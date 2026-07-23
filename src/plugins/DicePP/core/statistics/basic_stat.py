@@ -2,9 +2,9 @@ import json
 import datetime
 from typing import List, Dict
 
-from core.data import JsonObject, custom_json_object
+from plugins.DicePP.core.data import JsonObject, custom_json_object
 
-from utils.time import get_current_date_int, get_current_date_raw, int_to_datetime, datetime_to_int
+from plugins.DicePP.utils.time import get_current_date_int, get_current_date_raw, int_to_datetime, datetime_to_int
 
 
 class StatElementBase:
@@ -75,7 +75,7 @@ class UserCommandStatInfo:
 
     def __add__(self, other: "UserCommandStatInfo") -> "UserCommandStatInfo":
         res = UserCommandStatInfo()
-        from core.command import DPP_COMMAND_FLAG_DICT
+        from plugins.DicePP.core.command import DPP_COMMAND_FLAG_DICT
         for flag in DPP_COMMAND_FLAG_DICT:
             if flag not in other.flag_dict and flag not in self.flag_dict:
                 continue
@@ -88,7 +88,7 @@ class UserCommandStatInfo:
         return res
 
     def record(self, command):
-        from core.command import UserCommandBase, DPP_COMMAND_FLAG_DICT
+        from plugins.DicePP.core.command import UserCommandBase, DPP_COMMAND_FLAG_DICT
         command: UserCommandBase
         for flag in DPP_COMMAND_FLAG_DICT.keys():
             if flag & command.flag:

@@ -9,16 +9,16 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.data import LogRepository
-from core.data.models import LogPublication, LogRecord
-from core.data.schema import ensure_bot_log_schema
-from module.common.log.publisher import (
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import LogPublication, LogRecord
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.module.common.log.publisher import (
     LogPublisher,
     ProviderPublishResult,
     PublicationStatus,
 )
-from module.common.log.service import LogService
-from module.common.log.types import LogExportView
+from plugins.DicePP.module.common.log.service import LogService
+from plugins.DicePP.module.common.log.types import LogExportView
 
 
 NOW = datetime(2026, 7, 20, 8, 0, 0, tzinfo=timezone.utc)

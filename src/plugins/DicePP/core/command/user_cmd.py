@@ -3,12 +3,12 @@ import abc
 from contextlib import contextmanager
 from typing import List, Tuple, Dict, Type, Any, Optional
 
-from core.bot import Bot
-from core.communication import MessageMetaData
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.communication import MessageMetaData
 
-from core.command.const import *
-from core.command.bot_cmd import BotCommandBase
-from core.message_types import MessageType
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command.bot_cmd import BotCommandBase
+from plugins.DicePP.core.message_types import MessageType
 
 
 class CommandRegistry:

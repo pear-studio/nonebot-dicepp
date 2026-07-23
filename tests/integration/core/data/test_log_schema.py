@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from core.data.schema import (
+from plugins.DicePP.core.data.schema import (
     SchemaTarget,
     SchemaVersionError,
     UnmanagedDatabaseError,
     apply_schema_target,
     ensure_bot_log_schema,
 )
-from core.data.schema import bot_log
+from plugins.DicePP.core.data.schema import bot_log
 
 
 LEGACY_SCHEMA_SQL = [

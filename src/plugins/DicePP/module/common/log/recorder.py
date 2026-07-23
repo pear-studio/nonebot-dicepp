@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from core.command.cq_extractor import extract_segments
-from core.communication import MessageMetaData, MessageRecallEvent, PostSendEvent
-from core.data.log_repository import LogRepository
-from core.data.models import LogRecord
-from utils.logger import logger
+from plugins.DicePP.core.command.cq_extractor import extract_segments
+from plugins.DicePP.core.communication import MessageMetaData, MessageRecallEvent, PostSendEvent
+from plugins.DicePP.core.data.log_repository import LogRepository
+from plugins.DicePP.core.data.models import LogRecord
+from plugins.DicePP.utils.logger import logger
 
 
 class LogRecordReason(str, Enum):

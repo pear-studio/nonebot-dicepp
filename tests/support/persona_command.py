@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from core.communication import MessageMetaData, MessageSender
-from core.config.pydantic_models import (
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.config.pydantic_models import (
     ModelConfig,
     PersonaConfig,
     ProviderConfig,
 )
-from module.persona.command import PersonaCommand
+from plugins.DicePP.module.persona.command import PersonaCommand
 
 
 def make_group_meta(

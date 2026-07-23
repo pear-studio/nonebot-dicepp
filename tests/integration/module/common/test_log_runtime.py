@@ -8,18 +8,18 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.communication import (
+from plugins.DicePP.core.communication import (
     MessageMetaData,
     MessageRecallEvent,
     MessageSender,
     PostSendEvent,
 )
-from core.bot import Bot
-from core.data import LogRepository
-from core.data.models import LogPublication
-from core.data.schema import ensure_bot_log_schema
-from module.common.log import LogRuntime
-from module.common.log.publisher import ProviderPublishResult
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import LogPublication
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.module.common.log import LogRuntime
+from plugins.DicePP.module.common.log.publisher import ProviderPublishResult
 
 
 NOW = datetime(2026, 7, 20, 17, 0, 0)
@@ -251,7 +251,7 @@ def test_refresh_publication_provider_preserves_injected_provider(runtime_parts)
 
 
 def test_bot_reload_config_refreshes_log_publication_provider(monkeypatch):
-    import core.bot.dicebot as dicebot_module
+    import plugins.DicePP.core.bot.dicebot as dicebot_module
 
     new_config = SimpleNamespace(
         log=SimpleNamespace(level="INFO"),

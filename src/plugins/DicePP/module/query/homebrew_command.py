@@ -6,16 +6,16 @@ import math
 #import random
 # from openpyxl.utils import get_column_letter
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
-from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.localization import LOC_FUNC_DISABLE
-from core.config.basic import Paths
-from core.data.models import GroupConfig
-from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
-from utils.data import yield_deduplicate
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.core.data.models import GroupConfig
+from plugins.DicePP.utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from plugins.DicePP.utils.data import yield_deduplicate
 
 LOC_HOMEBREW_LOAD = "homebrew_load"
 LOC_HOMEBREW_LOAD_FINISHED = "homebrew_load_finished"

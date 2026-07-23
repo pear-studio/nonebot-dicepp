@@ -1,9 +1,9 @@
 import re
 import random
 
-from core.config.basic import Paths
-from utils.logger import logger
-from utils.cq_code import get_cq_image
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.cq_code import get_cq_image
 
 
 class LocalizationText:

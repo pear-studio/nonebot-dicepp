@@ -1,7 +1,7 @@
 # utils 包的统一导入入口
 # 为了方便使用，将常用函数直接导出到包级别
 
-from utils.localdata import (
+from plugins.DicePP.utils.localdata import (
     # JSON 操作
     read_json,
     update_json,
@@ -16,12 +16,12 @@ from utils.localdata import (
     create_parent_dir,
 )
 
-import utils.time
-import utils.string
-import utils.data
-import utils.cq_code
+import plugins.DicePP.utils.time
+import plugins.DicePP.utils.string
+import plugins.DicePP.utils.data
+import plugins.DicePP.utils.cq_code
 
-from utils.string import estimate_tokens
+from plugins.DicePP.utils.string import estimate_tokens
 
 # 导出列表，方便 IDE 自动补全和静态分析
 __all__ = [

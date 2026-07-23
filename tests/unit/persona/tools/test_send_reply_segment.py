@@ -2,9 +2,9 @@
 
 import pytest
 
-from module.persona.agent.runtime_types import ToolExecutionContext
-from module.persona.chat.delivery_queue import DeliveryItem
-from module.persona.tools.send_reply_segment import (
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from plugins.DicePP.module.persona.chat.delivery_queue import DeliveryItem
+from plugins.DicePP.module.persona.tools.send_reply_segment import (
     build_send_reply_segment_tool,
 )
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from core.command import BotSendMsgCommand
-from core.communication import GroupInfo, GroupMemberInfo, GroupMessagePort
-from adapter.client_proxy import ClientProxy
+from plugins.DicePP.core.command import BotSendMsgCommand
+from plugins.DicePP.core.communication import GroupInfo, GroupMemberInfo, GroupMessagePort
+from plugins.DicePP.adapter.client_proxy import ClientProxy
 
 import pytest
 

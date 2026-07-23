@@ -7,8 +7,8 @@ This file focuses on modifier behavior with exact output assertions.
 """
 
 import pytest
-from module.roll.ast_engine.parser import parse_expression
-from module.roll.ast_engine.evaluator import evaluate, EvalResult, DiceRoll
+from plugins.DicePP.module.roll.ast_engine.parser import parse_expression
+from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate, EvalResult, DiceRoll
 
 
 class MockDiceRoller:
@@ -172,7 +172,7 @@ class TestConstantRangeEnforcement:
 
     def test_constant_below_min_raises(self):
         """Constant < DICE_CONSTANT_MIN raises RollRuntimeError."""
-        from module.roll.ast_engine.errors import RollRuntimeError, RollErrorCode
+        from plugins.DicePP.module.roll.ast_engine.errors import RollRuntimeError, RollErrorCode
         ast = parse_expression("-1001")
         with pytest.raises(RollRuntimeError) as exc_info:
             evaluate(ast)
@@ -180,7 +180,7 @@ class TestConstantRangeEnforcement:
 
     def test_constant_above_max_raises(self):
         """Constant > DICE_CONSTANT_MAX raises RollRuntimeError."""
-        from module.roll.ast_engine.errors import RollRuntimeError, RollErrorCode
+        from plugins.DicePP.module.roll.ast_engine.errors import RollRuntimeError, RollErrorCode
         ast = parse_expression("1001")
         with pytest.raises(RollRuntimeError) as exc_info:
             evaluate(ast)

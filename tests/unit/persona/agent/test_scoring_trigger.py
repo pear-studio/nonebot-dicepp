@@ -9,9 +9,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from module.persona.chat.scoring_trigger import ScoringTrigger
-from module.persona.chat.chat_config import ChatConfig
-from module.persona.data.models import RelationshipState, ScoreDeltas
+from plugins.DicePP.module.persona.chat.scoring_trigger import ScoringTrigger
+from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
 
 
 def _make_trigger(*, scoring_agent=None, scoring_interval=2):
@@ -61,7 +61,7 @@ class TestScoringRetry:
     @pytest.mark.asyncio
     async def test_parse_error_retains_pending_and_increments_retry(self):
         """parse_error 非空 → 保留 pending，retry_count=1"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -104,7 +104,7 @@ class TestScoringRetry:
     @pytest.mark.asyncio
     async def test_parse_error_three_failures_discards(self):
         """parse_error 连续 3 次 → 丢弃"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -125,7 +125,7 @@ class TestScoringRetry:
     @pytest.mark.asyncio
     async def test_success_resets_retry_count(self):
         """成功后 retry_count 清零"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         # 第一次失败
@@ -172,7 +172,7 @@ class TestScoringWarnPending:
     @pytest.mark.asyncio
     async def test_warning_issued_sets_warn_pending(self):
         """warning_issued=True 且无扣分时设置 warn_pending"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -189,7 +189,7 @@ class TestScoringWarnPending:
     @pytest.mark.asyncio
     async def test_negative_reputation_clears_warn_pending(self):
         """reputation_delta<0 时清除 warn_pending（即使 warning_issued 也为 True）"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -206,7 +206,7 @@ class TestScoringWarnPending:
     @pytest.mark.asyncio
     async def test_normal_interaction_clears_warn_pending(self):
         """正常互动（无 warning、无扣分）清除 warn_pending"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -223,7 +223,7 @@ class TestScoringWarnPending:
     @pytest.mark.asyncio
     async def test_warn_pending_passed_to_batch_analyze(self):
         """warn_pending=True 时传入 batch_analyze 参数"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
@@ -242,7 +242,7 @@ class TestScoringWarnPending:
     @pytest.mark.asyncio
     async def test_no_warn_pending_passed_as_false(self):
         """warn_pending 不存在时传入 batch_analyze 为 False"""
-        from module.persona.chat.scoring import ScoringAnalysisResult
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
 
         scoring_agent = MagicMock()
         scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(

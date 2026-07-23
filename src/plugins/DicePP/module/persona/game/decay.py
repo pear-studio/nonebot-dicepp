@@ -6,13 +6,13 @@
 import math
 from typing import Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.models import RelationshipState, ScoreDeltas
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 # 半衰期参数（默认值，实际从 DecayConfig / PersonaConfig 读取）
 HALF_LIFE_FAMILIARITY = 35   # 熟悉度半衰期（天）

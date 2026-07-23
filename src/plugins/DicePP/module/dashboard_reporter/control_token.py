@@ -7,7 +7,7 @@ the path, no out-of-band configuration needed.
 """
 from pathlib import Path
 
-from core.data.schema import DicePPDatabase
+from plugins.DicePP.core.data.schema import DicePPDatabase
 
 
 def ensure_token(project_root: Path) -> str:

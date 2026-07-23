@@ -12,7 +12,7 @@ class _BotTestBase(IsolatedAsyncioTestCase):
     BOT_NAME = "test_common_bot"
 
     async def asyncSetUp(self):
-        from core.bot import Bot
+        from plugins.DicePP.core.bot import Bot
         self.bot = Bot(self.BOT_NAME, no_tick=True)
         self.bot.config.master = ["test_master"]
         await self.bot.delay_init_command()
@@ -24,12 +24,12 @@ class _BotTestBase(IsolatedAsyncioTestCase):
 
     async def _send_group(self, msg: str, user_id: str = "user1",
                           group_id: str = "group1", to_me: bool = False):
-        from core.communication import MessageMetaData, MessageSender
+        from plugins.DicePP.core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender(user_id, "测试用户"), group_id, to_me)
         return await self.bot.process_message(msg, meta)
 
     async def _send_private(self, msg: str, user_id: str = "user1"):
-        from core.communication import MessageMetaData, MessageSender
+        from plugins.DicePP.core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender(user_id, "测试用户"), "", True)
         return await self.bot.process_message(msg, meta)
 
@@ -158,7 +158,7 @@ class TestWelcomeCommandIntegration(_BotTestBase):
 
     async def test_welcome_illegal_length_returns_error(self):
         """超长欢迎词 -> LOC_WELCOME_ILLEGAL"""
-        from module.common.welcome_command import WELCOME_MAX_LENGTH
+        from plugins.DicePP.module.common.welcome_command import WELCOME_MAX_LENGTH
         long_greeting = "x" * (WELCOME_MAX_LENGTH + 1)
         cmds = await self._send_group(f".welcome {long_greeting}")
         result = "\n".join([str(c) for c in cmds])

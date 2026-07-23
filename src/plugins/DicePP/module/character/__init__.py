@@ -1,3 +1,3 @@
 
-import module.character.dnd5e
-from module.character.dnd5e import DC_CHAR_DND  # 向后兼容导出
+import plugins.DicePP.module.character.dnd5e
+from plugins.DicePP.module.character.dnd5e import DC_CHAR_DND  # 向后兼容导出

@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from utils.logger import logger
-from frozen import get_project_root
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.frozen import get_project_root
 
 
 def _derive_paths(root: Path) -> dict[str, Path]:

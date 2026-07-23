@@ -17,14 +17,14 @@ class _FakeMsg:
 
 def test_empty_results():
     """空结果不再生成冗余参与者表头。"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     result = format_message_results([])
     assert result == ""
 
 
 def test_single_user():
     """玩家行同时暴露稳定账号和可读昵称。"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg("u1", "user", "你好", "小王", datetime(2026, 5, 21, 15, 0, 0)),
     ]
@@ -34,7 +34,7 @@ def test_single_user():
 
 def test_multiple_participants():
     """多参与者直接按 uid 区分，不生成易漂移的玩家序号映射。"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg("u1", "user", "hello", "Alice", datetime(2026, 5, 21, 15, 0, 0)),
         _FakeMsg("u2", "user", "world", "Bob", datetime(2026, 5, 21, 15, 1, 0)),
@@ -48,7 +48,7 @@ def test_multiple_participants():
 
 def test_assistant_role_mapped_to_wo():
     """assistant 角色映射为 '我'"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg("u1", "user", "你好", "小王", datetime(2026, 5, 21, 15, 0, 0)),
         _FakeMsg("bot", "assistant", "你好呀", "", datetime(2026, 5, 21, 15, 0, 1)),
@@ -59,7 +59,7 @@ def test_assistant_role_mapped_to_wo():
 
 def test_content_truncation():
     """超过 max_chars 的内容被截断"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     long_content = "A" * 200
     msgs = [
         _FakeMsg("u1", "user", long_content, "小王", datetime(2026, 5, 21, 15, 0, 0)),
@@ -72,7 +72,7 @@ def test_content_truncation():
 
 def test_missing_created_at():
     """created_at 为 None 时省略时间，但保留明确的发言者。"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg("u1", "user", "test", "小王", created_at=None),
     ]
@@ -83,7 +83,7 @@ def test_missing_created_at():
 
 def test_display_name_fallback():
     """display_name 缺失时回退到 user_id"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg("u1", "user", "test", "", datetime(2026, 5, 21, 15, 0, 0)),
     ]
@@ -93,7 +93,7 @@ def test_display_name_fallback():
 
 def test_persisted_system_event_uses_event_line_even_with_user_role():
     """事件类型优先于 role，避免持久事件被误标成玩家发言。"""
-    from module.persona.tools.formatter import format_message_results
+    from plugins.DicePP.module.persona.tools.formatter import format_message_results
     msgs = [
         _FakeMsg(
             "u1", "user", "[uid: u1] [昵称: 小王] 查询今日运势",

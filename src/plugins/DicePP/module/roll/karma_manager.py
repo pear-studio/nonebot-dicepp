@@ -10,12 +10,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from core.data.models import GroupConfig
+from plugins.DicePP.core.data.models import GroupConfig
 
 from .karma_runtime import DiceRuntime, reset_runtime, set_runtime
 
 if TYPE_CHECKING:
-    from core.bot import Bot
+    from plugins.DicePP.core.bot import Bot
 
 
 # 常量配置

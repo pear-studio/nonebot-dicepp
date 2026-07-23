@@ -1,14 +1,14 @@
-import module.common
+import plugins.DicePP.module.common
 
-import module.roll
-import module.query
-import module.deck
-import module.dice_hub
+import plugins.DicePP.module.roll
+import plugins.DicePP.module.query
+import plugins.DicePP.module.deck
+import plugins.DicePP.module.dice_hub
 
-import module.character
-import module.initiative
+import plugins.DicePP.module.character
+import plugins.DicePP.module.initiative
 
-import module.fastapi
-import module.misc
+import plugins.DicePP.module.fastapi
+import plugins.DicePP.module.misc
 
-import module.persona
+import plugins.DicePP.module.persona

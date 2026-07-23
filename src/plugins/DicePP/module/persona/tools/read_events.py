@@ -25,7 +25,7 @@ READ_EVENTS_TOOL = ToolSpec(
 def build_read_events_tool(store, timezone: str = "Asia/Shanghai") -> ToolSpec:
     """构建 read_events 工具 (T6 新路径)"""
 
-    from utils.time import wall_now
+    from plugins.DicePP.utils.time import wall_now
 
     async def handler(parsed: BaseModel, ctx: ToolExecutionContext) -> ToolResult:
         if store is None:

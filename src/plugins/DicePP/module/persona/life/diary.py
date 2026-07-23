@@ -6,7 +6,7 @@ Phase 1: 使用 CharacterAgent 替代 EventGenerationAgent。
 import uuid
 from typing import Optional, List
 from dataclasses import dataclass
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from datetime import timedelta
 
 from ..data.store import PersonaDataStore
@@ -55,7 +55,7 @@ class DiaryGenerator:
             日记内容，如果失败则返回 None
         """
         try:
-            from utils.time import get_clock
+            from plugins.DicePP.utils.time import get_clock
             now = get_clock().now()
 
             diary_hour, diary_minute = map(int, self.config.diary_time.split(":"))

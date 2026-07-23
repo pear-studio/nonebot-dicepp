@@ -3,7 +3,7 @@
 token 估算、切分、压缩判定。
 """
 from typing import List
-from utils.string import estimate_tokens
+from plugins.DicePP.utils.string import estimate_tokens
 
 
 KEEP_RECENT = 10

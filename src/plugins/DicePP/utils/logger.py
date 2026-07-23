@@ -8,7 +8,7 @@ from typing import List
 
 from loguru import logger
 
-from utils.stdio import configure_redirected_stdio_utf8
+from plugins.DicePP.utils.stdio import configure_redirected_stdio_utf8
 
 configure_redirected_stdio_utf8()
 

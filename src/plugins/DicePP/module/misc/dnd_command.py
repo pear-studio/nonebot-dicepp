@@ -5,12 +5,12 @@
 from typing import List, Tuple, Any
 import random
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core import localization
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core import localization
 
 LOC_DND_RES = "dnd_result"
 LOC_DND_RES_NOREASON = "dnd_result_noreason"

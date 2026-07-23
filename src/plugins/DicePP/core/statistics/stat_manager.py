@@ -7,9 +7,9 @@ read-modify-write 串行化，消除多写路径间的丢失更新。
 import asyncio
 from typing import Callable, Dict
 
-from core.data.models import UserStat, GroupStat
-from core.statistics.user_stat import UserStatInfo
-from core.statistics.group_stat import GroupStatInfo
+from plugins.DicePP.core.data.models import UserStat, GroupStat
+from plugins.DicePP.core.statistics.user_stat import UserStatInfo
+from plugins.DicePP.core.statistics.group_stat import GroupStatInfo
 
 
 class StatManager:

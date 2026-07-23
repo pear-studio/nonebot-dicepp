@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from pydantic import BaseModel, Field
 
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext

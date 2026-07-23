@@ -17,9 +17,9 @@ import pytest
 from typing import List, Tuple, Any
 from unittest import IsolatedAsyncioTestCase, mock
 
-from core.bot import Bot
-from core.command import BotCommandBase
-from core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotCommandBase
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 from tests.integration.commands.bot_support import make_test_bot, teardown_test_bot
 from tests.support.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 from tests.support.assert_helpers import assert_contains_number

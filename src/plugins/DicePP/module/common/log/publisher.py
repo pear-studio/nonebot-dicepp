@@ -7,8 +7,8 @@ from enum import Enum
 from typing import Protocol
 from urllib.parse import urlparse
 
-from core.data.log_repository import LogRepository
-from core.data.models import LogPublication
+from plugins.DicePP.core.data.log_repository import LogRepository
+from plugins.DicePP.core.data.models import LogPublication
 
 from .projection import LogProjection, LogProjector
 from .types import ExportRequest

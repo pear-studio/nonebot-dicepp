@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from utils.time import get_current_date_str
+from plugins.DicePP.utils.time import get_current_date_str
 
 
 class InitiativeError(Exception):

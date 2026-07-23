@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from shell.session import (
+from plugins.DicePP.shell.session import (
     create_session,
     delete_session,
     get_session_dir,

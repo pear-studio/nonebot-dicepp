@@ -7,23 +7,21 @@ from itertools import count
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-# Shell bot_runner 全部使用裸绝对导入 (core.X / utils.X / module.X / adapter)，
-# 与核心模块一致。不要改回 ..core.bot 相对导入： shell 以
-# plugins.DicePP.shell.bot_runner 路径被导入时会触发 sys.modules 双副本，
-# 导致 ContextVar 读写分离。
-from core.bot import Bot
-from core.config import Paths
-from core.communication import (
+# Shell bot_runner 全部使用 `plugins.DicePP.*` canonical 绝对导入，
+# 以与运行时其他入口保持同一 module identity。
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config import Paths
+from plugins.DicePP.core.communication import (
     GroupInfo,
     GroupMemberInfo,
     MessageMetaData,
     MessageSender,
     PostSendEvent,
 )
-from core.message_types import MessageType
-from utils.logger import logger, restore_runtime_logging
-from adapter import ClientProxy
-from core.command import (
+from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.utils.logger import logger, restore_runtime_logging
+from plugins.DicePP.adapter import ClientProxy
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotCommandDispatchResult,
     BotSendFileCommand,
@@ -31,13 +29,10 @@ from core.command import (
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from utils.sequence_runtime import SequenceRuntime
-# 注意：必须使用裸绝对导入 `module.roll.karma_runtime`，
-# 因为 Bot 内部大量使用该路径导入此模块。
-# 若使用相对导入 (`..module.roll.karma_runtime`)，会导致
-# `sys.modules` 中出现两个副本，ContextVar 的读写将分离，
-# 从而使 `--dice` 序列控制完全失效。
-from module.roll.karma_runtime import set_runtime, reset_runtime
+from plugins.DicePP.utils.sequence_runtime import SequenceRuntime
+# 注意：使用 canonical 绝对导入 `plugins.DicePP.module.roll.karma_runtime`，
+# 以保证与 Bot 共享同一个序列控制 ContextVar。
+from plugins.DicePP.module.roll.karma_runtime import set_runtime, reset_runtime
 from .session import bot_id_for_session
 
 
@@ -199,7 +194,7 @@ class BotRunner:
             return
 
         try:
-            from utils.time import get_clock
+            from plugins.DicePP.utils.time import get_clock
 
             self._runtime_clock_original = get_clock()
             self._activate_workspace()
@@ -253,7 +248,7 @@ class BotRunner:
                 await self.bot.shutdown_async()
         finally:
             if self._runtime_clock_original is not None:
-                from utils.time import set_clock
+                from plugins.DicePP.utils.time import set_clock
 
                 set_clock(self._runtime_clock_original)
             self.bot = None
@@ -294,8 +289,8 @@ class BotRunner:
         Returns:
             包含执行结果的字典
         """
-        from utils.time import SteppedClock, set_clock
-        from utils.logger import logger
+        from plugins.DicePP.utils.time import SteppedClock, set_clock
+        from plugins.DicePP.utils.logger import logger
 
         if not self._started or not self.bot:
             raise RuntimeError("Bot not started. Call start() first.")
@@ -307,7 +302,7 @@ class BotRunner:
             )
 
         # 获取 PersonaCommand → PersonaApp → LifeSimulator（与 dicebot.py 一致的 isinstance 查找）
-        from module.persona.command import PersonaCommand as PCmd
+        from plugins.DicePP.module.persona.command import PersonaCommand as PCmd
         persona_cmd = next(
             (cmd for cmd in self.bot.command_dict.values() if isinstance(cmd, PCmd)),
             None,

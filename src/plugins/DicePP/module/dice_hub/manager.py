@@ -1,11 +1,11 @@
 from typing import Dict, List, Optional, Any
 import datetime
 
-from core.bot import Bot
-from core.config import get_bot_version
-from utils.time import get_current_date_raw
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config import get_bot_version
+from plugins.DicePP.utils.time import get_current_date_raw
 
-from module.dice_hub.api_client import HubAPIClient, HubAPIError
+from plugins.DicePP.module.dice_hub.api_client import HubAPIClient, HubAPIError
 
 LIST_REFRESH_INTERVAL = 600
 HUB_KEY_API_URL = "api_url"

@@ -19,12 +19,12 @@ from nonebot.adapters.onebot.v11 import Message as CQMessage
 from nonebot.adapters.onebot.v11 import ActionFailed
 from nonebot.plugin import on_metaevent
 
-from core.bot import Bot as DicePPBot
-from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
-from core.communication import MessageRecallEvent, PostSendEvent
-from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
-from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from core.command import (
+from plugins.DicePP.core.bot import Bot as DicePPBot
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
+from plugins.DicePP.core.communication import MessageRecallEvent, PostSendEvent
+from plugins.DicePP.core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
+from plugins.DicePP.core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotCommandDispatchResult,
     BotDelayCommand,
@@ -35,11 +35,11 @@ from core.command import (
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
-from adapter.client_proxy import ClientProxy
+from plugins.DicePP.adapter.client_proxy import ClientProxy
 
-from module.fastapi import dpp_api
+from plugins.DicePP.module.fastapi import dpp_api
 
 try:
     app: FastAPI = nonebot.get_app()
@@ -134,7 +134,7 @@ class NoneBotClientProxy(ClientProxy):
         return BotCommandDispatchResult(command=command)
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
-        from core.message_types import MessageType
+        from plugins.DicePP.core.message_types import MessageType
         raw_type = getattr(command, "message_type", None)
         msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
         history_stream_id = getattr(command, "msg_id", None)

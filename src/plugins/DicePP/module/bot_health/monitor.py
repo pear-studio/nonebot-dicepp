@@ -7,7 +7,7 @@ import time
 from enum import Enum
 from typing import Optional, Dict, Any
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from .classifier import FaultTrigger, classify
 

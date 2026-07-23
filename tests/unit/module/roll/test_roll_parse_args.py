@@ -12,18 +12,9 @@ tests/unit/module/roll/test_roll_parse_args.py
   - reason 分割（短输入 via sift_roll_exp_and_reason）
   - 前导空白容忍
 """
-import sys
-import os
-
-# 确保 src/plugins/DicePP 在 sys.path 中（与其他 roll 测试相同）
-_HERE = os.path.dirname(__file__)
-_SRC = os.path.normpath(os.path.join(_HERE, "../../../src/plugins/DicePP"))
-if _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
-
 import pytest
-from module.roll.ast_engine.adapter import sift_roll_exp_and_reason
-from module.roll.roll_parse_args import _parse_roll_args, RollParseArgs, MULTI_ROLL_LIMIT
+from plugins.DicePP.module.roll.ast_engine.adapter import sift_roll_exp_and_reason
+from plugins.DicePP.module.roll.roll_parse_args import _parse_roll_args, RollParseArgs, MULTI_ROLL_LIMIT
 
 
 # ---------------------------------------------------------------------------

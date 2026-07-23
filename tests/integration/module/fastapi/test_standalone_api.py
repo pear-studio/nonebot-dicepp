@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from module.fastapi.api import bind_runtime, dpp_api
+from plugins.DicePP.module.fastapi.api import bind_runtime, dpp_api
 
 
 

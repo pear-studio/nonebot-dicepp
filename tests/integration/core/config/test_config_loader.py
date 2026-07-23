@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.config.loader import ConfigLoader, ConfigValidationError, _deep_merge
+from plugins.DicePP.core.config.loader import ConfigLoader, ConfigValidationError, _deep_merge
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -291,7 +291,7 @@ def test_canonical_rewrite_preserves_comment_metadata(dd):
         },
     })
 
-    with patch("core.config.loader.logger.warning") as warning:
+    with patch('plugins.DicePP.core.config.loader.logger.warning') as warning:
         cfg = dd.loader().load()
     saved = _read(dd.global_cfg)
 

@@ -12,7 +12,7 @@ import pytest_asyncio
 # ─────────────────────────── 集成测试辅助 ───────────────────────────
 
 async def _send_group(bot, msg: str, user_id: str = "user1", group_id: str = "group1"):
-    from core.communication import MessageMetaData, MessageSender
+    from plugins.DicePP.core.communication import MessageMetaData, MessageSender
     meta = MessageMetaData(msg, msg, MessageSender(user_id, "测试用户"), group_id, False)
     return await bot.process_message(msg, meta)
 
@@ -31,7 +31,7 @@ def _cleanup_bot(bot):
 
 @pytest_asyncio.fixture
 async def dnd_bot():
-    from core.bot import Bot
+    from plugins.DicePP.core.bot import Bot
     bot = Bot("test_dnd_misc_bot")
     bot.config.master = ["test_master"]
     await bot.delay_init_command()
@@ -42,7 +42,7 @@ async def dnd_bot():
 
 @pytest_asyncio.fixture
 async def coc_bot():
-    from core.bot import Bot
+    from plugins.DicePP.core.bot import Bot
     bot = Bot("test_coc_misc_bot")
     bot.config.master = ["test_master"]
     await bot.delay_init_command()

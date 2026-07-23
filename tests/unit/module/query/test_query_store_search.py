@@ -1,6 +1,6 @@
 """Pure QueryStore search-SQL generation tests."""
 
-from core.data.query_store import QueryStore
+from plugins.DicePP.core.data.query_store import QueryStore
 
 
 class TestGenerateSearchSqlRegexp:

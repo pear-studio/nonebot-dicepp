@@ -1,6 +1,6 @@
 import pytest
 
-from core.persona.models import PersonaModel
+from plugins.DicePP.core.persona.models import PersonaModel
 
 
 pytestmark = pytest.mark.quick

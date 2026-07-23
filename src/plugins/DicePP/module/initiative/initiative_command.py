@@ -1,18 +1,18 @@
 from typing import List, Tuple, Dict, Any
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from module.roll import RollResult, RollDiceError
-from module.roll.ast_engine.adapter import (
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.module.roll import RollResult, RollDiceError
+from plugins.DicePP.module.roll.ast_engine.adapter import (
     exec_roll_exp_unified,
     is_roll_exp,
     sift_roll_exp_and_reason,
 )
 
-from core.data.models import InitList, InitEntity, InitiativeError, HPInfo
+from plugins.DicePP.core.data.models import InitList, InitEntity, InitiativeError, HPInfo
 
 
 LOC_INIT_ROLL = "initiative_roll"
@@ -316,7 +316,7 @@ class InitiativeCommand(UserCommandBase):
         # 处理需要有表存在才能使用的指令
         if mode == "inspect":  # 查看先攻信息
             # 从 SQLite 查询 HP 信息：PC 来自 characters_dnd，NPC 来自 npc_health
-            from core.data.models import DNDCharacter, NPCHealth
+            from plugins.DicePP.core.data.models import DNDCharacter, NPCHealth
             # user_id -> HPInfo (PC)
             hp_dict: Dict[str, HPInfo] = {}
             pc_chars = await self.bot.db.characters_dnd.list_by(group_id=meta.group_id)

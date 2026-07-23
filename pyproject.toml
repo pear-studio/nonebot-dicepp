@@ -61,10 +61,10 @@ dependency-metadata = []
 # ── nonebot 配置 ────────────────────────────────────────────────────────────
 [nonebot.plugins]
 plugins = []
-plugin_dirs = ["src/plugins"]
+plugin_dirs = []
 
 [tool.nonebot]
-plugin_dirs = ["src/plugins"]
+plugin_dirs = []
 builtin_plugins = []
 
 [tool.nonebot.plugins]
@@ -77,7 +77,7 @@ builtin_plugins = []
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration", "tests/system"]
-pythonpath = [".", "src", "src/plugins/DicePP"]
+pythonpath = [".", "src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test*"]

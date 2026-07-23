@@ -1,15 +1,15 @@
 import pytest
 import websockets
 
-from adapter.web_chat_adapter import SEND_QUEUE_MAX, WebChatAdapter, WebChatAuthFailed
-from adapter.web_chat_proxy import WebChatProxy
-from core.command import (
+from plugins.DicePP.adapter.web_chat_adapter import SEND_QUEUE_MAX, WebChatAdapter, WebChatAuthFailed
+from plugins.DicePP.adapter.web_chat_proxy import WebChatProxy
+from plugins.DicePP.core.command import (
     BotSendFileCommand,
     BotSendForwardMsgCommand,
     BotSendMsgCommand,
     FileDeliveryOutcome,
 )
-from core.communication import GroupMessagePort, PrivateMessagePort
+from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
 
 class _DummyAdapter:
     def __init__(self):

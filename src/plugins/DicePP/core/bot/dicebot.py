@@ -7,27 +7,27 @@ import traceback
 from typing import TYPE_CHECKING, List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
-from utils.logger import logger, get_exception_info, configure_log_level
-from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
-from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
-from core.config import Paths
-from core.config.loader import ConfigLoader, ConfigValidationError
-from core.config.pydantic_models import BotConfig
-from core.bot.task_scheduler import TaskScheduler
-from core.persona import PersonaLoader
-from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.communication import MessageRecallEvent, PostSendEvent
-from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
-from core.communication import GroupInfo
-from core.data import BotDatabase
-from core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
-from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
+from plugins.DicePP.utils.logger import logger, get_exception_info, configure_log_level
+from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
+from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
+from plugins.DicePP.core.config import Paths
+from plugins.DicePP.core.config.loader import ConfigLoader, ConfigValidationError
+from plugins.DicePP.core.config.pydantic_models import BotConfig
+from plugins.DicePP.core.bot.task_scheduler import TaskScheduler
+from plugins.DicePP.core.persona import PersonaLoader
+from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from plugins.DicePP.core.communication import MessageRecallEvent, PostSendEvent
+from plugins.DicePP.core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
+from plugins.DicePP.core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
+from plugins.DicePP.core.communication import GroupInfo
+from plugins.DicePP.core.data import BotDatabase
+from plugins.DicePP.core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
+from plugins.DicePP.core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
 
 import shutil
 
 if TYPE_CHECKING:
-    from module.common.log import LogRuntime
+    from plugins.DicePP.module.common.log import LogRuntime
 
 # 日志清理相关常量
 LOGS_SUBDIR = "logs"
@@ -88,10 +88,10 @@ class Bot:
             readonly: 只读模式，跳过本地化文件写入（适用于测试环境）
             no_tick: 为 True 时不启动 tick_loop（供确定性自动化测试）
         """
-        import core.command as command
-        import module  # 加载各 module 子包以注册命令、本地化键等，需尽早 import
-        from module.dice_hub import HubManager
-        from adapter import ClientProxy
+        import plugins.DicePP.core.command as command
+        import plugins.DicePP.module  # 加载各 module 子包以注册命令、本地化键等，需尽早 import
+        from plugins.DicePP.module.dice_hub import HubManager
+        from plugins.DicePP.adapter import ClientProxy
         self.account: str = account
         self.proxy: Optional[ClientProxy] = None
         self.data_path = str(Paths.bot_data_dir(account))
@@ -118,7 +118,7 @@ class Bot:
         self._no_tick: bool = no_tick
 
         # 健康监控
-        from module.bot_health.monitor import HealthMonitor
+        from plugins.DicePP.module.bot_health.monitor import HealthMonitor
         hc = self.config.health_monitor
         self.health_monitor = HealthMonitor(
             account=self.account,
@@ -134,8 +134,8 @@ class Bot:
         # 仪表盘控制通道（源码环境显式启用，Windows EXE 默认连接本机）
         self._control_channel = None
         try:
-            from module.dashboard_reporter.control_token import ensure_token
-            from module.dashboard_reporter.ws_client import (
+            from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+            from plugins.DicePP.module.dashboard_reporter.ws_client import (
                 ControlChannelClient,
                 resolve_dashboard_url,
             )
@@ -176,7 +176,7 @@ class Bot:
         self.start_up(readonly=readonly)
 
     def set_client_proxy(self, proxy):
-        from adapter import ClientProxy
+        from plugins.DicePP.adapter import ClientProxy
         if isinstance(proxy, ClientProxy):
             self.proxy = proxy
         else:
@@ -281,7 +281,7 @@ class Bot:
             logger.warning(f"[Stat] 群 {group_id} stat 更新失败: {_exc}")
 
     async def tick_loop(self):
-        from core.command import BotCommandBase
+        from plugins.DicePP.core.command import BotCommandBase
         loop = asyncio.get_event_loop()
         time_counter = [loop.time()] * 2
 
@@ -448,13 +448,13 @@ class Bot:
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
         # 此处应与实例状态同步，避免日报和旧通知双双缺失。
-        from module.persona.command import PersonaCommand
+        from plugins.DicePP.module.persona.command import PersonaCommand
         persona_running = any(
             isinstance(cmd, PersonaCommand) and cmd.enabled
             for cmd in self.command_dict.values()
         )
         if not (persona_running and self.config.persona_ai.daily_report_enabled):
-            from core.localization import LOC_DAILY_UPDATE
+            from plugins.DicePP.core.localization import LOC_DAILY_UPDATE
             feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
             if feedback and feedback != "$":
                 await self.send_msg_to_master(feedback)
@@ -615,7 +615,7 @@ class Bot:
         return new_cfg
 
     def register_command(self, registry=None):
-        from core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY
+        from plugins.DicePP.core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY
         if registry is None:
             registry = DEFAULT_REGISTRY
         for command_cls in registry.get_sorted_commands():
@@ -649,7 +649,7 @@ class Bot:
                 raise
 
             if self.log_runtime is None:
-                from module.common.log import LogRuntime
+                from plugins.DicePP.module.common.log import LogRuntime
 
                 self.log_runtime = LogRuntime(
                     self,
@@ -681,8 +681,8 @@ class Bot:
                             await self.proxy.process_bot_command(bc)
 
             if self.proxy:
-                from core.command import BotSendMsgCommand
-                from core.localization import LOC_LOGIN_NOTICE
+                from plugins.DicePP.core.command import BotSendMsgCommand
+                from plugins.DicePP.core.localization import LOC_LOGIN_NOTICE
                 # 检查是否开启了静默模式
                 _ctrl_row = await self.db.bot_control.get("silent_startup")
                 is_silent = _ctrl_row.value == "True" if _ctrl_row else False
@@ -731,7 +731,7 @@ class Bot:
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
         """处理消息"""
-        from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
+        from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 
         # Packaged runs may receive events before on_bot_connect completes.
         # Ensure DB + per-command delay_init have been executed once.
@@ -913,8 +913,8 @@ class Bot:
 
     async def process_notice(self, data: NoticeData) -> List:
         """处理提醒"""
-        from core.command import BotCommandBase, BotSendMsgCommand
-        from module.common import LOC_WELCOME_DEFAULT
+        from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+        from plugins.DicePP.module.common import LOC_WELCOME_DEFAULT
         bot_commands: List[BotCommandBase] = []
 
         # Ensure DB + per-command init completed before reading/writing sqlite.
@@ -947,7 +947,7 @@ class Bot:
 
     def handle_exception(self, info: str) -> List:
         """在捕获异常后的Except语句中调用"""
-        from core.command import BotSendMsgCommand
+        from plugins.DicePP.core.command import BotSendMsgCommand
         exception_info = get_exception_info()
         exception_info = "\n".join(exception_info[-8:]) if len(exception_info) > 8 else "\n".join(exception_info)
         additional_info = f"\n{info}" if info else ""
@@ -963,7 +963,7 @@ class Bot:
 
     async def send_msg_to_master(self, msg: str) -> None:
         """发送信息给主Master"""
-        from core.command import BotSendMsgCommand
+        from plugins.DicePP.core.command import BotSendMsgCommand
         master_list = self.get_master_ids()
         if master_list:
             await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
@@ -1029,8 +1029,8 @@ class Bot:
         pass
 
     async def clear_expired_data(self) -> List:
-        from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
-        from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
+        from plugins.DicePP.core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
+        from plugins.DicePP.module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
 
         cur_date = get_current_date_raw()
         is_data_expire = self.config.data_expire

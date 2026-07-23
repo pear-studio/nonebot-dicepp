@@ -2,7 +2,7 @@
 
 import pytest
 
-from module.persona.utils.json_helpers import safe_json_loads
+from plugins.DicePP.module.persona.utils.json_helpers import safe_json_loads
 
 
 def test_direct_parse_success():

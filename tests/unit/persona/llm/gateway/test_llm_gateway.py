@@ -3,15 +3,15 @@ import json
 import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 
-from module.persona.agent.llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
-from module.persona.agent.event_bus import AgentEventBus, EventStore
-from module.persona.agent.state import AgentRunState
-from module.persona.agent.output_protocol import (
+from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
+from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
+from plugins.DicePP.module.persona.agent.state import AgentRunState
+from plugins.DicePP.module.persona.agent.output_protocol import (
     INTERNAL_MESSAGE_TYPE_FIELD,
     RUNTIME_INSTRUCTION_NAME,
 )
-from module.persona.llm.router import LLMRouter, ServiceUnavailableError
-from module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+from plugins.DicePP.module.persona.llm.router import LLMRouter, ServiceUnavailableError
+from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
 
 def _make_llm_resp(content="ok", tool_calls=None) -> LLMResponse:
@@ -378,13 +378,13 @@ class TestLLMGateway:
 
     def test_tool_choice_for_no_tools_returns_none(self):
         """tools=None 时 _tool_choice_for 返回 None"""
-        from module.persona.agent.llm_gateway import _tool_choice_for
+        from plugins.DicePP.module.persona.agent.llm_gateway import _tool_choice_for
         req = _make_request(tools=None)
         assert _tool_choice_for(req) is None
 
     def test_tool_choice_for_empty_tools_returns_none(self):
         """tools=[] 时 _tool_choice_for 返回 None"""
-        from module.persona.agent.llm_gateway import _tool_choice_for
+        from plugins.DicePP.module.persona.agent.llm_gateway import _tool_choice_for
         req = _make_request(tools=[])
         assert _tool_choice_for(req) is None
 

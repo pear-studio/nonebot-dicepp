@@ -8,7 +8,7 @@ def reset_clock_after_test():
     """Restore the wall clock after tests that install a virtual clock."""
     yield
 
-    from utils.time import WallClock, set_clock
+    from plugins.DicePP.utils.time import WallClock, set_clock
 
     set_clock(WallClock())
 
@@ -18,7 +18,7 @@ async def temp_db():
     """Provide an initialized in-memory persona store."""
     import aiosqlite
 
-    from module.persona.data.store import PersonaDataStore
+    from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
     async with aiosqlite.connect(":memory:") as core_db:
         async with PersonaDataStore(":memory:", core_db) as store:

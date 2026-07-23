@@ -13,7 +13,7 @@ buffered merge-retry 状态机：``pending_consumed`` 标记最近一轮 result
 from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from .errors import classify
 
 T = TypeVar("T")

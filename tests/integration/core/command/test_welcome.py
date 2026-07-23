@@ -1,6 +1,6 @@
 """欢迎词集成测试。"""
 import pytest
-from core.communication import NoticeData, GroupIncreaseNoticeData
+from plugins.DicePP.core.communication import NoticeData, GroupIncreaseNoticeData
 
 
 class TestWelcome:

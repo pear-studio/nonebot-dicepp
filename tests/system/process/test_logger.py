@@ -41,8 +41,8 @@ def test_redirected_stderr_logger_outputs_utf8_without_ansi(
             import json
             import sys
 
-            sys.path.insert(0, {str(Path.cwd() / "src" / "plugins" / "DicePP")!r})
-            from utils.logger import logger
+            sys.path.insert(0, {str(Path.cwd() / "src")!r})
+            from plugins.DicePP.utils.logger import logger
 
             logger.info("DicePP 骰子机器人已启动")
             logger.info("等待聊天客户端连接")
@@ -92,9 +92,9 @@ def test_restore_runtime_logging_replaces_colored_redirected_handler(
             f"""
             import sys
 
-            sys.path.insert(0, {str(Path.cwd() / "src" / "plugins" / "DicePP")!r})
+            sys.path.insert(0, {str(Path.cwd() / "src")!r})
             from loguru import logger as loguru_logger
-            from utils.logger import restore_runtime_logging
+            from plugins.DicePP.utils.logger import restore_runtime_logging
 
             loguru_logger.remove()
             loguru_logger.add(sys.stderr, format="<red>{{message}}</red>", colorize=True)

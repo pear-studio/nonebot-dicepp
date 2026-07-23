@@ -5,18 +5,18 @@ import os
 from pathlib import Path
 import openpyxl
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.config.basic import Paths
-from core.localization import LocalizationManager, LOC_FUNC_DISABLE
-from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
-from utils.string import match_substring
-from utils.logger import logger
-from utils.cq_code import get_cq_image
-from module.roll.ast_engine.adapter import preprocess_roll_exp, is_roll_exp, exec_roll_exp_unified
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.core.localization import LocalizationManager, LOC_FUNC_DISABLE
+from plugins.DicePP.utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from plugins.DicePP.utils.string import match_substring
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.cq_code import get_cq_image
+from plugins.DicePP.module.roll.ast_engine.adapter import preprocess_roll_exp, is_roll_exp, exec_roll_exp_unified
 
 
 LOC_DRAW_RESULT = "draw_result"

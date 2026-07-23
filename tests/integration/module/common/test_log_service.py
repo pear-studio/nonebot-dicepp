@@ -10,16 +10,16 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.data import LogRepository
-from core.data.models import (
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import (
     LogExport,
     LogGroupState,
     LogPublication,
     LogRecord,
     LogSession,
 )
-from core.data.schema import ensure_bot_log_schema
-from module.common.log import (
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.module.common.log import (
     LogDomainError,
     LogErrorCode,
     LogExportFormat,

@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
-from module.deck.deck_command import DeckItem, ForceFinal, Deck
+from plugins.DicePP.module.deck.deck_command import DeckItem, ForceFinal, Deck
 
 
 # ────────────────────── DeckItem ──────────────────────
@@ -39,7 +39,7 @@ class TestDeckItem:
         loc = _make_loc_helper()
         source_deck = Deck("测试牌库", "/tmp")
 
-        with patch('module.deck.deck_command.exec_roll_exp_unified') as mock_roll:
+        with patch('plugins.DicePP.module.deck.deck_command.exec_roll_exp_unified') as mock_roll:
             mock_result = MagicMock()
             mock_result.get_complete_result.return_value = "1D20=15"
             mock_roll.return_value = mock_result
@@ -202,7 +202,7 @@ class TestDeckItem:
         mock_result.get_complete_result.return_value = "1D4=3"
 
         with (
-            patch("module.deck.deck_command.exec_roll_exp_unified", return_value=mock_result),
+            patch('plugins.DicePP.module.deck.deck_command.exec_roll_exp_unified', return_value=mock_result),
             patch.object(random, "randint", return_value=1),
         ):
             result = item.get_result(source_deck, [target_deck], loc)
@@ -272,7 +272,7 @@ class TestDeckDraw:
         loc = _make_loc_helper()
         result = deck.draw(2, [deck], loc)
         assert "唯一卡牌" in result
-        from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
+        from plugins.DicePP.module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
         loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
 
     def test_draw_final_type_2_raises_force_final(self):
@@ -280,7 +280,7 @@ class TestDeckDraw:
         deck = Deck("终止牌库", "/tmp")
         deck.add_item(DeckItem("终止卡", final_type=2))
         loc = _make_loc_helper()
-        from module.deck.deck_command import LOC_DRAW_FIN_ALL
+        from plugins.DicePP.module.deck.deck_command import LOC_DRAW_FIN_ALL
         loc.format_loc_text.side_effect = lambda key, **kwargs: (
             "抽取提前结束！（全部）" if key == LOC_DRAW_FIN_ALL else kwargs.get("content", "")
         )
@@ -296,7 +296,7 @@ class TestDeckDraw:
         deck.add_item(DeckItem("内层终止卡", final_type=1))
         deck.add_item(DeckItem("普通卡"))
         loc = _make_loc_helper()
-        from module.deck.deck_command import LOC_DRAW_FIN_INNER
+        from plugins.DicePP.module.deck.deck_command import LOC_DRAW_FIN_INNER
         loc.format_loc_text.side_effect = lambda key, **kwargs: (
             "提前结束内层" if key == LOC_DRAW_FIN_INNER else kwargs.get("content", kwargs.get("result", ""))
         )
@@ -313,7 +313,7 @@ class TestDeckDraw:
         result = deck.draw(3, [deck], loc)
         assert "A" in result
         assert "B" in result
-        from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
+        from plugins.DicePP.module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
         loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
 
     def test_draw_empty_deck_no_items(self):
@@ -321,7 +321,7 @@ class TestDeckDraw:
         deck = Deck("空牌库", "/tmp")
         loc = _make_loc_helper()
         result = deck.draw(1, [deck], loc)
-        from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
+        from plugins.DicePP.module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
         loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
 
     def test_weighted_draw_respects_weight(self):

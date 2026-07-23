@@ -15,7 +15,13 @@ import pytest
 from unittest.mock import patch
 
 # 被测模块
-from frozen import is_frozen, get_app_dir, get_runtime_info, get_project_root, PROJECT_ROOT_ENV_KEY
+from plugins.DicePP.frozen import (
+    PROJECT_ROOT_ENV_KEY,
+    get_app_dir,
+    get_project_root,
+    get_runtime_info,
+    is_frozen,
+)
 
 
 class TestIsFrozen:
@@ -28,7 +34,7 @@ class TestIsFrozen:
 
     def test_frozen_environment(self):
         """模拟打包环境应返回 True"""
-        with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, "frozen", True, create=True):
             assert is_frozen() is True
 
 
@@ -52,7 +58,7 @@ class TestGetAppDir:
         expected_dir = os.path.join(os.sep, 'Program Files', 'DicePP')
         fake_exe_path = os.path.join(expected_dir, 'DicePP.exe')
         
-        with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, "frozen", True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
                 app_dir = get_app_dir()
                 assert app_dir == expected_dir
@@ -63,7 +69,7 @@ class TestGetAppDir:
         expected_dir = os.path.join(os.sep, '测试目录', '骰子机器人')
         fake_exe_path = os.path.join(expected_dir, 'DicePP.exe')
         
-        with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, "frozen", True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
                 app_dir = get_app_dir()
                 assert app_dir == expected_dir
@@ -95,7 +101,7 @@ class TestGetRuntimeInfo:
         """模拟打包环境的运行时信息"""
         fake_exe_path = os.path.join(os.sep, 'Apps', 'DicePP', 'DicePP.exe')
 
-        with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, "frozen", True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
                 info = get_runtime_info()
 
@@ -126,7 +132,7 @@ class TestGetProjectRoot:
         expected_dir = os.path.join(os.sep, 'Apps', 'DicePP')
         fake_exe = os.path.join(expected_dir, 'DicePP.exe')
         monkeypatch.delenv(PROJECT_ROOT_ENV_KEY, raising=False)
-        with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, "frozen", True, create=True):
             with patch.object(sys, 'executable', fake_exe):
                 result = get_project_root()
         assert result == expected_dir

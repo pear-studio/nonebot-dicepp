@@ -6,36 +6,25 @@ import sys
 # ============================================================
 # 打包环境适配：确保 EXE 运行时工作目录和路径正确
 # ============================================================
-_IS_FROZEN = getattr(sys, 'frozen', False)
-_INTERNAL_DIR = None
-
+_IS_FROZEN = getattr(sys, "frozen", False)
 if _IS_FROZEN:
     # PyInstaller 打包环境
     # 1. 将工作目录切换到 EXE 所在位置，确保用户数据目录可被正确访问
     exe_dir = os.path.dirname(sys.executable)
     os.chdir(exe_dir)
-    # 2. 记录 _internal 目录路径（pyproject.toml 和 DicePP 插件在这里）
-    _INTERNAL_DIR = os.path.join(exe_dir, '_internal')
-    if _INTERNAL_DIR not in sys.path:
-        sys.path.insert(0, _INTERNAL_DIR)
-    # 3. 把 src/plugins 加入 sys.path，让 NoneBot 能正确导入插件
-    _plugins_base = os.path.join(_INTERNAL_DIR, 'src', 'plugins')
-    if _plugins_base not in sys.path:
-        sys.path.insert(0, _plugins_base)
-    # 4. 把 src/plugins/DicePP 加入 sys.path，让 DicePP 模块可直接 import
-    _plugin_root = os.path.join(_plugins_base, 'DicePP')
-    if _plugin_root not in sys.path:
-        sys.path.insert(0, _plugin_root)
+    # 2. Keep the frozen import surface identical to source: only ``src`` is
+    # exposed, so DicePP can be imported only as ``plugins.DicePP``.
+    _src_root = os.path.join(exe_dir, '_internal', 'src')
+    if _src_root not in sys.path:
+        sys.path.insert(0, _src_root)
 else:
-    # 源码环境：暴露仓库根目录、共享源码和 DicePP 插件源码
+    # 源码环境只暴露 ``src``，禁止 DicePP 内部模块作为顶级包被导入。
     dir_path = os.path.abspath(os.path.dirname(__file__))
-    sys.path.insert(0, dir_path)
     _src_root = os.path.join(dir_path, "src")
-    sys.path.insert(0, _src_root)
-    _plugin_root = os.path.join(dir_path, "src", "plugins", "DicePP")
-    sys.path.insert(0, _plugin_root)
+    if _src_root not in sys.path:
+        sys.path.insert(0, _src_root)
 
-from utils.stdio import configure_redirected_stdio_utf8
+from plugins.DicePP.utils.stdio import configure_redirected_stdio_utf8
 
 configure_redirected_stdio_utf8()
 
@@ -55,13 +44,13 @@ if _bootstrap_args.version:
     sys.exit(0)
 
 if _bootstrap_args.smoke_check:
-    import _smoke_check
+    from plugins.DicePP import _smoke_check
     ok = _smoke_check.run_smoke_check()
     sys.exit(0 if ok else 1)
 
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
-from utils.logger import logger, restore_runtime_logging
+from plugins.DicePP.utils.logger import logger, restore_runtime_logging
 
 restore_runtime_logging()
 
@@ -95,14 +84,8 @@ async def _startup_message():
 driver = nonebot.get_driver()
 driver.register_adapter(OneBot_V11_Adapter)
 
-# 加载插件
-if _IS_FROZEN:
-    # 打包环境：src/plugins 已加入 sys.path，直接用模块名加载
-    nonebot.load_plugin("DicePP")
-else:
-    # 开发环境：使用 load_plugins 扫描目录
-    _plugins_dir = os.path.join("src", "plugins")
-    nonebot.load_plugins(_plugins_dir)
+# 加载规范的 NoneBot side-effect 入口。
+nonebot.load_plugin("plugins.DicePP.plugin")
 
 app = nonebot.get_asgi()
 

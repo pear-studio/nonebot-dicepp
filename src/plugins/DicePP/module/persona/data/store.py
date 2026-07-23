@@ -11,7 +11,7 @@ from ..image_cache import ImageCache
 from datetime import datetime, timedelta
 import json
 import re
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 import os
 import base64
 import aiosqlite
@@ -30,8 +30,8 @@ from .models import (
     DEFAULT_SESSION_TOKEN_BUDGET,
     StoryDeckEntry, VALID_ENTRY_TYPES,
 )
-from core.data.schema import ensure_schema_async
-from core.data.schema.lifecycle import execute_many_async
+from plugins.DicePP.core.data.schema import ensure_schema_async
+from plugins.DicePP.core.data.schema.lifecycle import execute_many_async
 from .schema import BOT_CORE_SCHEMA_SQL, PERSONA_TARGET
 
 
@@ -146,7 +146,7 @@ class PersonaDataStore:
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         return get_clock().now()
 
     @staticmethod

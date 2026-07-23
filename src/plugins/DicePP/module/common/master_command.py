@@ -6,12 +6,12 @@ from typing import List, Tuple, Any
 import os
 import asyncio
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.data.models import BotControl
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.data.models import BotControl
 
 LOC_REBOOT = "master_reboot"
 LOC_SEND_MASTER = "master_send_to_master"
@@ -110,7 +110,7 @@ class MasterCommand(UserCommandBase):
             await self.bot.db.bot_control.upsert(BotControl(key="rebooter", value=meta.user_id))
             
             async def delayed_reboot():
-                from core.command import BotSendMsgCommand
+                from plugins.DicePP.core.command import BotSendMsgCommand
                 # 发送倒计时提醒
                 await self.bot.send_msg_to_master(f"⏰ 骰娘将在 {delay_sec} 秒后重启...")
                 await asyncio.sleep(delay_sec)

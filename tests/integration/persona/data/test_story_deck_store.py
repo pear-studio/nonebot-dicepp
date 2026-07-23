@@ -7,8 +7,8 @@ delete、get_linked_entries 等核心逻辑。
 """
 import pytest
 import asyncio
-from module.persona.data.store import PersonaDataStore
-from module.persona.data.models import StoryDeckEntry
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.models import StoryDeckEntry
 
 _TEST_DB_PATH = ":memory:"
 

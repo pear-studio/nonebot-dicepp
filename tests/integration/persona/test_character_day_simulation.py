@@ -9,13 +9,13 @@ import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
-from module.persona.life.character_life import CharacterLife, CharacterLifeConfig
-from module.persona.life.diary import DiaryGenerator, DiaryConfig
-from module.persona.character.models import Character, PersonaExtensions
-from module.persona.data.store import PersonaDataStore
-from module.persona.data.models import CharacterState
-from module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
-from utils.time import set_test_clock
+from plugins.DicePP.module.persona.life.character_life import CharacterLife, CharacterLifeConfig
+from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
+from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.models import CharacterState
+from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
+from plugins.DicePP.utils.time import set_test_clock
 
 @pytest.fixture
 async def temp_db():

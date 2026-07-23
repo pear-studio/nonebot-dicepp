@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from typing import Optional
 from weakref import WeakKeyDictionary
 
-from utils.logger import logger
-from utils.time import get_clock
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import get_clock
 from ..data.store import PersonaDataStore
 from ..agent.output_protocol import (
     INTERNAL_MESSAGE_TYPE_FIELD,

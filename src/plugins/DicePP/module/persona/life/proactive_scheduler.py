@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 import random
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 import re
 
 from ..data.store import PersonaDataStore
@@ -15,7 +15,7 @@ from ..data.persist_keys import PERSONA_SK_SCHEDULER
 from ..data.models import RelationshipState, DEFAULT_RELATION_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
-from utils.time import format_timestamp, format_relative_time
+from plugins.DicePP.utils.time import format_timestamp, format_relative_time
 from .protocols import BoundaryReceiver
 from .models import ShareTarget
 from .utils import effective_for_proactive
@@ -91,7 +91,7 @@ class ProactiveScheduler(BoundaryReceiver):
         return self._llm_semaphore
 
     def _now(self) -> datetime:
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         return get_clock().now()
 
     def _get_today_str(self) -> str:

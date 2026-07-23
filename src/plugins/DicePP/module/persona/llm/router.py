@@ -9,7 +9,7 @@ import asyncio
 from collections import defaultdict
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from .providers import _PROVIDER_CLASSES, _PROVIDER_OVERRIDES
 from .providers.protocol import ImageGenProvider
@@ -18,7 +18,11 @@ from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
 
 if TYPE_CHECKING:
-    from ...core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
+    from plugins.DicePP.core.config.pydantic_models import (
+        ModelConfig,
+        PersonaConfig,
+        ProviderConfig,
+    )
 
 
 class ServiceUnavailableError(Exception):
@@ -262,7 +266,7 @@ class LLMRouter:
             return
         if not user_id:  # 系统调用（bot 自身运作）不计入用量
             return
-        from utils.time import wall_now
+        from plugins.DicePP.utils.time import wall_now
         today = wall_now(
             self.config.timezone if self.config else "Asia/Shanghai"
         ).strftime("%Y-%m-%d")
@@ -279,7 +283,7 @@ class LLMRouter:
             return
         if not user_id:  # 系统调用（bot 自身运作）不限配额
             return
-        from utils.time import wall_now
+        from plugins.DicePP.utils.time import wall_now
         today = wall_now(
             self.config.timezone if self.config else "Asia/Shanghai"
         ).strftime("%Y-%m-%d")

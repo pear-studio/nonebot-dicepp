@@ -7,13 +7,13 @@ import tempfile
 import os
 
 
-from module.persona.character.models import (
+from plugins.DicePP.module.persona.character.models import (
     Character,
     CharacterBook,
     LoreEntry,
     PersonaExtensions,
 )
-from module.persona.character.loader import CharacterLoader
+from plugins.DicePP.module.persona.character.loader import CharacterLoader
 
 
 class TestCharacter:

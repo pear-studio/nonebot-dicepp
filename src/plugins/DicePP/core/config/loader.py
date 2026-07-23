@@ -16,9 +16,9 @@ from typing import Any, Dict, Optional, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from utils.logger import logger
-from core.config.pydantic_models import BotConfig
-from core.config.basic import Paths
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.core.config.pydantic_models import BotConfig
+from plugins.DicePP.core.config.basic import Paths
 
 _BOTS_DIR = "bots"
 _GLOBAL_CONFIG = "global.json"

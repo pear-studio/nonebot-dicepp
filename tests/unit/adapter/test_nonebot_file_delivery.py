@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-import adapter.nonebot_adapter as nonebot_adapter
-from adapter.nonebot_adapter import NoneBotClientProxy, _group_folder_cache
-from core.command import BotSendFileCommand, FileDeliveryOutcome
-from core.communication import GroupMessagePort, PrivateMessagePort
+import plugins.DicePP.adapter.nonebot_adapter as nonebot_adapter
+from plugins.DicePP.adapter.nonebot_adapter import NoneBotClientProxy, _group_folder_cache
+from plugins.DicePP.core.command import BotSendFileCommand, FileDeliveryOutcome
+from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
 
 
 @pytest.fixture(autouse=True)

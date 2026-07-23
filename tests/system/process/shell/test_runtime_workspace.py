@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config import Paths
+from plugins.DicePP.core.config import Paths
 
 
 

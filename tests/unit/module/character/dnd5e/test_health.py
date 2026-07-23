@@ -1,5 +1,5 @@
 import pytest
-from core.data.models.character import HPInfo, CHAR_INFO_KEY_HP, CHAR_INFO_KEY_HP_DICE
+from plugins.DicePP.core.data.models.character import HPInfo, CHAR_INFO_KEY_HP, CHAR_INFO_KEY_HP_DICE
 
 
 class TestHPInfoModel:

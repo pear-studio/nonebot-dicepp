@@ -7,7 +7,7 @@ Phase 1: 真实 LLM 调用，根据 context.mode 使用不同 prompt 模板。
 import asyncio
 import json
 from typing import Any, List, Optional, TYPE_CHECKING
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.models import CharacterState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
@@ -15,13 +15,13 @@ from ..llm.selection import EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.collecting import (
     SAY_TOOL_CHARACTER,
 )
-from utils.time import format_timestamp, format_relative_time
+from plugins.DicePP.utils.time import format_timestamp, format_relative_time
 from .agent import Agent
 from .change_sources import CharacterStateChangeSource
 from .types import AgentResult, EventReactionResult
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 # ── 默认 few-shot 示例（系统默认）
@@ -172,7 +172,7 @@ class CharacterAgent(Agent):
         today_context = ""
         if today_events:
             events_lines = []
-            from utils.time import get_clock
+            from plugins.DicePP.utils.time import get_clock
             now = get_clock().now()
             for e in today_events:
                 created_at = e.get("created_at")
@@ -217,7 +217,7 @@ class CharacterAgent(Agent):
         state_text = self._format_state_prompt(energy, mood, health)
 
         events_lines = []
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         now = get_clock().now()
         for e in events:
             created_at = e.get("created_at")
@@ -276,7 +276,7 @@ class CharacterAgent(Agent):
 
         today_events_text = ""
         if today_events:
-            from utils.time import get_clock
+            from plugins.DicePP.utils.time import get_clock
             now = get_clock().now()
             ev_lines = []
             for e in today_events:

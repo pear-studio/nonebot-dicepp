@@ -1,6 +1,6 @@
 import pytest
 
-from shell.session import create_session, format_session_info
+from plugins.DicePP.shell.session import create_session, format_session_info
 
 
 class TestSessionValidation:

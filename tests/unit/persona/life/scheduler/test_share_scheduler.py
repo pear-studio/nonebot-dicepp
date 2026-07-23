@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from module.persona.chat.chat_shared import ChatOutcome
-from module.persona.life.models import ShareTarget
-from module.persona.life.share_scheduler import ShareScheduler
-from module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.chat.chat_shared import ChatOutcome
+from plugins.DicePP.module.persona.life.models import ShareTarget
+from plugins.DicePP.module.persona.life.share_scheduler import ShareScheduler
+from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
 
 
 def _make_config():
@@ -327,7 +327,7 @@ class TestShouldTriggerMidnightWrap:
                 return 0.5  # 0.5 < prob(1/31) is False
 
         with patch(
-            "module.persona.life.share_scheduler.random_module.Random",
+            'plugins.DicePP.module.persona.life.share_scheduler.random_module.Random',
             _MockRandom,
         ):
             result = scheduler._should_trigger(now_m=now_m, center=0, label="test")
@@ -402,7 +402,7 @@ class TestCrossMidnightOccurrence:
         current = [datetime(2026, 7, 17, 23, 50)]
         monkeypatch.setattr(scheduler, "_now", lambda: current[0])
         monkeypatch.setattr(
-            "module.persona.life.share_scheduler.random_module.Random",
+            'plugins.DicePP.module.persona.life.share_scheduler.random_module.Random',
             _AlwaysTriggerRandom,
         )
 

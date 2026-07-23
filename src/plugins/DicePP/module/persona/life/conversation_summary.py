@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Protocol, runtime_checkable
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..llm.selection import SUMMARIZE
 from ..agent.output_protocol import is_runtime_instruction, is_unsubmitted_draft

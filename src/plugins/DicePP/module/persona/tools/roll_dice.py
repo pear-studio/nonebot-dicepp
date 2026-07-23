@@ -4,9 +4,9 @@
 将 module.roll 的调用隔离在 persona 模块外部，
 负责异常转换和结果格式化。
 """
-from utils.logger import logger
-from module.roll import RollDiceError
-from module.roll.ast_engine.adapter import exec_roll_exp_unified
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.module.roll import RollDiceError
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 

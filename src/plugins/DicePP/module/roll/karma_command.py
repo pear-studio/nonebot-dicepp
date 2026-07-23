@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.bot import Bot
-from core.command import BotCommandBase, BotSendMsgCommand, UserCommandBase, custom_user_command
-from core.command.const import DPP_COMMAND_FLAG_MANAGE, DPP_COMMAND_PRIORITY_DEFAULT
-from core.communication import GroupMessagePort, MessageMetaData
-from core.localization import LOC_PERMISSION_DENIED_NOTICE
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, UserCommandBase, custom_user_command
+from plugins.DicePP.core.command.const import DPP_COMMAND_FLAG_MANAGE, DPP_COMMAND_PRIORITY_DEFAULT
+from plugins.DicePP.core.communication import GroupMessagePort, MessageMetaData
+from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE
 
 from .karma_manager import get_karma_manager, MODE_DISPLAY, ENGINE_DISPLAY
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 LOC_KARMA_ON = "karma_enable_on"
 LOC_KARMA_ALREADY_ON = "karma_enable_already_on"

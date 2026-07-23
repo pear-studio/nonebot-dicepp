@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from typing import List, Mapping, Optional
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..llm.providers.protocol import LLMResponse
 from ..llm.router import LLMRouter, QuotaExceeded, ServiceUnavailableError

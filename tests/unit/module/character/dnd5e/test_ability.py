@@ -1,5 +1,5 @@
 import pytest
-from core.data.models.character import (
+from plugins.DicePP.core.data.models.character import (
     AbilityInfo,
     ABILITY_LIST, ABILITY_NUM,
     SKILL_LIST, SKILL_NUM, SKILL_PARENT_DICT, SKILL_SYNONYM_DICT,
@@ -9,7 +9,7 @@ from core.data.models.character import (
     EXT_ITEM_LIST, EXT_ITEM_NUM, EXT_ITEM_INDEX_DICT,
     SAVING_ALL_KEY, ATTACK_ALL_KEY,
 )
-from module.character.dnd5e.services import AbilityService
+from plugins.DicePP.module.character.dnd5e.services import AbilityService
 
 
 # ── 模块级常量 ─────────────────────────────────────────────

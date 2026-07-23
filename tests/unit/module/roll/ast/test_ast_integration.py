@@ -4,15 +4,15 @@ Integration tests for the AST engine adapter.
 
 import pytest
 
-from module.roll.ast_engine import (
+from plugins.DicePP.module.roll.ast_engine import (
     build_roll_result,
     exec_roll_exp_ast,
     exec_roll_exp_unified,
     RollExpressionResult,
 )
-from module.roll.ast_engine.errors import RollSyntaxError
-from module.roll.ast_engine.evaluator import DiceRoll, DiceResult, EvalResult
-from module.roll.result import RollResult
+from plugins.DicePP.module.roll.ast_engine.errors import RollSyntaxError
+from plugins.DicePP.module.roll.ast_engine.evaluator import DiceRoll, DiceResult, EvalResult
+from plugins.DicePP.module.roll.result import RollResult
 
 
 class MockDiceRoller:
@@ -48,7 +48,7 @@ class TestASTEngineAdapter:
         assert result.get_complete_result() == "1+2=3"
 
     def test_syntax_error_raises(self):
-        from module.roll.roll_utils import RollDiceError
+        from plugins.DicePP.module.roll.roll_utils import RollDiceError
         with pytest.raises(RollDiceError):
             exec_roll_exp_unified("1+")
 

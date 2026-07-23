@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from core.data.models.karma import UserKarma
+from plugins.DicePP.core.data.models.karma import UserKarma
 
 
 class TestUserKarma:

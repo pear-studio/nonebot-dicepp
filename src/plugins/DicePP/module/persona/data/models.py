@@ -6,9 +6,9 @@ Persona 模块数据模型
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
-from core.message_types import MessageType  # noqa: F401 — re-export from central location
+from plugins.DicePP.core.message_types import MessageType  # noqa: F401 — re-export from central location
 
 
 DEFAULT_SESSION_TOKEN_BUDGET: int = 64000

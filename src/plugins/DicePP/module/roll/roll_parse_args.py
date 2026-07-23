@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from module.roll.roll_const import MULTI_ROLL_LIMIT
+from plugins.DicePP.module.roll.roll_const import MULTI_ROLL_LIMIT
 
 
 @dataclass
@@ -55,7 +55,7 @@ def _parse_roll_args(raw: str) -> RollParseArgs:
       5. 表达式 / 原因分割（via ``sift_roll_exp_and_reason``）
     """
     # 延迟导入，避免循环依赖
-    from module.roll.ast_engine.adapter import sift_roll_exp_and_reason
+    from plugins.DicePP.module.roll.ast_engine.adapter import sift_roll_exp_and_reason
 
     result = RollParseArgs()
     s = raw.strip()  # 容忍前导空白

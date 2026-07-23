@@ -1,14 +1,14 @@
 import datetime
 from typing import List, Tuple, Any
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser  # Task 3.4
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.localization import LOC_FUNC_DISABLE
-from utils.time import get_current_date_raw
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.utils.time import get_current_date_raw
 
 from .jrrp_utils import compute_jrrp, format_jrrp_text
 

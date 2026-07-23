@@ -7,7 +7,7 @@ QUERY_DATA_FIELD_LIST = ["名称", "英文", "来源", "分类", "标签", "内�
 
 @pytest_asyncio.fixture
 async def query_store():
-    from core.data.query_store import QueryStore
+    from plugins.DicePP.core.data.query_store import QueryStore
 
     store = QueryStore()
     try:
@@ -155,7 +155,7 @@ class TestQueryStoreSearch:
 
     @pytest.mark.asyncio
     async def test_search_raises_on_unloaded_db(self, tmp_path, query_store):
-        from core.data.query_store import QueryStoreError
+        from plugins.DicePP.core.data.query_store import QueryStoreError
 
         store = query_store
         with pytest.raises(QueryStoreError, match="未加载"):

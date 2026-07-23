@@ -10,7 +10,7 @@ import pytest
 
 
 def test_smoke_check_imports_dicepp_plugin_entrypoint():
-    from _smoke_check import _check_dicepp_plugin_import
+    from plugins.DicePP._smoke_check import _check_dicepp_plugin_import
 
     assert _check_dicepp_plugin_import() == []
 

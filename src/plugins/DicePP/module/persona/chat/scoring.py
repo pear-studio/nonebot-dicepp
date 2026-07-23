@@ -5,14 +5,14 @@
 """
 import json
 from typing import List, Dict, Any, Optional
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, DEFAULT_RELATION_LABELS
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy, SCORING
 from ..utils.json_helpers import safe_json_loads
-from utils.time import wall_now, format_timestamp, format_relative_time
+from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time
 
 
 class ScoringAnalysisResult(BaseModel):

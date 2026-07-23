@@ -10,9 +10,9 @@ import asyncio
 
 import pytest
 
-from module.bot_health.monitor import HealthMonitor, BotHealth
-from module.bot_health.classifier import FaultTrigger
-from adapter.client_proxy import ClientProxy
+from plugins.DicePP.module.bot_health.monitor import HealthMonitor, BotHealth
+from plugins.DicePP.module.bot_health.classifier import FaultTrigger
+from plugins.DicePP.adapter.client_proxy import ClientProxy
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ def _make_mock_heartbeat_event(self_id=123, online=True, good=True, interval=300
 
 def test_handle_heartbeat_forwards_to_monitor():
     """handle_heartbeat 正确转发 HeartbeatMetaEvent → on_heartbeat()。"""
-    from adapter.nonebot_adapter import all_bots, handle_heartbeat
+    from plugins.DicePP.adapter.nonebot_adapter import all_bots, handle_heartbeat
 
     monitor = HealthMonitor(account="test_bot")
     assert not monitor._has_heartbeat
@@ -60,7 +60,7 @@ def test_handle_heartbeat_forwards_to_monitor():
 
 def test_handle_heartbeat_bot_not_found_no_error():
     """handle_heartbeat 在 bot 未注册时安全跳过。"""
-    from adapter.nonebot_adapter import all_bots, handle_heartbeat
+    from plugins.DicePP.adapter.nonebot_adapter import all_bots, handle_heartbeat
 
     original = dict(all_bots)
     all_bots.clear()
@@ -78,8 +78,8 @@ def test_handle_heartbeat_bot_not_found_no_error():
 
 def test_send_msg_success_calls_on_send_success():
     """BotSendMsgCommand 成功后调用 on_send_success()。"""
-    from adapter.nonebot_adapter import all_bots, NoneBotClientProxy
-    from core.command import BotSendMsgCommand
+    from plugins.DicePP.adapter.nonebot_adapter import all_bots, NoneBotClientProxy
+    from plugins.DicePP.core.command import BotSendMsgCommand
 
     monitor = HealthMonitor(account="test_bot")
     # 先让 monitor 进入 UNHEALTHY send_failure 状态
@@ -117,8 +117,8 @@ def test_send_msg_success_calls_on_send_success():
 
 def test_action_failed_calls_on_send_failure():
     """ActionFailed 时调用 on_send_failure() + check_heartbeat()。"""
-    from adapter.nonebot_adapter import all_bots, NoneBotClientProxy
-    from core.command import BotSendMsgCommand
+    from plugins.DicePP.adapter.nonebot_adapter import all_bots, NoneBotClientProxy
+    from plugins.DicePP.core.command import BotSendMsgCommand
     from nonebot.adapters.onebot.v11 import ActionFailed
 
     monitor = HealthMonitor(account="test_bot")
@@ -158,8 +158,8 @@ def test_action_failed_calls_on_send_failure():
 
 def test_unknown_send_exception_is_reported_to_caller():
     """代理未知异常也必须上抛，让 MessagePort 返回投递失败。"""
-    from adapter.nonebot_adapter import NoneBotClientProxy
-    from core.command import BotSendMsgCommand
+    from plugins.DicePP.adapter.nonebot_adapter import NoneBotClientProxy
+    from plugins.DicePP.core.command import BotSendMsgCommand
 
     mock_nonebot = MagicMock()
     mock_nonebot.self_id = "no-registered-bot"

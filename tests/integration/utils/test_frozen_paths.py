@@ -1,6 +1,6 @@
 import os
 
-from frozen import get_app_dir
+from plugins.DicePP.frozen import get_app_dir
 
 
 def test_dicepp_app_dir_env_override(monkeypatch, tmp_path):

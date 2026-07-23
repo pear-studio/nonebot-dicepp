@@ -20,7 +20,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.models import MessageType
 
 if TYPE_CHECKING:

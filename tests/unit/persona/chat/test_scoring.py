@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import Mock, AsyncMock
 
-from module.persona.chat.scoring import ScoringAgent, ScoringAnalysisResult
-from module.persona.data.models import ScoreDeltas
+from plugins.DicePP.module.persona.chat.scoring import ScoringAgent, ScoringAnalysisResult
+from plugins.DicePP.module.persona.data.models import ScoreDeltas
 
 
 class TestScoringAgent:

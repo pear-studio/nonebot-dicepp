@@ -45,12 +45,12 @@ from typing import List
 _REPO_ROOT = Path.cwd().resolve()
 if not (_REPO_ROOT / "pyproject.toml").is_file():
     raise RuntimeError("请从 DicePP 仓库根目录运行 benchmark")
-_SRC = _REPO_ROOT / "src" / "plugins" / "DicePP"
+_SRC = _REPO_ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from module.roll.ast_engine import build_sampling_plan, sample_from_plan
-from module.roll.ast_engine.adapter import (
+from plugins.DicePP.module.roll.ast_engine import build_sampling_plan, sample_from_plan
+from plugins.DicePP.module.roll.ast_engine.adapter import (
     preprocess, parse_expression, evaluate, DEFAULT_LIMITS,
     check_expression_length,
 )

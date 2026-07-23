@@ -9,19 +9,19 @@
 import random
 from typing import Any, List, Tuple
 
-from core.bot import Bot
-from core.command.const import (
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import (
     DPP_COMMAND_FLAG_DND,
     DPP_COMMAND_FLAG_FUN,
     DPP_COMMAND_PRIORITY_DEFAULT,
 )
-from core.command import (
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotSendMsgCommand,
     UserCommandBase,
     custom_user_command,
 )
-from core.communication import (
+from plugins.DicePP.core.communication import (
     GroupMessagePort,
     MessageMetaData,
     PrivateMessagePort,

@@ -262,7 +262,7 @@ def make_read_past_events_executor(store: "PersonaDataStore"):
         offset = max(0, args.offset or 0)
 
         from datetime import timedelta
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
 
         now = get_clock().now()
         start_date = (now - timedelta(days=days)).strftime("%Y-%m-%d")

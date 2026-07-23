@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from module.bot_health.monitor import HealthMonitor, BotHealth
-from module.bot_health.classifier import FaultTrigger, classify
+from plugins.DicePP.module.bot_health.monitor import HealthMonitor, BotHealth
+from plugins.DicePP.module.bot_health.classifier import FaultTrigger, classify
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────

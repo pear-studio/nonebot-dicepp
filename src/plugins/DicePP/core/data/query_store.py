@@ -5,8 +5,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiosqlite
 
-from core.config.basic import Paths
-from utils import col_based_workbook_to_dict, create_parent_dir, read_xlsx
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.utils import col_based_workbook_to_dict, create_parent_dir, read_xlsx
 
 
 # 查询资料库表结构

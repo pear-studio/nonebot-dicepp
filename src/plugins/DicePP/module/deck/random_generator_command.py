@@ -6,17 +6,17 @@ from typing import List, Tuple, Any, Dict, Optional
 from pathlib import Path
 import openpyxl
 
-from core.bot import Bot
-from core.config.basic import Paths
-from core.localization import LOC_FUNC_DISABLE
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from utils import read_xlsx, update_xlsx
-from utils.string import match_substring
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.utils import read_xlsx, update_xlsx
+from plugins.DicePP.utils.string import match_substring
 
-from module.deck.random_generator_data import RandomDataSource, RandomGenerateContext
+from plugins.DicePP.module.deck.random_generator_data import RandomDataSource, RandomGenerateContext
 
 LOC_RAND_GEN_LIST = "rand_gen_list"
 LOC_RAND_GEN_MISS = "rand_gen_miss"

@@ -5,18 +5,18 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from core.command import (
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotSendMsgCommand,
     UserCommandBase,
     custom_user_command,
 )
-from core.command.const import (
+from plugins.DicePP.core.command.const import (
     DPP_COMMAND_CLUSTER_DEFAULT,
     DPP_COMMAND_FLAG_DEFAULT,
 )
-from core.communication import GroupMessagePort, MessageMetaData
-from core.message_types import MessageType
+from plugins.DicePP.core.communication import GroupMessagePort, MessageMetaData
+from plugins.DicePP.core.message_types import MessageType
 
 from .errors import LogDomainError, LogErrorCode
 from .publisher import PublicationStatus

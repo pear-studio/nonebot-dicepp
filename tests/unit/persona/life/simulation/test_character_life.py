@@ -6,12 +6,12 @@
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
-from module.persona.life.character_life import CharacterLife, CharacterLifeConfig
-from module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
-from module.persona.life.diary import DiaryGenerator, DiaryConfig
-from module.persona.character.models import Character, PersonaExtensions
-from module.persona.data.models import CharacterState
-from utils.time import set_test_clock
+from plugins.DicePP.module.persona.life.character_life import CharacterLife, CharacterLifeConfig
+from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
+from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
+from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
+from plugins.DicePP.module.persona.data.models import CharacterState
+from plugins.DicePP.utils.time import set_test_clock
 
 class MockAgentSet:
     """Mock Agent 容器 — 同时包含 dm (DMAgent mock) 和 char (CharacterAgent mock)
@@ -170,8 +170,8 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_fallback_delta_applies_to_character_state(self, life, mock_event_agent, mock_data_store, monkeypatch):
         """R10: fallback EventGenerationResult 经 _clamp_delta 后状态累加值验证"""
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.data.models import CharacterState
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         initial_state = CharacterState(energy=50, mood=50, health=50)
@@ -203,7 +203,7 @@ class TestCharacterLifePersistence:
 
     @pytest.fixture
     def mock_data_store(self):
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.data.models import CharacterState
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
@@ -275,7 +275,7 @@ class TestCharacterLifeDiary:
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
-        from module.persona.data.models import CharacterState, DailyEvent
+        from plugins.DicePP.module.persona.data.models import CharacterState, DailyEvent
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
         store.get_daily_events = AsyncMock(return_value=[DailyEvent(date='2024-01-01', event_type='scheduled', description='早上喝咖啡', context_summary='早上喝咖啡', reaction='很香', created_at=datetime(2024, 1, 1, 9, 0))])
@@ -286,7 +286,7 @@ class TestCharacterLifeDiary:
 
     @pytest.fixture
     def diary_generator(self, mock_event_agent, mock_data_store):
-        from module.persona.character.models import Character
+        from plugins.DicePP.module.persona.character.models import Character
         character = Character(name='测试角色', description='一个温柔的角色')
         return DiaryGenerator(store=mock_data_store, character_agent=mock_event_agent.char, character=character, config=DiaryConfig(diary_time='23:30', timezone='Asia/Shanghai'))
 
@@ -329,7 +329,7 @@ class TestCharacterLifeDiary:
         基于注入时间计算。若回退到 wall_now(tz) 将得到当前真实年份的日期，
         断言会因日期不匹配而失败。
         """
-        from module.persona.data.models import DailyEvent
+        from plugins.DicePP.module.persona.data.models import DailyEvent
 
         fake_now = datetime(2099, 6, 15, 23, 30, 0)
         set_test_clock(fake_now)
@@ -578,7 +578,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_depth_three_with_tendency(self, life, mock_event_agent, monkeypatch):
         """follow_up_action 非空时链式续写到 max_depth"""
-        from module.persona.life.types import EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
@@ -599,7 +599,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_delta_clamped(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """单事件 delta 硬约束：超出 ±20 被钳制"""
-        from module.persona.life.types import EventGenerationResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
@@ -615,7 +615,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_force_extend_once_prob_ignored(self, life, mock_event_agent, monkeypatch):
         """已弃用：chain_force_extend_once_prob 不再影响链深度（want_to_end 协议替代）"""
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life.config.chain_force_extend_once_prob = 1.0
@@ -634,7 +634,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_no_consensus_continues_to_max_depth(self, life, mock_event_agent, monkeypatch):
         """双方都不提议 end → 链续写到 max_depth"""
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
@@ -651,7 +651,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_wake_up_floor_corrects_negative_delta(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """wake_up 事件：LLM 返回负 delta → floor 修正为 recovery_energy"""
-        from module.persona.life.types import EventGenerationResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
@@ -667,7 +667,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_wake_up_floor_preserves_positive_above_floor(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """wake_up 事件：LLM 返回正值高于 floor → 保留原值（不经过 clamp）"""
-        from module.persona.life.types import EventGenerationResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
@@ -683,7 +683,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_non_wake_up_no_floor_applied(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """非 wake_up 事件不受 floor 约束"""
-        from module.persona.life.types import EventGenerationResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
@@ -929,7 +929,7 @@ class TestMidnightResetDelay:
         life._last_event_date = '2024-01-02'
         life.character.extensions.event_day_start_hour = 8
         life.character.extensions.event_day_end_hour = 25
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='good_night 事件', duration_minutes=0)))
         mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='晚安')))
         result = await life.tick()
@@ -1240,7 +1240,7 @@ class TestGenerateDailyEventExceptionFallback:
     @pytest.mark.asyncio
     async def test_agent_reaction_exception_returns_empty(self, life, monkeypatch):
         """EventGenerationAgent.generate_event_reaction 抛出异常时返回空列表"""
-        from module.persona.life.types import EventGenerationResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试事件', duration_minutes=0)))
@@ -1297,7 +1297,7 @@ class TestStateZeroPreserved:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         mock_data_store.get_character_state = AsyncMock(return_value=CharacterState(energy=0, mood=0, health=0))
         life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试', duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0)))
         life.character_agent.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))
@@ -1314,7 +1314,7 @@ class TestStateZeroPreserved:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         mock_data_store.get_character_state = AsyncMock(return_value=CharacterState(energy=0, mood=50, health=50))
         life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试', duration_minutes=0, energy_delta=10, mood_delta=0, health_delta=0)))
         life.character_agent.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))
@@ -1329,7 +1329,7 @@ class TestStateZeroPreserved:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        from module.persona.life.types import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         mock_data_store.get_character_state = AsyncMock(return_value=CharacterState(energy=None, mood=None, health=None))
         life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试', duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0)))
         life.character_agent.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))

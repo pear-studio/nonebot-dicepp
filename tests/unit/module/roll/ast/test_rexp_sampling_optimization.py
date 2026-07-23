@@ -13,13 +13,13 @@ from typing import List
 
 import pytest
 
-from module.roll.ast_engine import (
+from plugins.DicePP.module.roll.ast_engine import (
     build_sampling_plan,
     sample_from_plan,
     SamplingPlan,
 )
-from module.roll.ast_engine.errors import RollSyntaxError, RollLimitError
-from module.roll.roll_dice_command import _adaptive_sample_count, get_roll_exp_result
+from plugins.DicePP.module.roll.ast_engine.errors import RollSyntaxError, RollLimitError
+from plugins.DicePP.module.roll.roll_dice_command import _adaptive_sample_count, get_roll_exp_result
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ def _fixed_baseline_percentiles(expression: str, stat_positions: List[float]) ->
 
 def _adaptive_percentiles(expression: str, stat_positions: List[float]) -> List[float]:
     """Run adaptive sampling (mirrors get_roll_exp_result logic), return percentiles."""
-    from module.roll.roll_dice_command import _WARMUP_SIZE, _adaptive_sample_count
+    from plugins.DicePP.module.roll.roll_dice_command import _WARMUP_SIZE, _adaptive_sample_count
 
     plan = build_sampling_plan(expression)
     warmup = [sample_from_plan(plan) for _ in range(_WARMUP_SIZE)]
@@ -220,7 +220,7 @@ class TestNoCrossRequestLeak:
 
     def test_sampling_plan_not_stored_at_module_level(self):
         """SamplingPlan must not exist as a module-level variable in adapter."""
-        import module.roll.ast_engine.adapter as adapter_mod
+        import plugins.DicePP.module.roll.ast_engine.adapter as adapter_mod
         module_vals = vars(adapter_mod).values()
         assert not any(isinstance(v, SamplingPlan) for v in module_vals), (
             "Found a SamplingPlan stored at module level — violates request-scope contract"
@@ -239,7 +239,7 @@ class TestAstOnlyRouting:
         """Importing and using the sampling path must not recreate the removed legacy module."""
         import sys
         # Ensure the removed legacy adapter is not imported as a side effect of build/sample.
-        legacy_key = "module.roll.ast_engine.legacy_adapter"
+        legacy_key = 'plugins.DicePP.module.roll.ast_engine.legacy_adapter'
         was_loaded = legacy_key in sys.modules
         build_sampling_plan("3D6")
         is_loaded_now = legacy_key in sys.modules

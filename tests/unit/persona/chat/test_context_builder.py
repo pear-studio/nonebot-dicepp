@@ -4,11 +4,11 @@
 
 import pytest
 from datetime import datetime, timedelta
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 
-from module.persona.character.models import Character, CharacterBook, LoreEntry
-from module.persona.data.models import UserProfile
-from module.persona.chat.context import ContextBuilder
+from plugins.DicePP.module.persona.character.models import Character, CharacterBook, LoreEntry
+from plugins.DicePP.module.persona.data.models import UserProfile
+from plugins.DicePP.module.persona.chat.context import ContextBuilder
 
 # 今天日期，用于构造同日时间戳（format_timestamp 同日返回 HH:MM）
 _TODAY = wall_now().replace(hour=14, minute=0, second=0, microsecond=0)
@@ -284,7 +284,7 @@ class TestContextBuilderSegmentGuide:
 
     def test_segment_guide_injects_only_length_limits(self):
         char = self._make_character()
-        from module.persona.chat.context import SegmentGuide
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
         builder = ContextBuilder(
             char,
             segment_guide=SegmentGuide(
@@ -306,7 +306,7 @@ class TestContextBuilderSegmentGuide:
 
     def test_segment_guide_reflects_custom_values(self):
         char = self._make_character()
-        from module.persona.chat.context import SegmentGuide
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
         builder = ContextBuilder(
             char,
             segment_guide=SegmentGuide(
@@ -323,7 +323,7 @@ class TestContextBuilderSegmentGuide:
 
     def test_segment_guide_placed_after_character_info(self):
         char = self._make_character()
-        from module.persona.chat.context import SegmentGuide
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
         builder = ContextBuilder(
             char,
             segment_guide=SegmentGuide(
@@ -387,8 +387,8 @@ class TestConfigMigration:
 
     def test_new_fields_assembled_correctly(self):
         """ChatConfig.from_persona() 装配新字段正确"""
-        from core.config.pydantic_models import PersonaConfig
-        from module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
         pc = PersonaConfig(
             max_history_turns=7,
             max_history_tokens=3000,
@@ -408,8 +408,8 @@ class TestDiaryContextConfig:
 
     def test_diary_uses_max_diary_context_chars(self):
         """_build_diary_context 使用 max_diary_context_chars"""
-        from core.config.pydantic_models import PersonaConfig
-        from module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
         pc = PersonaConfig(
             max_diary_context_chars=300,
         )
@@ -439,7 +439,7 @@ class TestFormatPrivateHistory:
 
     def test_timestamp_prefix(self, monkeypatch):
         monkeypatch.setattr(
-            "module.persona.chat.context.wall_now",
+            'plugins.DicePP.module.persona.chat.context.wall_now',
             lambda tz: _TODAY,
         )
         builder = ContextBuilder(self._make_character())
@@ -721,7 +721,7 @@ class TestFormatHistory:
 
     def test_is_group_false_dispatches_private(self, monkeypatch):
         monkeypatch.setattr(
-            "module.persona.chat.context.wall_now",
+            'plugins.DicePP.module.persona.chat.context.wall_now',
             lambda tz: _TODAY,
         )
         builder = ContextBuilder(self._make_character())
@@ -872,36 +872,36 @@ class TestBuildImageMarkers:
     """_build_image_markers 图片标记构建测试"""
 
     def test_normal_image_marker(self):
-        from module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
 
         msg = {"image_meta": [{"image_hash": "abc123", "sub_type": "0"}]}
         result = _build_image_markers(msg)
         assert result == "[图片 abc123] "
 
     def test_emoticon_marker(self):
-        from module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
 
         msg = {"image_meta": [{"image_hash": "def456", "sub_type": "1"}]}
         result = _build_image_markers(msg)
         assert result == "[表情 def456] "
 
     def test_default_subtype_is_image(self):
-        from module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
 
         msg = {"image_meta": [{"image_hash": "xyz789"}]}
         result = _build_image_markers(msg)
         assert result == "[图片 xyz789] "
 
     def test_empty_image_meta_returns_empty(self):
-        from module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
 
         assert _build_image_markers({}) == ""
         assert _build_image_markers({"image_meta": None}) == ""
         assert _build_image_markers({"image_meta": []}) == ""
 
     def test_missing_hash_falls_back_to_compute_image_hash(self, monkeypatch):
-        from module.persona.chat.context import _build_image_markers
-        from module.persona.image_cache import ImageCache
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.image_cache import ImageCache
 
         monkeypatch.setattr(
             ImageCache, "compute_image_hash",
@@ -912,8 +912,8 @@ class TestBuildImageMarkers:
         assert result == "[图片 computed_hash] "
 
     def test_missing_hash_and_no_url_skips_entry(self, monkeypatch):
-        from module.persona.chat.context import _build_image_markers
-        from module.persona.image_cache import ImageCache
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.image_cache import ImageCache
 
         monkeypatch.setattr(
             ImageCache, "compute_image_hash",
@@ -925,7 +925,7 @@ class TestBuildImageMarkers:
         assert result == " "
 
     def test_multiple_image_markers(self):
-        from module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
 
         msg = {
             "image_meta": [

@@ -1,6 +1,6 @@
 """NicknameCommand pure logic tests."""
 
-from module.common.nickname_command import MAX_NICKNAME_LENGTH, NicknameCommand
+from plugins.DicePP.module.common.nickname_command import MAX_NICKNAME_LENGTH, NicknameCommand
 
 
 class TestNicknameCommandPureLogic:

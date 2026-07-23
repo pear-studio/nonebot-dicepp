@@ -14,7 +14,6 @@
 import sys
 import os
 import importlib
-from pathlib import Path
 
 
 def run_smoke_check() -> bool:
@@ -39,9 +38,9 @@ def run_smoke_check() -> bool:
 def _check_frozen_env() -> list[str]:
     """验证 frozen 环境检测逻辑。"""
     errors = []
-    import frozen
+    from plugins.DicePP import frozen
 
-    if frozen.is_frozen() != getattr(sys, 'frozen', False):
+    if frozen.is_frozen() != getattr(sys, "frozen", False):
         errors.append("is_frozen() mismatch with sys.frozen")
 
     app_dir = frozen.get_app_dir()
@@ -92,26 +91,14 @@ def _check_critical_modules() -> list[str]:
 
 
 def _check_dicepp_plugin_import() -> list[str]:
-    """验证 DicePP 插件入口可导入，覆盖 NoneBot load_plugin 的核心导入链。"""
+    """验证规范的 DicePP 插件入口可导入。"""
     errors = []
-    plugin_root = Path(__file__).resolve().parent
-    plugins_base = str(plugin_root.parent)
-
-    inserted = False
-    if plugins_base not in sys.path:
-        sys.path.insert(0, plugins_base)
-        inserted = True
-
     try:
-        importlib.import_module('DicePP')
+        importlib.import_module("plugins.DicePP.plugin")
     except Exception as e:
-        errors.append(f"DicePP plugin import failed: {e.__class__.__name__}: {e}")
-    finally:
-        if inserted:
-            try:
-                sys.path.remove(plugins_base)
-            except ValueError:
-                pass
+        errors.append(
+            f"plugins.DicePP.plugin import failed: {e.__class__.__name__}: {e}"
+        )
 
     return errors
 
@@ -119,8 +106,8 @@ def _check_dicepp_plugin_import() -> list[str]:
 def _check_version() -> list[str]:
     """验证版本号可读取且格式正确。
 
-    直接使用 importlib.metadata，不经过 core.config.declare。
-    core/config/__init__.py 会触发 basic.py → utils.logger 的完整导入链，
+    直接使用 importlib.metadata，不经过 plugins.DicePP.core.config.declare。
+    plugins.DicePP.core.config 会触发 basic.py → utils.logger 的完整导入链，
     不适合在 nonebot.init() 之前调用。
     """
     errors = []

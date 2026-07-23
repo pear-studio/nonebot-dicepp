@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, List
 import aiohttp
 import asyncio
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 DEFAULT_TIMEOUT = 10
 DEFAULT_RETRY = 3

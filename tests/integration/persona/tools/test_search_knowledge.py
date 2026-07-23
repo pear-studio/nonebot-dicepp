@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from module.persona.agent.runtime_types import ToolExecutionContext
-from module.persona.tools.search_knowledge import (
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from plugins.DicePP.module.persona.tools.search_knowledge import (
     SEARCH_KNOWLEDGE_TOOL,
     build_search_knowledge_tool,
 )

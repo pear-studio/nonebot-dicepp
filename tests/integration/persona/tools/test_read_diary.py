@@ -4,8 +4,8 @@ from datetime import timedelta
 
 import pytest
 
-from module.persona.agent.runtime_types import ToolExecutionContext
-from module.persona.tools.read_diary import build_read_diary_tool
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from plugins.DicePP.module.persona.tools.read_diary import build_read_diary_tool
 
 
 

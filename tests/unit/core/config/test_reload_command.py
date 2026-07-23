@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.communication import MessageMetaData, MessageSender
-from core.command.bot_cmd import BotSendMsgCommand
-from core.config.loader import ConfigValidationError
-from core.config.pydantic_models import BotConfig
-from module.common.reload_config_command import ReloadConfigCommand
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.command.bot_cmd import BotSendMsgCommand
+from plugins.DicePP.core.config.loader import ConfigValidationError
+from plugins.DicePP.core.config.pydantic_models import BotConfig
+from plugins.DicePP.module.common.reload_config_command import ReloadConfigCommand
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

@@ -16,8 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set
 
-from core.command.parse_result import CommandParseResult
-from core.command.const import PARSE_WARN_COMPAT_CONFLICT, PARSE_WARN_COMPAT_RULE_ERROR
+from plugins.DicePP.core.command.parse_result import CommandParseResult
+from plugins.DicePP.core.command.const import PARSE_WARN_COMPAT_CONFLICT, PARSE_WARN_COMPAT_RULE_ERROR
 
 
 # ---------------------------------------------------------------------------

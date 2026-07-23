@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from module.persona.agent.runtime_types import ToolExecutionContext
-from module.persona.tools.list_databases import (
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from plugins.DicePP.module.persona.tools.list_databases import (
     LIST_QUERY_DATABASES_TOOL,
     build_list_databases_tool,
 )

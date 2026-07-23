@@ -5,7 +5,7 @@ Executor 通过 ToolContext 访问 store 和 image_cache。
 import json
 from typing import Any, Dict
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 

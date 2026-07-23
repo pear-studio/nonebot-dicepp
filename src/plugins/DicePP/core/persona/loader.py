@@ -7,9 +7,9 @@ from typing import Dict, Optional
 import yaml
 from pydantic import ValidationError
 
-from utils.logger import logger
-from core.persona.models import PersonaModel
-from core.config.basic import Paths
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.core.persona.models import PersonaModel
+from plugins.DicePP.core.config.basic import Paths
 
 _DEFAULT_PERSONA = "default"
 

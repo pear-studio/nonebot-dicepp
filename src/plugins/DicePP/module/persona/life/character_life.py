@@ -8,7 +8,7 @@ import asyncio
 import json
 import sys
 import time
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 import random
 import uuid
 from dataclasses import dataclass
@@ -19,12 +19,12 @@ from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
-from utils.time import format_timestamp
+from plugins.DicePP.utils.time import format_timestamp
 from .types import EventGenerationResult, EventReactionResult, UnrecoverableAgentError
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
     from .dm_agent import DMAgent
     from .character_agent import CharacterAgent
 
@@ -102,7 +102,7 @@ class CharacterLifeConfig:
         )
 
     def now(self) -> datetime:
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         return get_clock().now()
 
 

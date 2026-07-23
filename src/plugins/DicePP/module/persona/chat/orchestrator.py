@@ -11,8 +11,8 @@ import random
 import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from utils.logger import logger
-from utils.time import wall_now
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import wall_now
 
 from ..data.store import PersonaDataStore
 from ..data.models import MessageType, RelationshipState

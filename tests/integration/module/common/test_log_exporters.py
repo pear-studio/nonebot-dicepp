@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from docx import Document
 
-from module.common.log import (
+from plugins.DicePP.module.common.log import (
     LogExportFormat,
     LogExportView,
     LogProjection,
@@ -14,14 +14,14 @@ from module.common.log import (
     ProjectedPart,
     ProjectedReply,
 )
-from module.common.log.exporters import (
+from plugins.DicePP.module.common.log.exporters import (
     DocxLogExporter,
     TextLogExporter,
     build_filename_base,
     reserve_export_target,
     sanitize_filename_component,
 )
-from module.common.log.exporters.docx import stable_user_color
+from plugins.DicePP.module.common.log.exporters.docx import stable_user_color
 
 
 NOW = datetime(2026, 7, 20, 16, 0, 0)

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Callable, Dict, List, Optional, Union
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 
 class TaskScheduler:

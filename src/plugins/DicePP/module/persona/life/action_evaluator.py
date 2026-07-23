@@ -9,7 +9,7 @@ import uuid
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..llm.selection import SelectionPolicy, SCORING
@@ -21,7 +21,7 @@ class RecordEvaluationArgs(BaseModel):
     reason: str = Field(..., description="评估原因")
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
     from ..llm.router import LLMRouter
 
 # 常见中文地点词匹配
@@ -56,7 +56,7 @@ class ActionEvaluator:
         self._timeout = config.suggest_action_evaluation_timeout
 
     def _get_today_str(self) -> str:
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         return get_clock().now().strftime("%Y-%m-%d")
 
     @staticmethod
@@ -102,7 +102,7 @@ class ActionEvaluator:
         )
 
     def _now(self):
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         return get_clock().now()
 
     async def evaluate(

@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional
 import psutil
 from filelock import FileLock, Timeout as FileLockTimeout
 
-from frozen import get_project_root
-from utils.network import format_url_host
+from plugins.DicePP.frozen import get_project_root
+from plugins.DicePP.utils.network import format_url_host
 
 
 SHELL_DIR = Path(get_project_root()) / ".dicepp-shell"

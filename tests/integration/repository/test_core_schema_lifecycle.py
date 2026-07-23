@@ -7,9 +7,9 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from core.data.database import BotDatabase
-from core.data.models.karma import UserKarma
-from core.data.schema import (
+from plugins.DicePP.core.data.database import BotDatabase
+from plugins.DicePP.core.data.models.karma import UserKarma
+from plugins.DicePP.core.data.schema import (
     AsyncSchemaMigration,
     BOT_CORE_TARGET,
     BOT_LOG_TARGET,
@@ -22,7 +22,7 @@ from core.data.schema import (
     apply_schema_target,
     ensure_schema_async,
 )
-from core.data.schema.lifecycle import execute_many
+from plugins.DicePP.core.data.schema.lifecycle import execute_many
 
 
 def _tables(db_path: Path) -> set[str]:

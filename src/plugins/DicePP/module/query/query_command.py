@@ -6,24 +6,24 @@ import math
 #import random
 # from openpyxl.utils import get_column_letter
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
-from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.localization import LOC_FUNC_DISABLE
-from core.config.basic import Paths
-from core.data.models import GroupConfig
-from core.data.query_store import (
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.core.data.models import GroupConfig
+from plugins.DicePP.core.data.query_store import (
     QUERY_DATA_FIELD,
     QUERY_DATA_FIELD_LIST,
     QUERY_REDIRECT_FIELD,
     QUERY_REDIRECT_FIELD_LIST,
     QueryStoreError,
 )
-from core.query_utils import command_split
-from utils.time import get_current_date_raw
-from utils.data import yield_deduplicate
+from plugins.DicePP.core.query_utils import command_split
+from plugins.DicePP.utils.time import get_current_date_raw
+from plugins.DicePP.utils.data import yield_deduplicate
 
 LOC_QUERY_RESULT = "query_result"
 LOC_QUERY_SINGLE_RESULT = "query_single_result"

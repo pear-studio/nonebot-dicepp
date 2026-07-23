@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from module.persona.command import PersonaCommand
-from module.persona.data.models import MessageType
-from module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.command import PersonaCommand
+from plugins.DicePP.module.persona.data.models import MessageType
+from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
 
 
 def _make_command(msg_id=123):
@@ -34,8 +34,8 @@ def _make_command(msg_id=123):
 class TestInboundRecorderWiring:
     async def test_bot_dispatches_hook_evidence_id_on_current_message_meta(self):
         """Bot 必须把当前 hook 返回的唯一 ID 交给随后执行的 command。"""
-        from core.bot import Bot
-        from core.communication import MessageMetaData, MessageSender
+        from plugins.DicePP.core.bot import Bot
+        from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 
         bot = MagicMock(spec=Bot)
         bot._delay_init_done = True

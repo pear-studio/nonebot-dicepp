@@ -3,18 +3,18 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from module.persona.chat.chat_config import ChatConfig
-from module.persona.chat.chat_shared import ChatCallContext
-from module.persona.life.conversation import Conversation, ConversationRunResult, Snapshot
-from module.persona.chat.orchestrator import ChatOrchestrator, ChatOutcome
-from module.persona.data.store import PersonaDataStore
-from module.persona.life.conversation_registry import ConversationRegistry
-from module.persona.life.conversation_scope import ConversationScope
-from module.persona.life.conversation_summary import FakeSummarizer
-from module.persona.agent.runtime_types import (
+from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+from plugins.DicePP.module.persona.chat.chat_shared import ChatCallContext
+from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult, Snapshot
+from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator, ChatOutcome
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult, RunCompletion, RunOutput, BillingSummary,
 )
-from core.message_types import MessageType
+from plugins.DicePP.core.message_types import MessageType
 
 
 def _make_config():
@@ -174,7 +174,7 @@ class TestChatOrchestratorChat:
     @pytest.fixture
     def orch_with_mocks(self):
         """构造带 mock Conversation 和 Coordinator 的 ChatOrchestrator。"""
-        from module.persona.life.conversation import ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -261,7 +261,7 @@ class TestChatOrchestratorChat:
     @pytest.mark.asyncio
     async def test_chat_reputation_refused(self, orch_with_mocks):
         """低信誉时返回拒绝消息"""
-        from module.persona.data.models import RelationshipState
+        from plugins.DicePP.module.persona.data.models import RelationshipState
 
         orch, mock_conv, store = orch_with_mocks
         orch._chat_config.relationship_refuse_enabled = True
@@ -278,7 +278,7 @@ class TestChatOrchestratorChat:
     @pytest.mark.asyncio
     async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
         """QuotaExceeded 时调用 on_exhausted 回调返回 fallback 文案"""
-        from module.persona.llm.router import QuotaExceeded
+        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
 
         orch, mock_conv, store = orch_with_mocks
 
@@ -401,7 +401,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_retry_on_rotation_needed(self):
         """P1-6: 第一次 rotation_needed → rotate → retry → 成功"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -446,7 +446,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_retry_limit_exceeded(self):
         """P1-7: 连续 2 次 rotation_needed → retry_limit_exceeded"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -490,7 +490,7 @@ class TestStageBRetry:
         completion_kind: str = "completed",
         completion_code: str = "output_collected",
     ):
-        from module.persona.agent.runtime_types import (
+        from plugins.DicePP.module.persona.agent.runtime_types import (
             AgentRunResult, RunCompletion, RunOutput, BillingSummary,
         )
         return AgentRunResult(
@@ -626,7 +626,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_chat_command_retry_on_rotation_needed(self):
         """chat_command: rotation_needed → rotate → retry → 成功"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -664,7 +664,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_chat_command_retry_limit_exceeded(self):
         """chat_command: 连续 2 次 rotation_needed → retry_limit_exceeded"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -698,7 +698,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_chat_command_happy_path_no_rotation(self):
         """chat_command: 无轮换时正常返回（回归验证）"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -733,7 +733,7 @@ class TestStageBRetry:
     @pytest.mark.asyncio
     async def test_chat_command_exception_does_not_retry(self):
         """chat_command: execute_turn 抛异常不触发 retry"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
@@ -772,7 +772,7 @@ class TestStageBRetry:
         第二个提交者（被缓冲）的 user_id/ctx 不被第一个的闭包覆盖。
         使用真实 coordinator（不 mock submit），验证缓冲正确传递上下文。
         """
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
         import asyncio
 
         store = _make_store()
@@ -869,7 +869,7 @@ class TestChatOrchestratorScope:
 
     @pytest.mark.asyncio
     async def test_group_message_locates_group_scope(self):
-        from module.persona.life.conversation_scope import ConversationScope
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
         orch = self._make_orch()
         await orch._ensure_conversation(ConversationScope.from_chat("u1", "g1"))
         scope = orch._registry.get_or_create.call_args[0][0]
@@ -877,7 +877,7 @@ class TestChatOrchestratorScope:
 
     @pytest.mark.asyncio
     async def test_private_message_locates_private_scope(self):
-        from module.persona.life.conversation_scope import ConversationScope
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
         orch = self._make_orch()
         await orch._ensure_conversation(ConversationScope.from_chat("u1", ""))
         scope = orch._registry.get_or_create.call_args[0][0]
@@ -895,8 +895,8 @@ class TestChatOrchestratorScope:
 
         不 mock _ensure_conversation，验证真实的 from_chat → registry.get_or_create 链路。
         """
-        from module.persona.life.conversation_scope import ConversationScope
-        from module.persona.life.conversation import ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+        from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
 
         store = _make_store()
         store.get_group_messages = AsyncMock(return_value=[{}])
@@ -957,7 +957,7 @@ class TestF2RealRegistryIntegration:
     @pytest.mark.asyncio
     async def test_f2_real_registry_retry_injects_summary(self, temp_db):
         """chat() 经 retry 路径 → 真实 registry.rotate → 摘要生成 → 新 conv 继承。"""
-        from module.persona.life.conversation import NOTIFICATION_PREFIX
+        from plugins.DicePP.module.persona.life.conversation import NOTIFICATION_PREFIX
 
         summarizer = FakeSummarizer(return_text="F2摘要")
 
@@ -1099,7 +1099,7 @@ class TestChatCommandSerialization:
     @pytest.mark.asyncio
     async def test_two_concurrent_chat_commands_serialized(self):
         """两个并发 chat_command() 对同一 scope → 串行执行，conv.run 不同时调用。"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
         import asyncio
 
         store = _make_store()
@@ -1170,7 +1170,7 @@ class TestChatCommandSerialization:
     @pytest.mark.asyncio
     async def test_chat_and_chat_command_serialized(self):
         """并发 chat() + chat_command() 对同一 scope → 串行执行，agent 只创建一次。"""
-        from module.persona.life.conversation import Conversation, ConversationRunResult
+        from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
         import asyncio
 
         store = _make_store()
@@ -1364,12 +1364,12 @@ class TestAgentCacheInvalidationOnSilentRotation:
     async def test_agent_cache_invalidated_on_silent_rotation(self, temp_db):
         """append_visible 触发静默轮换 → _close_locked → on_scope_closed 回调 → _agents 清空。"""
         from unittest.mock import MagicMock
-        from module.persona.life.conversation_scope import ConversationScope
-        from module.persona.life.conversation_registry import ConversationRegistry
-        from module.persona.life.conversation_summary import FakeSummarizer
-        from module.persona.chat.chat_config import ChatConfig
-        from module.persona.chat.orchestrator import ChatOrchestrator
-        from core.message_types import MessageType
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+        from plugins.DicePP.core.message_types import MessageType
 
         summarizer = FakeSummarizer(return_text="summary")
 

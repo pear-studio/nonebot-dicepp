@@ -1,4 +1,4 @@
-from core.config.loader import _deep_merge
+from plugins.DicePP.core.config.loader import _deep_merge
 
 
 def test_deep_merge_flat():

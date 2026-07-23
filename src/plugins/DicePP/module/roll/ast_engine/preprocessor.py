@@ -13,7 +13,7 @@ so that every call through the AST engine automatically benefits from it.
 
 import re
 
-from utils.string import to_english_str
+from plugins.DicePP.utils.string import to_english_str
 
 
 def preprocess(expression: str) -> str:

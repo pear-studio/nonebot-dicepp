@@ -33,7 +33,7 @@ class TestGetBotVersion:
 
     def test_returns_v_prefix_semver(self):
         """get_bot_version() 返回正式版或预发布版本格式。"""
-        from core.config.declare import get_bot_version
+        from plugins.DicePP.core.config.declare import get_bot_version
 
         version_str = get_bot_version()
         assert re.match(r"^v\d+\.\d+\.\d+((a|b|rc)\d+)?$", version_str), (
@@ -43,7 +43,7 @@ class TestGetBotVersion:
     def test_matches_pyproject_version(self):
         """get_bot_version() 与 pyproject.toml 中的版本一致。
         (importlib.metadata consistency is implicit in the declared import path.)"""
-        from core.config.declare import get_bot_version
+        from plugins.DicePP.core.config.declare import get_bot_version
 
         expected = f"v{_read_pyproject_version()}"
         assert get_bot_version() == expected, (

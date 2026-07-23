@@ -9,15 +9,15 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.data import LogRepository
-from core.data.models import (
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import (
     LogExport,
     LogGroupState,
     LogPublication,
     LogRecord,
     LogSession,
 )
-from core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
 
 NOW = datetime(2026, 7, 20, 12, 0, 0)
 

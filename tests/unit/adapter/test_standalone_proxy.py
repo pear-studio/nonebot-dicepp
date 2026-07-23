@@ -1,8 +1,8 @@
 import pytest
 
-from adapter.standalone_proxy import StandaloneClientProxy
-from core.command import BotSendFileCommand, BotSendMsgCommand, FileDeliveryOutcome
-from core.communication import GroupMessagePort
+from plugins.DicePP.adapter.standalone_proxy import StandaloneClientProxy
+from plugins.DicePP.core.command import BotSendFileCommand, BotSendMsgCommand, FileDeliveryOutcome
+from plugins.DicePP.core.communication import GroupMessagePort
 
 
 @pytest.mark.asyncio

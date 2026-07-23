@@ -4,7 +4,7 @@
 组合 force / normal 策略生成候选目标；最终发送前的 mute 与最小间隔检查由调度器负责。
 """
 from typing import TYPE_CHECKING, List, Optional, Set
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from .models import ShareTarget
 from ..data.store import PersonaDataStore
 from ..game.decay import DecayCalculator
@@ -12,7 +12,7 @@ from ..character.models import Character
 from .utils import effective_for_proactive
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 FORCE_PRIORITY_BASE = 10000

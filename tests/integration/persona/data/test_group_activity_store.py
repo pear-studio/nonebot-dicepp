@@ -8,7 +8,7 @@ import aiosqlite
 import pytest
 
 
-from module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 @pytest.mark.asyncio

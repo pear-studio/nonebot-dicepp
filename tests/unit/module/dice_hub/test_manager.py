@@ -5,8 +5,8 @@ dice_hub 模块测试
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from module.dice_hub.manager import HubManager, HUB_KEY_NICKNAME
-from core.config.pydantic_models import BotConfig
+from plugins.DicePP.module.dice_hub.manager import HubManager, HUB_KEY_NICKNAME
+from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
 class _FakeBot:
@@ -142,7 +142,7 @@ class TestHubManagerRegister:
     @pytest.mark.asyncio
     async def test_register_stores_api_key_from_response(self, bot):
         """register 成功后从响应中提取 api_key 并持久化到缓存和数据库"""
-        from module.dice_hub.api_client import HubAPIClient
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient
 
         mgr = HubManager(bot)
         await mgr.set_api_url("https://hub.example.com")
@@ -159,7 +159,7 @@ class TestHubManagerRegister:
     @pytest.mark.asyncio
     async def test_register_no_api_key_in_response(self, bot):
         """响应中没有 api_key 时不调用 set_api_key"""
-        from module.dice_hub.api_client import HubAPIClient
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient
 
         mgr = HubManager(bot)
         await mgr.set_api_url("https://hub.example.com")
@@ -211,7 +211,7 @@ class TestGetOnlineRobotsCache:
     @pytest.mark.asyncio
     async def test_cache_hit_within_ttl(self, manager):
         """缓存 TTL 内不调用 API"""
-        from module.dice_hub.api_client import HubAPIClient
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient
         from datetime import datetime, timezone
 
         # 填充缓存
@@ -219,7 +219,7 @@ class TestGetOnlineRobotsCache:
         fake_now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
         manager._last_list_refresh = fake_now
 
-        with patch("module.dice_hub.manager.get_current_date_raw", return_value=fake_now):
+        with patch('plugins.DicePP.module.dice_hub.manager.get_current_date_raw', return_value=fake_now):
             with patch.object(HubAPIClient, "get_robots", new_callable=AsyncMock) as mock_get:
                 result = await manager.get_online_robots()
 
@@ -229,9 +229,9 @@ class TestGetOnlineRobotsCache:
     @pytest.mark.asyncio
     async def test_cache_expired_refreshes(self, manager):
         """缓存过期后重新调用 API"""
-        from module.dice_hub.api_client import HubAPIClient
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient
         from datetime import datetime, timezone, timedelta
-        from module.dice_hub.manager import LIST_REFRESH_INTERVAL
+        from plugins.DicePP.module.dice_hub.manager import LIST_REFRESH_INTERVAL
 
         manager._online_robots_cache = self.ROBOTS_DATA
         old_time = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -240,7 +240,7 @@ class TestGetOnlineRobotsCache:
         new_time = old_time + timedelta(seconds=LIST_REFRESH_INTERVAL + 1)
         new_robots = [{"bot_id": "bot2", "nickname": "Bot2", "is_online": True}]
 
-        with patch("module.dice_hub.manager.get_current_date_raw", return_value=new_time):
+        with patch('plugins.DicePP.module.dice_hub.manager.get_current_date_raw', return_value=new_time):
             with patch.object(HubAPIClient, "get_robots", new_callable=AsyncMock, return_value=new_robots) as mock_get:
                 result = await manager.get_online_robots()
 
@@ -252,9 +252,9 @@ class TestGetOnlineRobotsCache:
     @pytest.mark.asyncio
     async def test_api_error_returns_old_cache(self, manager):
         """API 失败时返回旧的缓存数据"""
-        from module.dice_hub.api_client import HubAPIClient, HubAPIError
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient, HubAPIError
         from datetime import datetime, timezone, timedelta
-        from module.dice_hub.manager import LIST_REFRESH_INTERVAL
+        from plugins.DicePP.module.dice_hub.manager import LIST_REFRESH_INTERVAL
 
         manager._online_robots_cache = self.ROBOTS_DATA
         old_time = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -262,7 +262,7 @@ class TestGetOnlineRobotsCache:
 
         new_time = old_time + timedelta(seconds=LIST_REFRESH_INTERVAL + 1)
 
-        with patch("module.dice_hub.manager.get_current_date_raw", return_value=new_time):
+        with patch('plugins.DicePP.module.dice_hub.manager.get_current_date_raw', return_value=new_time):
             with patch.object(HubAPIClient, "get_robots", new_callable=AsyncMock, side_effect=HubAPIError("API down")) as mock_get:
                 result = await manager.get_online_robots()
 
@@ -281,7 +281,7 @@ class TestGetOnlineRobotsCache:
     @pytest.mark.asyncio
     async def test_no_cache_expired_returns_api_data(self, manager):
         """无缓存时直接调用 API 并返回结果"""
-        from module.dice_hub.api_client import HubAPIClient
+        from plugins.DicePP.module.dice_hub.api_client import HubAPIClient
         from datetime import datetime, timezone
 
         manager._online_robots_cache = []  # 空缓存
@@ -290,7 +290,7 @@ class TestGetOnlineRobotsCache:
         new_robots = [{"bot_id": "bot1", "nickname": "Bot1"}]
         fake_now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-        with patch("module.dice_hub.manager.get_current_date_raw", return_value=fake_now):
+        with patch('plugins.DicePP.module.dice_hub.manager.get_current_date_raw', return_value=fake_now):
             with patch.object(HubAPIClient, "get_robots", new_callable=AsyncMock, return_value=new_robots) as mock_get:
                 result = await manager.get_online_robots()
 

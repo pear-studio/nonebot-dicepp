@@ -5,15 +5,15 @@
 from typing import List, Dict, Any, Optional
 import json
 import time
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from datetime import timedelta
 
-from core.bot import Bot
+from plugins.DicePP.core.bot import Bot
 
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .report.daily_report import DailyReportGenerator
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 from .data.models import STAGE_FLOORS
 
 
@@ -249,7 +249,7 @@ class AdminDispatcher:
         # 24h 错误摘要
         lines.append(f"\n[24h 错误摘要]")
         if self.data_store:
-            from utils.time import wall_now
+            from plugins.DicePP.utils.time import wall_now
             since = (wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
             error_rows = await self.data_store.get_error_summary_since(since)
             if error_rows:
@@ -371,7 +371,7 @@ class AdminDispatcher:
         return "\n".join(lines)
 
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
-        from utils.time import wall_now
+        from plugins.DicePP.utils.time import wall_now
         wall = wall_now(self.config.timezone)
         if len(args) < 2:
             date = wall.strftime("%Y-%m-%d")

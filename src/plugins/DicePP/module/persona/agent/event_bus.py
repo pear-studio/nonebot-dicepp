@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, List, Optional, Protocol
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from .events import AgentEvent

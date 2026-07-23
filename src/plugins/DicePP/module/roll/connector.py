@@ -1,7 +1,7 @@
 import abc
 from typing import Type, Dict
 
-from module.roll.result import RollResult
+from plugins.DicePP.module.roll.result import RollResult
 
 
 class RollExpConnector(metaclass=abc.ABCMeta):

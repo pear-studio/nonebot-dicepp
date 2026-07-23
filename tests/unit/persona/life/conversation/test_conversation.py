@@ -2,7 +2,7 @@
 单元测试: Conversation — 纯追加消息线程
 """
 import pytest
-from module.persona.life.conversation import (
+from plugins.DicePP.module.persona.life.conversation import (
     Conversation, Snapshot, Store, Notification, ConversationRunResult,
 )
 from unittest.mock import AsyncMock, MagicMock
@@ -139,7 +139,7 @@ class FakeChangeSource:
 
 def _make_notification(source_id="test.source", content="test content",
                        name="测试"):
-    from module.persona.life.conversation import Notification
+    from plugins.DicePP.module.persona.life.conversation import Notification
     return Notification(source_id=source_id, content=content, name=name)
 
 
@@ -542,7 +542,7 @@ class TestConversationRun:
         run_id: str = "r_test",
     ):
         """创建 mock AgentRuntime.run() 的返回值。"""
-        from module.persona.agent.runtime_types import (
+        from plugins.DicePP.module.persona.agent.runtime_types import (
             AgentRunResult, RunCompletion, RunOutput, BillingSummary,
         )
         if message_delta is None:

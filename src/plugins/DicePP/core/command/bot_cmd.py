@@ -2,8 +2,8 @@ import abc
 import re
 from typing import List, Optional
 
-from core.communication import MessagePort
-from core.message_types import MessageType
+from plugins.DicePP.core.communication import MessagePort
+from plugins.DicePP.core.message_types import MessageType
 
 from nonebot.adapters.onebot.v11 import Message as CQMessage
 

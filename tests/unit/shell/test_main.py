@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import runpy
 import sys
 
 import pytest
 
-from shell.main import _print_dry_run, _print_warp_result, main
+from plugins.DicePP.shell.main import _print_dry_run, _print_warp_result, main
+
+
+def test_canonical_module_entrypoint_shows_shell_help(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["plugins.DicePP.shell", "--help"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module("plugins.DicePP.shell", run_name="__main__")
+
+    assert exc_info.value.code == 0
+    assert "usage: dicepp-shell" in capsys.readouterr().out
 
 
 def test_main_help_lists_runtime_warp_commands(monkeypatch, capsys):

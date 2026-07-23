@@ -13,7 +13,7 @@ from typing import List, Optional, Protocol
 
 import httpx
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 
 class ImageCacheProtocol(Protocol):

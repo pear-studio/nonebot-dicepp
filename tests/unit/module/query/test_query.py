@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.data.query_store import regexp_normalize
+from plugins.DicePP.core.data.query_store import regexp_normalize
 
 
 class TestRegexpNormalize:

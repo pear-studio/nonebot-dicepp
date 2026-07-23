@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.data.models import UserStat as UserStatModel
-from core.data.models import GroupStat as GroupStatModel
-from core.statistics.user_stat import UserStatInfo
-from core.statistics.group_stat import GroupStatInfo
-from core.config.pydantic_models import BotConfig
+from plugins.DicePP.core.data.models import UserStat as UserStatModel
+from plugins.DicePP.core.data.models import GroupStat as GroupStatModel
+from plugins.DicePP.core.statistics.user_stat import UserStatInfo
+from plugins.DicePP.core.statistics.group_stat import GroupStatInfo
+from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -30,8 +30,8 @@ async def test_process_msg_stat_write_failure():
     回归 B-260602-4263c4：stat 写入从延迟批量 try/except 改为内联
     原子更新后缺失异常保护，DB 异常可直接传播到 nonebot adapter。
     """
-    from core.bot import Bot
-    from core.communication import MessageMetaData, MessageSender
+    from plugins.DicePP.core.bot import Bot
+    from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 
     bot = MagicMock(spec=Bot)
     bot.stat_manager = MagicMock()
@@ -81,8 +81,8 @@ async def test_tick_daily_continues_after_single_row_failure():
     任一行的 upsert 失败会阻断剩余所有行的刷新。
     """
     import aiosqlite
-    from core.data import Repository
-    from core.statistics.stat_manager import StatManager
+    from plugins.DicePP.core.data import Repository
+    from plugins.DicePP.core.statistics.stat_manager import StatManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
@@ -147,8 +147,8 @@ async def test_tick_daily_with_per_row_protection_succeeds():
     此测试使用与 R2 修复相同的保护模式，确认修复有效。
     """
     import aiosqlite
-    from core.data import Repository
-    from core.statistics.stat_manager import StatManager
+    from plugins.DicePP.core.data import Repository
+    from plugins.DicePP.core.statistics.stat_manager import StatManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
@@ -224,8 +224,8 @@ async def test_read_under_lock_returns_fresh_data():
     read 方法在 per-key 锁内执行，确保不会读到并发原子更新前旧快照。
     """
     import aiosqlite
-    from core.data import Repository
-    from core.statistics.stat_manager import StatManager
+    from plugins.DicePP.core.data import Repository
+    from plugins.DicePP.core.statistics.stat_manager import StatManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")

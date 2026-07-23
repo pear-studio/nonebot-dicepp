@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
 import pytest
 
-from module.persona.agent.runtime import _build_image_content_parts
-from module.persona.chat.context import _build_image_markers, _safe_estimate_tokens
-from module.persona.image_cache import ImageCache
+from plugins.DicePP.module.persona.agent.runtime import _build_image_content_parts
+from plugins.DicePP.module.persona.chat.context import _build_image_markers, _safe_estimate_tokens
+from plugins.DicePP.module.persona.image_cache import ImageCache
 
 
 # ── _build_image_content_parts ────────────────────────────────────────────────
@@ -222,7 +222,7 @@ class TestImageCache:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch('plugins.DicePP.module.persona.image_cache.httpx.AsyncClient', return_value=mock_client):
             meta = [{"url": "http://example.com/emoji.png", "sub_type": "1", "cache_hash": None}]
             await cache.download_and_cache(meta, force_emoji=True)
 
@@ -251,7 +251,7 @@ class TestImageCache:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch('plugins.DicePP.module.persona.image_cache.httpx.AsyncClient', return_value=mock_client):
             meta = [{"url": "http://example.com/img.png", "sub_type": "0", "cache_hash": None}]
             await cache.download_and_cache(meta)
 
@@ -276,7 +276,7 @@ class TestImageCache:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch('plugins.DicePP.module.persona.image_cache.httpx.AsyncClient', return_value=mock_client):
             meta = [{"url": "http://example.com/missing.png", "sub_type": "0", "cache_hash": None}]
             await cache.download_and_cache(meta)
 
@@ -293,7 +293,7 @@ class TestImageCache:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch('plugins.DicePP.module.persona.image_cache.httpx.AsyncClient', return_value=mock_client):
             meta = [{"url": "http://example.com/error.png", "sub_type": "0", "cache_hash": None}]
             await cache.download_and_cache(meta)
 
@@ -308,7 +308,7 @@ class TestImageCache:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch('plugins.DicePP.module.persona.image_cache.httpx.AsyncClient', return_value=mock_client):
             meta = [{"url": "http://example.com/timeout.png", "sub_type": "0", "cache_hash": None}]
             await cache.download_and_cache(meta)
 

@@ -7,9 +7,9 @@ T5: SA 通过 Agent 基类 AgentRunSpec 新路径执行，
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from module.persona.life.sa_agent import SAAgent
-from module.persona.life.types import AgentResult
-from module.persona.data.models import SAState
+from plugins.DicePP.module.persona.life.sa_agent import SAAgent
+from plugins.DicePP.module.persona.life.types import AgentResult
+from plugins.DicePP.module.persona.data.models import SAState
 
 
 # ── 辅助: 创建 mock ConversationRunResult ──────────────────────
@@ -17,7 +17,7 @@ from module.persona.data.models import SAState
 
 def _make_conv_result(*, completion_kind="completed", output_arguments=None,
                       output_call_index=0, final_text="", final_reason="output_collected"):
-    from module.persona.life.conversation import ConversationRunResult
+    from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
     return ConversationRunResult(
         final_text=final_text,
         final_reason=final_reason,
@@ -135,7 +135,7 @@ class TestSAAgent:
     @pytest.mark.asyncio
     async def test_preserves_fronts_from_tools(self, sa_agent, sa_context):
         """验证 tool 修改的 fronts_dicts 被正确写回 SAState"""
-        from module.persona.data.models import Front, Thread
+        from plugins.DicePP.module.persona.data.models import Front, Thread
         existing_front = Front(
             name="主线",
             type="campaign",
@@ -184,7 +184,7 @@ class TestSAAgent:
     @pytest.mark.asyncio
     async def test_build_run_spec_returns_agent_run_spec(self, sa_agent, sa_context):
         """build_run_spec 返回 AgentRunSpec（含 finish_plan OutputSpec）"""
-        from module.persona.agent.runtime_types import AgentRunSpec
+        from plugins.DicePP.module.persona.agent.runtime_types import AgentRunSpec
 
         spec = await sa_agent.build_run_spec(sa_context)
         assert isinstance(spec, AgentRunSpec)
@@ -296,10 +296,10 @@ class TestSASelfCleanup:
 
     @staticmethod
     def _spec():
-        from module.persona.agent.runtime_types import (
+        from plugins.DicePP.module.persona.agent.runtime_types import (
             AgentRunSpec, ToolKit, LoopLimits,
         )
-        from module.persona.llm.selection import SUMMARIZE
+        from plugins.DicePP.module.persona.llm.selection import SUMMARIZE
         return AgentRunSpec(
             system_prompt="test", user_input="test", tools=ToolKit(),
             output=None, selection=SUMMARIZE, limits=LoopLimits(max_rounds=5),

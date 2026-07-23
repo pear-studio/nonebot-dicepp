@@ -1,6 +1,6 @@
 import pytest
 
-from core.data.models import (
+from plugins.DicePP.core.data.models import (
     DNDCharacter,
     HPInfo,
     AbilityInfo,

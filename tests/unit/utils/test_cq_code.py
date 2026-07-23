@@ -1,7 +1,7 @@
 import pytest
 from io import BytesIO
 from pathlib import Path
-from utils.cq_code import get_cq_image, get_cq_reply, get_cq_at
+from plugins.DicePP.utils.cq_code import get_cq_image, get_cq_reply, get_cq_at
 
 
 class TestGetCqImage:

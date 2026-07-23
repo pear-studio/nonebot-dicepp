@@ -8,24 +8,24 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.command import (
+from plugins.DicePP.core.command import (
     BotCommandDispatchResult,
     BotSendFileCommand,
     BotSendMsgCommand,
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from core.communication import MessageMetaData, MessageSender, PostSendEvent
-from core.data import LogRepository
-from core.data.models import LogRecord
-from core.data.schema import ensure_bot_log_schema
-from core.message_types import MessageType
-from module.common.log.command import LogCommand
-from module.common.log.command import _run_export
-from module.common.log.export_service import ArtifactResult, ExportBatchResult
-from module.common.log.publisher import ProviderPublishResult
-from module.common.log.runtime import LogRuntime
-from module.common.log.types import (
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender, PostSendEvent
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import LogRecord
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.module.common.log.command import LogCommand
+from plugins.DicePP.module.common.log.command import _run_export
+from plugins.DicePP.module.common.log.export_service import ArtifactResult, ExportBatchResult
+from plugins.DicePP.module.common.log.publisher import ProviderPublishResult
+from plugins.DicePP.module.common.log.runtime import LogRuntime
+from plugins.DicePP.module.common.log.types import (
     ExportRequest,
     LogDeliveryStatus,
     LogExportFormat,
@@ -438,7 +438,7 @@ def test_private_log_command_is_claimed_for_the_shared_group_only_notice(
 
 
 def test_registry_orders_log_command_before_broad_query_alias() -> None:
-    from core.command.user_cmd import DEFAULT_REGISTRY
+    from plugins.DicePP.core.command.user_cmd import DEFAULT_REGISTRY
 
     names = [command.__name__ for command in DEFAULT_REGISTRY.get_sorted_commands()]
 

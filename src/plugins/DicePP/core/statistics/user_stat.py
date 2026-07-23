@@ -1,8 +1,8 @@
 import json
 
-from core.data import JsonObject, custom_json_object
+from plugins.DicePP.core.data import JsonObject, custom_json_object
 
-from core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo
+from plugins.DicePP.core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo
 
 
 class UserMetaInfo:

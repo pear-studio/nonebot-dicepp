@@ -7,7 +7,7 @@ Story Deck: chain_depth==0 时自动注入匹配的叙事条目。
 """
 from typing import Any, Optional
 import json
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter
 from .agent import Agent

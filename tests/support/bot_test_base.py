@@ -3,8 +3,8 @@
 from typing import List, Tuple
 from unittest import IsolatedAsyncioTestCase
 
-from core.command import BotCommandBase
-from core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.command import BotCommandBase
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 from tests.support.bot import async_make_test_bot, async_teardown_test_bot
 from tests.support.sequence_runtime import SequenceRuntime, reset_runtime, set_runtime
 

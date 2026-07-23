@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Type, TypeVar
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 T = TypeVar("T", bound="MessageType")
 

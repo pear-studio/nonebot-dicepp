@@ -1,7 +1,7 @@
 """ResponseHandler — 封装回复持久化与 MessagePort 发送"""
 
 from typing import Optional
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..data.models import MessageType

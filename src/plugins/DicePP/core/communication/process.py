@@ -1,7 +1,7 @@
 import html
 
 from zhconv import convert
-from utils.string import to_english_str
+from plugins.DicePP.utils.string import to_english_str
 
 
 def preprocess_msg(msg_str: str) -> str:

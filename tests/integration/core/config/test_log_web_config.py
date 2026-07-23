@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config.loader import ConfigLoader
+from plugins.DicePP.core.config.loader import ConfigLoader
 
 
 def _write(path: Path, data: dict) -> None:

@@ -19,8 +19,8 @@ PLUGIN_ROOT = REPO_ROOT / "src" / "plugins" / "DicePP"
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
-from core.persona.loader import PersonaLoader
-from core.persona.models import PersonaModel
+from plugins.DicePP.core.persona.loader import PersonaLoader
+from plugins.DicePP.core.persona.models import PersonaModel
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

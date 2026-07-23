@@ -24,7 +24,7 @@ def is_frozen() -> bool:
         True 表示运行在打包后的 EXE 中
         False 表示运行在开发环境（直接 Python 运行）
     """
-    return getattr(sys, 'frozen', False)
+    return getattr(sys, "frozen", False)
 
 
 def get_app_dir() -> str:

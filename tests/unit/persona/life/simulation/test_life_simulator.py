@@ -11,8 +11,8 @@ LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from module.persona.life.simulator import LifeSimulator, LifeConfig
-from module.persona.life.proactive_config import ProactiveConfig
+from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
@@ -124,7 +124,7 @@ async def test_send_msg_with_user_only_still_sends():
 @pytest.mark.asyncio
 async def test_tick_daily_applies_relationship_decay():
     """decay_calculator 非 None 时 tick_daily 应用关系衰减并写库"""
-    from module.persona.data.models import RelationshipState, ScoreDeltas
+    from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
     sim = _make_simulator()
     decay_calc = MagicMock()
     decay_calc.should_apply_decay = MagicMock(return_value=True)
@@ -146,8 +146,8 @@ async def test_tick_daily_sa_planning_calls_run_not_plan():
     Before fix: AttributeError swallowed, 'SA 规划失败' warning logged.
     After fix: sa_agent.run() called once with valid interaction_id.
     """
-    from module.persona.life.sa_agent import SAAgent
-    from module.persona.life.types import AgentResult
+    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
+    from plugins.DicePP.module.persona.life.types import AgentResult
 
     sim = _make_simulator(diary='今天充实')
     sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")
@@ -173,8 +173,8 @@ async def test_tick_daily_sa_planning_calls_run_not_plan():
 @pytest.mark.asyncio
 async def test_tick_daily_sa_compact_called_after_successful_planning():
     """tick_daily 在 SA 规划成功后调用 SA compact_conversation（用后即弃）。"""
-    from module.persona.life.sa_agent import SAAgent
-    from module.persona.life.types import AgentResult
+    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
+    from plugins.DicePP.module.persona.life.types import AgentResult
 
     sim = _make_simulator(diary='今天充实')
     sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")
@@ -196,8 +196,8 @@ async def test_tick_daily_sa_compact_called_after_successful_planning():
 @pytest.mark.asyncio
 async def test_tick_daily_sa_compact_called_even_on_failure():
     """SA 规划失败时，tick_daily 仍应调用 compact_conversation 丢弃 conv。"""
-    from module.persona.life.sa_agent import SAAgent
-    from module.persona.life.types import AgentResult
+    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
+    from plugins.DicePP.module.persona.life.types import AgentResult
 
     sim = _make_simulator(diary='今天充实')
     sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")

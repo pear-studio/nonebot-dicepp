@@ -32,8 +32,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, run
 import json
 import uuid
 
-from utils.logger import logger
-from utils.string import estimate_tokens
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.string import estimate_tokens
 
 from ..agent.runtime_types import (
     AgentRunRequest,

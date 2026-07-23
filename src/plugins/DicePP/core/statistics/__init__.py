@@ -1,5 +1,5 @@
-from core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo, D20StatInfo,\
+from plugins.DicePP.core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo, D20StatInfo,\
     MetaStatInfo
-from core.statistics.user_stat import UserMetaInfo, UserStatInfo
-from core.statistics.group_stat import GroupMetaInfo, GroupStatInfo
-from core.statistics.stat_manager import StatManager
+from plugins.DicePP.core.statistics.user_stat import UserMetaInfo, UserStatInfo
+from plugins.DicePP.core.statistics.group_stat import GroupMetaInfo, GroupStatInfo
+from plugins.DicePP.core.statistics.stat_manager import StatManager

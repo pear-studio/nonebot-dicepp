@@ -3,11 +3,11 @@ from typing import Optional, TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Request
 
-from core.communication import MessageMetaData, MessageSender
-from core.config.loader import ConfigValidationError
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.config.loader import ConfigValidationError
 
 if TYPE_CHECKING:
-    from core.bot import Bot
+    from plugins.DicePP.core.bot import Bot
 
 dpp_api = FastAPI()
 _active_bot: Optional["Bot"] = None

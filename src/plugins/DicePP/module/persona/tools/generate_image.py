@@ -2,7 +2,7 @@
 import asyncio
 from typing import Optional
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field

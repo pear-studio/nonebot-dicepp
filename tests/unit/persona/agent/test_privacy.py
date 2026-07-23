@@ -4,7 +4,7 @@
 
 import pytest
 
-from module.persona.utils.privacy import mask_sensitive_string
+from plugins.DicePP.module.persona.utils.privacy import mask_sensitive_string
 
 
 class TestMaskSensitiveString:

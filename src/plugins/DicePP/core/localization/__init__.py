@@ -1,2 +1,2 @@
-from core.localization.common import *
-from core.localization.manager import LocalizationManager
+from plugins.DicePP.core.localization.common import *
+from plugins.DicePP.core.localization.manager import LocalizationManager

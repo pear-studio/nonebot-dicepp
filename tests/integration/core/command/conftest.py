@@ -8,7 +8,7 @@ import uuid
 
 import pytest
 
-from core.bot import Bot
+from plugins.DicePP.core.bot import Bot
 from tests.support.bot import TestProxy
 from tests.support.core_command import IntegrationHelper
 from tests.support.fs_utils import rmtree_retry

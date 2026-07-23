@@ -19,10 +19,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.message_types import MessageType
-from module.persona.life.conversation_registry import ConversationRegistry
-from module.persona.life.conversation_scope import ConversationScope
-from module.persona.life.conversation_summary import (
+from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.life.conversation_summary import (
     FakeSummarizer,
     SUMMARY_MIN_MESSAGES,
 )
@@ -350,7 +350,7 @@ class TestCA3_InheritanceTarget:
     @pytest.mark.asyncio
     async def test_inherits_just_closed_not_older(self, temp_db):
         """新活跃期继承刚关闭的 session（S2）摘要，而非更旧的 S1。"""
-        from module.persona.life.conversation_summary import FakeSummarizer
+        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
 
         class TaggedSummarizer:
             def __init__(self):

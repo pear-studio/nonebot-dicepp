@@ -1,9 +1,9 @@
 import re
 from typing import Any
 
-from module.roll.roll_config import DICE_TYPE_DEFAULT, DICE_TYPE_MAX, DICE_NUM_MAX
-from module.roll.roll_utils import RollDiceError
-from module.roll.ast_engine.adapter import preprocess_roll_exp
+from plugins.DicePP.module.roll.roll_config import DICE_TYPE_DEFAULT, DICE_TYPE_MAX, DICE_NUM_MAX
+from plugins.DicePP.module.roll.roll_utils import RollDiceError
+from plugins.DicePP.module.roll.ast_engine.adapter import preprocess_roll_exp
 
 DEFAULT_DICE_EXPR = f"D{DICE_TYPE_DEFAULT}"
 _PLACEHOLDER_PATTERN = re.compile(r'([0-9]*)D(?![0-9])')

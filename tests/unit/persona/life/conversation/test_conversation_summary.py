@@ -11,15 +11,15 @@ Conversation 摘要模块测试（阶段 3b）。
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from module.persona.life.conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX
-from module.persona.life.conversation_summary import (
+from plugins.DicePP.module.persona.life.conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX
+from plugins.DicePP.module.persona.life.conversation_summary import (
     FakeSummarizer,
     ProviderSummarizer,
     Summarizer,
     SUMMARY_MIN_MESSAGES,
     _build_summary_prompt,
 )
-from module.persona.agent.output_protocol import (
+from plugins.DicePP.module.persona.agent.output_protocol import (
     DRAFT_MESSAGE_NAME,
     INTERNAL_MESSAGE_TYPE_FIELD,
     RUNTIME_INSTRUCTION_NAME,

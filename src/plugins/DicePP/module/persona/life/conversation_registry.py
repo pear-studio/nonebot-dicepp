@@ -20,8 +20,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Optional
 
-from utils.logger import logger
-from utils.time import get_clock
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import get_clock
 
 from ..data.store import PersonaDataStore
 from .conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX, ChangeSource, Conversation

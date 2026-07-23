@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.bot import Bot
-from core.communication import MessageMetaData, MessageSender, PostSendEvent
-from core.message_types import MessageType
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender, PostSendEvent
+from plugins.DicePP.core.message_types import MessageType
 
 
 @pytest.mark.asyncio

@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from core.command.bot_cmd import BotCommandBase
-from core.communication import MessagePort
+from plugins.DicePP.core.command.bot_cmd import BotCommandBase
+from plugins.DicePP.core.communication import MessagePort
 
 
 class FileDeliveryOutcome(str, Enum):

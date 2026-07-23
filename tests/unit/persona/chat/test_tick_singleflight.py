@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
-from module.persona.command import PersonaCommand
+from plugins.DicePP.module.persona.command import PersonaCommand
 
 
 def _make_cmd():

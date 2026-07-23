@@ -4,14 +4,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping, Protocol
 
-from core.command import (
+from plugins.DicePP.core.command import (
     BotCommandDispatchResult,
     BotSendFileCommand,
     FileDeliveryOutcome,
 )
-from core.communication import GroupMessagePort
-from core.data.log_repository import LogRepository
-from core.data.models import LogExport
+from plugins.DicePP.core.communication import GroupMessagePort
+from plugins.DicePP.core.data.log_repository import LogRepository
+from plugins.DicePP.core.data.models import LogExport
 
 from .exporters import (
     DocxLogExporter,

@@ -1,5 +1,5 @@
 import pytest
-from core.command.cq_extractor import _parse_cq_params, extract_segments
+from plugins.DicePP.core.command.cq_extractor import _parse_cq_params, extract_segments
 
 
 class TestParseCqParams:

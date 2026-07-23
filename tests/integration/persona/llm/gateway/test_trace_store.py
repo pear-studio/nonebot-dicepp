@@ -3,15 +3,15 @@
 import json
 import pytest
 from datetime import datetime, timedelta
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 
-from module.persona.data.models import LLMTraceRecord
+from plugins.DicePP.module.persona.data.models import LLMTraceRecord
 
 
 @pytest.fixture
 async def temp_db():
     import aiosqlite
-    from module.persona.data.store import PersonaDataStore
+    from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
     async with aiosqlite.connect(":memory:") as persona_db, \
          aiosqlite.connect(":memory:") as core_db:

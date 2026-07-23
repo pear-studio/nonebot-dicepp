@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from module.common.log.command import (
+from plugins.DicePP.module.common.log.command import (
     LogCommandAction,
     parse_log_command,
 )
-from module.common.log.types import LogExportFormat, LogExportView
+from plugins.DicePP.module.common.log.types import LogExportFormat, LogExportView
 
 
 

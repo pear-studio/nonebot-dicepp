@@ -16,11 +16,11 @@ def test_dicepp_app_dir_sets_config_data_path(tmp_path):
     """A fresh interpreter resolves config paths from the project-root override."""
     app_root = tmp_path / "dicepp_app_root"
     app_root.mkdir()
-    dicepp_src = _repository_root() / "src" / "plugins" / "DicePP"
+    dicepp_src = _repository_root() / "src"
     script = f"""
 import os, sys
 sys.path.insert(0, {str(dicepp_src)!r})
-import core.config.basic as basic_mod
+import plugins.DicePP.core.config.basic as basic_mod
 expected_root = os.path.abspath({str(app_root)!r})
 assert str(basic_mod.Paths.PROJECT_ROOT) == expected_root, (str(basic_mod.Paths.PROJECT_ROOT), expected_root)
 assert str(basic_mod.Paths.CONFIG_DIR) == os.path.join(expected_root, "config"), str(basic_mod.Paths.CONFIG_DIR)

@@ -7,7 +7,7 @@ config/global.json and are loaded by ConfigLoader into BotConfig (pydantic_model
 """
 from typing import List
 
-from core.config.declare import BOT_AGREEMENT  # noqa: F401 (re-exported for compat)
+from plugins.DicePP.core.config.declare import BOT_AGREEMENT  # noqa: F401 (re-exported for compat)
 
 # ── Core / permissions ───────────────────────────────────────────────────────
 CFG_MASTER = "master"

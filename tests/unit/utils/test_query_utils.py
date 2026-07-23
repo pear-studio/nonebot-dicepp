@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.query_utils import command_split
+from plugins.DicePP.core.query_utils import command_split
 
 
 class TestCommandSplit:

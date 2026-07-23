@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.bot import Bot
-    from core.communication import MessageMetaData
+    from plugins.DicePP.core.bot import Bot
+    from plugins.DicePP.core.communication import MessageMetaData
 
 
 class CommandContext:

@@ -3,11 +3,11 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from utils.time import set_clock, SteppedClock, WallClock
-from core.bot import Bot
-from core.command import BotCommandBase
-from core.config.pydantic_models import BotConfig, PersonaConfig
-from core.data.models.extended import MetaStat
+from plugins.DicePP.utils.time import set_clock, SteppedClock, WallClock
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotCommandBase
+from plugins.DicePP.core.config.pydantic_models import BotConfig, PersonaConfig
+from plugins.DicePP.core.data.models.extended import MetaStat
 
 
 class _FakeBotCommand(BotCommandBase):
@@ -150,7 +150,7 @@ async def test_tick_daily_suppresses_master_notification_when_persona_running():
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch('plugins.DicePP.module.persona.command.PersonaCommand', _FakePersonaCommand):
         bot_commands = []
         bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
         await Bot.tick_daily(bot, bot_commands)
@@ -181,7 +181,7 @@ async def test_tick_daily_sends_master_notification_when_daily_report_disabled()
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch('plugins.DicePP.module.persona.command.PersonaCommand', _FakePersonaCommand):
         bot_commands = []
         await Bot.tick_daily(bot, bot_commands)
 
@@ -198,7 +198,7 @@ async def test_tick_daily_sends_master_notification_when_persona_not_enabled():
     persona_cmd = _FakePersonaCommand(enabled=False)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch('plugins.DicePP.module.persona.command.PersonaCommand', _FakePersonaCommand):
         bot_commands = []
         await Bot.tick_daily(bot, bot_commands)
 

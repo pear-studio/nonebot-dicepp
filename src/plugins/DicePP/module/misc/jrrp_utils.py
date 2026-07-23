@@ -11,7 +11,7 @@ import random
 import datetime
 from typing import NamedTuple, Literal
 
-from utils.time import datetime_to_str_day
+from plugins.DicePP.utils.time import datetime_to_str_day
 
 
 class JrrpResult(NamedTuple):

@@ -1,5 +1,5 @@
 import pytest
-from module.roll.result import RollResult
+from plugins.DicePP.module.roll.result import RollResult
 
 
 class TestRollResult:
@@ -164,8 +164,8 @@ class TestBuildRollResult:
 
     def _run(self, expr: str, roller=None):
         """用固定 dice roller 执行表达式，返回 RollResult。"""
-        from module.roll.ast_engine.adapter import exec_roll_exp_ast
-        from module.roll.ast_engine.adapter import build_roll_result
+        from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_ast
+        from plugins.DicePP.module.roll.ast_engine.adapter import build_roll_result
 
         ast_result = exec_roll_exp_ast(expr, dice_roller=roller)
         return build_roll_result(ast_result)
@@ -315,7 +315,7 @@ class TestBuildRollResultEmptyEval:
 
     def test_eval_result_none_fallback_to_value(self):
         """_eval_result 为 None 时 val_list 应回退为 [ast_result.value]。"""
-        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+        from plugins.DicePP.module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
 
         ast_result = RollExpressionResult(value=42, expression="42", info="42", exp="42")
         result = build_roll_result(ast_result)
@@ -326,7 +326,7 @@ class TestBuildRollResultEmptyEval:
     def test_eval_result_empty_dice_results_fallback(self):
         """_eval_result.dice_results 为空时 val_list 应回退为 [ast_result.value]。"""
         from unittest.mock import MagicMock
-        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+        from plugins.DicePP.module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
 
         mock_eval = MagicMock()
         mock_eval.dice_results = []
@@ -340,7 +340,7 @@ class TestBuildRollResultEmptyEval:
 
     def test_eval_result_none_float_value(self):
         """_eval_result 为 None 时 float_state 应正确。"""
-        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+        from plugins.DicePP.module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
 
         ast_result = RollExpressionResult(value=3.14, expression="3.14", info="3.14", exp="3.14")
         result = build_roll_result(ast_result)

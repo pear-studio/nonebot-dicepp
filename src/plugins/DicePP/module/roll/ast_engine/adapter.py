@@ -7,7 +7,7 @@ parser/evaluator.
 """
 
 from typing import Optional, Union, Callable, Any, Tuple
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from dataclasses import dataclass, field
 
 from .parser import parse_expression

@@ -125,7 +125,7 @@ async def test_search_dedup(fresh_bot, query_db):
 async def test_search_max_total_exceeded(fresh_bot, query_db):
     """QueryStore.search() — 超限抛 QueryStoreError"""
     bot, _proxy = fresh_bot
-    from core.data.query_store import QueryStoreError
+    from plugins.DicePP.core.data.query_store import QueryStoreError
 
     db_name = await query_db("SEARCHMAX")
 

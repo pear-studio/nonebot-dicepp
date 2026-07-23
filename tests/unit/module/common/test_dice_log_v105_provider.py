@@ -7,19 +7,19 @@ from datetime import datetime, timezone
 
 import pytest
 
-import module.common.log.providers.dice_log_v105 as provider_module
-from module.common.log.projection import (
+import plugins.DicePP.module.common.log.providers.dice_log_v105 as provider_module
+from plugins.DicePP.module.common.log.projection import (
     LogProjection,
     ProjectedMessage,
     ProjectedPart,
     ProjectedReply,
 )
-from module.common.log.providers.dice_log_v105 import (
+from plugins.DicePP.module.common.log.providers.dice_log_v105 import (
     DiceLogV105Provider,
     ProviderPublishError,
     ProviderUnavailableError,
 )
-from module.common.log.types import LogExportView
+from plugins.DicePP.module.common.log.types import LogExportView
 
 
 

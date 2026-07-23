@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from module.persona.agent.runtime_types import (
+from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult,
     FinishPlanArgs,
     LoopLimits,
@@ -27,12 +27,12 @@ from module.persona.agent.runtime_types import (
     ToolResult,
     ToolSpec,
 )
-from module.persona.agent.loop import AgentLoop
-from module.persona.agent.event_bus import AgentEventBus, EventStore
-from module.persona.agent.llm_gateway import LLMGatewayResult
-from module.persona.agent.message_buffer import MessageBuffer
-from module.persona.agent.state import AgentRunState
-from module.persona.llm.selection import CHAT
+from plugins.DicePP.module.persona.agent.loop import AgentLoop
+from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
+from plugins.DicePP.module.persona.agent.llm_gateway import LLMGatewayResult
+from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
+from plugins.DicePP.module.persona.agent.state import AgentRunState
+from plugins.DicePP.module.persona.llm.selection import CHAT
 
 
 # ── Reusable Fake Infrastructure ───────────────────────────────────
@@ -980,7 +980,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_completed_run_persists_history(self):
         """成功 run → user_input + message_delta 保存进 _messages"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(
@@ -1028,7 +1028,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_failed_run_does_not_persist(self):
         """失败 run → 不追加 user_input/message_delta，不 save"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(
@@ -1060,7 +1060,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_notification_cursor_committed_on_success(self):
         """成功 run → notification cursor 被提交"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(
@@ -1103,7 +1103,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_notification_cursor_not_committed_on_failure(self):
         """失败 run → notification cursor 不被提交"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(
@@ -1142,7 +1142,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_transient_context_not_saved(self):
         """transient_context_messages 不保存进 Conversation 历史"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(
@@ -1177,7 +1177,7 @@ class TestConversationIntegration:
     @pytest.mark.asyncio
     async def test_system_prompt_not_in_messages(self):
         """system_prompt 不持久化在 _messages 中"""
-        from module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation import Conversation
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=AgentRunResult(

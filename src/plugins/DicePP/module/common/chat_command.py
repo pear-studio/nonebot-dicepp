@@ -2,13 +2,13 @@ from typing import List, Tuple, Any
 import datetime
 import json
 
-from core.bot import Bot
-from core.data.models import GroupConfig, UserConfig
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from utils.time import get_current_date_str, get_current_date_raw, str_to_datetime, datetime_to_str
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.data.models import GroupConfig, UserConfig
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.utils.time import get_current_date_str, get_current_date_raw, str_to_datetime, datetime_to_str
 
 CFG_CHAT_INTER = "chat_interval"
 

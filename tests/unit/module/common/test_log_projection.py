@@ -5,8 +5,8 @@ from datetime import datetime
 
 import pytest
 
-from core.data.models import LogRecord, LogSession
-from module.common.log import LogExportView, LogProjector
+from plugins.DicePP.core.data.models import LogRecord, LogSession
+from plugins.DicePP.module.common.log import LogExportView, LogProjector
 
 
 NOW = datetime(2026, 7, 20, 16, 0, 0)

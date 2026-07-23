@@ -4,15 +4,15 @@
 组装四层记忆到 LLM 消息列表
 """
 from dataclasses import dataclass
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from typing import List, Dict, Optional, Any, Tuple
 
-from utils.string import estimate_tokens
+from plugins.DicePP.utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
 from ..image_cache import ImageCache
-from utils.time import wall_now, format_timestamp, format_relative_time
+from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time
 from ..chat.compression import estimate_image_token
 
 

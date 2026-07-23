@@ -5,7 +5,7 @@ import pytest
 import datetime
 from unittest.mock import patch, MagicMock, PropertyMock
 
-from module.misc.jrrp_utils import (
+from plugins.DicePP.module.misc.jrrp_utils import (
     compute_jrrp,
     JrrpResult,
     format_jrrp_info_line,
@@ -67,7 +67,7 @@ class TestComputeJrrp:
 
     def test_direction_up(self):
         """jrrp > zrrp 时 direction='up'（通过 mock 控制 randint 返回值）"""
-        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+        with patch('plugins.DicePP.module.misc.jrrp_utils.random.Random') as mock_random_cls:
             mock_zrrp_rng = MagicMock()
             mock_jrrp_rng = MagicMock()
             mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]
@@ -82,7 +82,7 @@ class TestComputeJrrp:
 
     def test_direction_down(self):
         """jrrp < zrrp 时 direction='down'（通过 mock 控制 randint 返回值）"""
-        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+        with patch('plugins.DicePP.module.misc.jrrp_utils.random.Random') as mock_random_cls:
             mock_zrrp_rng = MagicMock()
             mock_jrrp_rng = MagicMock()
             mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]
@@ -97,7 +97,7 @@ class TestComputeJrrp:
 
     def test_direction_same(self):
         """jrrp == zrrp 时 direction='same'"""
-        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+        with patch('plugins.DicePP.module.misc.jrrp_utils.random.Random') as mock_random_cls:
             mock_zrrp_rng = MagicMock()
             mock_jrrp_rng = MagicMock()
             mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]

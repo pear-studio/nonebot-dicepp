@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from module.persona.life.conversation import (
+from plugins.DicePP.module.persona.life.conversation import (
     DANGLING_REF_FALLBACK,
     ENTRY_TYPE_REF,
     Conversation,
     Snapshot,
 )
-from module.persona.agent.runtime_types import (
+from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult,
     BillingSummary,
     RunCompletion,

@@ -6,10 +6,10 @@ import os
 from typing import List
 import uuid
 
-from adapter import ClientProxy
-from adapter.client_proxy import GroupInfo, GroupMemberInfo
-from core.bot import Bot
-from core.command import BotCommandBase
+from plugins.DicePP.adapter import ClientProxy
+from plugins.DicePP.adapter.client_proxy import GroupInfo, GroupMemberInfo
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotCommandBase
 
 from tests.support.fs_utils import rmtree_retry
 

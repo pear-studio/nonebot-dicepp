@@ -5,15 +5,15 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import timedelta
 
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 
-from module.persona.life.change_sources import (
+from plugins.DicePP.module.persona.life.change_sources import (
     DateChangeSource,
     RelationChangeSource,
     ProfileFactsChangeSource,
     DailyEventChangeSource,
 )
-from module.persona.data.models import UserProfile
+from plugins.DicePP.module.persona.data.models import UserProfile
 
 
 class TestDateChangeSource:
@@ -42,7 +42,7 @@ class TestRelationChangeSource:
         store = MagicMock()
         store.get_relationship = AsyncMock(return_value=None)
         with patch(
-            'module.persona.data.models.RelationshipState.get_relation_level',
+            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
             return_value=(2, "朋友"),
         ):
             source = RelationChangeSource(
@@ -58,7 +58,7 @@ class TestRelationChangeSource:
         store = MagicMock()
         store.get_relationship = AsyncMock(return_value=None)
         with patch(
-            'module.persona.data.models.RelationshipState.get_relation_level',
+            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
             return_value=(3, "挚友"),
         ):
             source = RelationChangeSource(
@@ -74,7 +74,7 @@ class TestRelationChangeSource:
         store = MagicMock()
         store.get_relationship = AsyncMock(return_value=None)
         with patch(
-            'module.persona.data.models.RelationshipState.get_relation_level',
+            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
             return_value=(2, "朋友"),
         ):
             source = RelationChangeSource(
@@ -124,7 +124,7 @@ class TestDailyEventChangeSource:
 
     @pytest.mark.asyncio
     async def test_first_call_marks_seen_no_injection(self):
-        from module.persona.data.models import DailyEvent
+        from plugins.DicePP.module.persona.data.models import DailyEvent
         store = MagicMock()
         naive_now = wall_now()
         events = [
@@ -139,7 +139,7 @@ class TestDailyEventChangeSource:
 
     @pytest.mark.asyncio
     async def test_new_event_injected(self):
-        from module.persona.data.models import DailyEvent
+        from plugins.DicePP.module.persona.data.models import DailyEvent
         store = MagicMock()
         old = wall_now() - timedelta(minutes=10)
         new = wall_now()
@@ -171,8 +171,8 @@ class TestCharacterStateChangeSource:
     @pytest.mark.asyncio
     async def test_init_notification_all_dimensions(self):
         """cursor=None 三维有值 → 3 条通知"""
-        from module.persona.life.change_sources import CharacterStateChangeSource
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
+        from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(energy=80, mood=60, health=90)
         store = MagicMock()
@@ -186,8 +186,8 @@ class TestCharacterStateChangeSource:
     @pytest.mark.asyncio
     async def test_no_change_returns_empty(self):
         """cursor==current → 空通知"""
-        from module.persona.life.change_sources import CharacterStateChangeSource
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
+        from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(energy=80, mood=60, health=90)
         store = MagicMock()
@@ -200,8 +200,8 @@ class TestCharacterStateChangeSource:
     @pytest.mark.asyncio
     async def test_positive_delta_format(self):
         """delta>0 → "+N" 格式"""
-        from module.persona.life.change_sources import CharacterStateChangeSource
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
+        from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(energy=85, mood=60, health=90)
         store = MagicMock()
@@ -215,8 +215,8 @@ class TestCharacterStateChangeSource:
     @pytest.mark.asyncio
     async def test_negative_delta_format(self):
         """delta<0 → "-N" 格式"""
-        from module.persona.life.change_sources import CharacterStateChangeSource
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
+        from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(energy=75, mood=60, health=90)
         store = MagicMock()
@@ -230,8 +230,8 @@ class TestCharacterStateChangeSource:
     @pytest.mark.asyncio
     async def test_none_value_skipped(self):
         """None 维度不发通知"""
-        from module.persona.life.change_sources import CharacterStateChangeSource
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
+        from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(energy=None, mood=60, health=None)
         store = MagicMock()

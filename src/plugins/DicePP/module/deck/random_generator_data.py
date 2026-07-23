@@ -8,11 +8,11 @@ from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
 
-from core.config.basic import Paths
-from module.roll.ast_engine.adapter import is_roll_exp, exec_roll_exp_unified
-from utils.time import get_current_date_raw, datetime_to_str_day, datetime_to_str_week, datetime_to_str_month
-from utils.cq_code import get_cq_image
-from utils import read_xlsx
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.module.roll.ast_engine.adapter import is_roll_exp, exec_roll_exp_unified
+from plugins.DicePP.utils.time import get_current_date_raw, datetime_to_str_day, datetime_to_str_week, datetime_to_str_month
+from plugins.DicePP.utils.cq_code import get_cq_image
+from plugins.DicePP.utils import read_xlsx
 
 RAND_SOURCE_FIELD_NAME = "生成器名称"
 RAND_SOURCE_FIELD_VISIBLE = "是否可见"

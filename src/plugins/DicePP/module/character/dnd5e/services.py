@@ -7,8 +7,8 @@ DND5E 角色服务层
 - 这些函数操作 Pydantic 模型但不负责存储
 
 使用示例:
-    from core.data.models import HPInfo, AbilityInfo, DNDCharacter
-    from module.character.dnd5e.services import HPService, AbilityService, CharacterService
+    from plugins.DicePP.core.data.models import HPInfo, AbilityInfo, DNDCharacter
+    from plugins.DicePP.module.character.dnd5e.services import HPService, AbilityService, CharacterService
     
     # 使用生命骰
     result = HPService.use_hp_dice(hp_info, num=2, con_mod=3)
@@ -22,10 +22,10 @@ DND5E 角色服务层
 from typing import Dict, List, Literal, Optional, Tuple
 from collections import defaultdict
 
-from module.roll import RollDiceError, RollResult
-from module.roll.ast_engine.adapter import exec_roll_exp_unified
+from plugins.DicePP.module.roll import RollDiceError, RollResult
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified
 
-from core.data.models import (
+from plugins.DicePP.core.data.models import (
     HPInfo, AbilityInfo, DNDCharacter,
     CHAR_INFO_KEY_HP, CHAR_INFO_KEY_HP_DICE,
     CHAR_INFO_KEY_NAME, CHAR_INFO_KEY_LEVEL, CHAR_INFO_KEY_ABILITY,

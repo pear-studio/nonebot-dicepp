@@ -1,9 +1,9 @@
 import json
 
-from core.data import JsonObject, custom_json_object
-from utils.time import get_current_date_int
+from plugins.DicePP.core.data import JsonObject, custom_json_object
+from plugins.DicePP.utils.time import get_current_date_int
 
-from core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo
+from plugins.DicePP.core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, RollStatInfo
 
 
 class GroupMetaInfo:

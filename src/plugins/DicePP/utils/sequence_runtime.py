@@ -6,12 +6,10 @@ throwing IndexError when exhausted (rather than cycling).
 
 from typing import Sequence
 
-# 注意：必须使用裸绝对导入 `module.roll.karma_runtime`，
-# 因为 Bot 内部大量使用该路径导入此模块。
-# 若使用相对导入 (`..module.roll.karma_runtime`)，会导致
-# `sys.modules` 中出现两个副本，ContextVar 的读写将分离，
-# 从而使 `--dice` 序列控制完全失效。
-from module.roll.karma_runtime import set_runtime, reset_runtime
+# 必须与 Bot 共享同一 canonical 模块，才能共享 Karma runtime 的 ContextVar。
+# 若重新引入裸 `module.roll.karma_runtime` 或另一条包路径，`sys.modules` 会出现
+# 两个副本，ContextVar 的读写将分离，`--dice` 序列控制会失效。
+from plugins.DicePP.module.roll.karma_runtime import set_runtime, reset_runtime
 
 
 class SequenceRuntime:

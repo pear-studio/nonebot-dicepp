@@ -1,7 +1,7 @@
 import time as time_module
 import pytest
 import datetime
-from utils.time import (
+from plugins.DicePP.utils.time import (
     str_to_datetime, datetime_to_str, datetime_to_int, int_to_datetime,
     get_current_date_raw, datetime_to_str_day, datetime_to_str_week,
     datetime_to_str_month, datetime_filter_day, china_tz,

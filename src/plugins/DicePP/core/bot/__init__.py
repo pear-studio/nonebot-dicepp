@@ -1,1 +1,1 @@
-from core.bot.dicebot import Bot
+from plugins.DicePP.core.bot.dicebot import Bot

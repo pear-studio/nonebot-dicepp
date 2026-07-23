@@ -11,7 +11,7 @@ class TestCreateEmptySqliteDatabase:
     """QueryStore.create_empty_database 函数测试"""
 
     def test_creates_valid_db_file(self):
-        from core.data.query_store import QueryStore
+        from plugins.DicePP.core.data.query_store import QueryStore
         store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
@@ -22,7 +22,7 @@ class TestCreateEmptySqliteDatabase:
     def test_created_db_has_data_table(self):
         """创建的数据库应包含 data 和 redirect 两张表"""
         import sqlite3
-        from core.data.query_store import QueryStore
+        from plugins.DicePP.core.data.query_store import QueryStore
         store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
@@ -37,7 +37,7 @@ class TestCreateEmptySqliteDatabase:
     def test_data_table_has_correct_columns(self):
         """data 表应包含 QUERY_DATA_FIELD_LIST 定义的所有字段"""
         import sqlite3
-        from core.data.query_store import QueryStore, QUERY_DATA_FIELD_LIST
+        from plugins.DicePP.core.data.query_store import QueryStore, QUERY_DATA_FIELD_LIST
         store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
@@ -52,7 +52,7 @@ class TestCreateEmptySqliteDatabase:
     def test_second_create_raises_or_fails(self):
         """在已存在文件上再次创建应引发异常（data 表已存在）"""
         import sqlite3
-        from core.data.query_store import QueryStore
+        from plugins.DicePP.core.data.query_store import QueryStore
         store = QueryStore()
         tmpdir = tempfile.mkdtemp()
         try:
@@ -78,7 +78,7 @@ def _send_group_factory(fresh_bot):
 
     async def send_group(msg: str, user_id: str = "user1", group_id: str = "group1",
                          nickname: str = "测试用户"):
-        from core.communication import MessageMetaData, MessageSender
+        from plugins.DicePP.core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, False)
         return await bot.process_message(msg, meta)
 

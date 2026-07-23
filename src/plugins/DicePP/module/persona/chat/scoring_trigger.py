@@ -9,7 +9,7 @@ CH6 修复: 统一异常/parse_error 重试逻辑，SCORING_MAX_RETRIES = 3。
 import math
 from collections import deque
 from typing import Dict, Tuple, Optional, List, Any
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..data.models import (
@@ -22,7 +22,7 @@ from ..data.models import (
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..game.decay import DecayCalculator
-from utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now
 from .chat_config import ChatConfig
 
 # familiarity 即时结算参数（硬编码，暂无角色间差异化需求）

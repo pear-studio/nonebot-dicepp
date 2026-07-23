@@ -3,8 +3,8 @@ from typing import Optional
 
 import aiosqlite
 
-from core.config.basic import Paths
-from core.data.schema import (
+from plugins.DicePP.core.config.basic import Paths
+from plugins.DicePP.core.data.schema import (
     BOT_CORE_TARGET,
     SchemaLifecycleError,
     apply_schema_target,

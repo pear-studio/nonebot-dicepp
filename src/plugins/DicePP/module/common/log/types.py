@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from core.data.models import LogSession
+from plugins.DicePP.core.data.models import LogSession
 
 
 class LogOnAction(str, Enum):

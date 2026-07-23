@@ -5,7 +5,7 @@ from typing import Any, Callable
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 class _SuggestActionArgs(BaseModel):
     """行动灵感参数"""

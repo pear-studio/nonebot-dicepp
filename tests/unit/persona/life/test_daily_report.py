@@ -8,17 +8,17 @@ import json
 from unittest.mock import MagicMock, AsyncMock, PropertyMock, patch
 from datetime import datetime, timedelta
 
-from core.statistics.user_stat import UserStatInfo
-from core.statistics.group_stat import GroupStatInfo
-from core.statistics.basic_stat import StatElementBase
-from module.persona.report.daily_report import (
+from plugins.DicePP.core.statistics.user_stat import UserStatInfo
+from plugins.DicePP.core.statistics.group_stat import GroupStatInfo
+from plugins.DicePP.core.statistics.basic_stat import StatElementBase
+from plugins.DicePP.module.persona.report.daily_report import (
     DailyReportGenerator, _DIARY_UNAVAILABLE,
 )
-from module.persona.life.types import AgentResult
-from module.persona.gateway.port import MessagePort
-from utils.time import wall_now, get_current_date_int
-from core.message_types import MessageType
-from core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.module.persona.life.types import AgentResult
+from plugins.DicePP.module.persona.gateway.port import MessagePort
+from plugins.DicePP.utils.time import wall_now, get_current_date_int
+from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 def _make_mock_bot(with_master=True):
@@ -182,7 +182,7 @@ class TestDailyReportGenerator:
 
         mock_opening = "早上好，主人！今天机器人状态良好。"
 
-        target = "module.persona.life.character_agent.CharacterAgent"
+        target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
         core_stats = gen._empty_core_stats()
         with patch(target) as mock_char_agent_cls:
             mock_agent = MagicMock()
@@ -204,7 +204,7 @@ class TestDailyReportGenerator:
         gen._character.description = ""
         gen._router = MagicMock()
 
-        target = "module.persona.life.character_agent.CharacterAgent"
+        target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
         core_stats = gen._empty_core_stats()
         with patch(target) as mock_char_agent_cls:
             mock_agent = MagicMock()
@@ -227,8 +227,8 @@ class TestDailyReportGenerator:
         gen._character.description = ""
         gen._router = MagicMock()
 
-        from module.persona.life.types import AgentResult
-        target = "module.persona.life.character_agent.CharacterAgent"
+        from plugins.DicePP.module.persona.life.types import AgentResult
+        target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
         core_stats = gen._empty_core_stats()
         with patch(target) as mock_char_cls:
             mock_agent = MagicMock()
@@ -302,7 +302,7 @@ class TestDailyReportGenerator:
     async def test_core_stats_per_flag_user_count(self):
         """per-flag 用户计数正确去重"""
         bot = _make_mock_bot()
-        from core.command.const import DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_FUN
+        from plugins.DicePP.core.command.const import DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_FUN
 
         # 用户 1：用过掷骰
         info1 = UserStatInfo()
@@ -456,7 +456,7 @@ class TestDailyReportGenerator:
         """use_cur_day=True 时错误统计使用今天午夜的 cutoff"""
         fixed_now = datetime(2026, 6, 25, 14, 30, 0)
         monkeypatch.setattr(
-            "module.persona.report.daily_report.wall_now",
+            'plugins.DicePP.module.persona.report.daily_report.wall_now',
             lambda tz: fixed_now,
         )
 
@@ -481,7 +481,7 @@ class TestDailyReportGenerator:
         """use_cur_day=False 时错误统计使用昨天午夜的 cutoff"""
         fixed_now = datetime(2026, 6, 25, 2, 30, 0)
         monkeypatch.setattr(
-            "module.persona.report.daily_report.wall_now",
+            'plugins.DicePP.module.persona.report.daily_report.wall_now',
             lambda tz: fixed_now,
         )
 
@@ -509,7 +509,7 @@ class TestDailyReportGenerator:
         bot = _make_mock_bot()
         port, mock_bot = _make_mock_port()
 
-        from module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.data.models import CharacterState
         state = CharacterState(
             energy=80, mood=65, health=90,
             current_intention="sleeping",
@@ -617,7 +617,7 @@ class TestTickDailyIntegration:
     @pytest.mark.asyncio
     async def test_generate_and_send_called_during_run_daily(self):
         """_run_daily() 获取 diary 后调用 generate_and_send"""
-        from module.persona.command import PersonaCommand
+        from plugins.DicePP.module.persona.command import PersonaCommand
 
         bot = _make_mock_bot()
         cmd = PersonaCommand(bot)
@@ -645,7 +645,7 @@ class TestTickDailyIntegration:
     @pytest.mark.asyncio
     async def test_daily_report_disabled_skips_generate(self):
         """daily_report_enabled=False 时 _run_daily 不调用 generate_and_send"""
-        from module.persona.command import PersonaCommand
+        from plugins.DicePP.module.persona.command import PersonaCommand
 
         bot = _make_mock_bot()
         bot.config.persona_ai.daily_report_enabled = False
@@ -670,8 +670,8 @@ class TestFlagDisplayOrder:
 
     def test_display_order_matches_flag_dict(self):
         """_FLAG_DISPLAY_ORDER 的集合与 DPP_COMMAND_FLAG_DICT 的键集合一致"""
-        from module.persona.report.daily_report import _FLAG_DISPLAY_ORDER
-        from core.command.const import DPP_COMMAND_FLAG_DICT
+        from plugins.DicePP.module.persona.report.daily_report import _FLAG_DISPLAY_ORDER
+        from plugins.DicePP.core.command.const import DPP_COMMAND_FLAG_DICT
         assert set(_FLAG_DISPLAY_ORDER) == set(DPP_COMMAND_FLAG_DICT.keys()), \
             "_FLAG_DISPLAY_ORDER 与 DPP_COMMAND_FLAG_DICT 键集不一致，请同步更新"
 

@@ -1,5 +1,5 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+"""DicePP's import-safe package namespace.
 
-from adapter.nonebot_adapter import *
+NoneBot registration intentionally lives in :mod:`plugins.DicePP.plugin` so
+library and CLI imports cannot create matchers as a side effect.
+"""

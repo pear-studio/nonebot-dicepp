@@ -6,7 +6,7 @@ Agent 基类
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 from pydantic import BaseModel
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..llm.router import LLMRouter
 from ..data.store import PersonaDataStore
 from ..llm.selection import SelectionPolicy, EVENT_GEN

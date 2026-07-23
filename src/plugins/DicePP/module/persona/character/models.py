@@ -3,7 +3,7 @@
 
 参考 SillyTavern V2 标准（部分关键字段，不保证全部兼容）
 """
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 import random
 from enum import Enum
 from typing import List, Optional

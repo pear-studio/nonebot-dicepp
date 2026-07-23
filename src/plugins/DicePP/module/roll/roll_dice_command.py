@@ -1,15 +1,15 @@
 from typing import List, Tuple, Any
 import asyncio
 
-from core.bot import Bot
-from core.statistics import UserStatInfo
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser
-from core.command.parse_result import CommandParseResult
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.statistics import UserStatInfo
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command import CommandTextParser
+from plugins.DicePP.core.command.parse_result import CommandParseResult
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 # roll 命令统一解析器实例（私有 flags 在命令适配层声明）
 _ROLL_PARSER = CommandTextParser(
@@ -17,20 +17,20 @@ _ROLL_PARSER = CommandTextParser(
     private_flags={"h", "s", "a", "n"},
 )
 
-from module.roll.roll_const import MULTI_ROLL_LIMIT
-from module.roll.roll_parse_args import RollParseArgs, _parse_roll_args
+from plugins.DicePP.module.roll.roll_const import MULTI_ROLL_LIMIT
+from plugins.DicePP.module.roll.roll_parse_args import RollParseArgs, _parse_roll_args
 
-from module.roll import RollResult, RollDiceError
-from module.roll.ast_engine.adapter import exec_roll_exp_unified, preprocess_roll_exp
-from module.roll.ast_engine import build_sampling_plan, sample_from_plan
-from module.roll.ast_engine.errors import RollEngineError
-from module.roll.default_dice import (
+from plugins.DicePP.module.roll import RollResult, RollDiceError
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified, preprocess_roll_exp
+from plugins.DicePP.module.roll.ast_engine import build_sampling_plan, sample_from_plan
+from plugins.DicePP.module.roll.ast_engine.errors import RollEngineError
+from plugins.DicePP.module.roll.default_dice import (
     format_default_expr_from_storage,
     apply_default_expr,
 )
-from module.roll.karma_manager import get_karma_manager, KarmaConfig
-from core.data.models import UserKarma
-from utils.logger import logger
+from plugins.DicePP.module.roll.karma_manager import get_karma_manager, KarmaConfig
+from plugins.DicePP.core.data.models import UserKarma
+from plugins.DicePP.utils.logger import logger
 
 LOC_ROLL_RESULT = "roll_result"
 LOC_ROLL_RESULT_REASON = "roll_result_reason"

@@ -1,17 +1,17 @@
 import pytest
-from module.roll.modifier import (
+from plugins.DicePP.module.roll.modifier import (
     RollExpModifier, ROLL_MODIFIERS_DICT, roll_modifier,
     REModReroll, REModCountSuccess, REModFloat, REModMinimum, REModPortent, REModMinMax
 )
-from module.roll.roll_utils import RollDiceError
-from module.roll.result import RollResult
-from module.roll.roll_config import DICE_CONSTANT_MAX
+from plugins.DicePP.module.roll.roll_utils import RollDiceError
+from plugins.DicePP.module.roll.result import RollResult
+from plugins.DicePP.module.roll.roll_config import DICE_CONSTANT_MAX
 
 
 class TestRollModifiers:
     def test_modifier_registration(self):
         """Verify each expected modifier class is registered in ROLL_MODIFIERS_DICT."""
-        from module.roll.modifier import REModReroll, REModCountSuccess, REModFloat, REModMinimum, REModPortent, REModMinMax
+        from plugins.DicePP.module.roll.modifier import REModReroll, REModCountSuccess, REModFloat, REModMinimum, REModPortent, REModMinMax
         registered_classes = set(ROLL_MODIFIERS_DICT.values())
         assert REModReroll in registered_classes
         assert REModCountSuccess in registered_classes
@@ -184,9 +184,9 @@ class TestRollModifierModify:
 
     def test_explode_x_adds_dice_when_condition_met(self, monkeypatch):
         """X>15 with val=18, mock rolls return 12 then 5 (<=15 stops) → one extra die appended."""
-        from module.roll.modifier import roll_a_dice
+        from plugins.DicePP.module.roll.modifier import roll_a_dice
         calls = iter([12, 5])
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: next(calls))
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: next(calls))
 
         modifier = REModReroll("X>15")
         result = self.create_dice_result([18], 20)
@@ -202,7 +202,7 @@ class TestRollModifierModify:
     def test_explode_x_multiple_original_dice(self, monkeypatch):
         """X>5 with vals [10, 3] — only val 10 triggers explosion."""
         calls = iter([8, 2])
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: next(calls))
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: next(calls))
 
         modifier = REModReroll("X>5")
         result = self.create_dice_result([10, 3], 20)
@@ -218,7 +218,7 @@ class TestRollModifierModify:
 
     def test_explode_x_no_condition_met_passthrough(self, monkeypatch):
         """X<5 with val=10 — no condition met, original list unchanged."""
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: 99)
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: 99)
 
         modifier = REModReroll("X<5")
         result = self.create_dice_result([10, 15], 20)
@@ -237,7 +237,7 @@ class TestRollModifierModify:
 
     def test_explode_x_explode_limit_exceeded_raises_error(self, monkeypatch):
         """X>1 on a d4 (range 2-4, 3/4 satisfy) — mock always returns >1, hits EXPLODE_LIMIT."""
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: 3)
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: 3)
 
         modifier = REModReroll("X>1")
         result = self.create_dice_result([2], 4)
@@ -246,7 +246,7 @@ class TestRollModifierModify:
 
     def test_explode_xo_adds_one_extra_die(self, monkeypatch):
         """XO>10 with vals [5, 15] — only 15 triggers, one extra die appended."""
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: 7)
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: 7)
 
         modifier = REModReroll("XO>10")
         result = self.create_dice_result([5, 15], 20)
@@ -261,7 +261,7 @@ class TestRollModifierModify:
     def test_explode_xo_multiple_triggers(self, monkeypatch):
         """XO>10 with vals [15, 18, 3] — two triggers, two extra dice."""
         calls = iter([7, 8])
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: next(calls))
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: next(calls))
 
         modifier = REModReroll("XO>10")
         result = self.create_dice_result([15, 18, 3], 20)
@@ -273,7 +273,7 @@ class TestRollModifierModify:
 
     def test_explode_xo_no_condition_met(self, monkeypatch):
         """XO<5 with val=10 — no condition met, no extra dice."""
-        monkeypatch.setattr("module.roll.modifier.roll_a_dice", lambda _t: 99)
+        monkeypatch.setattr('plugins.DicePP.module.roll.modifier.roll_a_dice', lambda _t: 99)
 
         modifier = REModReroll("XO<5")
         result = self.create_dice_result([10, 15], 20)

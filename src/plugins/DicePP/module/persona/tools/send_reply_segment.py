@@ -6,7 +6,7 @@ handler 把中间消息交给 DeliveryQueue，写入 message stream，segment_ph
 
 from typing import Dict, Any, Optional
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field

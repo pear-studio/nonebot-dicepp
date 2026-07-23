@@ -17,9 +17,8 @@ from typing import Any, Dict, List
 
 import pytest
 
-# 动态导入路径（conftest.py 已添加 DicePP 到 sys.path）
-from core.command.text_parser import CommandTextParser
-from core.command.parse_result import CommandParseResult
+from plugins.DicePP.core.command.text_parser import CommandTextParser
+from plugins.DicePP.core.command.parse_result import CommandParseResult
 from tests.support.paths import find_repository_root
 
 # ---------------------------------------------------------------------------

@@ -15,9 +15,9 @@ from typing import Callable, Optional
 import aiohttp
 
 from dicepp_meta import get_version
-from frozen import is_frozen
-from utils.network import format_url_host
-from module.dashboard_reporter.protocol import (
+from plugins.DicePP.frozen import is_frozen
+from plugins.DicePP.utils.network import format_url_host
+from plugins.DicePP.module.dashboard_reporter.protocol import (
     auth as auth_msg,
     decode,
     encode,

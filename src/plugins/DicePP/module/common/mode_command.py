@@ -3,14 +3,14 @@ import openpyxl
 import os
 import re
 
-from core.bot import Bot
-from core.data.models.extended import GroupConfig
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser, CommandContextResolver
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.data.models.extended import GroupConfig
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command import CommandTextParser, CommandContextResolver
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
 
 # Task 3.3: 统一解析器（替代内嵌前缀判断与参数切分）
 _MODE_PARSER_ZH = CommandTextParser(command_prefix="模式", strip_prefix_len=3)
@@ -155,7 +155,7 @@ class ModeCommand(UserCommandBase):
             if default_mode != "":
                 await self.switch_mode(target_id, default_mode, is_private=is_private)
             else:
-                from core.data.models.extended import GroupConfig
+                from plugins.DicePP.core.data.models.extended import GroupConfig
                 if config:
                     config.data["mode"] = "NULL"
                     await self.bot.db.group_config.upsert(config)

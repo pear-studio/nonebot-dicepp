@@ -8,9 +8,9 @@ LLM 可在对话中调用 get_jrrp 查询运势。
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 
-from utils.logger import logger
-from utils.time import wall_now
-from module.misc.jrrp_utils import compute_jrrp, format_compact_trend
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import wall_now
+from plugins.DicePP.module.misc.jrrp_utils import compute_jrrp, format_compact_trend
 
 
 class _GetJrrpArgs(BaseModel):

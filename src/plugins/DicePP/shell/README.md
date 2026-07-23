@@ -8,18 +8,18 @@ DicePP Shell 是一个命令行工具，用于在隔离环境中测试 DicePP �
 
 ```bash
 # 查看主帮助
-uv run python -m DicePP.shell --help
+uv run dicepp-shell --help
 
 # 查看子命令帮助
-uv run python -m DicePP.shell init --help
-uv run python -m DicePP.shell send --help
-uv run python -m DicePP.shell serve --help
-uv run python -m DicePP.shell serve --status
-uv run python -m DicePP.shell serve --stop
-uv run python -m DicePP.shell warp --help
-uv run python -m DicePP.shell job --help
-uv run python -m DicePP.shell list --help
-uv run python -m DicePP.shell rm --help
+uv run dicepp-shell init --help
+uv run dicepp-shell send --help
+uv run dicepp-shell serve --help
+uv run dicepp-shell serve --status
+uv run dicepp-shell serve --stop
+uv run dicepp-shell warp --help
+uv run dicepp-shell job --help
+uv run dicepp-shell list --help
+uv run dicepp-shell rm --help
 ```
 
 ## 功能特点
@@ -43,18 +43,18 @@ uv pip install -e ".[dev]"
 ### 创建会话
 
 ```bash
-python -m DicePP.shell init <session_name> [--group <group_id>]
+uv run dicepp-shell init <session_name> [--group <group_id>]
 ```
 
 示例：
 ```bash
-python -m DicePP.shell init combat_test --group battle_01
+uv run dicepp-shell init combat_test --group battle_01
 ```
 
 ### 发送消息
 
 ```bash
-python -m DicePP.shell send <session_name> [options]
+uv run dicepp-shell send <session_name> [options]
 ```
 
 **必需参数：**
@@ -70,25 +70,25 @@ python -m DicePP.shell send <session_name> [options]
 示例：
 ```bash
 # 简单掷骰
-python -m DicePP.shell send combat_test --user player1 --msg ".r 1d20 攻击"
+uv run dicepp-shell send combat_test --user player1 --msg ".r 1d20 攻击"
 
 # 带确定性骰子结果
-python -m DicePP.shell send combat_test --user player1 --msg ".r 1d20 攻击" --dice 20
+uv run dicepp-shell send combat_test --user player1 --msg ".r 1d20 攻击" --dice 20
 
 # 多个骰子（多个d20用同一个序列）
-python -m DicePP.shell send combat_test --user player1 --msg ".r 2d20 优势攻击" --dice 20,15
+uv run dicepp-shell send combat_test --user player1 --msg ".r 2d20 优势攻击" --dice 20,15
 
 # JSON输出
-python -m DicePP.shell send combat_test --user DM --msg ".init" --json
+uv run dicepp-shell send combat_test --user DM --msg ".init" --json
 ```
 
 **`send` 要求会话已通过 `serve` 常驻运行**——先在另一个终端执行
-`python -m DicePP.shell serve <会话名>`，再用 `send` 发消息。
+`uv run dicepp-shell serve <会话名>`，再用 `send` 发消息。
 
 ### 启动常驻测试 Runtime
 
 ```bash
-python -m DicePP.shell serve combat_test --port 0
+uv run dicepp-shell serve combat_test --port 0
 ```
 
 `--port 0` 会自动选择可用端口。Runtime 仅允许监听 `127.0.0.1` 或
@@ -101,7 +101,7 @@ python -m DicePP.shell serve combat_test --port 0
 DICEPP_PROJECT_ROOT=.dicepp-shell/combat_test uv run python -m dashboard
 
 # 终端 2：连接该 Dashboard
-python -m DicePP.shell serve combat_test \
+uv run dicepp-shell serve combat_test \
   --dashboard http://127.0.0.1:4090
 ```
 
@@ -158,14 +158,14 @@ uv run dicepp-shell job cancel persona-warp <job_id>
 查看和停止 Runtime：
 
 ```bash
-python -m DicePP.shell serve --status combat_test --json
-python -m DicePP.shell serve --stop combat_test
+uv run dicepp-shell serve --status combat_test --json
+uv run dicepp-shell serve --stop combat_test
 ```
 
 ### 列出现有会话
 
 ```bash
-python -m DicePP.shell list
+uv run dicepp-shell list
 ```
 
 输出示例：
@@ -179,7 +179,7 @@ test_session     test_group          1.1KB  1h ago   stopped
 ### 删除会话
 
 ```bash
-python -m DicePP.shell rm <session_name>
+uv run dicepp-shell rm <session_name>
 ```
 
 ## 典型测试场景
@@ -188,42 +188,42 @@ python -m DicePP.shell rm <session_name>
 
 ```bash
 # 创建会话
-python -m DicePP.shell init combat
+uv run dicepp-shell init combat
 
 # DM开启先攻
-python -m DicePP.shell send combat --user DM --msg ".init"
+uv run dicepp-shell send combat --user DM --msg ".init"
 
 # 玩家加入先攻
-python -m DicePP.shell send combat --user 战士 --msg ".ri" --dice 18
-python -m DicePP.shell send combat --user 法师 --msg ".ri" --dice 12
+uv run dicepp-shell send combat --user 战士 --msg ".ri" --dice 18
+uv run dicepp-shell send combat --user 法师 --msg ".ri" --dice 12
 
 # DM添加怪物
-python -m DicePP.shell send combat --user DM --msg ".ri 15 地精" --dice 15
+uv run dicepp-shell send combat --user DM --msg ".ri 15 地精" --dice 15
 
 # 查看先攻列表
-python -m DicePP.shell send combat --user DM --msg ".init"
+uv run dicepp-shell send combat --user DM --msg ".init"
 
 # 开始战斗
-python -m DicePP.shell send combat --user DM --msg ".init next"
+uv run dicepp-shell send combat --user DM --msg ".init next"
 
 # 玩家攻击
-python -m DicePP.shell send combat --user 战士 --msg ".r 1d20+5 攻击地精" --dice 20
-python -m DicePP.shell send combat --user 战士 --msg ".r 2d6+3 伤害" --dice 6,4
+uv run dicepp-shell send combat --user 战士 --msg ".r 1d20+5 攻击地精" --dice 20
+uv run dicepp-shell send combat --user 战士 --msg ".r 2d6+3 伤害" --dice 6,4
 
 # 结束战斗
-python -m DicePP.shell send combat --user DM --msg ".init end"
+uv run dicepp-shell send combat --user DM --msg ".init end"
 
 # 清理
-python -m DicePP.shell rm combat
+uv run dicepp-shell rm combat
 ```
 
 ### 场景2：角色卡管理
 
 ```bash
-python -m DicePP.shell init char_test
+uv run dicepp-shell init char_test
 
 # 创建角色卡
-python -m DicePP.shell send char_test --user player1 --msg ".角色卡记录
+uv run dicepp-shell send char_test --user player1 --msg ".角色卡记录
 $姓名$ 战士
 $等级$ 5
 $生命值$ 50/50
@@ -232,12 +232,12 @@ $属性$ 16/14/13/10/12/8
 $熟练$ 运动/威吓"
 
 # 查看角色状态
-python -m DicePP.shell send char_test --user player1 --msg ".状态"
+uv run dicepp-shell send char_test --user player1 --msg ".状态"
 
 # 修改HP
-python -m DicePP.shell send char_test --user player1 --msg ".hp -10"
+uv run dicepp-shell send char_test --user player1 --msg ".hp -10"
 
-python -m DicePP.shell rm char_test
+uv run dicepp-shell rm char_test
 ```
 
 ## 输出格式

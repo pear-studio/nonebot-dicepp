@@ -1,2 +1,2 @@
-from core.persona.models import PersonaModel
-from core.persona.loader import PersonaLoader
+from plugins.DicePP.core.persona.models import PersonaModel
+from plugins.DicePP.core.persona.loader import PersonaLoader

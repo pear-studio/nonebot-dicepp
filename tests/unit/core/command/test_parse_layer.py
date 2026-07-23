@@ -6,10 +6,10 @@ Task 5.1: 解析层综合测试
 - CommandContext 快照一致性测试（mock）
 """
 import pytest
-from core.command.parse_result import CommandParseResult, MentionInfo, MessageSegment, ParseIssue
-from core.command.text_parser import CommandTextParser
-from core.command.compat_mapper import CommandCompatMapper, CompatRule, apply_compat
-from core.command.cq_extractor import extract_segments, extract_mentions, enrich_parse_result
+from plugins.DicePP.core.command.parse_result import CommandParseResult, MentionInfo, MessageSegment, ParseIssue
+from plugins.DicePP.core.command.text_parser import CommandTextParser
+from plugins.DicePP.core.command.compat_mapper import CommandCompatMapper, CompatRule, apply_compat
+from plugins.DicePP.core.command.cq_extractor import extract_segments, extract_mentions, enrich_parse_result
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ class TestCompatMapper:
         """--quiet 应在 parser 词法层直接归一为规范 key 'q'（不经过 compat mapper）"""
         # --quiet 的映射由 GLOBAL_FLAG_TABLE long 别名在 CommandTextParser 中处理，
         # compat mapper 不再保留冗余的 _rule_long_quiet 规则。
-        from core.command.text_parser import CommandTextParser
+        from plugins.DicePP.core.command.text_parser import CommandTextParser
         parser = CommandTextParser(command_prefix="r")
         r = parser.parse(".r --quiet")
         assert "q" in r.flags

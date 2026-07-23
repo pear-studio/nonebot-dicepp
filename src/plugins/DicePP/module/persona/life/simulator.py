@@ -9,7 +9,7 @@ import uuid
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.store import PersonaDataStore
 from ..data.models import RelationshipState, ScoreEvent, MessageType
 from ..character.models import Character
@@ -22,7 +22,7 @@ from .conversation_scope import ConversationScope
 from .share_scheduler import ShareScheduler
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
     from .dm_agent import DMAgent
     from .character_agent import CharacterAgent
     from .sa_agent import SAAgent
@@ -217,7 +217,7 @@ class LifeSimulator:
         if not self.decay_calculator or not self.character:
             return 0
         n = 0
-        from utils.time import get_clock
+        from plugins.DicePP.utils.time import get_clock
         now = get_clock().now()
         try:
             for rel in await self.store.list_all_relationships_raw():

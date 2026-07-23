@@ -1,14 +1,14 @@
 from array import array
 from typing import List, Tuple, Any
 
-from core.bot import Bot
-from core.data.models import GroupWelcome
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.data.models import GroupWelcome
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command import CommandTextParser
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 _WELCOME_PARSER = CommandTextParser(command_prefix="welcome")
 

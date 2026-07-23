@@ -1,10 +1,10 @@
 """唯一消息发送出口"""
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from typing import Optional, Callable
 
-from core.bot import Bot
-from core.command.bot_cmd import BotSendMsgCommand
-from core.communication import GroupMessagePort, PrivateMessagePort
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.bot_cmd import BotSendMsgCommand
+from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
 from ..data.models import MessageType
 
 from .pipeline import MessagePipeline, SendAction

@@ -13,7 +13,7 @@ TODO(test-merge): test_combat_flow__* 系列仍存在重叠（多个用例验证
 import pytest
 
 from tests.integration.commands.bot_support import e2e_bot, send_as_user
-from core.bot import Bot
+from plugins.DicePP.core.bot import Bot
 
 
 # ---------------------------------------------------------------------------

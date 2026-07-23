@@ -136,7 +136,7 @@ BOT_CORE_SCHEMA_SQL = [
 
 def create_bot_core_schema(conn: sqlite3.Connection) -> None:
     execute_many(conn, BOT_CORE_SCHEMA_SQL)
-    from module.persona.data.schema import BOT_CORE_SCHEMA_SQL as persona_schema_sql
+    from plugins.DicePP.module.persona.data.schema import BOT_CORE_SCHEMA_SQL as persona_schema_sql
 
     execute_many(conn, persona_schema_sql)
 

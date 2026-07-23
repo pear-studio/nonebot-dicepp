@@ -23,7 +23,7 @@ from collections import Counter
 from typing import Literal, Optional
 
 from pydantic import ValidationError
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from .event_bus import AgentEventBus
 from .events import (

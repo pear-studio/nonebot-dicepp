@@ -1,19 +1,19 @@
 from typing import List, Tuple, Any
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser  # Task 3.4
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.data.models import GroupConfig
-from module.roll.default_dice import (
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.data.models import GroupConfig
+from plugins.DicePP.module.roll.default_dice import (
     format_default_expr_from_input,
     format_default_expr_from_storage,
 )
-from module.roll.roll_config import DICE_TYPE_MAX
-from module.roll.roll_utils import RollDiceError
-from core.localization import LOC_FUNC_DISABLE
+from plugins.DicePP.module.roll.roll_config import DICE_TYPE_MAX
+from plugins.DicePP.module.roll.roll_utils import RollDiceError
+from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 _DSET_PARSER = CommandTextParser(command_prefix="dset")
 

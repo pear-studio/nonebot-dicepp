@@ -5,14 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from adapter.nonebot_adapter import (
+from plugins.DicePP.adapter.nonebot_adapter import (
     NoneBotClientProxy,
     _handle_group_recall,
     all_bots,
 )
-from core.bot import Bot
-from core.command import BotSendForwardMsgCommand, BotSendMsgCommand
-from core.communication import GroupMessagePort, PrivateMessagePort
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotSendForwardMsgCommand, BotSendMsgCommand
+from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
 
 
 @pytest.fixture

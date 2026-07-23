@@ -6,18 +6,18 @@ as they verify internal wiring/constants rather than behavioral contracts.
 """
 
 import pytest
-from module.roll.ast_engine.trace import (
+from plugins.DicePP.module.roll.ast_engine.trace import (
     EvaluationTrace,
     DiceRollEvent,
     ModifierAppliedEvent,
     TraceEventType,
     LegacyTextRenderer,
 )
-from module.roll.ast_engine.errors import (
+from plugins.DicePP.module.roll.ast_engine.errors import (
     RollLimitError,
     RollErrorCode,
 )
-from module.roll.ast_engine.limits import (
+from plugins.DicePP.module.roll.ast_engine.limits import (
     SafetyLimits,
     LimitChecker,
     check_expression_length,
@@ -297,7 +297,7 @@ class TestModifierRendering:
     def test_render_modifier_replace_sentinel_handled(self):
         """render() must handle REPLACE sentinel so info text is correct."""
         renderer = LegacyTextRenderer()
-        from module.roll.ast_engine.trace import EvaluationTrace, DiceRollEvent
+        from plugins.DicePP.module.roll.ast_engine.trace import EvaluationTrace, DiceRollEvent
 
         trace = EvaluationTrace(expression="2D20K1")
         trace.add_event(DiceRollEvent(
@@ -323,8 +323,8 @@ class TestEvaluationDepthLimit:
 
     def test_normal_depth_no_error(self):
         """A simple nested expression well within depth limit should evaluate fine."""
-        from module.roll.ast_engine.parser import parse_expression
-        from module.roll.ast_engine.evaluator import evaluate
+        from plugins.DicePP.module.roll.ast_engine.parser import parse_expression
+        from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate
         # (((1+2)+3)+4) has depth ~4, well below default 50
         ast = parse_expression("(((1+2)+3)+4)")
         result = evaluate(ast)
@@ -332,10 +332,10 @@ class TestEvaluationDepthLimit:
 
     def test_depth_limit_exceeded_raises_limit_error(self):
         """Evaluating an AST that exceeds max_parse_depth should raise RollLimitError."""
-        from module.roll.ast_engine.parser import parse_expression
-        from module.roll.ast_engine.evaluator import Evaluator
-        from module.roll.ast_engine.errors import RollLimitError
-        from module.roll.ast_engine.limits import SafetyLimits
+        from plugins.DicePP.module.roll.ast_engine.parser import parse_expression
+        from plugins.DicePP.module.roll.ast_engine.evaluator import Evaluator
+        from plugins.DicePP.module.roll.ast_engine.errors import RollLimitError
+        from plugins.DicePP.module.roll.ast_engine.limits import SafetyLimits
 
         # max_parse_depth=2 means only depth 1 (NumberNode) is allowed
         limits = SafetyLimits(max_parse_depth=2)
@@ -350,9 +350,9 @@ class TestEvaluationDepthLimit:
 
     def test_depth_counter_resets_between_branches(self):
         """After evaluating left branch the counter must decrement so right branch works."""
-        from module.roll.ast_engine.parser import parse_expression
-        from module.roll.ast_engine.evaluator import Evaluator
-        from module.roll.ast_engine.limits import SafetyLimits
+        from plugins.DicePP.module.roll.ast_engine.parser import parse_expression
+        from plugins.DicePP.module.roll.ast_engine.evaluator import Evaluator
+        from plugins.DicePP.module.roll.ast_engine.limits import SafetyLimits
 
         # depth=3 allows: BinaryOp(1) + Number(2) on each side
         limits = SafetyLimits(max_parse_depth=3)

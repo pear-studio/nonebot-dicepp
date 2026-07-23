@@ -14,10 +14,10 @@ R8 变更：
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from module.persona.gateway.port import MessagePort
-from module.persona.life.simulator import LifeSimulator, LifeConfig
-from module.persona.life.proactive_config import ProactiveConfig
-from module.persona.data.models import MessageType
+from plugins.DicePP.module.persona.gateway.port import MessagePort
+from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+from plugins.DicePP.module.persona.data.models import MessageType
 
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None,
@@ -93,7 +93,7 @@ class TestSendMsgReflow:
     @pytest.mark.asyncio
     async def test_no_chat_registry_no_reflow(self):
         """chat_registry=None 时不回流，发送照常。"""
-        from module.persona.life.conversation_registry import ConversationRegistry
+        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
         sim = _make_simulator()
         sim.store.add_message_stream = AsyncMock(return_value=100)
         sim.port.send = AsyncMock(return_value=True)

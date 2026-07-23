@@ -1,7 +1,7 @@
 """搜索规则资料库工具"""
 import json
-from core.data.query_store import QueryStoreError
-from core.query_utils import command_split
+from plugins.DicePP.core.data.query_store import QueryStoreError
+from plugins.DicePP.core.query_utils import command_split
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 

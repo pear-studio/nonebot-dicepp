@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from module.misc.coc_command import (
+from plugins.DicePP.module.misc.coc_command import (
     _derive_db_build,
     _derive_mov,
     _format_one,

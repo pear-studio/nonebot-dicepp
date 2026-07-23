@@ -17,8 +17,8 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
-from core.command.parse_result import CommandParseResult, ParseIssue
-from core.command.const import (
+from plugins.DicePP.core.command.parse_result import CommandParseResult, ParseIssue
+from plugins.DicePP.core.command.const import (
     GLOBAL_FLAG_TABLE, GLOBAL_KWARG_TABLE,
     PARSE_ERR_PREFIX_MISMATCH, PARSE_WARN_KWARG_MISSING_VALUE,
 )

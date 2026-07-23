@@ -2,8 +2,8 @@
 import datetime
 import pytest
 
-from core.data.models import GroupConfig
-from utils.time import datetime_to_str, get_current_date_raw
+from plugins.DicePP.core.data.models import GroupConfig
+from plugins.DicePP.utils.time import datetime_to_str, get_current_date_raw
 
 
 class TestLocalization:

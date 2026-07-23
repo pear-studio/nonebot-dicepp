@@ -8,6 +8,6 @@ import pytest
 @pytest.fixture(autouse=True)
 def reset_clock_after_test():
     yield
-    from utils.time import WallClock, set_clock
+    from plugins.DicePP.utils.time import WallClock, set_clock
 
     set_clock(WallClock())

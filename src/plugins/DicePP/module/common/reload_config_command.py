@@ -5,13 +5,13 @@ Only admin (permission >= 3) or master (permission == 4) may use this command.
 import datetime
 from typing import Any, List, Tuple
 
-from core.bot import Bot
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_MANAGE
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config.loader import ConfigValidationError
-from utils.logger import logger
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_MANAGE
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.config.loader import ConfigValidationError
+from plugins.DicePP.utils.logger import logger
 
 LOC_RELOAD_OK = "reload_ok"
 LOC_RELOAD_FAIL = "reload_fail"

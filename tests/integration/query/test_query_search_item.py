@@ -5,7 +5,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_query_search_exact_name_regexp_params(fresh_bot, query_db):
     bot, _proxy = fresh_bot
-    from module.query.query_command import QueryCommand
+    from plugins.DicePP.module.query.query_command import QueryCommand
 
     db_name = await query_db("DNDTEST")
 
@@ -26,7 +26,7 @@ async def test_query_search_exact_name_regexp_params(fresh_bot, query_db):
 @pytest.mark.asyncio
 async def test_query_search_negative_excludes(fresh_bot, query_db):
     bot, _proxy = fresh_bot
-    from module.query.query_command import QueryCommand
+    from plugins.DicePP.module.query.query_command import QueryCommand
 
     db_name = await query_db("DNDTEST_NEG")
 
@@ -45,7 +45,7 @@ async def test_query_search_negative_excludes(fresh_bot, query_db):
 @pytest.mark.asyncio
 async def test_query_search_redirect_by_alias(fresh_bot, query_db):
     bot, _proxy = fresh_bot
-    from module.query.query_command import QueryCommand
+    from plugins.DicePP.module.query.query_command import QueryCommand
 
     db_name = await query_db("DNDTEST_REDIRECT")
 
@@ -75,7 +75,7 @@ async def test_query_search_redirect_by_alias(fresh_bot, query_db):
 @pytest.mark.asyncio
 async def test_query_search_apostrophe_is_safe_with_params(fresh_bot, query_db):
     bot, _proxy = fresh_bot
-    from module.query.query_command import QueryCommand
+    from plugins.DicePP.module.query.query_command import QueryCommand
 
     db_name = await query_db("DNDTEST_QUOTE")
 

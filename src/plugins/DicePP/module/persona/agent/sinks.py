@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from .event_bus import EventStore
 from .events import AgentEvent

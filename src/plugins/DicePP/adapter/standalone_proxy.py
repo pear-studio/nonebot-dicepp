@@ -1,8 +1,8 @@
 import asyncio
 from typing import List
 
-from adapter.client_proxy import ClientProxy
-from core.command import (
+from plugins.DicePP.adapter.client_proxy import ClientProxy
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotCommandDispatchResult,
     BotDelayCommand,
@@ -12,8 +12,8 @@ from core.command import (
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from core.communication import GroupInfo, GroupMemberInfo
-from utils.logger import logger
+from plugins.DicePP.core.communication import GroupInfo, GroupMemberInfo
+from plugins.DicePP.utils.logger import logger
 
 
 DEFAULT_GROUP_ID = "10000"

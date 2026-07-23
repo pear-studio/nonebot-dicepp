@@ -1,5 +1,5 @@
 import pytest
-from utils.string import to_english_str, match_substring, estimate_tokens
+from plugins.DicePP.utils.string import to_english_str, match_substring, estimate_tokens
 
 
 @pytest.mark.quick

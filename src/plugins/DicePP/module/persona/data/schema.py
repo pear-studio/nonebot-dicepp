@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.data.schema.lifecycle import (
+from plugins.DicePP.core.data.schema.lifecycle import (
     AsyncSchemaMigration,
     SchemaMigration,
     SchemaTarget,

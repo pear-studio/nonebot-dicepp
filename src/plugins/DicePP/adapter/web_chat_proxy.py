@@ -1,10 +1,10 @@
 import asyncio
 from typing import List, Optional
 
-from adapter.client_proxy import ClientProxy
-from adapter.standalone_proxy import DEFAULT_GROUP_ID, DEFAULT_USER_ID
-from adapter.web_chat_adapter import WebChatAdapter
-from core.command import (
+from plugins.DicePP.adapter.client_proxy import ClientProxy
+from plugins.DicePP.adapter.standalone_proxy import DEFAULT_GROUP_ID, DEFAULT_USER_ID
+from plugins.DicePP.adapter.web_chat_adapter import WebChatAdapter
+from plugins.DicePP.core.command import (
     BotCommandBase,
     BotCommandDispatchResult,
     BotDelayCommand,
@@ -15,8 +15,8 @@ from core.command import (
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from core.communication import GroupInfo, GroupMemberInfo
-from utils.logger import logger
+from plugins.DicePP.core.communication import GroupInfo, GroupMemberInfo
+from plugins.DicePP.utils.logger import logger
 
 
 def _normalize_web_user_id(user_id: str) -> str:

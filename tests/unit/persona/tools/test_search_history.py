@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from module.persona.agent.runtime_types import ToolExecutionContext
-from module.persona.tools.search_history import build_search_history_tool
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from plugins.DicePP.module.persona.tools.search_history import build_search_history_tool
 
 
 

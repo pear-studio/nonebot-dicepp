@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from shell.session import (
+from plugins.DicePP.shell.session import (
     RuntimeAlreadyActive,
     SessionRuntimeLease,
     create_session,
@@ -16,7 +16,7 @@ from shell.session import (
     format_session_info,
     read_runtime_info,
 )
-from shell import session as session_module
+from plugins.DicePP.shell import session as session_module
 
 
 class TestLoadSession:
@@ -243,7 +243,7 @@ class TestMutualExclusion:
         monkeypatch.setattr(session_module, "_session_lock_path",
                             lambda name: shell_dir / ".locks" / f"{name}.lock")
 
-        from shell.session import create_session as _create_session
+        from plugins.DicePP.shell.session import create_session as _create_session
         sd = _create_session("init-blocked")
         # Hold the lock directly via FileLock to simulate concurrent rm
         from filelock import FileLock

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shell.jobs import RuntimeJobManager
+from plugins.DicePP.shell.jobs import RuntimeJobManager
 
 
 class _WaitingRunner:

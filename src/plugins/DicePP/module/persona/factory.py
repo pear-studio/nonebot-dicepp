@@ -7,9 +7,9 @@ import os
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
-from utils.logger import logger
-from core.bot import Bot
-from core.config.basic import Paths
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config.basic import Paths
 
 from .character.loader import CharacterLoader
 from .character.models import Character

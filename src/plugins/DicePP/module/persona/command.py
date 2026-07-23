@@ -9,16 +9,16 @@ import json
 import time
 import asyncio
 import uuid
-from utils.logger import logger, _request_id_var
-from utils.time import get_clock
+from plugins.DicePP.utils.logger import logger, _request_id_var
+from plugins.DicePP.utils.time import get_clock
 
 from datetime import timedelta
 
-from core.bot import Bot
-from core.command.user_cmd import UserCommandBase, custom_user_command
-from core.command.bot_cmd import BotCommandBase
-from core.communication import MessageMetaData, PostSendEvent
-from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.user_cmd import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command.bot_cmd import BotCommandBase
+from plugins.DicePP.core.communication import MessageMetaData, PostSendEvent
+from plugins.DicePP.core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
 
 
 from .factory import PersonaApp, create_persona
@@ -33,7 +33,7 @@ from .gateway.port import MessagePort
 from .gateway.pipeline import MessagePipeline, TruncateStage
 from .image_cache import ImageCache
 from .transcript import format_event_message, format_player_identity
-from core.command.cq_extractor import extract_segments
+from plugins.DicePP.core.command.cq_extractor import extract_segments
 
 
 async def resolve_images(
@@ -598,8 +598,8 @@ class PersonaCommand(UserCommandBase):
         inbound_message_stream_id: Optional[int] = None,
     ) -> List[BotCommandBase]:
         """处理 .jrrp 命令：调 compute_jrrp → 事件消息注入 LLM 生成角色评语"""
-        from module.misc.jrrp_utils import compute_jrrp, format_jrrp_text
-        from utils.time import get_current_date_raw
+        from plugins.DicePP.module.misc.jrrp_utils import compute_jrrp, format_jrrp_text
+        from plugins.DicePP.utils.time import get_current_date_raw
 
         # 1. 计算运势
         result = compute_jrrp(user_id, get_current_date_raw())
@@ -724,7 +724,7 @@ class PersonaCommand(UserCommandBase):
             )
 
             # R11(3): 追加 ref 到 Conversation
-            from module.persona.life.conversation_scope import ConversationScope
+            from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
             scope = ConversationScope.from_chat(user_id, group_id)
             chat_registry = self.app.chat.registry if self.app.chat else None
             if chat_registry:
@@ -836,7 +836,7 @@ class PersonaCommand(UserCommandBase):
             try:
                 earliest_time = await self.data_store.get_earliest_message_time(user_id, group_id)
                 if earliest_time:
-                    from utils.time import wall_now
+                    from plugins.DicePP.utils.time import wall_now
                     now = wall_now(self.config.timezone)
                     days_known = max(1, (now - earliest_time).days)
                     lines.append(f"  认识: {days_known} 天")

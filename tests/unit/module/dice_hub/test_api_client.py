@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from module.dice_hub.api_client import HubAPIClient, HubAPIError
+from plugins.DicePP.module.dice_hub.api_client import HubAPIClient, HubAPIError
 
 
 def _make_response(status=200, json_data=None):
@@ -50,7 +50,7 @@ class TestHubAPIClientRequest:
         cm = _make_response_cm(resp)
         session = _make_session(cm)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session):
             result = await client._request("POST", "/api/bots/register/", {"bot_id": "b1"})
 
@@ -62,7 +62,7 @@ class TestHubAPIClientRequest:
         cm = _make_response_cm(resp)
         session = _make_session(cm)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session):
             await client._request("POST", "/api/bots/register/", {"bot_id": "b1"})
 
@@ -81,7 +81,7 @@ class TestHubAPIClientRequest:
         cm = _make_response_cm(resp)
         session = _make_session(cm)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session), \
              patch("asyncio.sleep"):  # 跳过退避
             with pytest.raises(HubAPIError) as exc_info:
@@ -114,7 +114,7 @@ class TestHubAPIClientRetry:
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session), \
              patch("asyncio.sleep"):
             result = await client._request("GET", "/api/bots/")
@@ -132,7 +132,7 @@ class TestHubAPIClientRetry:
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session), \
              patch("asyncio.sleep"):
             with pytest.raises(HubAPIError, match="Request failed"):
@@ -153,7 +153,7 @@ class TestHubAPIClientRetry:
         async def tracking_sleep(seconds):
             sleeps.append(seconds)
 
-        with patch("module.dice_hub.api_client.aiohttp.ClientSession",
+        with patch('plugins.DicePP.module.dice_hub.api_client.aiohttp.ClientSession',
                    return_value=session), \
              patch("asyncio.sleep", tracking_sleep):
             with pytest.raises(HubAPIError):
@@ -167,5 +167,5 @@ class TestHubAPIClientRetry:
     @pytest.mark.asyncio
     async def test_retry_count_default_is_three(self):
         """验证默认重试次数为 3。"""
-        from module.dice_hub.api_client import DEFAULT_RETRY
+        from plugins.DicePP.module.dice_hub.api_client import DEFAULT_RETRY
         assert DEFAULT_RETRY == 3

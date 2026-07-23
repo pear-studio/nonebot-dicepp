@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 import websockets
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
-from core.communication import MessageMetaData, MessageSender
-from utils.logger import logger
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.utils.logger import logger
 
 
 MAX_FRAME_BYTES = 64 * 1024

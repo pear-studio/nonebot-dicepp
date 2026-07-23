@@ -5,9 +5,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from core.communication import MessageMetaData, MessageRecallEvent, PostSendEvent
-from core.data.log_repository import LogRepository
-from core.data.models import LogPublication
+from plugins.DicePP.core.communication import MessageMetaData, MessageRecallEvent, PostSendEvent
+from plugins.DicePP.core.data.log_repository import LogRepository
+from plugins.DicePP.core.data.models import LogPublication
 
 from .export_service import ExportBatchResult, LogExportCoordinator
 from .providers import DiceLogV105Provider

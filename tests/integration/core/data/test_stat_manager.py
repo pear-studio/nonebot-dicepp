@@ -11,11 +11,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.data import Repository
-from core.data.models import UserStat, GroupStat
-from core.statistics.stat_manager import StatManager
-from core.statistics.user_stat import UserStatInfo
-from core.statistics.group_stat import GroupStatInfo
+from plugins.DicePP.core.data import Repository
+from plugins.DicePP.core.data.models import UserStat, GroupStat
+from plugins.DicePP.core.statistics.stat_manager import StatManager
+from plugins.DicePP.core.statistics.user_stat import UserStatInfo
+from plugins.DicePP.core.statistics.group_stat import GroupStatInfo
 
 
 # ── fixtures ──────────────────────────────────────────────────────────
@@ -226,7 +226,7 @@ async def test_daily_update_concurrent_with_inc(stat_manager):
 @pytest.mark.asyncio
 async def test_corrupt_data_in_user_stat_is_recovered(stat_manager):
     """如果 user_stat 中的 JSON 损坏，deserialize 失败时使用默认空对象。"""
-    from core.data.models import UserStat as UserStatModel
+    from plugins.DicePP.core.data.models import UserStat as UserStatModel
 
     # 直接写入损坏的 JSON
     bad_row = UserStatModel(user_id="u1", data="not valid json{{{")
@@ -245,7 +245,7 @@ async def test_corrupt_data_in_user_stat_is_recovered(stat_manager):
 @pytest.mark.asyncio
 async def test_corrupt_data_in_group_stat_is_recovered(stat_manager):
     """group_stat 损坏 JSON 同理。"""
-    from core.data.models import GroupStat as GroupStatModel
+    from plugins.DicePP.core.data.models import GroupStat as GroupStatModel
 
     bad_row = GroupStatModel(group_id="g1", data="corrupt{{{")
     await stat_manager._db.group_stat.upsert(bad_row)

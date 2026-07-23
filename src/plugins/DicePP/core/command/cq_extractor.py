@@ -15,7 +15,7 @@ import re
 from typing import List, Tuple
 from xml.sax.saxutils import unescape
 
-from core.command.parse_result import CommandParseResult, MentionInfo, MessageSegment
+from plugins.DicePP.core.command.parse_result import CommandParseResult, MentionInfo, MessageSegment
 
 # CQ 码全匹配正则：[CQ:type,key=value,...]
 _CQ_RE = re.compile(r'\[CQ:([a-zA-Z0-9_]+)(?:,([^\]]*))?\]')

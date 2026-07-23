@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 
-from core.command.context import CommandContext, CommandContextResolver
+from plugins.DicePP.core.command.context import CommandContext, CommandContextResolver
 
 
 # ── 1. 属性推导 ──────────────────────────────────────────────────────────────────

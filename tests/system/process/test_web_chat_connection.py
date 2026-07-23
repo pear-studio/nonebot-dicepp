@@ -4,10 +4,10 @@ import json
 import pytest
 import websockets
 
-from adapter.web_chat_adapter import WebChatAdapter
-from adapter.web_chat_proxy import WebChatProxy
-from core.command import BotSendMsgCommand
-from core.communication import PrivateMessagePort
+from plugins.DicePP.adapter.web_chat_adapter import WebChatAdapter
+from plugins.DicePP.adapter.web_chat_proxy import WebChatProxy
+from plugins.DicePP.core.command import BotSendMsgCommand
+from plugins.DicePP.core.communication import PrivateMessagePort
 
 
 class _MiniBot:

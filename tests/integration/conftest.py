@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.bot import Bot
+from plugins.DicePP.core.bot import Bot
 from tests.support.bot import TestProxy, new_test_account
 from tests.support.fs_utils import rmtree_retry
 

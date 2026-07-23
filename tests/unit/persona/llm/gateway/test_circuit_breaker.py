@@ -3,7 +3,7 @@ import time
 import pytest
 from unittest.mock import patch
 
-from module.persona.llm.circuit_breaker import CircuitBreaker, CircuitBreakerRegistry
+from plugins.DicePP.module.persona.llm.circuit_breaker import CircuitBreaker, CircuitBreakerRegistry
 
 
 class TestStateTransitions:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional
 
-from core.bot import Bot
-from core.communication import MessageMetaData, MessageSender, NoticeData
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender, NoticeData
 
 
 class IntegrationHelper:

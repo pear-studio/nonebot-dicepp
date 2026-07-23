@@ -1,5 +1,5 @@
 import pytest
-from core.data.models.initiative import (
+from plugins.DicePP.core.data.models.initiative import (
     InitEntity, InitList, InitiativeError, INIT_LIST_SIZE
 )
 

@@ -354,7 +354,7 @@ class TestInitiativeErrors:
         await h.send_group(".ri1000000D20 地精", checker=lambda s: "骰子数量过多" in s)
 
     async def test_init_list_size_limit(self, h):
-        from core.data.models import INIT_LIST_SIZE
+        from plugins.DicePP.core.data.models import INIT_LIST_SIZE
         for i in range(INIT_LIST_SIZE):
             await h.send_group(f".ri 地精{i}", checker=lambda s: s.count("地精") >= 1)
         await h.send_group(".ri 地精-1", checker=lambda s: "先攻列表大小超出限制" in s)

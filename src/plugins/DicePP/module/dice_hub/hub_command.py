@@ -1,15 +1,15 @@
 from typing import List, Tuple, Any, Literal
 import asyncio
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from module.dice_hub.manager import HubManager
-from module.dice_hub.api_client import HubAPIError
-from utils.logger import logger
+from plugins.DicePP.module.dice_hub.manager import HubManager
+from plugins.DicePP.module.dice_hub.api_client import HubAPIError
+from plugins.DicePP.utils.logger import logger
 
 
 def run_async(coro):

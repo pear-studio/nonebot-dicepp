@@ -9,7 +9,7 @@
 import pytest
 import aiosqlite
 
-from module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 class TestStoreEnsureTables:

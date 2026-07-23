@@ -15,9 +15,9 @@ import pytest
 from typing import List, Optional
 from dataclasses import dataclass
 
-from module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
-from module.roll.roll_utils import RollDiceError
-from module.roll.ast_engine import exec_roll_exp_ast
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
+from plugins.DicePP.module.roll.roll_utils import RollDiceError
+from plugins.DicePP.module.roll.ast_engine import exec_roll_exp_ast
 
 
 
@@ -233,6 +233,6 @@ class TestASTErrorCorpus:
 
     @pytest.mark.parametrize("entry", ERROR_CORPUS, ids=lambda e: e.description)
     def test_ast_engine_raises_roll_engine_error(self, entry: CorpusEntry):
-        from module.roll.ast_engine.errors import RollEngineError
+        from plugins.DicePP.module.roll.ast_engine.errors import RollEngineError
         with pytest.raises(RollEngineError):
             exec_roll_exp_ast(entry.expression)

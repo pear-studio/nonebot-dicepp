@@ -28,6 +28,9 @@ PRIVATE_CHAT_RUNS = 7
 GROUP_CHAT_RUNS = 10
 PRIVATE_INTERACTIONS_BY_USER = (7,)
 GROUP_INTERACTIONS_BY_USER = (1, 2, 7)
+LEGACY_RUNTIME_IMPORT_ROOTS = frozenset(
+    {"core", "module", "utils", "adapter", "shell", "frozen", "DicePP"}
+)
 
 
 class PreparationError(RuntimeError):
@@ -198,18 +201,105 @@ def deep_merge(
 
 
 def import_runtime_types(repo_root: Path):
-    plugin_root = repo_root / "src" / "plugins" / "DicePP"
-    src_root = repo_root / "src"
-    for path in (str(plugin_root), str(src_root)):
-        if path not in sys.path:
-            sys.path.insert(0, path)
+    source_root = (repo_root / "src").resolve()
+    _assert_runtime_import_environment_is_clean(source_root)
 
-    from core.config.pydantic_models import BotConfig
-    from module.persona.character.loader import CharacterLoader
-    from core.persona.models import PersonaModel
-    from plugins.DicePP.shell import session as shell_session
+    src_root = str(source_root)
+    added_src_root = not any(
+        _resolve_path_entry(entry) == source_root for entry in sys.path
+    )
+    if added_src_root:
+        sys.path.insert(0, src_root)
 
-    return BotConfig, CharacterLoader, PersonaModel, shell_session
+    try:
+        from plugins.DicePP.core.config.pydantic_models import BotConfig
+        from plugins.DicePP.core.persona.models import PersonaModel
+        from plugins.DicePP.module.persona.character.loader import CharacterLoader
+        from plugins.DicePP.shell import session as shell_session
+
+        return BotConfig, CharacterLoader, PersonaModel, shell_session
+    finally:
+        if added_src_root:
+            sys.path.remove(src_root)
+
+
+def _assert_runtime_import_environment_is_clean(source_root: Path) -> None:
+    plugins_root = source_root / "plugins"
+    dicepp_root = plugins_root / "DicePP"
+    legacy_paths = [
+        path
+        for entry in sys.path
+        if (path := _resolve_path_entry(entry)) is not None
+        and _is_legacy_runtime_import_path(
+            path,
+            source_root=source_root,
+            plugins_root=plugins_root,
+            dicepp_root=dicepp_root,
+        )
+    ]
+    legacy_modules = _loaded_legacy_runtime_modules(dicepp_root)
+    if not legacy_paths and not legacy_modules:
+        return
+
+    details: list[str] = []
+    if legacy_paths:
+        details.append(
+            "sys.path=" + ", ".join(str(path) for path in legacy_paths)
+        )
+    if legacy_modules:
+        details.append("sys.modules=" + ", ".join(legacy_modules))
+    raise PreparationError(
+        "检测到旧 DicePP 导入身份，拒绝在可能产生模块双身份的进程中加载运行时类型: "
+        + "; ".join(details)
+        + "。请移除当前仓库的 src/plugins 或 src/plugins/DicePP 路径，并在干净 Python 进程中重试。"
+    )
+
+
+def _resolve_path_entry(entry: object) -> Path | None:
+    try:
+        return Path(entry).resolve()
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _is_legacy_runtime_import_path(
+    path: Path,
+    *,
+    source_root: Path,
+    plugins_root: Path,
+    dicepp_root: Path,
+) -> bool:
+    """Return whether *path* can expose this repository's DicePP twice."""
+    if path == source_root:
+        return False
+    return (
+        path == plugins_root
+        or path == dicepp_root
+        or dicepp_root in path.parents
+    )
+
+
+def _loaded_legacy_runtime_modules(dicepp_root: Path) -> tuple[str, ...]:
+    loaded: list[str] = []
+    for module_name, module in tuple(sys.modules.items()):
+        if module is None:
+            continue
+        root_name = module_name.split(".", 1)[0]
+        if root_name not in LEGACY_RUNTIME_IMPORT_ROOTS:
+            continue
+        if _module_originates_under(module, dicepp_root):
+            loaded.append(module_name)
+    return tuple(sorted(loaded))
+
+
+def _module_originates_under(module: object, dicepp_root: Path) -> bool:
+    locations = [getattr(module, "__file__", None)]
+    locations.extend(getattr(module, "__path__", ()) or ())
+    for location in locations:
+        path = _resolve_path_entry(location)
+        if path == dicepp_root or (path is not None and dicepp_root in path.parents):
+            return True
+    return False
 
 
 def validate_character_assets(

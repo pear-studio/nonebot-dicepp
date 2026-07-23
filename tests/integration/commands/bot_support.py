@@ -5,11 +5,11 @@ import uuid
 import pytest_asyncio
 from typing import List, Tuple, Optional
 
-from adapter import ClientProxy
-from core.bot import Bot
-from core.command import BotCommandBase
-from core.communication import MessageMetaData, MessageSender
-from src.plugins.DicePP import GroupInfo, GroupMemberInfo
+from plugins.DicePP.adapter import ClientProxy
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command import BotCommandBase
+from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+from plugins.DicePP.core.communication import GroupInfo, GroupMemberInfo
 from tests.support.fs_utils import rmtree_retry
 from tests.support.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 

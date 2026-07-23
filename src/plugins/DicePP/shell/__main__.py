@@ -1,4 +1,4 @@
-"""Entry point for python -m DicePP.shell"""
+"""Entry point for ``python -m plugins.DicePP.shell``."""
 
 from .main import main
 

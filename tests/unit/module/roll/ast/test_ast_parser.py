@@ -8,8 +8,8 @@ This module tests the Lark-based parser to ensure:
 """
 
 import pytest
-from module.roll.ast_engine.parser import parse_expression
-from module.roll.ast_engine.ast_nodes import (
+from plugins.DicePP.module.roll.ast_engine.parser import parse_expression
+from plugins.DicePP.module.roll.ast_engine.ast_nodes import (
     NumberNode,
     DiceNode,
     BinaryOpNode,
@@ -22,7 +22,7 @@ from module.roll.ast_engine.ast_nodes import (
     CompareOp,
     ast_to_string,
 )
-from module.roll.ast_engine.errors import RollSyntaxError, RollErrorCode
+from plugins.DicePP.module.roll.ast_engine.errors import RollSyntaxError, RollErrorCode
 
 
 class TestParserNumbers:
@@ -408,7 +408,7 @@ class TestFortuneEvaluation:
 
     def test_fortune_rolls_unaffected(self):
         """Fortune modifier does not alter roll values."""
-        from module.roll.ast_engine.evaluator import evaluate
+        from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate
         ast = parse_expression("3D6F")
         roller = self._MockRoller([2, 5, 3])
         result = evaluate(ast, dice_roller=roller)
@@ -416,7 +416,7 @@ class TestFortuneEvaluation:
 
     def test_fortune_with_threshold_parses_and_evaluates(self):
         """1D100F50 evaluates without error and returns raw roll."""
-        from module.roll.ast_engine.evaluator import evaluate
+        from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate
         ast = parse_expression("1D100F50")
         roller = self._MockRoller([42])
         result = evaluate(ast, dice_roller=roller)
@@ -424,7 +424,7 @@ class TestFortuneEvaluation:
 
     def test_fortune_d100_critical_success(self):
         """d100 fortune roll: value=1 is critical success in legacy system."""
-        from module.roll.ast_engine.evaluator import evaluate
+        from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate
         ast = parse_expression("1D100F50")
         roller = self._MockRoller([1])
         result = evaluate(ast, dice_roller=roller)
@@ -435,7 +435,7 @@ class TestFortuneEvaluation:
 
     def test_fortune_d100_critical_failure(self):
         """d100 fortune roll: value=100 is critical failure in legacy system."""
-        from module.roll.ast_engine.evaluator import evaluate
+        from plugins.DicePP.module.roll.ast_engine.evaluator import evaluate
         ast = parse_expression("1D100F50")
         roller = self._MockRoller([100])
         result = evaluate(ast, dice_roller=roller)
@@ -443,7 +443,7 @@ class TestFortuneEvaluation:
 
     def test_fortune_build_roll_result_d100_success_failure(self):
         """Full pipeline: fortune d100 maps to success/fail through build_roll_result."""
-        from module.roll.ast_engine import exec_roll_exp_unified
+        from plugins.DicePP.module.roll.ast_engine import exec_roll_exp_unified
         # d100=1 → success=1 (critical success)
         roller = self._MockRoller([1])
         result = exec_roll_exp_unified("1D100F50", dice_roller=roller)

@@ -8,7 +8,7 @@ import json
 import time
 from typing import List, Dict, Optional, Any
 
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 from .protocol import LLMProvider, LLMResponse, TokenUsage, ToolCall, ErrorClass, NonRetryableError
 

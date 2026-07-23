@@ -9,8 +9,8 @@ Covers:
 import pytest
 from datetime import datetime
 
-from module.persona.data.models import UserLLMConfig, DailyUsage
-from module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.models import UserLLMConfig, DailyUsage
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -236,7 +236,7 @@ class TestUserConfigCRUD:
     async def test_get_config_decrypt_failed_without_secret(self, tmp_path):
         """配置已存在但加密数据无效或无密钥时 decrypt_failed=True"""
         import aiosqlite
-        from utils.time import wall_now
+        from plugins.DicePP.utils.time import wall_now
 
         async with aiosqlite.connect(":memory:") as persona_db, \
              aiosqlite.connect(":memory:") as core_db:

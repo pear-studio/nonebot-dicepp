@@ -9,17 +9,17 @@ Covers:
 """
 
 import pytest
-from module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
-from module.roll.roll_utils import RollDiceError
-from module.roll.ast_engine.adapter import exec_roll_exp_ast
-from module.roll.ast_engine.errors import (
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
+from plugins.DicePP.module.roll.roll_utils import RollDiceError
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_ast
+from plugins.DicePP.module.roll.ast_engine.errors import (
     RollEngineError,
     RollSyntaxError,
     RollRuntimeError,
     RollLimitError,
     RollErrorCode,
 )
-from module.roll.ast_engine.limits import SafetyLimits
+from plugins.DicePP.module.roll.ast_engine.limits import SafetyLimits
 from tests.support.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
 
@@ -247,7 +247,7 @@ class TestHistoricalEdgeRegressions:
 
     def test_expression_with_reason_separator(self):
         """Expression followed by reason text — preprocess should split correctly."""
-        from module.roll.ast_engine.adapter import sift_roll_exp_and_reason, preprocess_roll_exp
+        from plugins.DicePP.module.roll.ast_engine.adapter import sift_roll_exp_and_reason, preprocess_roll_exp
 
         exp_str, reason = sift_roll_exp_and_reason("1D20+5 攻击地精")
         assert exp_str.upper() == "1D20+5"

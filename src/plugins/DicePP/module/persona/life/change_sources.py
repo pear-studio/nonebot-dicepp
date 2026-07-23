@@ -12,8 +12,8 @@ import json as _json
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from utils.logger import logger
-from utils.time import wall_now, format_timestamp, format_relative_time, DEFAULT_EPOCH
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time, DEFAULT_EPOCH
 
 from ..data.store import PersonaDataStore
 from ..data.models import RelationshipState

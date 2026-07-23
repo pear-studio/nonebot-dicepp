@@ -13,16 +13,16 @@ def test_fresh_process_registers_only_the_new_log_command(
     pytestconfig,
 ) -> None:
     repository_root = Path(str(pytestconfig.rootpath))
-    plugin_root = repository_root / "src" / "plugins" / "DicePP"
+    source_root = repository_root / "src"
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
-        [str(plugin_root), env.get("PYTHONPATH", "")]
+        [str(source_root), env.get("PYTHONPATH", "")]
     ).rstrip(os.pathsep)
     script = """
 import json
-import module
-import module.common
-from core.command.user_cmd import DEFAULT_REGISTRY
+import plugins.DicePP.module
+import plugins.DicePP.module.common
+from plugins.DicePP.core.command.user_cmd import DEFAULT_REGISTRY
 print(json.dumps([item.__name__ for item in DEFAULT_REGISTRY.get_sorted_commands()]))
 """
 

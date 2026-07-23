@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from core.config.pydantic_models import PersonaConfig
-from module.persona.life.target import TargetSelector
-from module.persona.life.models import ShareTarget
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.module.persona.life.target import TargetSelector
+from plugins.DicePP.module.persona.life.models import ShareTarget
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ async def test_normal_medium_score_user(mock_data_store, bot_config):
 
 @pytest.mark.asyncio
 async def test_normal_group_activity(mock_data_store, bot_config):
-    from module.persona.data.models import GroupActivity
+    from plugins.DicePP.module.persona.data.models import GroupActivity
     mock_data_store.get_all_group_activities = AsyncMock(return_value=[
         GroupActivity(group_id="g2", score=70.0)
     ])

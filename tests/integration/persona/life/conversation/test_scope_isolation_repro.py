@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.message_types import MessageType
-from module.persona.life.conversation_registry import ConversationRegistry
-from module.persona.life.conversation_scope import ConversationScope
-from module.persona.agent.runtime_types import (
+from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult,
     BillingSummary,
     RunCompletion,

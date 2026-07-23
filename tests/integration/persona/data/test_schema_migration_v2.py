@@ -15,9 +15,9 @@ import sqlite3
 import aiosqlite
 import pytest
 
-from core.data.schema.lifecycle import ensure_schema_async
-from module.persona.data.schema import PERSONA_TARGET
-from module.persona.data.schema_sql import (
+from plugins.DicePP.core.data.schema.lifecycle import ensure_schema_async
+from plugins.DicePP.module.persona.data.schema import PERSONA_TARGET
+from plugins.DicePP.module.persona.data.schema_sql import (
     MIGRATE_PERSONA_V2_STATEMENTS,
 )
 

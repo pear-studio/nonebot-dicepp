@@ -1,8 +1,8 @@
 import abc
 from typing import Callable, Dict, List
 
-from core.command import BotCommandBase, BotCommandDispatchResult
-from core.communication import GroupInfo, GroupMemberInfo
+from plugins.DicePP.core.command import BotCommandBase, BotCommandDispatchResult
+from plugins.DicePP.core.communication import GroupInfo, GroupMemberInfo
 
 
 class ClientProxy(metaclass=abc.ABCMeta):

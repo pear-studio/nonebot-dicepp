@@ -5,7 +5,7 @@ SA Agent — Story Architect 长期叙事规划
 通过 Agent 基类 AgentRunSpec 新路径执行。
 """
 from typing import Any, Optional
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 from ..data.models import SAState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter

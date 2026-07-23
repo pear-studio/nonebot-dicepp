@@ -5,14 +5,14 @@ DND角色卡指令
 from typing import List, Tuple, Any, Optional
 import re
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from core.data.models import DNDCharacter
-from module.character.dnd5e.services import CharacterService, HPService, gen_template_char
+from plugins.DicePP.core.data.models import DNDCharacter
+from plugins.DicePP.module.character.dnd5e.services import CharacterService, HPService, gen_template_char
 
 LOC_CHAR_SET = "char_set"
 LOC_CHAR_MISS = "char_miss"
@@ -166,7 +166,7 @@ class CharacterDNDCommand(UserCommandBase):
                 if check_name == "先攻":
                     time = 1
                 try:
-                    from module.character.dnd5e.services import AbilityService
+                    from plugins.DicePP.module.character.dnd5e.services import AbilityService
                     hint_str = ""
                     for t in range(time):
                         hint_str, result_str, result_val = AbilityService.perform_check(
@@ -184,7 +184,7 @@ class CharacterDNDCommand(UserCommandBase):
                     feedback = e.args[0]
                 if check_name == "先攻检定" and len(check_value_list) > 0:
                     try:
-                        from module.initiative import InitiativeCommand
+                        from plugins.DicePP.module.initiative import InitiativeCommand
                         assert InitiativeCommand.__name__ in self.bot.command_dict, "未注册先攻指令"
                         init_cmd: InitiativeCommand = self.bot.command_dict[InitiativeCommand.__name__]
                         assert name_str, "Unexpected Code: name_str is empty"

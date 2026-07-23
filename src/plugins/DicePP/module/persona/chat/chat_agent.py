@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 
-from utils.logger import logger
-from utils.time import get_clock
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import get_clock
 
 from ..data.models import MessageType
 from ..life.conversation import Conversation

@@ -10,20 +10,20 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from core.communication import (
+from plugins.DicePP.core.communication import (
     MessageMetaData,
     MessageRecallEvent,
     MessageSender,
     PostSendEvent,
 )
-from core.data import LogRepository
-from core.data.schema import ensure_bot_log_schema
-from module.common.log import (
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.module.common.log import (
     LogRecordReason,
     LogRecorder,
     LogService,
 )
-from utils.logger import logger
+from plugins.DicePP.utils.logger import logger
 
 
 NOW = datetime(2026, 7, 20, 16, 0, 0)

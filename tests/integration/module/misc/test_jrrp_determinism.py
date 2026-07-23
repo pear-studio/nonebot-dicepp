@@ -9,16 +9,18 @@ import re
 from unittest.mock import patch
 
 from tests.integration.commands.bot_support import e2e_bot, send_as_user
-from core.bot import Bot
-from module.misc.jrrp_utils import JrrpResult
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.module.misc.jrrp_utils import JrrpResult
 
 # Mock 范围说明：
-# - 本文件 patch("module.misc.jrrp_command.compute_jrrp") 仅覆盖 JrrpCommand 路径。
+# - 本文件 patch("plugins.DicePP.module.misc.jrrp_command.compute_jrrp")
+#   仅覆盖 JrrpCommand 路径。
 #   JrrpCommand 在模块加载时执行 `from .jrrp_utils import compute_jrrp`，
 #   符号绑定在 jrrp_command 命名空间，patch jrrp_utils 不影响已绑定的引用。
-# - PersonaCommand._handle_jrrp 使用运行时 `from module.misc.jrrp_utils import compute_jrrp`，
+# - PersonaCommand._handle_jrrp 使用运行时
+#   `from plugins.DicePP.module.misc.jrrp_utils import compute_jrrp`，
 #   不受此 patch 影响。该路径的 mock 在 tests/unit/persona/test_jrrp_persona.py
-#   中通过 `patch("module.misc.jrrp_utils.compute_jrrp")` 覆盖。
+#   中通过 `patch("plugins.DicePP.module.misc.jrrp_utils.compute_jrrp")` 覆盖。
 # - 当前集成 Bot 中 persona 未启用，PersonaCommand 不拦截 .jrrp，无实际覆盖盲区。
 #   若将来集成 Bot 启用 persona，需同步更新本文件的 mock 范围。
 
@@ -54,7 +56,7 @@ def _make_jrrp_result(jrrp: int, zrrp: int = 60) -> JrrpResult:
 def mock_jrrp_date():
     """Mock JRRP 日期为固定值"""
     fixed_date = datetime.datetime(2024, 1, 15, 12, 0, 0)
-    with patch("module.misc.jrrp_command.get_current_date_raw", return_value=fixed_date):
+    with patch('plugins.DicePP.module.misc.jrrp_command.get_current_date_raw', return_value=fixed_date):
         yield fixed_date
 
 
@@ -84,11 +86,11 @@ class TestJrrpDeterminism:
         group_id = "group_jrrp"
 
         day1 = datetime.datetime(2024, 1, 15, 12, 0, 0)
-        with patch("module.misc.jrrp_command.get_current_date_raw", return_value=day1):
+        with patch('plugins.DicePP.module.misc.jrrp_command.get_current_date_raw', return_value=day1):
             _, result1 = await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
 
         day2 = datetime.datetime(2024, 1, 16, 12, 0, 0)
-        with patch("module.misc.jrrp_command.get_current_date_raw", return_value=day2):
+        with patch('plugins.DicePP.module.misc.jrrp_command.get_current_date_raw', return_value=day2):
             _, result2 = await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
 
         # 验证不同日期产生不同结果（极低概率相同，因 seed 不同）
@@ -96,7 +98,7 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__boundary_value_min(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.4: JRRP 边界值 1 应显示特殊文本"""
-        with patch("module.misc.jrrp_command.compute_jrrp",
+        with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                    return_value=_make_jrrp_result(jrrp=1)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_min", nickname="测试用户", group_id="group_jrrp")
 
@@ -109,7 +111,7 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__boundary_value_max(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.5: JRRP 边界值 100 应显示特殊文本"""
-        with patch("module.misc.jrrp_command.compute_jrrp",
+        with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                    return_value=_make_jrrp_result(jrrp=100)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_max", nickname="测试用户", group_id="group_jrrp")
 
@@ -122,7 +124,7 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__comparison_lower_than_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.6: JRRP 比昨日低时应显示下降信息"""
-        with patch("module.misc.jrrp_command.compute_jrrp",
+        with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                    return_value=_make_jrrp_result(jrrp=40, zrrp=80)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_lower", nickname="测试用户", group_id="group_jrrp")
 
@@ -132,7 +134,7 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__comparison_higher_than_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.7: JRRP 比昨日高时应显示上升信息"""
-        with patch("module.misc.jrrp_command.compute_jrrp",
+        with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                    return_value=_make_jrrp_result(jrrp=70, zrrp=30)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_higher", nickname="测试用户", group_id="group_jrrp")
 
@@ -141,7 +143,7 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__comparison_same_as_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.8: JRRP 与昨日相同时应显示相同信息"""
-        with patch("module.misc.jrrp_command.compute_jrrp",
+        with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                    return_value=_make_jrrp_result(jrrp=50, zrrp=50)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_same", nickname="测试用户", group_id="group_jrrp")
 
@@ -152,7 +154,7 @@ class TestJrrpDeterminism:
         """任务 6.9: 验证 seed 基于日期和 user_id 生成并影响结果"""
         fixed_date = datetime.datetime(2024, 1, 15, 12, 0, 0)
 
-        with patch("module.misc.jrrp_command.get_current_date_raw", return_value=fixed_date):
+        with patch('plugins.DicePP.module.misc.jrrp_command.get_current_date_raw', return_value=fixed_date):
             # 测试1: 相同 user_id 和日期应产生相同结果（确定性验证）
             cmds1, result1 = await send_as_user(
                 e2e_bot, ".jrrp", user_id="test_user_123", nickname="测试用户", group_id="group_jrrp"
@@ -163,7 +165,7 @@ class TestJrrpDeterminism:
             assert result1 == result2, "相同 user_id 和日期应产生相同 JRRP 结果"
 
             # 测试2: 不同 user_id 应产生不同结果（通过 patch compute_jrrp 验证 seed 机制）
-            with patch("module.misc.jrrp_command.compute_jrrp",
+            with patch('plugins.DicePP.module.misc.jrrp_command.compute_jrrp',
                        return_value=_make_jrrp_result(jrrp=42)):
                 cmds3, result3 = await send_as_user(
                     e2e_bot, ".jrrp", user_id="test_user_456", nickname="测试用户3", group_id="group_jrrp"

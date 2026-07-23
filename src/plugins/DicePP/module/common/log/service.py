@@ -5,8 +5,8 @@ from collections.abc import Callable
 from datetime import datetime
 from uuid import uuid4
 
-from core.data.log_repository import LogRepository, LogUnitOfWork
-from core.data.models import LogGroupState, LogSession
+from plugins.DicePP.core.data.log_repository import LogRepository, LogUnitOfWork
+from plugins.DicePP.core.data.models import LogGroupState, LogSession
 
 from .errors import LogDomainError, LogErrorCode, LogInvariantError
 from .types import (

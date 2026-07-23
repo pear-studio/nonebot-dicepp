@@ -6,8 +6,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
-from core.command.cq_extractor import extract_segments
-from core.data.models import LogRecord, LogSession
+from plugins.DicePP.core.command.cq_extractor import extract_segments
+from plugins.DicePP.core.data.models import LogRecord, LogSession
 
 from .types import LogExportView
 

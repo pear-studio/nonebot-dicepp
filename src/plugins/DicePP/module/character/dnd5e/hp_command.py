@@ -5,17 +5,17 @@ hp指令
 from typing import List, Tuple, Any, Literal, Optional, Dict
 import re
 
-from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from utils.string import match_substring
-from module.roll import RollDiceError, RollResult
-from module.roll.ast_engine.adapter import exec_roll_exp_unified
-from core.data.models import DNDCharacter, NPCHealth, HPInfo
-from module.character.dnd5e.services import HPService
+from plugins.DicePP.utils.string import match_substring
+from plugins.DicePP.module.roll import RollDiceError, RollResult
+from plugins.DicePP.module.roll.ast_engine.adapter import exec_roll_exp_unified
+from plugins.DicePP.core.data.models import DNDCharacter, NPCHealth, HPInfo
+from plugins.DicePP.module.character.dnd5e.services import HPService
 
 LOC_HP_INFO = "hp_info"
 LOC_HP_INFO_MISS = "hp_info_miss"
@@ -310,7 +310,7 @@ class HPCommand(UserCommandBase):
         target_id_name_dict = {}
         pc_set: set = set()
         try:
-            from core.data.models import InitList
+            from plugins.DicePP.core.data.models import InitList
             init_list: InitList = await self.bot.db.initiative.get(group_id)
             if init_list is not None:
                 for entity in init_list.entities:

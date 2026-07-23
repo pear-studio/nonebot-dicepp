@@ -8,7 +8,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock
 
-from module.persona.llm.coordinator import (
+from plugins.DicePP.module.persona.llm.coordinator import (
     LLMCallCoordinator,
     SubmitResult,
 )

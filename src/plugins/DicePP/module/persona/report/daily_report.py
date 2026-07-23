@@ -8,16 +8,16 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import timedelta
 
-from core.bot import Bot
-from core.command.const import DPP_COMMAND_FLAG_DICT, DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_CHAR, \
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.command.const import DPP_COMMAND_FLAG_DICT, DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_CHAR, \
     DPP_COMMAND_FLAG_QUERY, DPP_COMMAND_FLAG_FUN, DPP_COMMAND_FLAG_CHAT, DPP_COMMAND_FLAG_MANAGE, \
     DPP_COMMAND_FLAG_DRAW, DPP_COMMAND_FLAG_DND, DPP_COMMAND_FLAG_HELP, DPP_COMMAND_FLAG_INFO, \
     DPP_COMMAND_FLAG_HUB, DPP_COMMAND_FLAG_BATTLE, DPP_COMMAND_FLAG_MACRO
-from core.statistics import UserStatInfo, GroupStatInfo
+from plugins.DicePP.core.statistics import UserStatInfo, GroupStatInfo
 from ..data.models import MessageType
 from ..gateway.port import MessagePort
-from utils.time import wall_now
-from utils.logger import logger
+from plugins.DicePP.utils.time import wall_now
+from plugins.DicePP.utils.logger import logger
 
 _DIARY_UNAVAILABLE = "今日日记未生成"
 

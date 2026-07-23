@@ -97,6 +97,227 @@ def _isolate_shell_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return shell_session
 
 
+def test_import_runtime_types_uses_canonical_namespace_without_leaking_path() -> None:
+    probe = f"""
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+repo_root = Path({json.dumps(str(REPO_ROOT))})
+script_path = Path({json.dumps(str(SCRIPT_PATH))})
+source_root = (repo_root / "src").resolve()
+legacy_plugins_root = source_root / "plugins"
+legacy_package_root = source_root / "plugins" / "DicePP"
+
+def is_path_entry(entry, target):
+    try:
+        return Path(entry).resolve() == target
+    except (OSError, TypeError):
+        return False
+
+sys.path[:] = [
+    entry
+    for entry in sys.path
+    if not is_path_entry(entry, source_root)
+    and not is_path_entry(entry, legacy_plugins_root)
+    and not is_path_entry(entry, legacy_package_root)
+]
+original_path = list(sys.path)
+
+spec = importlib.util.spec_from_file_location("persona_llm_prepare_session_probe", script_path)
+assert spec and spec.loader
+prepare = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = prepare
+spec.loader.exec_module(prepare)
+bot_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
+
+print("__DICEPP_IMPORT_PROBE__" + json.dumps({{
+    "path_restored": sys.path == original_path,
+    "legacy_import_path_exposed": any(
+        is_path_entry(entry, legacy_plugins_root)
+        or is_path_entry(entry, legacy_package_root)
+        for entry in sys.path
+    ),
+    "modules": [
+        bot_config.__module__,
+        character_loader.__module__,
+        persona_model.__module__,
+        shell_session.__name__,
+    ],
+}}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_line = next(
+        line
+        for line in completed.stdout.splitlines()
+        if line.startswith("__DICEPP_IMPORT_PROBE__")
+    )
+    result = json.loads(result_line.removeprefix("__DICEPP_IMPORT_PROBE__"))
+    assert result == {
+        "path_restored": True,
+        "legacy_import_path_exposed": False,
+        "modules": [
+            "plugins.DicePP.core.config.pydantic_models",
+            "plugins.DicePP.module.persona.character.loader",
+            "plugins.DicePP.core.persona.models",
+            "plugins.DicePP.shell.session",
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("pollution", "expected_detail"),
+    [
+        ("sys.path.insert(0, str(legacy_plugins_root))", "sys.path="),
+        (
+            "sys.path.insert(0, str(legacy_package_root / 'core'))",
+            "sys.path=",
+        ),
+        (
+            "sys.path.insert(0, str(legacy_plugins_root))\n"
+            "import DicePP\n"
+            "sys.path.remove(str(legacy_plugins_root))",
+            "sys.modules=DicePP",
+        ),
+        (
+            "sys.path.insert(0, str(legacy_package_root))\n"
+            "import core\n"
+            "sys.path.remove(str(legacy_package_root))",
+            "sys.modules=core",
+        ),
+    ],
+)
+def test_import_runtime_types_rejects_legacy_process_pollution(
+    pollution: str,
+    expected_detail: str,
+) -> None:
+    probe = f"""
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+repo_root = Path({json.dumps(str(REPO_ROOT))})
+script_path = Path({json.dumps(str(SCRIPT_PATH))})
+source_root = (repo_root / "src").resolve()
+legacy_plugins_root = source_root / "plugins"
+legacy_package_root = legacy_plugins_root / "DicePP"
+
+spec = importlib.util.spec_from_file_location("persona_llm_prepare_session_probe", script_path)
+assert spec and spec.loader
+prepare = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = prepare
+spec.loader.exec_module(prepare)
+
+{pollution}
+
+try:
+    prepare.import_runtime_types(repo_root)
+except prepare.PreparationError as exc:
+    print("__DICEPP_IMPORT_POLLUTION_PROBE__" + json.dumps({{"message": str(exc)}}))
+else:
+    raise AssertionError("legacy import pollution was accepted")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_line = next(
+        line
+        for line in completed.stdout.splitlines()
+        if line.startswith("__DICEPP_IMPORT_POLLUTION_PROBE__")
+    )
+    message = json.loads(
+        result_line.removeprefix("__DICEPP_IMPORT_POLLUTION_PROBE__")
+    )["message"]
+    assert "旧 DicePP 导入身份" in message
+    assert expected_detail in message
+
+
+def test_import_runtime_types_allows_unrelated_plugin_paths_and_modules(
+    tmp_path: Path,
+) -> None:
+    foreign_plugins_root = tmp_path / "unrelated" / "src" / "plugins"
+    probe = f"""
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+repo_root = Path({json.dumps(str(REPO_ROOT))})
+script_path = Path({json.dumps(str(SCRIPT_PATH))})
+foreign_plugins_root = Path({json.dumps(str(foreign_plugins_root))})
+foreign_dicepp_root = foreign_plugins_root / "DicePP"
+foreign_dicepp_root.mkdir(parents=True)
+(foreign_dicepp_root / "__init__.py").write_text(
+    "marker = 'external'\\n", encoding="utf-8"
+)
+
+spec = importlib.util.spec_from_file_location("persona_llm_prepare_session_probe", script_path)
+assert spec and spec.loader
+prepare = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = prepare
+spec.loader.exec_module(prepare)
+
+sys.path.insert(0, str(foreign_plugins_root))
+import DicePP
+assert Path(DicePP.__file__).resolve().is_relative_to(foreign_dicepp_root)
+
+bot_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
+print("__DICEPP_UNRELATED_IMPORT_PROBE__" + json.dumps({{
+    "external_package": str(Path(DicePP.__file__).resolve()),
+    "modules": [
+        bot_config.__module__,
+        character_loader.__module__,
+        persona_model.__module__,
+        shell_session.__name__,
+    ],
+}}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_line = next(
+        line
+        for line in completed.stdout.splitlines()
+        if line.startswith("__DICEPP_UNRELATED_IMPORT_PROBE__")
+    )
+    result = json.loads(
+        result_line.removeprefix("__DICEPP_UNRELATED_IMPORT_PROBE__")
+    )
+    assert result == {
+        "external_package": str(
+            (foreign_plugins_root / "DicePP" / "__init__.py").resolve()
+        ),
+        "modules": [
+            "plugins.DicePP.core.config.pydantic_models",
+            "plugins.DicePP.module.persona.character.loader",
+            "plugins.DicePP.core.persona.models",
+            "plugins.DicePP.shell.session",
+        ],
+    }
+
+
 def _prepared_for_confirmation(
     *estimates: prepare.AgentRunEstimate,
 ) -> prepare.PreparedSession:
@@ -217,7 +438,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
         / "character.yaml"
     ).is_file()
 
-    from core.config.loader import ConfigLoader
+    from plugins.DicePP.core.config.loader import ConfigLoader
 
     loaded = ConfigLoader(
         data_path=str(result.path / "config"),

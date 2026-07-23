@@ -11,14 +11,14 @@ from __future__ import annotations
 import pytest
 from unittest.mock import MagicMock
 
-from module.persona.life.conversation import NOTIFICATION_PREFIX
-from module.persona.life.conversation_scope import (
+from plugins.DicePP.module.persona.life.conversation import NOTIFICATION_PREFIX
+from plugins.DicePP.module.persona.life.conversation_scope import (
     ConversationScope,
     NS_LIFE_DM,
     NS_LIFE_CHARACTER,
 )
-from module.persona.life.conversation_registry import ConversationRegistry
-from module.persona.life.conversation_summary import FakeSummarizer
+from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
 
 
 @pytest.fixture

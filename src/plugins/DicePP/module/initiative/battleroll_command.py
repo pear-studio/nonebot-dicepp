@@ -1,13 +1,13 @@
 from typing import List, Tuple, Any
 
-from core.bot import Bot
-from core.data.models import InitList, InitEntity
-from core.command.const import *
-from core.command import UserCommandBase , custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from utils.string import match_substring
-from utils.cq_code import get_cq_at
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.data.models import InitList, InitEntity
+from plugins.DicePP.core.command.const import *
+from plugins.DicePP.core.command import UserCommandBase , custom_user_command
+from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
+from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from plugins.DicePP.utils.string import match_substring
+from plugins.DicePP.utils.cq_code import get_cq_at
 
 LOC_BR_NEW = "battleroll_new"
 LOC_BR_ROUND = "battleroll_round"

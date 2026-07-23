@@ -11,10 +11,10 @@ import re
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
-from core.communication import MessageMetaData
-from module.persona.chat.chat_shared import ChatCallContext
-from module.persona.chat.orchestrator import ChatOutcome
-from core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.core.communication import MessageMetaData
+from plugins.DicePP.module.persona.chat.chat_shared import ChatCallContext
+from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ def _make_meta(user_id: str = "U123", group_id: str = "", nickname: str = "test_
 
 def _make_cmd(app=None, data_store=None, config=None, enabled=True):
     """创建 PersonaCommand 实例并注入 mock 依赖"""
-    from module.persona.command import PersonaCommand
+    from plugins.DicePP.module.persona.command import PersonaCommand
 
     cmd = PersonaCommand.__new__(PersonaCommand)
     cmd.enabled = enabled
@@ -165,7 +165,7 @@ class TestHandleJrrp:
 
     @pytest.fixture
     def mock_jrrp_result(self):
-        from module.misc.jrrp_utils import JrrpResult
+        from plugins.DicePP.module.misc.jrrp_utils import JrrpResult
         return JrrpResult(jrrp=75, zrrp=60, delta=15, delta_percent=25.0,
                           direction='up', is_min=False, is_max=False)
 
@@ -180,8 +180,8 @@ class TestHandleJrrp:
         cmd._send = AsyncMock()
 
         meta = _make_meta()
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
@@ -216,8 +216,8 @@ class TestHandleJrrp:
         meta = _make_meta(group_id="G1", nickname="账号昵称")
         meta.sender.card = "银月团长"
 
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 await cmd._handle_jrrp("U123", "G1", meta)
 
         ctx = app.chat.chat_command.await_args.kwargs["ctx"]
@@ -237,9 +237,9 @@ class TestHandleJrrp:
         cmd._send = AsyncMock()
 
         meta = _make_meta()
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
+                with patch('plugins.DicePP.module.misc.jrrp_utils.format_jrrp_text',
                            return_value="test_user的今日人品是:75\n人品比昨天上升了25.0%！"):
                     result = await cmd._handle_jrrp("U123", "", meta)
 
@@ -265,9 +265,9 @@ class TestHandleJrrp:
 
         meta = _make_meta()
         fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
+                with patch('plugins.DicePP.module.misc.jrrp_utils.format_jrrp_text',
                            return_value=fallback_text):
                     result = await cmd._handle_jrrp("U123", "", meta)
 
@@ -286,9 +286,9 @@ class TestHandleJrrp:
 
         meta = _make_meta()
         fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
+                with patch('plugins.DicePP.module.misc.jrrp_utils.format_jrrp_text',
                            return_value=fallback_text):
                     result = await cmd._handle_jrrp("U123", "", meta)
 
@@ -308,9 +308,9 @@ class TestHandleJrrp:
 
         meta = _make_meta()
         fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
+                with patch('plugins.DicePP.module.misc.jrrp_utils.format_jrrp_text',
                            return_value=fallback_text):
                     result = await cmd._handle_jrrp("U123", "", meta)
 
@@ -331,8 +331,8 @@ class TestHandleJrrp:
         cmd.data_store = None
 
         meta = _make_meta()
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
@@ -346,9 +346,9 @@ class TestHandleJrrp:
         使用真实 ChatOrchestrator（非裸 AsyncMock），确保 ctx=ChatCallContext
         传参不会被静默吞掉。裸 AsyncMock 接受任意 kwargs 是这个 bug 逃过测试的根因。
         """
-        from module.persona.chat.orchestrator import ChatOrchestrator
-        from module.persona.chat.chat_config import ChatConfig
-        from module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
         # 构造真实 ChatOrchestrator（依赖全部 mock，但 chat() 是真实方法）
         store = MagicMock(spec=PersonaDataStore)
@@ -405,8 +405,8 @@ class TestHandleJrrp:
 
         meta = _make_meta(group_id="G1", nickname="账号昵称")
         meta.sender.card = "银月团长"
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_jrrp_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 result = await cmd._handle_jrrp("U123", "G1", meta)
 
         # 不抛 TypeError 即为通过；LLM 评语由 delivery 发送，命令层不再 _send
@@ -428,7 +428,7 @@ class TestIsCommandPropagation:
 
     async def test_handle_jrrp_calls_chat_with_is_command(self):
         """_handle_jrrp 通过 app.chat.chat_command 传入 is_command=True"""
-        from module.misc.jrrp_utils import JrrpResult
+        from plugins.DicePP.module.misc.jrrp_utils import JrrpResult
 
         app = MagicMock()
         app.chat.chat_command = AsyncMock(
@@ -442,8 +442,8 @@ class TestIsCommandPropagation:
         mock_result = JrrpResult(jrrp=50, zrrp=50, delta=0, delta_percent=0.0,
                                  direction='same', is_min=False, is_max=False)
 
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 await cmd._handle_jrrp("U123", "", meta)
 
         # 验证 chat_command 被调用且 is_command=True
@@ -459,7 +459,7 @@ class TestPersonaAppIsAwake:
 
     async def test_delegates_to_chat_session(self):
         """is_awake 委托给 chat.is_awake()"""
-        from module.persona.factory import PersonaApp
+        from plugins.DicePP.module.persona.factory import PersonaApp
 
         chat = MagicMock()
         chat.is_awake = AsyncMock(return_value=True)
@@ -477,7 +477,7 @@ class TestJrrpLLMContext:
 
     async def test_event_msg_passed_as_transient_message(self):
         """event_msg 以 transient_message 参数传入 chat()，不写入 message_stream"""
-        from module.misc.jrrp_utils import JrrpResult
+        from plugins.DicePP.module.misc.jrrp_utils import JrrpResult
 
         app = MagicMock()
         app.chat.chat_command = AsyncMock(
@@ -491,8 +491,8 @@ class TestJrrpLLMContext:
         mock_result = JrrpResult(jrrp=75, zrrp=60, delta=15, delta_percent=25.0,
                                  direction='up', is_min=False, is_max=False)
 
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
-            with patch("utils.time.get_current_date_raw"):
+        with patch('plugins.DicePP.module.misc.jrrp_utils.compute_jrrp', return_value=mock_result):
+            with patch('plugins.DicePP.utils.time.get_current_date_raw'):
                 await cmd._handle_jrrp("U123", "", meta)
 
         # 验证 chat_command() 被调用且 ctx.transient_message 包含完整 event 内容
@@ -531,7 +531,7 @@ class TestChatSignatureContract:
     def test_chat_accepts_ctx_parameter(self):
         """ChatOrchestrator.chat() 签名包含 ctx 参数"""
         import inspect
-        from module.persona.chat.orchestrator import ChatOrchestrator
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 
         sig = inspect.signature(ChatOrchestrator.chat)
         params = dict(sig.parameters)
@@ -543,7 +543,7 @@ class TestChatSignatureContract:
     def test_chat_rejects_legacy_kwargs(self):
         """ChatOrchestrator.chat() 不接受已废弃的独立 keyword 参数"""
         import inspect
-        from module.persona.chat.orchestrator import ChatOrchestrator
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 
         sig = inspect.signature(ChatOrchestrator.chat)
         params = dict(sig.parameters)

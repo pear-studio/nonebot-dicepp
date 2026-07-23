@@ -8,15 +8,15 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from core.bot import Bot
-from core.config import Paths
-from core.communication import (
+from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config import Paths
+from plugins.DicePP.core.communication import (
     MessageMetaData,
     MessageRecallEvent,
     MessageSender,
     PostSendEvent,
 )
-from module.common.log import LogRecorder
+from plugins.DicePP.module.common.log import LogRecorder
 from tests.support.fs_utils import rmtree_retry
 
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from module.persona.life.conversation_scope import (
+from plugins.DicePP.module.persona.life.conversation_scope import (
     NS_CHAT_GROUP,
     NS_CHAT_PRIVATE,
     NS_LIFE_DM,

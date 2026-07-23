@@ -1,5 +1,5 @@
 import pytest
-from utils.data import yield_deduplicate
+from plugins.DicePP.utils.data import yield_deduplicate
 
 
 class TestYieldDeduplicate:

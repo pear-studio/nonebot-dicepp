@@ -20,8 +20,8 @@ import random as random_module
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
-from utils.logger import logger
-from utils.time import get_clock
+from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import get_clock
 
 from ..data.persist_keys import PERSONA_SK_SHARE_SCHEDULER
 from ..data.store import PersonaDataStore
@@ -32,7 +32,7 @@ from .protocols import BoundaryReceiver
 from .target import TargetSelector
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
     from ..chat.chat_shared import ChatOutcome
 
 

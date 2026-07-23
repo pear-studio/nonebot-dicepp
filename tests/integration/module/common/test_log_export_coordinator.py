@@ -10,16 +10,16 @@ import pytest
 import pytest_asyncio
 from docx import Document
 
-from core.command import (
+from plugins.DicePP.core.command import (
     BotCommandDispatchResult,
     FileDeliveryOutcome,
     FileDeliveryResult,
 )
-from core.communication import GroupMessagePort
-from core.data import LogRepository
-from core.data.models import LogRecord
-from core.data.schema import ensure_bot_log_schema
-from module.common.log import (
+from plugins.DicePP.core.communication import GroupMessagePort
+from plugins.DicePP.core.data import LogRepository
+from plugins.DicePP.core.data.models import LogRecord
+from plugins.DicePP.core.data.schema import ensure_bot_log_schema
+from plugins.DicePP.module.common.log import (
     LogDeliveryStatus,
     LogExportCoordinator,
     LogExportFormat,
@@ -27,7 +27,7 @@ from module.common.log import (
     LogProjector,
     LogService,
 )
-from module.common.log.exporters import DocxLogExporter, TextLogExporter
+from plugins.DicePP.module.common.log.exporters import DocxLogExporter, TextLogExporter
 
 
 NOW = datetime(2026, 7, 20, 16, 0, 0)

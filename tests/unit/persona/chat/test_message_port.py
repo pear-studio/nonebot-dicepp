@@ -7,10 +7,10 @@ Bot.proxy.process_bot_command 投递；proxy 缺失时安全降级而非抛 Attr
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from core.command.bot_cmd import BotSendMsgCommand
-from core.communication import GroupMessagePort, PrivateMessagePort
+from plugins.DicePP.core.command.bot_cmd import BotSendMsgCommand
+from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
 
-from module.persona.gateway.port import MessagePort
+from plugins.DicePP.module.persona.gateway.port import MessagePort
 
 
 def _make_bot(account: str = "test_bot", with_proxy: bool = True) -> MagicMock:
@@ -113,7 +113,7 @@ async def test_send_failure_returns_false_and_calls_on_delivery_failed():
 @pytest.mark.asyncio
 async def test_send_pipeline_stages_still_applied():
     bot = _make_bot()
-    from module.persona.gateway.pipeline import MessagePipeline, TruncateStage
+    from plugins.DicePP.module.persona.gateway.pipeline import MessagePipeline, TruncateStage
 
     pipeline = MessagePipeline()
     pipeline.add(TruncateStage(max_chars=5))
@@ -144,7 +144,7 @@ async def test_send_with_system_log_message_type():
     """message_type=SYSTEM_LOG 时透传到 BotSendMsgCommand"""
     bot = _make_bot()
     port = MessagePort(bot)
-    from core.message_types import MessageType
+    from plugins.DicePP.core.message_types import MessageType
 
     await port.send("u1", "", "daily report", message_type=MessageType.SYSTEM_LOG)
 
@@ -157,7 +157,7 @@ async def test_send_default_message_type_is_chat():
     """未指定 message_type 时默认为 CHAT"""
     bot = _make_bot()
     port = MessagePort(bot)
-    from core.message_types import MessageType
+    from plugins.DicePP.core.message_types import MessageType
 
     await port.send("u1", "g1", "hello")
 
