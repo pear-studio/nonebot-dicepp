@@ -20,6 +20,18 @@ def _float_env(name: str, default: float) -> float:
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True, slots=True)
 class ManagerSettings:
     layout: InstanceLayout
@@ -33,6 +45,8 @@ class ManagerSettings:
     docker_command: str = "unix:///var/run/docker.sock"
     docker_timeout: float = 30.0
     token_path: Path | None = None
+    release_scheduler_enabled: bool = True
+    github_api: str = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
 
     def __post_init__(self) -> None:
         validate_runtime_unit_id(self.runtime_unit_id)
@@ -52,6 +66,14 @@ class ManagerSettings:
             docker_command=os.environ.get("DICEPP_MANAGER_DOCKER_COMMAND", "unix:///var/run/docker.sock"),
             docker_timeout=_float_env("DICEPP_MANAGER_DOCKER_TIMEOUT", 30.0),
             token_path=Path(os.environ.get("DICEPP_MANAGER_TOKEN_FILE", str(layout.manager_token))),
+            release_scheduler_enabled=_bool_env(
+                "DICEPP_MANAGER_RELEASE_SCHEDULER",
+                True,
+            ),
+            github_api=os.environ.get(
+                "DICEPP_GITHUB_API",
+                "https://api.github.com/repos/pear-studio/nonebot-dicepp",
+            ),
         )
 
 

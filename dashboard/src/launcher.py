@@ -6,7 +6,9 @@ import argparse
 import asyncio
 import logging
 import os
+import stat
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -270,24 +272,150 @@ def configure_launcher_environment(
     runtime_exe_name: str = "DicePP-Runtime.exe",
 ) -> dict[str, str]:
     """Set default env vars for the packaged Windows single entry."""
-    app_path = Path(app_dir)
-    runtime_path = app_path / runtime_exe_name
+    program_path, instance_path = resolve_launcher_roots(app_dir)
+    sync_version_owned_config(program_path, instance_path)
+    runtime_path = program_path / runtime_exe_name
     defaults = {
-        "DICEPP_PROJECT_ROOT": str(app_path),
+        "DICEPP_APP_DIR": str(program_path),
+        "DICEPP_PROJECT_ROOT": str(instance_path),
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_PORT": "4090",
         "DICEPP_MANAGER_HOST": "127.0.0.1",
         "DICEPP_MANAGER_PORT": "4091",
         "DICEPP_MANAGER_URL": "http://127.0.0.1:4091",
-        "DICEPP_MANAGER_TOKEN_FILE": str(app_path / "manager" / "state" / "api-token"),
+        "DICEPP_MANAGER_TOKEN_FILE": str(instance_path / "manager" / "state" / "api-token"),
         "DICEPP_MANAGER_RUNTIME": "process",
         "DICEPP_MANAGER_RUNTIME_UNIT_ID": LAUNCHER_RUNTIME_KEY,
         "DICEPP_MANAGER_PROCESS_COMMAND": _quote_command([str(runtime_path)]),
-        "DICEPP_MANAGER_PROCESS_CWD": str(app_path),
+        "DICEPP_MANAGER_PROCESS_CWD": str(instance_path),
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
     return {key: os.environ[key] for key in defaults}
+
+
+def sync_version_owned_config(program_dir: Path, instance_root: Path) -> None:
+    """Seed missing version-owned defaults without overwriting an instance."""
+    if program_dir == instance_root:
+        return
+    for relative in (
+        Path("config/global.json"),
+        Path("config/bots/_template.json"),
+    ):
+        source = program_dir / relative
+        if not source.is_file() or source.is_symlink():
+            continue
+        destination = instance_root / relative
+        _ensure_safe_seed_parent(instance_root, relative.parent)
+        if _existing_safe_config(destination):
+            continue
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(source.read_bytes())
+                output.flush()
+                os.fsync(output.fileno())
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                _existing_safe_config(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        else:
+            temporary.unlink(missing_ok=True)
+
+
+def _existing_safe_config(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    attributes = getattr(info, "st_file_attributes", 0)
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        path.is_symlink()
+        or (reparse and attributes & reparse)
+        or not stat.S_ISREG(info.st_mode)
+    ):
+        raise RuntimeError(f"Refusing unsafe instance config destination: {path}")
+    return True
+
+
+def _ensure_safe_seed_parent(
+    instance_root: Path,
+    relative_parent: Path,
+) -> Path:
+    root_info = _validate_seed_directory(instance_root, root=instance_root)
+    root_identity = (root_info.st_dev, root_info.st_ino)
+    current = instance_root
+    ancestors = [instance_root]
+    for component in relative_parent.parts:
+        _validate_seed_directory(
+            instance_root,
+            root=instance_root,
+            identity=root_identity,
+        )
+        current = current / component
+        try:
+            current.mkdir()
+        except FileExistsError:
+            pass
+        _validate_seed_directory(current, root=instance_root)
+        ancestors.append(current)
+    for ancestor in ancestors:
+        identity = root_identity if ancestor == instance_root else None
+        _validate_seed_directory(
+            ancestor,
+            root=instance_root,
+            identity=identity,
+        )
+    return current
+
+
+def _validate_seed_directory(
+    path: Path,
+    *,
+    root: Path,
+    identity: tuple[int, int] | None = None,
+) -> os.stat_result:
+    info = path.lstat()
+    attributes = getattr(info, "st_file_attributes", 0)
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    if (
+        path.is_symlink()
+        or (reparse and attributes & reparse)
+        or not stat.S_ISDIR(info.st_mode)
+        or (
+            identity is not None
+            and (info.st_dev, info.st_ino) != identity
+        )
+    ):
+        raise RuntimeError(f"Refusing unsafe instance config directory: {path}")
+    root_resolved = root.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    if not resolved.is_relative_to(root_resolved):
+        raise RuntimeError(f"Instance config directory escapes stable root: {path}")
+    return info
+
+
+def resolve_launcher_roots(
+    app_dir: str | os.PathLike[str],
+) -> tuple[Path, Path]:
+    """Return ``(program_dir, instance_root)`` for Portable or Velopack.
+
+    Velopack launches the active program from ``<install-root>/current``.
+    Mutable DicePP data belongs to the stable parent while executables remain in
+    the version switch directory. Portable keeps both roles in its own root.
+    """
+    program = Path(app_dir).resolve()
+    instance = program.parent if program.name.casefold() == "current" else program
+    return program, instance
 
 
 def should_open_browser() -> bool:

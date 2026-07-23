@@ -4,10 +4,11 @@
 # 支持: vX.Y.Z 正式版；vX.Y.ZrcN 预发布测试版
 # 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>
 #       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
-#       DicePP-<tag>-win64.zip
-#       DicePP-<tag>-linux-amd64-offline.zip
+#       DicePP-<tag>-win64-Portable.zip / DicePP-<tag>-win64-Setup.exe
+#       DicePP-<tag>-linux-amd64.zip
+#       dicepp-release.json（Manager machine contract）
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
-#       docker-compose.yml、Windows zip 和 Linux 离线包作为 release assets
+#       docker-compose.yml、Windows 安装产物和 Linux 发布包作为 release assets
 
 name: Release
 
@@ -158,6 +159,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
+      - name: Compute Velopack version and channel
+        id: velopack
+        shell: bash
+        run: |
+          CHANNEL=stable
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+            CHANNEL=prerelease
+          fi
+          VELOPACK_VERSION="$(PYTHONPATH=src uv run --frozen python -c \
+            "from scripts.build.generate_release_manifest import velopack_version; print(velopack_version('${{ steps.version.outputs.version }}'))")"
+          VELOPACK_CHANNEL="$(PYTHONPATH=src uv run --frozen python -c \
+            "from scripts.build.generate_release_manifest import velopack_channel; print(velopack_channel('${CHANNEL}', 'amd64'))")"
+          echo "version=${VELOPACK_VERSION}" >> $GITHUB_OUTPUT
+          echo "channel=${VELOPACK_CHANNEL}" >> $GITHUB_OUTPUT
+
       - name: Build Bot and Dashboard with PyInstaller
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
@@ -225,13 +241,35 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          $zipName = "DicePP-${{ steps.version.outputs.tag }}-win64.zip"
-          Compress-Archive -Path dist/DicePP -DestinationPath $zipName
+          dotnet tool install -g vpk --version 1.2.0
+          vpk pack `
+            --packId DicePP `
+            --packVersion "${{ steps.velopack.outputs.version }}" `
+            --packDir dist/DicePP `
+            --mainExe DicePP.exe `
+            --channel "${{ steps.velopack.outputs.channel }}"
+
+          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
+          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
+          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
+          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
+            throw "Velopack output set is incomplete or ambiguous"
+          }
+          Move-Item $portable[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip"
+          Move-Item $setup[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe"
+          Copy-Item $full[0].FullName .
+          Copy-Item "Releases/releases.${{ steps.velopack.outputs.channel }}.json" .
+          Copy-Item "Releases/assets.${{ steps.velopack.outputs.channel }}.json" .
 
       - uses: actions/upload-artifact@v4
         with:
           name: dicepp-windows
-          path: DicePP-*-win64.zip
+          path: |
+            DicePP-*-win64-Portable.zip
+            DicePP-*-win64-Setup.exe
+            *-full.nupkg
+            releases.win-*.json
+            assets.win-*.json
           retention-days: 7
 
   publish:
@@ -240,6 +278,14 @@ jobs:
     needs: [build-docker, windows-build]
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.24"
 
       - uses: actions/download-artifact@v4
         with:
@@ -264,7 +310,7 @@ jobs:
           docker pull ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
           docker pull ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
 
-      - name: Package Linux amd64 offline bundle
+      - name: Package Linux amd64 release bundle
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zip zstd
@@ -272,7 +318,7 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           ARCHIVE="DicePP-${TAG}-linux-amd64-images.tar"
           COMPRESSED="${ARCHIVE}.zst"
-          PACKAGE_DIR="DicePP-${TAG}-linux-amd64-offline"
+          PACKAGE_DIR="DicePP-${TAG}-linux-amd64"
           PACKAGE_ZIP="${PACKAGE_DIR}.zip"
 
           docker save \
@@ -291,7 +337,7 @@ jobs:
           cp docs/persona-character-card.md "${PACKAGE_DIR}/docs/persona-character-card.md"
 
           cat > "${PACKAGE_DIR}/使用说明.md" <<EOF
-          # DicePP Linux 离线包使用说明
+          # DicePP Linux 发布包使用说明
 
           请先阅读 docs/linux.md。
 
@@ -302,28 +348,19 @@ jobs:
           - docs/persona.md：Persona AI 对话
           - docs/persona-character-card.md：Persona 角色卡
 
-          本包包含 DicePP 的 Linux amd64 Docker 离线镜像和对应版本的 docker-compose.yml。
+          本包包含 DicePP 的 Linux amd64 Docker 镜像和对应版本的 docker-compose.yml，可用于快速或离线部署。
           EOF
 
-          cat > "${PACKAGE_DIR}/manifest.json" <<EOF
-          {
-            "name": "DicePP Linux offline package",
-            "version": "${TAG}",
-            "platform": "linux-amd64",
-            "images": [
-              "ghcr.io/pear-studio/nonebot-dicepp:${TAG}",
-              "ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
-            ],
-            "image_archive": "images/${COMPRESSED}",
-            "compose": "docker-compose.yml",
-            "docs": [
-              "docs/linux.md",
-              "docs/configuration.md",
-              "docs/persona.md",
-              "docs/persona-character-card.md"
-            ]
-          }
-          EOF
+          PYTHONPATH=src uv run --frozen python \
+            scripts/build/generate_linux_package_manifest.py \
+            --version "${TAG}" \
+            --package-root "${PACKAGE_DIR}" \
+            --compose "${PACKAGE_DIR}/docker-compose.yml" \
+            --image-archive "${PACKAGE_DIR}/images/${COMPRESSED}" \
+            --image "ghcr.io/pear-studio/nonebot-dicepp:${TAG}" \
+            --image "ghcr.io/pear-studio/dicepp-dashboard:${TAG}" \
+            --release-notes "docs/releases/${TAG}.md" \
+            --output "${PACKAGE_DIR}/dicepp-package.json"
 
           (
             cd "${PACKAGE_DIR}"
@@ -335,11 +372,31 @@ jobs:
               "docs/persona.md" \
               "docs/persona-character-card.md" \
               "使用说明.md" \
-              "manifest.json" \
+              "dicepp-package.json" \
               > checksums.sha256
           )
 
           zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"
+
+      - name: Generate release machine contract
+        run: |
+          CHANNEL=stable
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+            CHANNEL=prerelease
+          fi
+          FULL_NUPKG="$(find . -maxdepth 1 -name '*-full.nupkg' -print -quit)"
+          RELEASES_JSON="$(find . -maxdepth 1 -name 'releases.win-*.json' -print -quit)"
+          ASSETS_JSON="$(find . -maxdepth 1 -name 'assets.win-*.json' -print -quit)"
+          PYTHONPATH=src uv run --frozen python scripts/build/generate_release_manifest.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --channel "${CHANNEL}" \
+            --release-notes "docs/releases/${{ steps.version.outputs.tag }}.md" \
+            --artifact "windows:amd64:portable:DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip" \
+            --artifact "windows:amd64:setup:DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe" \
+            --artifact "windows:amd64:velopack-full:${FULL_NUPKG}" \
+            --artifact "windows:amd64:velopack-releases:${RELEASES_JSON}" \
+            --artifact "windows:amd64:velopack-assets:${ASSETS_JSON}" \
+            --artifact "linux:amd64:linux-bundle:DicePP-${{ steps.version.outputs.tag }}-linux-amd64.zip"
 
       - name: Create GitHub Release
         env:
@@ -352,10 +409,10 @@ jobs:
             RELEASE_FLAGS+=(--prerelease)
           fi
 
-          ASSETS=(docker-compose.yml)
+          ASSETS=(docker-compose.yml dicepp-release.json)
 
           shopt -s nullglob
-          ZIP_ASSETS=(DicePP-*-win64.zip)
+          ZIP_ASSETS=(DicePP-*-win64-Portable.zip DicePP-*-win64-Setup.exe *-full.nupkg releases.win-*.json assets.win-*.json)
           shopt -u nullglob
           if [ "${#ZIP_ASSETS[@]}" -gt 0 ]; then
             ASSETS+=("${ZIP_ASSETS[@]}")
@@ -364,12 +421,12 @@ jobs:
           fi
 
           shopt -s nullglob
-          OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-offline.zip)
+          LINUX_IMAGE_ASSETS=(DicePP-*-linux-amd64.zip)
           shopt -u nullglob
-          if [ "${#OFFLINE_IMAGE_ASSETS[@]}" -gt 0 ]; then
-            ASSETS+=("${OFFLINE_IMAGE_ASSETS[@]}")
+          if [ "${#LINUX_IMAGE_ASSETS[@]}" -gt 0 ]; then
+            ASSETS+=("${LINUX_IMAGE_ASSETS[@]}")
           else
-            echo "::warning::Linux 离线镜像包不存在，跳过上传"
+            echo "::warning::Linux 发布包不存在，跳过上传"
           fi
 
           if [ -f "$RELEASE_MD" ]; then

@@ -45,6 +45,27 @@ class RecordingClient:
         return {"operation_id": "op-1", "runtime_unit_id": runtime_unit_id, "action": action, "status": "queued"}
     async def get_operation(self, operation_id):
         return {"operation_id": operation_id, "runtime_unit_id": "dicepp-runtime", "status": "succeeded"}
+    async def release_status(self):
+        return {
+            "settings": {"channel": "stable", "auto_download": False},
+            "available": {"version": "3.1.0", "compatible": True},
+            "download": {"status": "idle"},
+            "install_supported": False,
+        }
+    async def check_releases(self):
+        return {
+            "settings": {"channel": "stable", "auto_download": False},
+            "available": {"version": "3.1.0", "compatible": True},
+            "download": {"status": "idle"},
+            "install_supported": False,
+        }
+    async def download_release(self, purpose=None):
+        self.calls.append(("download", purpose))
+        return {
+            "available": {"version": "3.1.0", "compatible": True},
+            "download": {"status": "downloading"},
+            "install_supported": False,
+        }
 
 
 def test_dashboard_exposes_explicit_manager_unavailable(test_client: TestClient) -> None:
@@ -86,3 +107,22 @@ def test_dashboard_controls_shared_runtime_unit_and_reconnects_by_operation_id(t
 def test_dashboard_has_no_legacy_bot_lifecycle_route(test_client: TestClient) -> None:
     setup_auth(test_client)
     assert test_client.post("/api/manager/bots/test_bot/start").status_code == 404
+
+
+def test_dashboard_proxies_release_discovery_and_download_but_has_no_install_route(
+    test_client: TestClient,
+) -> None:
+    setup_auth(test_client)
+    client = RecordingClient()
+    test_client.app.state.manager_client = client
+
+    assert test_client.get("/api/releases/status").json()["settings"]["channel"] == "stable"
+    assert test_client.post("/api/releases/check").json()["available"]["version"] == "3.1.0"
+    download = test_client.post(
+        "/api/releases/download",
+        json={"purpose": "portable"},
+    )
+    assert download.status_code == 202
+    assert download.json()["download"]["status"] == "downloading"
+    assert client.calls == [("download", "portable")]
+    assert test_client.post("/api/releases/install", json={}).status_code == 404

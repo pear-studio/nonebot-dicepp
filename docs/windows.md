@@ -10,8 +10,11 @@ Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它本�
 
 推荐部署流程：
 
-1. 下载 DicePP Windows 发布包。安装包可以从发布页或交流群获取。
-2. 解压到固定目录。
+1. 默认下载 `DicePP-vX.Y.Z-win64-Portable.zip`，解压到固定目录，例如
+   `D:\DicePP`。这是最直观、最符合 DicePP 自包含数据约定的部署形式。
+2. `DicePP-vX.Y.Z-win64-Setup.exe` 是可选的 Velopack one-click 安装器，不依赖
+   Portable zip。它没有自定义目录向导；要保持自包含，请从终端显式执行
+   `.\DicePP-vX.Y.Z-win64-Setup.exe --installto D:\DicePP`。
 3. 启动 `DicePP.exe`。
 4. 在自动打开的网页管理面板中初始化管理员密码；也可以手动访问 `http://127.0.0.1:4090/dashboard`。
 5. 配置 LLOneBot 连接 DicePP。
@@ -26,6 +29,12 @@ Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它本�
 
 Windows 部署保持自包含：配置、用户内容、运行数据、Dashboard 数据和 Manager 状态都放在 DicePP 根目录中，不写入 `%LocalAppData%` 作为隐藏的数据事实来源。复制或完整清理 DicePP 时，只需处理这个根目录。
 
+如果直接双击 Setup 而不传 `--installto`，Velopack 会使用当前用户的默认
+`%LocalAppData%` 安装位置；此时 DicePP 数据也会自包含在那个 install root
+中，但不符合本项目推荐的固定可见目录习惯。需要使用 Setup 时，建议始终显式
+指定 `--installto`。卸载 Setup 安装前先从 Dashboard 创建并导出归档；one-click
+卸载行为不应被当作数据备份机制。
+
 ```text
 DicePP/
 ├─ DicePP.exe
@@ -38,6 +47,14 @@ DicePP/
    ├─ packages/
    └─ backups/
 ```
+
+Velopack 激活版本时，程序文件实际位于 `DicePP/current/`；Manager 会把
+`DicePP/` 识别为稳定实例根，因此 `config/`、`content/`、`data/` 和 `manager/`
+不会被写进 `current/`。启动器通过 `DICEPP_APP_DIR` 保留当前程序目录，并把
+版本随附的 `config/global.json` 和 `config/bots/_template.json` 只在稳定实例
+根缺失时以竞争安全方式复制一次；既存普通文件保持不变，符号链接或 reparse
+目标会拒绝启动。`user.json`、账号配置和业务数据绝不覆盖。Portable 没有这一
+层，程序目录与实例根相同，也不执行自复制。
 
 “登录 Windows 后自动启动 DicePP”默认关闭。启用后，Manager 只为当前用户写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不安装 Windows Service，也不需要管理员权限。可以勾选托盘菜单中的“登录后自动启动”，也可以在 DicePP 根目录执行：
 
@@ -169,9 +186,15 @@ manager/state/
 
 网页管理面板通过本机 Manager API 执行运行控制。若 Manager 不可用，面板会明确显示运行管理不受支持，不会直接接管子进程。
 
-## 从旧版手动升级
+## 版本发现与旧版迁移
 
-Windows 自动 update/rollback 目前不支持。迁移旧目录时按手动流程处理：
+Dashboard 的“版本更新”页现在可以按 stable 或 opt-in prerelease 频道检查
+GitHub Release，并把匹配 win64 的 Portable、Setup 或 Velopack package 下载到
+`manager/packages/`。下载会校验 Release machine contract、asset digest 和
+SHA-256，但不会安装或切换当前目录；安装与自动完整回退由后续升级事务负责。
+配置和默认值见 [updates.md](./updates.md)。
+
+从不具备精确归档能力的旧目录迁移时按手动流程处理：
 
 1. 在旧版网页管理面板中创建存档。
 2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `data/backups/`。

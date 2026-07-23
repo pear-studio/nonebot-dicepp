@@ -105,9 +105,9 @@ Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会�
 
 Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
 
-## 无法拉取镜像时使用离线包
+## 从 GitHub Release 使用 Linux 发布包
 
-如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 离线包。离线包包含 DicePP 的两个 Docker 镜像、对应版本的三服务 `docker-compose.yml` 和常用文档。Manager 与 Dashboard 复用 Dashboard 镜像，因此不需要第三个镜像：
+国内服务器拉取 GHCR 很慢时，优先下载 Release 附带的 Linux 发布包。它同样可用于完全离线部署，包含 DicePP 的两个 Docker 镜像、对应版本的三服务 `docker-compose.yml`、包内 manifest、`checksums.sha256` 和常用文档。Manager 与 Dashboard 复用 Dashboard 镜像，因此不需要第三个镜像：
 
 ```text
 ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
@@ -117,7 +117,7 @@ ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z
 文件名类似：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.1.0-linux-amd64.zip
 ```
 
 下面示例用 `v3.0.0`，实际安装时请替换成你要部署的 Release 版本。
@@ -131,7 +131,7 @@ cd ~/dicepp
 VERSION=v3.0.0
 BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
 
-curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-offline.zip"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64.zip"
 ```
 
 `curl` 正常下载时会显示进度，结束后能看到类似文件：
@@ -143,19 +143,19 @@ ls -lh
 预期能看到：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.0.0-linux-amd64.zip
 ```
 
 如果你想记录下载文件的校验值，可以执行：
 
 ```bash
-sha256sum "DicePP-${VERSION}-linux-amd64-offline.zip"
+sha256sum "DicePP-${VERSION}-linux-amd64.zip"
 ```
 
 预期会输出一行类似：
 
 ```text
-780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64-offline.zip
+780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64.zip
 ```
 
 GitHub Release asset 本身也会记录 digest；如果你安装了 GitHub CLI，可以这样查看：
@@ -164,7 +164,7 @@ GitHub Release asset 本身也会记录 digest；如果你安装了 GitHub CLI�
 gh release view "${VERSION}" \
   --repo pear-studio/nonebot-dicepp \
   --json assets \
-  --jq '.assets[] | select(.name == "DicePP-'${VERSION}'-linux-amd64-offline.zip") | .digest'
+  --jq '.assets[] | select(.name == "DicePP-'${VERSION}'-linux-amd64.zip") | .digest'
 ```
 
 ### 服务器不能访问 GitHub
@@ -172,19 +172,19 @@ gh release view "${VERSION}" \
 先在自己的电脑浏览器打开目标 Release 页面，下载这个文件：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.0.0-linux-amd64.zip
 ```
 
 然后把文件上传到服务器的 `~/dicepp` 目录。Windows PowerShell、macOS 或 Linux 终端都可以用 `scp`：
 
 ```bash
-scp DicePP-v3.0.0-linux-amd64-offline.zip 用户名@服务器IP:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64.zip 用户名@服务器IP:~/dicepp/
 ```
 
 例如服务器 IP 是 `203.0.113.10`，登录用户名是 `ubuntu`：
 
 ```bash
-scp DicePP-v3.0.0-linux-amd64-offline.zip ubuntu@203.0.113.10:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64.zip ubuntu@203.0.113.10:~/dicepp/
 ```
 
 如果第一次连接服务器，可能会询问是否信任主机，输入 `yes` 后回车。上传成功后，服务器上执行：
@@ -194,9 +194,9 @@ cd ~/dicepp
 ls -lh
 ```
 
-预期能看到刚上传的离线包。
+预期能看到刚上传的发布包。
 
-### 导入离线镜像
+### 校验并导入镜像
 
 进入部署目录：
 
@@ -208,13 +208,13 @@ VERSION=v3.0.0
 可选：记录下载的 zip 校验值，方便与 GitHub Release asset digest 或你本地留存的校验值对照：
 
 ```bash
-sha256sum "DicePP-${VERSION}-linux-amd64-offline.zip"
+sha256sum "DicePP-${VERSION}-linux-amd64.zip"
 ```
 
 预期输出类似：
 
 ```text
-780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64-offline.zip
+780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64.zip
 ```
 
 如果提示 `sha256sum: command not found`，先安装基础工具；大多数 Debian / Ubuntu 系统默认已经带有。
@@ -226,16 +226,16 @@ sudo apt-get update
 sudo apt-get install -y unzip zstd
 ```
 
-解压离线包：
+解压发布包：
 
 ```bash
-unzip -o "DicePP-${VERSION}-linux-amd64-offline.zip"
+unzip -o "DicePP-${VERSION}-linux-amd64.zip"
 ```
 
 解压后会得到一个目录：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline/
+DicePP-v3.0.0-linux-amd64/
 ```
 
 目录中包含：
@@ -243,7 +243,7 @@ DicePP-v3.0.0-linux-amd64-offline/
 ```text
 使用说明.md
 docker-compose.yml
-manifest.json
+dicepp-package.json
 checksums.sha256
 images/DicePP-v3.0.0-linux-amd64-images.tar.zst
 docs/linux.md
@@ -252,16 +252,21 @@ docs/persona.md
 docs/persona-character-card.md
 ```
 
+`dicepp-package.json` 是包内安装契约，记录 Compose、镜像压缩包和镜像引用的
+版本、兼容性、size 与 SHA-256；`checksums.sha256` 则覆盖包内所有分发文件。
+Release 页面上的 `dicepp-release.json` 是外层契约，校验整个 zip。两层契约
+各自负责一层，避免 zip 需要记录自身摘要。
+
 校验离线包内部文件：
 
 ```bash
-cd "DicePP-${VERSION}-linux-amd64-offline"
+cd "DicePP-${VERSION}-linux-amd64"
 sha256sum -c checksums.sha256
 ```
 
 预期会看到多行 `OK`。
 
-把离线包内的 `docker-compose.yml` 复制到部署目录：
+把发布包内的 `docker-compose.yml` 复制到部署目录：
 
 ```bash
 cp docker-compose.yml ..
@@ -271,19 +276,19 @@ cd ..
 解压镜像：
 
 ```bash
-zstd -d -f "DicePP-${VERSION}-linux-amd64-offline/images/DicePP-${VERSION}-linux-amd64-images.tar.zst"
+zstd -d -f "DicePP-${VERSION}-linux-amd64/images/DicePP-${VERSION}-linux-amd64-images.tar.zst"
 ```
 
 解压后会得到：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline/images/DicePP-v3.0.0-linux-amd64-images.tar
+DicePP-v3.0.0-linux-amd64/images/DicePP-v3.0.0-linux-amd64-images.tar
 ```
 
 导入 Docker：
 
 ```bash
-docker load -i "DicePP-${VERSION}-linux-amd64-offline/images/DicePP-${VERSION}-linux-amd64-images.tar"
+docker load -i "DicePP-${VERSION}-linux-amd64/images/DicePP-${VERSION}-linux-amd64-images.tar"
 ```
 
 预期输出会包含两行 `Loaded image`，类似：
@@ -538,7 +543,7 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 cd ~/dicepp
 VERSION=v3.0.1
 
-# 先按“无法拉取镜像时使用离线包”下载、校验、解压并导入新版本镜像
+# 先按“从 GitHub Release 使用 Linux 发布包”下载、校验、解压并导入新版本镜像
 # 完成到 docker load 成功即可
 
 # 再用新版本重建容器。config/data/content 挂载目录不会被删除。
@@ -558,7 +563,7 @@ DICEPP_IMAGE_TAG=v3.0.2 docker compose up -d
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 ```
 
-如果旧版本镜像已经被清理，先重新下载并 `docker load` 旧版本离线包，再执行上面的回滚命令。
+如果旧版本镜像已经被清理，先重新下载并 `docker load` 旧版本发布包，再执行上面的回滚命令。
 
 如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
 
@@ -576,7 +581,10 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 
 DicePP 官方发布源目前是 GHCR。国内服务器首次拉取镜像可能较慢，但后续更新会复用 Docker 层缓存，普通代码更新通常只需要拉取变化层。
 
-如果 GHCR 无法访问，优先使用 Release 附带的 `DicePP-vX.Y.Z-linux-amd64-offline.zip` 离线包，按前文“无法拉取镜像时使用离线包”导入镜像。
+如果 GHCR 无法访问，优先使用 Release 附带的
+`DicePP-vX.Y.Z-linux-amd64.zip`，按前文“从 GitHub Release 使用 Linux
+发布包”导入镜像。Dashboard 版本更新页也会优先下载该 asset，而不是要求
+服务器直接访问 GHCR。
 
 如果你有自己的国内镜像仓库，可以通过完整镜像地址覆盖：
 

@@ -13,6 +13,14 @@
   "bot_default_enable": true,
   "chat_interval": 20,
 
+  "update": {
+    "discovery_enabled": true,
+    "auto_download": false,
+    "channel": "stable",
+    "check_interval_hours": 24,
+    "cache_versions": 2
+  },
+
   "memory_monitor": {
     "enable": false,
     "warn_percent": 80,

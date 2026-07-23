@@ -32,12 +32,11 @@ def _create_release_script() -> str:
 def test_create_release_uploads_only_user_facing_assets():
     script = _create_release_script()
 
-    assert "ASSETS=(docker-compose.yml)" in script
-    assert "ZIP_ASSETS=(DicePP-*-win64.zip)" in script
+    assert "ASSETS=(docker-compose.yml dicepp-release.json)" in script
+    assert "ZIP_ASSETS=(DicePP-*-win64-Portable.zip DicePP-*-win64-Setup.exe" in script
     assert 'ASSETS+=("${ZIP_ASSETS[@]}")' in script
-    assert "OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-offline.zip)" in script
+    assert "LINUX_IMAGE_ASSETS=(DicePP-*-linux-amd64.zip)" in script
     assert 'ASSETS+=("$RELEASE_MD")' not in script
-    assert "DicePP-*-linux-amd64-offline.zip.sha256" not in script
     assert "DicePP-*-linux-amd64-images.tar.zst" not in script
     assert "ASSETS+=(docs/linux.md)" not in script
     assert '"${ASSETS[@]}"' in script
@@ -51,16 +50,49 @@ def test_create_release_uses_metadata_as_notes_file_when_available():
     assert '--notes "DicePP ${TAG}"' in script
 
 
-def test_linux_offline_package_embeds_docs_and_usage_guide():
-    step = _workflow_step(RELEASE_WORKFLOW, "publish", "Package Linux amd64 offline bundle")
+def test_linux_release_package_embeds_docs_and_usage_guide_without_offline_name():
+    step = _workflow_step(RELEASE_WORKFLOW, "publish", "Package Linux amd64 release bundle")
     script = step["run"]
 
-    assert 'PACKAGE_DIR="DicePP-${TAG}-linux-amd64-offline"' in script
+    assert 'PACKAGE_DIR="DicePP-${TAG}-linux-amd64"' in script
+    assert "offline" not in script.lower()
     assert 'cp docs/linux.md "${PACKAGE_DIR}/docs/linux.md"' in script
     assert 'cp docs/configuration.md "${PACKAGE_DIR}/docs/configuration.md"' in script
     assert 'cat > "${PACKAGE_DIR}/使用说明.md"' in script
     assert 'zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"' in script
     assert 'sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"' not in script
+    assert "generate_linux_package_manifest.py" in script
+    assert 'dicepp-package.json' in script
+    assert '--release-notes "docs/releases/${TAG}.md"' in script
+    assert "--minimum-manager-version" not in script
+    assert "--automatic-upgrade" not in script
+
+
+def test_windows_release_uses_velpack_and_normalizes_public_names():
+    step = _workflow_step(RELEASE_WORKFLOW, "windows-build", "Package artifact")
+    script = step["run"]
+
+    assert "vpk pack" in script
+    assert "--mainExe DicePP.exe" in script
+    assert "win64-Portable.zip" in script
+    assert "win64-Setup.exe" in script
+    assert "*-full.nupkg" in script
+    assert "releases.${{ steps.velopack.outputs.channel }}.json" in script
+    assert "dotnet tool install -g vpk --version 1.2.0" in script
+
+
+def test_release_manifest_is_generated_after_all_platform_artifacts():
+    step = _workflow_step(RELEASE_WORKFLOW, "publish", "Generate release machine contract")
+    script = step["run"]
+
+    assert "generate_release_manifest.py" in script
+    assert "--release-notes" in script
+    assert "--minimum-manager-version" not in script
+    assert "--automatic-upgrade" not in script
+    assert "--change-scope" not in script
+    assert "windows:amd64:portable:" in script
+    assert "windows:amd64:setup:" in script
+    assert "linux:amd64:linux-bundle:" in script
 
 
 def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():

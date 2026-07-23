@@ -68,7 +68,7 @@ DicePP-vX.Y.Z-linux-amd64-with-napcat/
   checksums.sha256
 
   dicepp/
-    DicePP-vX.Y.Z-linux-amd64-offline.zip
+    DicePP-vX.Y.Z-linux-amd64.zip
 
   napcat/
     docker-compose.yml
@@ -88,7 +88,7 @@ DicePP-vX.Y.Z-win64-with-llonebot/
   checksums.sha256
 
   dicepp/
-    DicePP-vX.Y.Z-win64.zip
+    DicePP-vX.Y.Z-win64-Portable.zip
 
   llonebot/
     LLBot-Desktop-win-x64-vA.B.C.zip

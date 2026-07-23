@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from datetime import datetime
 from pathlib import Path
+import importlib.util
+import sys
 import time
 
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from dashboard.src import launcher
 from dashboard.src.config import DashboardPaths
 from dashboard.src.runtime_log import rotate_runtime_log, runtime_log_path
+from tests.support.paths import find_repository_root
 
 
 class FakeManagerClient:
@@ -71,7 +74,7 @@ def test_rotate_runtime_log_keeps_latest_ten_histories(tmp_path: Path) -> None:
 
 def test_launcher_environment_makes_manager_the_stable_owner(monkeypatch, tmp_path: Path) -> None:
     for key in (
-        "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
         "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
         "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
         "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
@@ -84,6 +87,253 @@ def test_launcher_environment_makes_manager_the_stable_owner(monkeypatch, tmp_pa
     assert env["DICEPP_MANAGER_RUNTIME"] == "process"
     assert env["DICEPP_MANAGER_RUNTIME_UNIT_ID"] == launcher.LAUNCHER_RUNTIME_KEY
     assert "DicePP-Runtime.exe" in env["DICEPP_MANAGER_PROCESS_COMMAND"]
+
+
+def test_velopack_current_keeps_mutable_instance_data_in_install_root(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    for key in (
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
+        "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
+        "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
+        "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
+        "DICEPP_MANAGER_PROCESS_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "config" / "bots").mkdir(parents=True)
+    (current / "config" / "global.json").write_text(
+        '{"version_owned": 2}',
+        encoding="utf-8",
+    )
+    (current / "config" / "bots" / "_template.json").write_text(
+        '{"template": 2}',
+        encoding="utf-8",
+    )
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "global.json").write_text(
+        '{"version_owned": 1}',
+        encoding="utf-8",
+    )
+    (tmp_path / "config" / "user.json").write_text(
+        '{"keep": true}',
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "keep.txt").write_text("keep", encoding="utf-8")
+
+    env = launcher.configure_launcher_environment(current)
+
+    assert env["DICEPP_PROJECT_ROOT"] == str(tmp_path)
+    assert env["DICEPP_APP_DIR"] == str(current)
+    assert env["DICEPP_MANAGER_TOKEN_FILE"] == str(
+        tmp_path / "manager" / "state" / "api-token"
+    )
+    assert str(current / "DicePP-Runtime.exe") in env[
+        "DICEPP_MANAGER_PROCESS_COMMAND"
+    ]
+    assert env["DICEPP_MANAGER_PROCESS_CWD"] == str(tmp_path)
+    for mutable in ("config", "data", "content", "manager"):
+        assert not Path(env["DICEPP_PROJECT_ROOT"], mutable).is_relative_to(current)
+    assert (tmp_path / "config" / "global.json").read_text(
+        encoding="utf-8"
+    ) == '{"version_owned": 1}'
+    assert (tmp_path / "config" / "bots" / "_template.json").read_text(
+        encoding="utf-8"
+    ) == '{"template": 2}'
+    assert (tmp_path / "config" / "user.json").read_text(
+        encoding="utf-8"
+    ) == '{"keep": true}'
+    assert (tmp_path / "data" / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        Path("config/global.json"),
+        Path("config/bots/_template.json"),
+    ],
+)
+def test_velopack_config_seed_rejects_symlink_destination(
+    monkeypatch,
+    tmp_path: Path,
+    relative: Path,
+) -> None:
+    for key in (
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
+        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
+        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
+        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
+        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    current = tmp_path / "current"
+    source = current / relative
+    source.parent.mkdir(parents=True)
+    source.write_text('{"source": true}', encoding="utf-8")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"keep": true}', encoding="utf-8")
+    destination = tmp_path / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"File symlinks are unavailable: {exc}")
+
+    with pytest.raises(RuntimeError, match="unsafe instance config"):
+        launcher.configure_launcher_environment(current)
+
+    assert outside.read_text(encoding="utf-8") == '{"keep": true}'
+
+
+@pytest.mark.parametrize("ancestor", ["config", "config/bots"])
+def test_launcher_seed_rejects_redirected_config_ancestor(
+    monkeypatch,
+    tmp_path: Path,
+    ancestor: str,
+) -> None:
+    for key in (
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
+        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
+        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
+        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
+        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    current = tmp_path / "current"
+    (current / "config" / "bots").mkdir(parents=True)
+    (current / "config" / "global.json").write_text("{}", encoding="utf-8")
+    (current / "config" / "bots" / "_template.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    redirected = tmp_path / Path(ancestor)
+    redirected.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        redirected.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"Directory symlinks are unavailable: {exc}")
+
+    with pytest.raises(RuntimeError, match="unsafe instance config directory"):
+        launcher.configure_launcher_environment(current)
+
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("ancestor", ["config", "config/bots"])
+def test_pyinstaller_seed_rejects_redirected_config_ancestor(
+    monkeypatch,
+    tmp_path: Path,
+    ancestor: str,
+) -> None:
+    for key in (
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
+        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
+        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
+        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
+        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    current = tmp_path / "current"
+    (current / "config" / "bots").mkdir(parents=True)
+    (current / "config" / "global.json").write_text("{}", encoding="utf-8")
+    (current / "config" / "bots" / "_template.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    executable = current / "DicePP.exe"
+    executable.write_bytes(b"")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    redirected = tmp_path / Path(ancestor)
+    redirected.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        redirected.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"Directory symlinks are unavailable: {exc}")
+    monkeypatch.chdir(Path.cwd())
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    entry = (
+        find_repository_root(Path(__file__))
+        / "scripts"
+        / "build"
+        / "dashboard_entry.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        f"dashboard_entry_ancestor_{ancestor.replace('/', '_')}",
+        entry,
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+
+    with pytest.raises(RuntimeError, match="unsafe instance config directory"):
+        spec.loader.exec_module(module)
+
+    assert list(outside.iterdir()) == []
+
+
+def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    keys = (
+        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
+        "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
+        "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
+        "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
+        "DICEPP_MANAGER_PROCESS_CWD",
+    )
+    for key in keys:
+        monkeypatch.delenv(key, raising=False)
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "config" / "bots").mkdir(parents=True)
+    (current / "config" / "global.json").write_text(
+        '{"source": true}',
+        encoding="utf-8",
+    )
+    (current / "config" / "bots" / "_template.json").write_text(
+        '{"template": true}',
+        encoding="utf-8",
+    )
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "global.json").write_text(
+        '{"existing": true}',
+        encoding="utf-8",
+    )
+    executable = current / "DicePP.exe"
+    executable.write_bytes(b"")
+    monkeypatch.chdir(Path.cwd())
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    entry = (
+        find_repository_root(Path(__file__))
+        / "scripts"
+        / "build"
+        / "dashboard_entry.py"
+    )
+    spec = importlib.util.spec_from_file_location("dashboard_entry_test", entry)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+
+    spec.loader.exec_module(module)
+
+    assert module._launcher_environment["DICEPP_PROJECT_ROOT"] == str(tmp_path)
+    assert str(current / "DicePP-Runtime.exe") in module._launcher_environment[
+        "DICEPP_MANAGER_PROCESS_COMMAND"
+    ]
+    assert (tmp_path / "config" / "global.json").read_text(
+        encoding="utf-8"
+    ) == '{"existing": true}'
+    assert (tmp_path / "config" / "bots" / "_template.json").read_text(
+        encoding="utf-8"
+    ) == '{"template": true}'
+    assert Path.cwd() == tmp_path
 
 
 def test_tray_operates_the_shared_runtime_unit_through_manager_client(tmp_dashboard_paths: Path) -> None:

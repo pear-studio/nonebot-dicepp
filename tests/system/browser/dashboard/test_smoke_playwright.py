@@ -1038,6 +1038,67 @@ def test_monitor_tab_hides_version_operations(dashboard_url: str) -> None:
         finally:
             browser.close()
 
+
+def test_updates_tab_discovers_and_downloads_without_install_control(
+    dashboard_url: str,
+) -> None:
+    """Release UI exposes verified download state but no installation action."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+        try:
+            _login(page, dashboard_url)
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.api = async (path) => {
+                        if (path === '/api/releases/status' || path === '/api/releases/check') {
+                            return {
+                                current_version: '3.0.0',
+                                settings: {channel: 'stable', auto_download: false},
+                                target: {platform: 'windows', arch: 'amd64'},
+                                available: {
+                                    version: '3.1.0',
+                                    compatible: true,
+                                    change_scope: ['runtime', 'dashboard'],
+                                    compatibility: {
+                                        minimum_manager_version: '1.0',
+                                        deployment_schema_version: 2,
+                                    },
+                                    artifacts: [{
+                                        filename: 'DicePP-v3.1.0-win64-Portable.zip',
+                                        size: 1024,
+                                        purpose: 'portable',
+                                    }],
+                                },
+                                download: {status: 'verified', filename: 'DicePP-v3.1.0-win64-Portable.zip'},
+                            };
+                        }
+                        throw new Error(`unexpected API: ${path}`);
+                    };
+                }"""
+            )
+            page.get_by_role("button", name="版本更新").click()
+            page.wait_for_selector('[data-testid="release-available"]', timeout=10000)
+
+            expect(page.locator('[data-testid="release-channel"]')).to_have_text(
+                "正式稳定版"
+            )
+            expect(
+                page.locator('[data-testid="release-current-version"]')
+            ).to_have_text("3.0.0")
+            expect(page.locator('[data-testid="release-available"]')).to_contain_text(
+                "runtime、dashboard"
+            )
+            expect(page.locator('[data-testid="release-download-status"]')).to_contain_text(
+                "尚未安装"
+            )
+            expect(page.get_by_role("button", name="安装")).to_have_count(0)
+            expect(page.get_by_role("button", name="回滚")).to_have_count(0)
+        finally:
+            browser.close()
+
+
 def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
     """Archives tab lists, creates, previews, and deletes via the API contract."""
     archives = [

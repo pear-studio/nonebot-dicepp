@@ -23,7 +23,9 @@ metadata:
 - Git tag 使用 `vX.Y.Z`, 由 `bump-my-version` 根据新版本号创建。
 - 发版测试可使用 `vX.Y.ZrcN` 预发布 tag（如 `v3.0.1rc1`）；RC 会创建 GitHub Prerelease 并推送同名镜像 tag，但不会更新 `latest`。
 - `uv.lock` 必须与 `pyproject.toml` 的项目版本同步；tag 指向的 release commit 内不得出现 `pyproject.toml` 为新版本、`uv.lock` 仍记录旧 `dicepp` 版本的状态。
-- Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64-offline.zip`，内含 Linux amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用文档，用于国内或离线环境通过 `docker load` 导入镜像。
+- Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64.zip`，内含 Linux
+  amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用
+  文档，用于国内或离线环境通过 `docker load` 导入镜像。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
@@ -45,9 +47,13 @@ metadata:
 # vX.Y.Z
 
 - 镜像: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
-- Windows: DicePP-vX.Y.Z-win64.zip
-- 数据变更: yes/no
-- 配置变更: yes/no
+- Windows: `DicePP-vX.Y.Z-win64-Portable.zip`、独立
+  `DicePP-vX.Y.Z-win64-Setup.exe` 和 Velopack feed
+- 数据变更: no
+- 配置变更: no
+- 变更范围: runtime, dashboard, deployment
+- 自动升级: yes/no
+- 最低 Manager 版本: 1.0
 
 ## Added
 - 新增的功能
@@ -70,6 +76,11 @@ metadata:
 - `镜像`: 生产部署使用的 GHCR 镜像 tag。
 - `数据变更`: 是否影响 `data/`、数据库 schema、持久化数据结构或需要执行迁移脚本。
 - `配置变更`: 是否影响运行环境变量、`config/`、配置 schema 或配置加载行为。
+- `变更范围`: 逗号分隔的实际变更域；必须显式声明 `data` / `config`，并与
+  前两个风险字段完全一致，否则发布会 fail closed。
+- `自动升级`: 当前常驻 Manager 是否能在无需自身升级和人工迁移部署拓扑的
+  前提下自动完成升级；无法确认时必须写 `no`。
+- `最低 Manager 版本`: 能理解本次发布契约和安装事务的最低 Manager 版本。
 - `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
 - `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
 
@@ -173,7 +184,10 @@ metadata:
    docs/releases/v{new_version}.md
    ```
 
-   要求用户确认 `数据变更` 和 `配置变更`。可通过 diff 辅助判断, 但不能把不确定风险默认为安全。
+   要求用户确认 `数据变更`、`配置变更`、`变更范围`、`自动升级` 和
+   `最低 Manager 版本`。可通过 diff 辅助判断，但不能把不确定风险默认为安全。
+   Release workflow 会严格解析这些字段；缺失、重复、值非法或版本不一致时
+   直接拒绝发布。
 
    编写 metadata 前必须先列出本次 release 的用户可见主题，至少回答：
 
@@ -230,11 +244,13 @@ metadata:
 
    push 成功后, GitHub Actions (release.yml) 将自动：
    - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)，运行冒烟测试
-   - 将 bot/dashboard 镜像与 Linux 部署文档打包为 DicePP-vX.Y.Z-linux-amd64-offline.zip，并在包内生成 checksums.sha256
+   - 将 bot/dashboard 镜像与 Linux 部署文档打包为
+     `DicePP-vX.Y.Z-linux-amd64.zip`，并在包内生成 `checksums.sha256`
    - 在 Windows 上构建 DicePP EXE，运行冒烟测试
-   - 将 EXE 打包为 DicePP-vX.Y.Z-win64.zip
+   - 生成独立 Windows Portable、Setup 和 Velopack package/feed
    - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
-   - 上传 docker-compose.yml、DicePP-vX.Y.Z-win64.zip 和 DicePP-vX.Y.Z-linux-amd64-offline.zip 作为 release assets
+   - 上传 `docker-compose.yml`、`dicepp-release.json`、Windows artifacts 和
+     `DicePP-vX.Y.Z-linux-amd64.zip` 作为 release assets
 
 9. **验证构建产物可用**
 
@@ -243,8 +259,10 @@ metadata:
    - `gh release view v{new_version}` 返回 release 信息。
    - Release assets 包含:
      - `docker-compose.yml`
-     - `DicePP-v{new_version}-win64.zip`
-     - `DicePP-v{new_version}-linux-amd64-offline.zip`
+     - `DicePP-v{new_version}-win64-Portable.zip`
+     - `DicePP-v{new_version}-win64-Setup.exe`
+     - `DicePP-v{new_version}-linux-amd64.zip`
+     - `dicepp-release.json`
    - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
    - Linux 离线包下载后可解压，包内 `checksums.sha256` 存在且可用于校验内部文件；GitHub Release asset digest 可作为外层 zip 的来源校验参考。
@@ -263,8 +281,9 @@ metadata:
    Tag: vA.B.C
    Release metadata: docs/releases/vA.B.C.md
    镜像: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
-   Windows EXE: DicePP-vA.B.C-win64.zip
-   Linux 离线包: DicePP-vA.B.C-linux-amd64-offline.zip
+   Windows Portable: DicePP-vA.B.C-win64-Portable.zip
+   Windows Setup: DicePP-vA.B.C-win64-Setup.exe
+   Linux 发布包: DicePP-vA.B.C-linux-amd64.zip
    数据变更: yes/no
    配置变更: yes/no
    推送: 成功/失败

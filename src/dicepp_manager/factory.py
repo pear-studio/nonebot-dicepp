@@ -13,6 +13,7 @@ from .config import ManagerSettings
 from .discovery import RuntimeUnitDiscovery
 from .docker_runtime import DockerRuntimeAdapter, DockerSocketRuntimeAdapter
 from .process_runtime import ProcessRuntimeAdapter
+from .release import ReleaseManager
 from .owner import ManagerOwnerLock
 from .runtime import RuntimeAdapter, UnavailableRuntimeAdapter
 from .service import ManagerService
@@ -75,6 +76,10 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
             service=service,
             dashboard_probe=lambda: _dashboard_probe(),
             control_probe=lambda: _control_channel_probe(),
+        )
+        service.release_manager = ReleaseManager(
+            layout=settings.layout,
+            github_api=settings.github_api,
         )
         return service
     except BaseException:

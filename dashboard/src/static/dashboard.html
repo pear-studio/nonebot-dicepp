@@ -728,6 +728,66 @@
         </div>
       </div>
 
+      <!-- Tab: 版本更新（发现和下载，不执行安装） -->
+      <div x-show="currentTab === 'updates'" x-cloak data-testid="updates-tab">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-xl font-bold">版本更新</h2>
+            <p class="text-xs text-gray-500 mt-1">这里只检查和下载已验证的软件包；安装始终需要单独确认。</p>
+          </div>
+          <button
+            @click="checkRelease()"
+            :disabled="releaseChecking || releaseDownloading"
+            data-testid="release-check-button"
+            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+            x-text="releaseChecking ? '检查中...' : '检查更新'"
+          ></button>
+        </div>
+        <div x-show="releaseError" x-cloak data-testid="release-error" class="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="releaseError"></div>
+        <div class="bg-white rounded-lg shadow p-4 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+            <div><div class="text-xs text-gray-500">当前版本</div><div data-testid="release-current-version" x-text="releaseState?.current_version || '-'"></div></div>
+            <div><div class="text-xs text-gray-500">更新频道</div><div data-testid="release-channel" x-text="releaseState?.settings?.channel === 'prerelease' ? 'RC / 预发布' : '正式稳定版'"></div></div>
+            <div><div class="text-xs text-gray-500">当前平台</div><div x-text="`${releaseState?.target?.platform || '-'} / ${releaseState?.target?.arch || '-'}`"></div></div>
+            <div><div class="text-xs text-gray-500">自动下载</div><div x-text="releaseState?.settings?.auto_download ? '已开启' : '未开启'"></div></div>
+          </div>
+          <template x-if="releaseState?.available">
+            <div class="border rounded p-4 space-y-3" data-testid="release-available">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div class="text-xs text-gray-500">可用版本</div>
+                  <div class="text-lg font-semibold" x-text="releaseState.available.version"></div>
+                </div>
+                <span class="text-xs px-2 py-1 rounded-full" :class="releaseState.available.compatible ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="releaseState.available.compatible ? '兼容' : '不兼容'"></span>
+              </div>
+              <div class="text-sm"><span class="text-gray-500">变更范围：</span><span x-text="(releaseState.available.change_scope || []).join('、')"></span></div>
+              <div class="text-xs text-gray-500" x-text="`需要 Manager ≥ ${releaseState.available.compatibility?.minimum_manager_version || '-'}；部署结构 v${releaseState.available.compatibility?.deployment_schema_version || '-'}`"></div>
+              <div x-show="(releaseState.available.compatibility?.problems || []).length" class="text-xs text-red-700" x-text="(releaseState.available.compatibility?.problems || []).join('；')"></div>
+              <div class="space-y-1">
+                <template x-for="artifact in (releaseState.available.artifacts || [])" :key="artifact.filename">
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+                    <div class="text-xs font-mono break-all" x-text="`${artifact.filename} · ${formatFileSize(artifact.size)} · ${artifact.purpose}`"></div>
+                    <button
+                      @click="downloadRelease(artifact.purpose)"
+                      :disabled="releaseDownloading || !releaseState.available.compatible"
+                      data-testid="release-artifact-download-button"
+                      class="px-3 py-1 border border-blue-200 text-blue-700 text-xs rounded hover:bg-blue-50 disabled:opacity-50"
+                      x-text="releaseDownloading ? '下载中...' : '下载此项'"
+                    ></button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+          <div x-show="!releaseState?.available && !releaseLoading" class="text-sm text-gray-500">尚未发现可用版本。</div>
+          <div x-show="releaseState?.download?.status && releaseState.download.status !== 'idle'" data-testid="release-download-status" class="bg-gray-50 border rounded p-3 text-sm">
+            <div x-text="`下载状态：${releaseState.download.status}`"></div>
+            <div class="text-xs text-gray-500 mt-1" x-text="releaseState.download.filename || ''"></div>
+            <div x-show="releaseState.download.status === 'verified'" class="text-green-700 text-xs mt-1">软件包已通过大小与 SHA-256 校验；尚未安装。</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Tab: 存档 -->
       <div x-show="currentTab === 'archives'" x-cloak data-testid="archives-tab">
         <div class="flex items-center justify-between mb-4">
@@ -1527,6 +1587,7 @@ function app() {
       { id: 'persona', label: 'Persona' },
       { id: 'content', label: '内容管理' },
       { id: 'monitor', label: '运行监控' },
+      { id: 'updates', label: '版本更新' },
       { id: 'archives', label: '存档' },
       { id: 'audit', label: '审计日志' },
     ],
@@ -1595,6 +1656,13 @@ function app() {
     managerLogs: null,
     managerLogsError: '',
     managerLogsLoading: false,
+
+    // ── Tab: Updates ──
+    releaseState: null,
+    releaseError: '',
+    releaseLoading: false,
+    releaseChecking: false,
+    releaseDownloading: false,
 
     // ── Tab: Archives ──
     archives: [],
@@ -1889,6 +1957,7 @@ function app() {
         case 'data': this.loadTables(); break;
         case 'config': this.loadConfig(); break;
         case 'persona': this.loadPersonaConfig(); break;
+        case 'updates': this.loadReleaseStatus(); break;
         case 'archives': this.loadArchives(); break;
         case 'monitor': this.loadMonitor(); break;
         case 'audit': this.loadAudit(); break;
@@ -2495,6 +2564,70 @@ function app() {
       this.managerLogs = null;
       this.managerLogsError = '';
       this.managerLogsLoading = false;
+    },
+
+    // ── Updates ──
+    async loadReleaseStatus() {
+      this.releaseLoading = true;
+      this.releaseError = '';
+      try {
+        this.releaseState = await this.api('/api/releases/status');
+      } catch (err) {
+        this.releaseState = null;
+        this.releaseError = err.message || '读取更新状态失败';
+      } finally {
+        this.releaseLoading = false;
+      }
+    },
+
+    async checkRelease() {
+      this.releaseChecking = true;
+      this.releaseError = '';
+      try {
+        this.releaseState = await this.api('/api/releases/check', { method: 'POST' });
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          if (this.releaseState?.discovery?.status !== 'checking') break;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          this.releaseState = await this.api('/api/releases/status');
+        }
+        if (this.releaseState?.discovery?.status === 'failed') {
+          throw new Error(this.releaseState.discovery.error || '检查更新失败');
+        }
+        if (this.releaseState?.discovery?.status === 'checking') {
+          throw new Error('检查仍在 Manager 后台运行，请稍后刷新状态');
+        }
+      } catch (err) {
+        this.releaseError = err.message || '检查更新失败';
+      } finally {
+        this.releaseChecking = false;
+      }
+    },
+
+    async downloadRelease(purpose = null) {
+      this.releaseDownloading = true;
+      this.releaseError = '';
+      try {
+        this.releaseState = await this.api('/api/releases/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ purpose }),
+        });
+        for (let attempt = 0; attempt < 600; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          this.releaseState = await this.api('/api/releases/status');
+          if (!['queued', 'downloading'].includes(this.releaseState?.download?.status)) break;
+        }
+        if (this.releaseState?.download?.status === 'failed') {
+          throw new Error(this.releaseState.download.error || '下载失败');
+        }
+        if (['queued', 'downloading'].includes(this.releaseState?.download?.status)) {
+          throw new Error('下载仍在 Manager 后台运行，请稍后刷新状态');
+        }
+      } catch (err) {
+        this.releaseError = err.message || '下载更新失败';
+      } finally {
+        this.releaseDownloading = false;
+      }
     },
 
     // ── Archives ──

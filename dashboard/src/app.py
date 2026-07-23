@@ -228,6 +228,22 @@ def _apply_deep(target: dict, path: str, value) -> None:
     d[parts[-1]] = value
 
 
+def _validate_merged_update_config(user_cfg: dict) -> None:
+    global_cfg = _read_json_safe(DashboardPaths.CONFIG_GLOBAL)
+    global_update = global_cfg.get("update", {})
+    user_update = user_cfg.get("update", {})
+    if not isinstance(global_update, dict) or not isinstance(user_update, dict):
+        _err("Invalid update configuration: update must be an object", 422)
+    merged = {**global_update, **user_update}
+    module = _load_pydantic_models_module()
+    if module is None:
+        _err("Update configuration schema is unavailable", 500)
+    try:
+        module.UpdateConfig.model_validate(merged)
+    except Exception as exc:
+        _err(f"Invalid update configuration: {exc}", 422)
+
+
 def _remove_deep(target: dict, path: str) -> bool:
     """Remove a key at a dotted path in a nested dict. Returns True if removed."""
     parts = path.split(".")
@@ -713,6 +729,47 @@ async def archives_delete(filename: str, request: Request):
         return _manager_archive_error(exc)
     return _ok(payload)
 
+
+# ── Release discovery/download (Manager proxy; never installs) ──────────────
+
+
+@app.get("/api/releases/status", dependencies=[Depends(require_auth)])
+async def releases_status(request: Request):
+    try:
+        payload = await _get_manager_client(request).release_status()
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
+
+
+@app.post("/api/releases/check", dependencies=[Depends(require_auth)])
+async def releases_check(request: Request):
+    try:
+        payload = await _get_manager_client(request).check_releases()
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return JSONResponse(status_code=202, content={"ok": True, **payload})
+
+
+@app.post("/api/releases/download", dependencies=[Depends(require_auth)])
+async def releases_download(request: Request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        _err("Release download body must be a JSON object", 400)
+    purpose = body.get("purpose")
+    if purpose is not None and (not isinstance(purpose, str) or not purpose):
+        _err("purpose must be a non-empty string", 400)
+    try:
+        payload = await _get_manager_client(request).download_release(purpose)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return JSONResponse(status_code=202, content={"ok": True, **payload})
+
 # ── Bot discovery ─────────────────────────────────────────────────────────────
 
 
@@ -1157,6 +1214,7 @@ async def config_set(request: Request):
     user_cfg = _read_json_safe(user_path)
 
     _apply_deep(user_cfg, path, value)
+    _validate_merged_update_config(user_cfg)
     _write_json_atomic(user_path, user_cfg)
 
     db_path = request.app.state.dashboard_db
@@ -1236,6 +1294,7 @@ async def config_user_save(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
+    _validate_merged_update_config(body)
 
     _write_json_atomic(DashboardPaths.CONFIG_USER, body)
 

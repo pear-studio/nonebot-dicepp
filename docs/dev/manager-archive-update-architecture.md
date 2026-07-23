@@ -249,11 +249,10 @@ GitHub Release 是更新事实来源。Manager 读取小型机器清单 `dicepp-
 默认配置位于 DicePP 统一配置中，由 Dashboard 管理：
 
 ```yaml
-manager:
-  update:
-    discovery_enabled: true
-    auto_download_enabled: false
-    channel: stable
+update:
+  discovery_enabled: true
+  auto_download: false
+  channel: stable
 ```
 
 - 默认自动发现稳定版。
@@ -271,9 +270,15 @@ DicePP-v3.1.0-win64-Portable.zip
 DicePP-v3.1.0-win64-Setup.exe
 ```
 
-Windows 更新还包含 Velopack 的 full/delta package 和 release feed；Linux 包包含 Release Contract、校验文件、Compose 和压缩 Docker 镜像。`offline` 不再作为 Linux 包名的一部分。
+Windows 更新还包含 Velopack 的 full/delta package 和按架构、频道隔离的
+release feed。Linux 使用两层契约：GitHub Release 的
+`dicepp-release.json` 校验外层 zip，zip 内 `dicepp-package.json` 声明安装所需
+deployment/Catalog/Compose/image archive 元数据和内部摘要；因此外层 zip
+不需要自我哈希。`offline` 不再作为 Linux 包名的一部分。
 
-Portable ZIP 与 Setup.exe 是独立首次安装入口，Setup 不依赖 ZIP。Velopack 的 `current` 是 Windows 内部实现，不出现在 DicePP 跨平台领域模型中。
+Portable ZIP 与 Setup.exe 是独立首次安装入口，Setup 不依赖 ZIP。Velopack 的
+`current` 是 Windows 程序切换目录；实例根始终是其父 install root，所有
+`config/data/content/manager` 都留在稳定根。
 
 ## 12. 升级事务
 

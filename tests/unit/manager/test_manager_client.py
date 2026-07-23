@@ -35,7 +35,7 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
     client = _client(tmp_path)
     calls: list[tuple[str, str]] = []
 
-    async def request(method: str, path: str):
+    async def request(method: str, path: str, **_kwargs):
         calls.append((method, path))
         if path == "/v1/status":
             return _compatible_status()
@@ -54,6 +54,9 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         lambda: client.operate("unit/id", "start/now"),
         lambda: client.logs("unit/id", 20),
         lambda: client.runtime_logs(20),
+        lambda: client.release_status(),
+        lambda: client.check_releases(),
+        lambda: client.download_release("portable"),
     ]
     for entry in entries:
         calls.clear()

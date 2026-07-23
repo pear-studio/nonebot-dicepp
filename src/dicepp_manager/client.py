@@ -191,6 +191,22 @@ class ManagerClient:
             raise ManagerUnavailable(str(exc), status_code=503) from exc
         return await asyncio.to_thread(self._upload_sync, filename, source, token)
 
+    async def release_status(self) -> dict:
+        await self._ensure_compatible()
+        return await self._request("GET", "/v1/releases/status")
+
+    async def check_releases(self) -> dict:
+        await self._ensure_compatible()
+        return await self._request("POST", "/v1/releases/check")
+
+    async def download_release(self, purpose: str | None = None) -> dict:
+        await self._ensure_compatible()
+        return await self._request(
+            "POST",
+            "/v1/releases/download",
+            json_body={"purpose": purpose},
+        )
+
     async def _request(
         self,
         method: str,

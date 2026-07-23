@@ -395,22 +395,27 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - Docker Compose runtime 只支持 `status`、`start`、`stop`、`restart` 和 `logs`，不会执行 `pull`、版本 tag 注入或 `up -d` 版本切换。
 - Manager action 白名单只包含 `start`、`stop`、`restart`；`update` / `rollback` 在 API 边界作为非法 action 拒绝，不创建 operation、不调用 runtime、不写 manager audit。
 - 已删除 `DICEPP_MANAGER_DOCKER_VERSION_ENV`、`DICEPP_MANAGER_RELEASE_METADATA_ROOT`、Manager release metadata preview endpoint、compatibility gate、deployment gate、archive gate、post-action health 与 failure guidance 等自动版本操作后端链路。
-- Release metadata 文档继续保留为 GitHub Release body / asset 和人工升级风险阅读材料，不进入 Docker 镜像，也不由 Manager 自动消费。
-- GitHub Release 发布侧 metadata 输出已接入：`docs/releases/vX.Y.Z.md` 作为 Release body 提供；`docs/linux.md` 随 Linux offline zip 提供；release metadata 仍不进入 Docker 镜像。
+- Release 正文继续作为人工风险阅读材料；机器判断改由 Release asset
+  `dicepp-release.json` 承担，Manager 严格消费其 schema、平台、架构、兼容性、
+  size 和 SHA-256，不从正文或文件名猜测。
+- GitHub Release 发布侧会同时生成 Windows Portable/Setup/Velopack feed 与
+  `DicePP-vX.Y.Z-linux-amd64.zip`，后者携带 Compose、压缩镜像和包内校验。
 
 已完成 Windows 单入口与手动升级边界：
 
 - Windows 发布包提供 `DicePP.exe` 作为用户主入口，负责启动 Dashboard/托盘体验。
 - `DicePP-Runtime.exe` 作为 runtime 进程入口，由 Manager `ProcessRuntime` 编排，不作为普通用户直接入口。
 - `ProcessRuntime` 已支持 start/stop/restart、状态查询和 console log 捕获；Dashboard 运行监控页通过 Manager 展示与操作这些能力。
-- Windows update/rollback 在 3.0.0 不由 Dashboard Manager 提供，不做自动 staging 替换、失败恢复或自动版本切换。
+- Dashboard Manager 已提供版本发现和校验下载，但仍不在此阶段执行 staging
+  替换、失败恢复或版本切换。
 - Windows 手动升级路径依赖存档能力：升级前创建存档，退出旧版本，解压/复制新版发行包，启动 `DicePP.exe`，必要时通过 Dashboard 恢复既有存档。
 
 3.0.0 不纳入，后续另行设计：
 
-- Windows 自动 staging update/rollback、版本切换和失败恢复。
+- Windows 自动 staging update/rollback、版本切换和失败恢复（发现和下载已完成）。
 - Linux Docker Compose 自动 update/rollback、镜像 tag 注入、compatibility gate、archive gate、post-action health 和失败恢复。
-- Manager runtime 自动联网抓取或消费 GitHub Release body / release asset。
+- Manager 已联网消费 GitHub Release API 与 `dicepp-release.json`；仍不自动消费
+  Release body，也不因发现或下载改变当前 runtime。
 - 自动同步真实目标 Release compose / deployment 文件。
 - 更完整的跨版本健康检查、自动恢复与失败后交互式用户指引。
 

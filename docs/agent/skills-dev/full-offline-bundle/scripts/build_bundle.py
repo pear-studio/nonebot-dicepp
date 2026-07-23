@@ -155,11 +155,11 @@ def ensure_dicepp_release_asset(version: str, filename: str) -> Path:
 
 
 def ensure_dicepp_offline_zip(version: str) -> Path:
-    return ensure_dicepp_release_asset(version, f"DicePP-{version}-linux-amd64-offline.zip")
+    return ensure_dicepp_release_asset(version, f"DicePP-{version}-linux-amd64.zip")
 
 
 def ensure_dicepp_windows_zip(version: str) -> Path:
-    return ensure_dicepp_release_asset(version, f"DicePP-{version}-win64.zip")
+    return ensure_dicepp_release_asset(version, f"DicePP-{version}-win64-Portable.zip")
 
 
 def cached_linux_llonebot_assets() -> list[Path]:

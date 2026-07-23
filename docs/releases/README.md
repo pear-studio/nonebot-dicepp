@@ -14,7 +14,9 @@ version-release (skill)               version-deploy (skill)
        → nonebot-dicepp:vX.Y.Z
        → dicepp-dashboard:vX.Y.Z
        → latest（正式版）
-       → linux-amd64 offline zip
+       → linux-amd64 release zip
+       → Windows Portable / Setup / Velopack feed
+       → dicepp-release.json
 ```
 
 ## 关键文件
@@ -25,9 +27,11 @@ version-release (skill)               version-deploy (skill)
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
 | `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes）；作为 GitHub Release body 提供 |
 | `docker-compose.yml` | 部署入口；包含 bot 与独立 Dashboard service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
-| `docs/linux.md` | Linux Docker 部署说明；打入 Linux offline zip, 也可从 tag 内容读取 |
+| `docs/linux.md` | Linux Docker 部署说明；打入 Linux 发布包，也可从 tag 内容读取 |
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
-| `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + Linux 离线包 + GitHub Release 创建，并上传 compose 文件、Windows zip 和 Linux offline zip |
+| `.github/workflows/release.yml` | tag push 触发 GHCR、Windows Velopack、Linux 发布包和 machine contract 构建，并创建 GitHub Release |
+| `dicepp-release.json` | Manager 消费的严格 machine contract；声明频道、兼容性、平台/架构和 artifact size/SHA-256 |
+| Linux 包内 `dicepp-package.json` | Linux 安装层 contract；声明 Compose、image archive、镜像引用及内部文件摘要 |
 
 ## 版本号
 
@@ -45,7 +49,9 @@ version-release (skill)               version-deploy (skill)
 - **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
 - **构建触发**: push `v*.*.*` tag
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
-- **分发**: `docker-compose.yml`、Windows zip 和 `DicePP-vX.Y.Z-linux-amd64-offline.zip` 作为 GitHub Release asset 下载；`docs/releases/vX.Y.Z.md` 作为 GitHub Release body；`docs/linux.md` 随 Linux offline zip 分发
+- **分发**: `docker-compose.yml`、Windows Portable/Setup/Velopack feed、
+  `DicePP-vX.Y.Z-linux-amd64.zip` 和 `dicepp-release.json` 作为 GitHub
+  Release assets；`docs/releases/vX.Y.Z.md` 作为 Release body
 
 ## Docker Compose 模式
 
@@ -72,7 +78,8 @@ version-release (skill)               version-deploy (skill)
 4. `bump-my-version` 递增版本号 + 自动 commit + tag
 5. 在当前 HEAD 上运行完整回归 `uv run pytest`
 6. `git push origin master --tags`
-7. GHA 自动构建镜像 + 创建 GitHub Release + 上传 compose 文件、Windows zip 和 Linux amd64 offline zip
+7. GHA 自动构建镜像、Windows Portable/Setup/Velopack feed、Linux amd64
+   发布包和 `dicepp-release.json`，再创建 GitHub Release
 
 ### 基线建立
 
@@ -88,7 +95,7 @@ version-release (skill)               version-deploy (skill)
 
 1. 读取目标版本 `vX.Y.Z`
 2. 通过 `gh release view vX.Y.Z --json body`、Release asset 或 `git show` 读取风险元数据，作为人工部署和回滚前的风险检查材料
-3. 读取目标版本的 `docs/linux.md` / Linux offline zip 内置部署说明
+3. 读取目标版本的 `docs/linux.md` / Linux 发布包内置部署说明
 4. 对比生产 `docker-compose.yml` 与目标 Release 的 compose 拓扑，必要时先计划同步 compose
 5. 展示影响范围，等待用户确认
 6. 在线路径注入 `DICEPP_IMAGE_TAG=vX.Y.Z`，调用 deploy-docker 执行 compose sync + pull + up；离线路径先 `docker load` 目标离线包，再执行 `up --pull never`
@@ -103,8 +110,8 @@ DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker co
 
 # 生产环境（离线包）
 VERSION=v3.0.0
-unzip -o DicePP-${VERSION}-linux-amd64-offline.zip
-cd DicePP-${VERSION}-linux-amd64-offline
+unzip -o DicePP-${VERSION}-linux-amd64.zip
+cd DicePP-${VERSION}-linux-amd64
 sha256sum -c checksums.sha256
 zstd -d -f images/DicePP-${VERSION}-linux-amd64-images.tar.zst
 docker load -i images/DicePP-${VERSION}-linux-amd64-images.tar
@@ -113,7 +120,7 @@ DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 
 # 小白部署（从零开始）
 # 1. 浏览器打开 https://github.com/pear-studio/nonebot-dicepp/releases/latest
-# 2. 下载 docker-compose.yml 和 Linux offline zip；Release 页面正文用于人工风险阅读
+# 2. 下载 dicepp-release.json 和 Linux 发布包；Release 页面正文用于人工风险阅读
 # 3. docker network create dice-net
 # 4. docker compose up -d
 ```
@@ -124,4 +131,5 @@ DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 - Prod 由 agent skill 保证不执行 build 命令
 - 生产主路径是发布镜像；源码构建只作为开发/应急 fallback
 - 镜像构建使用官方源，国内开发者通过 compose build args 可覆盖为清华源
-- Release metadata 不进 Docker 镜像；发布时通过 GitHub Release body 提供，生产部署期作为人工风险阅读材料使用
+- Release body 不进 Docker 镜像，继续供人工阅读；Manager 只消费
+  `dicepp-release.json`，发现和下载不会修改当前 runtime

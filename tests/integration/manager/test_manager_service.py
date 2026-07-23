@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -392,7 +394,11 @@ def test_owner_lock_prevents_second_recovery_then_next_owner_recovers(tmp_path: 
 
 def test_manager_api_requires_its_own_token_and_polls_persisted_operation(tmp_path: Path) -> None:
     layout = InstanceLayout.from_root(tmp_path)
-    settings = ManagerSettings(layout=layout, runtime="unavailable")
+    settings = ManagerSettings(
+        layout=layout,
+        runtime="unavailable",
+        release_scheduler_enabled=False,
+    )
     adapter = FakeRuntimeAdapter()
     app = create_manager_app(settings, service=_service(tmp_path, adapter), api_token="manager-secret")
 
@@ -413,6 +419,210 @@ def test_manager_api_requires_its_own_token_and_polls_persisted_operation(tmp_pa
         assert operation["status"] == "succeeded"
         assert operation["runtime_unit_id"] == "dicepp-runtime"
         assert adapter.actions == [("dicepp-runtime", "restart")]
+
+
+def test_manager_release_api_checks_and_downloads_without_touching_runtime(
+    tmp_path: Path,
+) -> None:
+    class FakeReleaseManager:
+        def __init__(self) -> None:
+            self.download_status = "idle"
+            self.download_calls = 0
+
+        def status(self):
+            return {
+                "settings": {"channel": "stable", "auto_download": False},
+                "target": {"platform": "linux", "arch": "amd64"},
+                "available": {
+                    "version": "3.1.0",
+                    "compatible": True,
+                    "change_scope": ["runtime", "dashboard"],
+                },
+                "discovery": {"status": "succeeded"},
+                "download": {"status": self.download_status},
+                "packages": [],
+                "install_supported": False,
+            }
+
+        def settings_loader(self):
+            from dicepp_manager.release import UpdateSettings
+            return UpdateSettings(auto_download=False)
+
+        def queue_discovery(self, *, manual=False):
+            assert manual is True
+            return True
+
+        def discover(self, *, manual=False, reservation=None):
+            assert reservation is not None
+            return self.status()
+
+        def queue_download(self):
+            if self.download_status in {"queued", "downloading"}:
+                return False
+            self.download_status = "queued"
+            return True
+
+        def download(self, *, purpose=None, reservation=None):
+            assert purpose == "linux-bundle"
+            assert reservation is not None
+            self.download_calls += 1
+            self.download_status = "verified"
+            return self.status()
+
+    layout = InstanceLayout.from_root(tmp_path)
+    adapter = FakeRuntimeAdapter()
+    service = _service(tmp_path, adapter)
+    release_manager = FakeReleaseManager()
+    service.release_manager = release_manager
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    headers = {"Authorization": "Bearer manager-secret"}
+
+    with TestClient(app) as client:
+        checked = client.post("/v1/releases/check", headers=headers)
+        assert checked.status_code == 202
+        assert checked.json()["available"]["change_scope"] == ["runtime", "dashboard"]
+
+        queued = client.post(
+            "/v1/releases/download",
+            headers=headers,
+            json={"purpose": "linux-bundle"},
+        )
+        assert queued.status_code == 202
+        for _ in range(50):
+            state = client.get("/v1/releases/status", headers=headers).json()
+            if state["download"]["status"] == "verified":
+                break
+        assert state["download"]["status"] == "verified"
+        assert state["install_supported"] is False
+
+    assert release_manager.download_calls == 1
+    assert adapter.actions == []
+
+
+def test_release_scheduler_checks_immediately_and_survives_config_error(
+    tmp_path: Path,
+) -> None:
+    class RecoveringReleaseManager:
+        scheduler_error_delay = 0.001
+
+        def __init__(self) -> None:
+            self.settings_calls = 0
+            self.errors = []
+            self.discoveries = 0
+
+        def settings_loader(self):
+            from dicepp_manager.release import UpdateSettings
+
+            self.settings_calls += 1
+            if self.settings_calls == 1:
+                raise ValueError("injected invalid update config")
+            return UpdateSettings(check_interval_hours=1)
+
+        def record_scheduler_error(self, exc):
+            self.errors.append(str(exc))
+
+        def queue_discovery(self, *, manual=False):
+            assert manual is False
+            return self.discoveries == 0
+
+        def discover(self, *, reservation=None):
+            assert reservation is not None
+            self.discoveries += 1
+            return {"available": None}
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path, FakeRuntimeAdapter())
+    releases = RecoveringReleaseManager()
+    service.release_manager = releases
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=True,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+
+    with TestClient(app):
+        for _ in range(100):
+            if releases.discoveries:
+                break
+            import time
+
+            time.sleep(0.002)
+
+    assert releases.errors == ["injected invalid update config"]
+    assert releases.discoveries == 1
+
+
+def test_release_shutdown_cancels_scheduler_and_drains_worker_immediately(
+    tmp_path: Path,
+) -> None:
+    class BlockingReleaseManager:
+        scheduler_error_delay = 60
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.cancelled = threading.Event()
+            self.finished = threading.Event()
+            self.queued = False
+
+        def settings_loader(self):
+            from dicepp_manager.release import UpdateSettings
+
+            return UpdateSettings(check_interval_hours=24)
+
+        def queue_discovery(self, *, manual=False):
+            if self.queued:
+                return None
+            self.queued = True
+            return object()
+
+        def discover(self, *, reservation=None):
+            from dicepp_manager.release import ReleaseCancelledError
+
+            assert reservation is not None
+            self.started.set()
+            assert self.cancelled.wait(2)
+            self.finished.set()
+            raise ReleaseCancelledError("cancelled")
+
+        def cancel_active(self):
+            self.cancelled.set()
+
+        def record_scheduler_error(self, _exc):
+            raise AssertionError("cooperative cancellation is not an error")
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path, FakeRuntimeAdapter())
+    releases = BlockingReleaseManager()
+    service.release_manager = releases
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=True,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+
+    started_at = time.monotonic()
+    with TestClient(app):
+        assert releases.started.wait(1)
+    elapsed = time.monotonic() - started_at
+
+    assert releases.finished.is_set()
+    assert elapsed < 1.0
 
 
 def test_manager_database_is_not_dashboard_database(tmp_path: Path) -> None:
