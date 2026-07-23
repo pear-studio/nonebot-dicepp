@@ -52,10 +52,6 @@ for relative_path in (Path("config/bots/_template.json"), Path("config/global.js
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(source, target)
 
-_DICEPP_PATH = _REAL_PROJECT / "src" / "plugins" / "DicePP"
-if str(_DICEPP_PATH) not in sys.path:
-    sys.path.insert(0, str(_DICEPP_PATH))
-
 # Production imports must happen only after the isolated app root is active.
 from tests.support.persona_llm import MockCoordinator
 

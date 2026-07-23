@@ -24,11 +24,15 @@ marker 是 `quick`。
 `tests/support/`，静态数据放到 `tests/fixtures/`。测试模块禁止导入任何
 `conftest`；需要复用的对象必须移到显式可导入的 support 模块。
 
-DicePP 运行时内部的 canonical namespace 是 `core/module/utils/adapter/shell`
-等裸路径。unit、integration 和 support 不得改用 `plugins.DicePP.*`，否则同一
-源码可能形成两份 module、singleton 或 ContextVar。只有明确验证外部包边界的
-system 测试，以及 Dashboard integration 中匹配正式跨包调用的测试可以使用完整
-包路径。将全部生产代码统一迁移到完整包命名空间属于独立架构任务。
+DicePP 的唯一 canonical namespace 是 `plugins.DicePP.*`。所有测试层级都必须
+使用完整包路径，包含 patch 目标与动态导入字符串；不得导入裸
+`core/module/utils/adapter/shell/frozen`，否则同一源码可能形成两份 module、
+singleton 或 ContextVar。
+
+唯一的刻意例外是 `tests/integration/repository/test_internal_import_namespace.py`
+中由 `LEGACY_BARE_IMPORT_FAILURE_PROBE` 声明的 `core.command` 失败性动态导入探针：
+它断言旧模块名无法进入
+`sys.modules`，因此绝不会实际加载第二份模块。
 
 根 `conftest.py` 会在测试模块导入前为每个 pytest worker 创建隔离的应用目录，
 并在会话结束后检查真实仓库未被污染。这是全套测试的安全边界；具体 Bot、数据库
@@ -97,8 +101,8 @@ uv run python -m tools.check_test_layout path\to\tests
 
 - `tests/` 顶层位置；
 - 导入 `conftest`；
-- unit/integration/support 中不属于显式 Dashboard 包边界的 `plugins.DicePP.*`
-  导入和 patch 目标；
+- 所有测试层级中的裸 `core/module/utils/adapter/shell/frozen` 导入、动态导入和
+  patch 目标；
 - 用 `Path(__file__).parents[n]` 推算仓库根目录；
 - unit 中直接连接 SQLite、构造完整 Bot/TestClient，或使用系统级资源；
 - integration 中使用子进程、listener/server 或浏览器；

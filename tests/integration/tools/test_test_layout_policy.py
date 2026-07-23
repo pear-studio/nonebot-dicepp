@@ -16,6 +16,19 @@ def _write_source(tmp_path: Path, layer: str, source: str) -> Path:
     return tests_root
 
 
+def _write_internal_import_namespace_source(tmp_path: Path, source: str) -> Path:
+    tests_root = tmp_path / "tests"
+    target = (
+        tests_root
+        / "integration"
+        / "repository"
+        / "test_internal_import_namespace.py"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    return tests_root
+
+
 def _codes(tests_root: Path) -> set[str]:
     return {violation.code for violation in check_test_layout(tests_root)}
 
@@ -36,7 +49,7 @@ def test_layout_rejects_unknown_top_level_locations(tmp_path: Path) -> None:
         ("import sqlite3 as sql\nsql.connect(':memory:')\n", "UNT001"),
         ("from aiosqlite import connect as open_db\nopen_db('db.sqlite')\n", "UNT001"),
         ("from nonebot.adapters import Bot as RuntimeBot\nRuntimeBot(None, None)\n", "UNT002"),
-        ("from core.bot import Bot\nBot('test')\n", "UNT002"),
+        ("from plugins.DicePP.core.bot import Bot\nBot('test')\n", "UNT002"),
         (
             "from starlette.testclient import TestClient as Client\nClient(object())\n",
             "UNT002",
@@ -158,19 +171,233 @@ def test_all_layers_reject_fragile_repository_lookup(
     assert _codes(tests_root) == {"PTH001"}
 
 
-@pytest.mark.parametrize("layer", ["unit", "integration", "support"])
 @pytest.mark.parametrize(
-    "source",
+    ("layer", "source"),
     [
-        "from plugins.DicePP.utils.time import wall_now\n",
-        "import plugins.DicePP.module.persona.factory\n",
         (
-            "from unittest.mock import patch\n"
-            "patch('plugins.DicePP.utils.time.wall_now')\n"
+            "integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "legacy_root = Path('repo') / 'src' / 'plugins'\n"
+            "sys.path.insert(0, str(legacy_root))\n",
+        ),
+        ("integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "sys.path.insert(0, str(package_root))\n"
+        ),
+        (
+            "integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "legacy_descendant = (\n"
+            "    Path('repo') / 'src' / 'plugins' / 'DicePP' / 'core'\n"
+            ")\n"
+            "sys.path.append(str(legacy_descendant))\n",
+        ),
+        ("integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "sys.path.append(str(package_root))\n"
+        ),
+        ("integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "sys.path.extend([str(package_root)])\n"
+        ),
+        (
+            "integration",
+            "import os\n"
+            "from pathlib import Path\n"
+            "legacy_root = Path('repo') / 'src' / 'plugins'\n"
+            "env = {}\n"
+            "env['PYTHONPATH'] = os.pathsep.join([str(legacy_root), ''])\n",
+        ),
+        (
+            "integration",
+            "import os\n"
+            "os.environ['PYTHONPATH'] = r'C:\\repo\\src\\plugins;C:\\other'\n",
+        ),
+        ("integration",
+            "import os\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "env = {}\n"
+            "env['PYTHONPATH'] = os.pathsep.join([str(package_root), ''])\n"
+        ),
+        ("system",
+            "import sys\n"
+            "repo = 'repo'\n"
+            "sys.path.insert(0, f'{repo}/src/plugins/DicePP')\n"
+        ),
+        ("system",
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "subprocess.run(['worker'], env={'PYTHONPATH': str(package_root)})\n"
+        ),
+        ("system",
+            "import os\n"
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "subprocess.run(\n"
+            "    ['worker'],\n"
+            "    env={**os.environ, 'PYTHONPATH': str(package_root)},\n"
+            ")\n"
+        ),
+        ("system",
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "env = {'PYTHONPATH': str(package_root)}\n"
+            "subprocess.run(['worker'], env=env)\n"
+        ),
+        ("system",
+            "import os\n"
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "env = {**os.environ, 'PYTHONPATH': str(package_root)}\n"
+            "subprocess.run(['worker'], env=env)\n"
+        ),
+        ("system",
+            "import os\n"
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "env = os.environ | {'PYTHONPATH': str(package_root)}\n"
+            "subprocess.run(['worker'], env=env)\n"
+        ),
+        ("system",
+            "import os\n"
+            "import subprocess\n"
+            "from pathlib import Path\n"
+            "package_root = Path('repo') / 'src' / 'plugins' / 'DicePP'\n"
+            "env = dict(os.environ, PYTHONPATH=str(package_root))\n"
+            "subprocess.run(['worker'], env=env)\n"
+        ),
+        (
+            "integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "legacy_root = (Path('repo') / 'src' / 'plugins').resolve()\n"
+            "sys.path.insert(0, str(legacy_root))\n",
+        ),
+        (
+            "integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "legacy_root = (\n"
+            "    Path('repo') / 'src' / 'plugins' / 'DicePP' / 'core'\n"
+            ").absolute()\n"
+            "sys.path.insert(0, str(legacy_root))\n",
+        ),
+        (
+            "integration",
+            "import os\n"
+            "import sys\n"
+            "legacy_root = os.path.abspath('repo/src/plugins/DicePP')\n"
+            "sys.path.insert(0, legacy_root)\n",
+        ),
+        (
+            "integration",
+            "import os\n"
+            "import sys\n"
+            "legacy_root = os.path.normpath('repo/src/plugins/DicePP/core')\n"
+            "sys.path.insert(0, legacy_root)\n",
+        ),
+        (
+            "integration",
+            "import os\n"
+            "os.environ['PYTHONPATH'] = 'repo/src/plugins/../plugins'\n",
+        ),
+        (
+            "integration",
+            "import sys\n"
+            "from pathlib import Path\n"
+            "legacy_root = (\n"
+            "    Path('repo') / 'src' / 'plugins' / 'DicePP' / 'core'\n"
+            ").resolve().parent\n"
+            "sys.path.insert(0, str(legacy_root))\n",
         ),
     ],
 )
-def test_in_process_layers_reject_package_qualified_dicepp_imports(
+def test_test_layers_reject_dicepp_legacy_import_path_exposure(
+    tmp_path: Path,
+    layer: str,
+    source: str,
+) -> None:
+    tests_root = _write_source(tmp_path, layer, source)
+
+    assert _codes(tests_root) == {"PTH002"}
+
+
+def test_test_layers_allow_unrelated_plugin_package_paths(tmp_path: Path) -> None:
+    tests_root = _write_source(
+        tmp_path,
+        "integration",
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "other_plugin = (\n"
+        "    Path('repo') / 'src' / 'plugins' / 'other_plugin' / '..' / 'other_plugin'\n"
+        ").resolve()\n"
+        "sys.path.insert(0, str(other_plugin))\n"
+        "os.environ['PYTHONPATH'] = '/repo/src/plugins/other_plugin'\n",
+    )
+
+    assert check_test_layout(tests_root) == []
+
+
+def test_system_process_setup_allows_canonical_src_path(tmp_path: Path) -> None:
+    tests_root = _write_source(
+        tmp_path,
+        "system",
+        "import os\n"
+        "import subprocess\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "source_root = Path('repo') / 'src'\n"
+        "sys.path.insert(0, str(source_root))\n"
+        "env = {}\n"
+        "env['PYTHONPATH'] = os.pathsep.join([str(source_root), ''])\n"
+        "subprocess.run(['worker'], env={'PYTHONPATH': str(source_root)})\n"
+        "subprocess.run(\n"
+        "    ['worker'],\n"
+        "    env={**os.environ, 'PYTHONPATH': str(source_root)},\n"
+        ")\n"
+        "named_env = {'PYTHONPATH': str(source_root)}\n"
+        "subprocess.run(['worker'], env=named_env)\n"
+        "spread_env = {**os.environ, 'PYTHONPATH': str(source_root)}\n"
+        "subprocess.run(['worker'], env=spread_env)\n"
+        "merged_env = os.environ | {'PYTHONPATH': str(source_root)}\n"
+        "subprocess.run(['worker'], env=merged_env)\n"
+        "dict_env = dict(os.environ, PYTHONPATH=str(source_root))\n"
+        "subprocess.run(['worker'], env=dict_env)\n",
+    )
+
+    assert check_test_layout(tests_root) == []
+
+
+@pytest.mark.parametrize("layer", ["unit", "integration", "support", "system"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from utils.time import wall_now\n",
+        "import module.persona.factory\n",
+        "import DicePP.core.command\n",
+        "from DicePP.core import command\n",
+        (
+            "from unittest.mock import patch\n"
+            "patch('utils.time.wall_now')\n"
+        ),
+    ],
+)
+def test_test_layers_reject_legacy_dicepp_imports(
     tmp_path: Path,
     layer: str,
     source: str,
@@ -180,7 +407,126 @@ def test_in_process_layers_reject_package_qualified_dicepp_imports(
     assert _codes(tests_root) == {"IMP002"}
 
 
-def test_system_layer_allows_package_qualified_boundary_imports(
+@pytest.mark.parametrize(
+    "source",
+    [
+        (
+            "import importlib\n"
+            "target = 'core.command'\n"
+            "importlib.import_module(target)\n"
+        ),
+        (
+            "from unittest.mock import patch\n"
+            "target = 'utils.time.wall_now'\n"
+            "patch(target)\n"
+        ),
+        (
+            "import importlib\n"
+            "target = 'DicePP.core.command'\n"
+            "importlib.import_module(target)\n"
+        ),
+        (
+            "from unittest.mock import patch\n"
+            "target = 'DicePP.core.command.execute'\n"
+            "patch(target)\n"
+        ),
+        (
+            "target = 'adapter.client_proxy.ClientProxy'\n"
+            "monkeypatch.setattr(target, object())\n"
+        ),
+    ],
+)
+def test_test_layers_reject_legacy_dicepp_dynamic_target_variables(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    tests_root = _write_source(tmp_path, "integration", source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_layout_allows_only_the_declared_legacy_import_failure_probe(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import importlib\n"
+        "import pytest\n"
+        "LEGACY_BARE_IMPORT_FAILURE_PROBE = 'core.command'\n"
+        "LEGACY_TOP_LEVEL_PACKAGE_IMPORT_FAILURE_PROBE = 'DicePP.core.command'\n"
+        "with pytest.raises(ModuleNotFoundError):\n"
+        "    importlib.import_module(LEGACY_BARE_IMPORT_FAILURE_PROBE)\n"
+        "with pytest.raises(ModuleNotFoundError):\n"
+        "    importlib.import_module(LEGACY_TOP_LEVEL_PACKAGE_IMPORT_FAILURE_PROBE)\n"
+    )
+    tests_root = _write_internal_import_namespace_source(tmp_path, source)
+
+    assert check_test_layout(tests_root) == []
+
+
+def test_layout_rejects_an_unscoped_legacy_target_in_the_probe_file(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import importlib\n"
+        "import pytest\n"
+        "LEGACY_BARE_IMPORT_FAILURE_PROBE = 'core.command'\n"
+        "LEGACY_TOP_LEVEL_PACKAGE_IMPORT_FAILURE_PROBE = 'DicePP.core.command'\n"
+        "with pytest.raises(ModuleNotFoundError):\n"
+        "    importlib.import_module(LEGACY_BARE_IMPORT_FAILURE_PROBE)\n"
+        "with pytest.raises(ModuleNotFoundError):\n"
+        "    importlib.import_module(LEGACY_TOP_LEVEL_PACKAGE_IMPORT_FAILURE_PROBE)\n"
+        "target = 'DicePP.core.command'\n"
+        "importlib.import_module(target)\n"
+    )
+    tests_root = _write_internal_import_namespace_source(tmp_path, source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_layout_rejects_a_declared_probe_outside_its_failure_assertion(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import importlib\n"
+        "LEGACY_BARE_IMPORT_FAILURE_PROBE = 'core.command'\n"
+        "result = importlib.import_module(LEGACY_BARE_IMPORT_FAILURE_PROBE)\n"
+    )
+    tests_root = _write_internal_import_namespace_source(tmp_path, source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_layout_rejects_a_declared_probe_with_the_wrong_failure_type(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import importlib\n"
+        "import pytest\n"
+        "LEGACY_BARE_IMPORT_FAILURE_PROBE = 'core.command'\n"
+        "with pytest.raises(ImportError):\n"
+        "    importlib.import_module(LEGACY_BARE_IMPORT_FAILURE_PROBE)\n"
+    )
+    tests_root = _write_internal_import_namespace_source(tmp_path, source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_layout_rejects_a_declared_probe_assignment_inside_failure_assertion(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import importlib\n"
+        "import pytest\n"
+        "LEGACY_BARE_IMPORT_FAILURE_PROBE = 'core.command'\n"
+        "with pytest.raises(ModuleNotFoundError):\n"
+        "    result = importlib.import_module(LEGACY_BARE_IMPORT_FAILURE_PROBE)\n"
+    )
+    tests_root = _write_internal_import_namespace_source(tmp_path, source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_system_layer_allows_canonical_dicepp_imports(
     tmp_path: Path,
 ) -> None:
     tests_root = _write_source(
@@ -192,7 +538,7 @@ def test_system_layer_allows_package_qualified_boundary_imports(
     assert check_test_layout(tests_root) == []
 
 
-def test_dashboard_integration_allows_its_explicit_package_boundary(
+def test_dashboard_integration_allows_canonical_dicepp_imports(
     tmp_path: Path,
 ) -> None:
     tests_root = tmp_path / "tests"

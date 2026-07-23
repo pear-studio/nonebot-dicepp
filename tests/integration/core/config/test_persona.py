@@ -4,20 +4,10 @@ Tests for core/persona/loader.py and core/persona/models.py
 Covers:
   9.3  Persona loading and fallback
 """
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
-
-REPO_ROOT = next(
-    parent
-    for parent in Path(__file__).resolve().parents
-    if (parent / "pyproject.toml").is_file()
-)
-PLUGIN_ROOT = REPO_ROOT / "src" / "plugins" / "DicePP"
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
 
 from plugins.DicePP.core.persona.loader import PersonaLoader
 from plugins.DicePP.core.persona.models import PersonaModel

@@ -5,7 +5,6 @@ Tests for core/config/declare.py
   - get_bot_version() 返回 vX.Y.Z 或 vX.Y.ZrcN 格式
   - get_bot_version() 与 pyproject.toml 中的版本一致
 """
-import sys
 import tomllib
 import re
 from pathlib import Path
@@ -17,9 +16,7 @@ project_root = next(
     for parent in Path(__file__).resolve().parents
     if (parent / "pyproject.toml").is_file()
 )
-PLUGIN_ROOT = project_root / "src" / "plugins" / "DicePP"
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
+
 
 def _read_pyproject_version() -> str:
     """读取 pyproject.toml 中声明的项目版本号，返回不带 v 前缀的值。"""
