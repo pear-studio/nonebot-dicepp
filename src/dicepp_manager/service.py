@@ -76,6 +76,7 @@ class ManagerService:
         self._lifecycle_leases: dict[str, AbstractContextManager[None]] = {}
         self._maintenance_active = False
         self._lock = threading.RLock()
+        self.archive_coordinator = None
 
     def close(self) -> None:
         with self._lock:

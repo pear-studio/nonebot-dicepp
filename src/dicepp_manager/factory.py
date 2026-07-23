@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import json
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+
+from .archive_coordinator import ArchiveCoordinator
 from .config import ManagerSettings
 from .discovery import RuntimeUnitDiscovery
 from .docker_runtime import DockerRuntimeAdapter, DockerSocketRuntimeAdapter
@@ -56,13 +63,101 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
         )
         store = ManagerOperationStore(settings.layout.manager_db)
         store.recover_incomplete_operations()
-        return ManagerService(
+        service = ManagerService(
             unit_provider=discovery.list_units,
             runtime_adapter=adapter,
             store=store,
             state_dir=settings.layout.manager_state_dir,
             owner_lock=owner,
         )
+        service.archive_coordinator = ArchiveCoordinator(
+            layout=settings.layout,
+            service=service,
+            dashboard_probe=lambda: _dashboard_probe(),
+            control_probe=lambda: _control_channel_probe(),
+        )
+        return service
     except BaseException:
         owner.release()
         raise
+
+
+def _dashboard_health_payload() -> tuple[str, int | None, dict]:
+    url = os.environ.get(
+        "DICEPP_DASHBOARD_HEALTH_URL",
+        "http://127.0.0.1:4090/api/health",
+    )
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            status = response.status
+            raw = response.read(64 * 1024)
+    except urllib.error.HTTPError:
+        return url, None, {}
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return url, None, {}
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = {}
+    return url, status, payload if isinstance(payload, dict) else {}
+
+
+def _dashboard_probe() -> dict:
+    url, status, payload = _dashboard_health_payload()
+    valid = (
+        status == 200
+        and payload.get("status") == "ok"
+        and payload.get("component") == "dashboard"
+    )
+    return {
+        "ok": valid,
+        "status": "ok" if valid else "failed",
+        "http_status": status,
+        "url": url,
+    }
+
+
+def _control_channel_probe() -> dict:
+    url, status, payload = _dashboard_health_payload()
+    if (
+        status != 200
+        or payload.get("status") != "ok"
+        or payload.get("component") != "dashboard"
+    ):
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": url,
+            "message": "Dashboard health is unavailable",
+        }
+    control = payload.get("control")
+    raw_heartbeat = (
+        control.get("latest_heartbeat") if isinstance(control, dict) else None
+    )
+    if not isinstance(raw_heartbeat, str) or not raw_heartbeat:
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": url,
+            "message": "No Bot control heartbeat",
+        }
+    try:
+        heartbeat = datetime.fromisoformat(raw_heartbeat.replace("Z", "+00:00"))
+        age = (
+            datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)
+        ).total_seconds()
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": url,
+            "message": "Invalid Bot control heartbeat",
+        }
+    return {
+        "ok": age <= 120,
+        "status": "ok" if age <= 120 else "failed",
+        "url": url,
+        "heartbeat_age_seconds": age,
+        "heartbeat": heartbeat.astimezone(timezone.utc).isoformat(),
+    }

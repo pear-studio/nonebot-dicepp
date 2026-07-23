@@ -317,6 +317,9 @@ def run_windows_launcher(*, fake_tray: bool = False) -> None:
         manager_settings = ManagerSettings.from_env(DashboardPaths.PROJECT_ROOT)
         token = ensure_api_token(manager_settings.token_path or manager_settings.layout.manager_token)
         manager_app = create_manager_app(manager_settings, api_token=token)
+        # Dashboard readiness is independent from Manager connectivity. Start it
+        # first so Manager startup recovery can run its local semantic probe.
+        dashboard_server = _start_dashboard_server(settings, log_path)
         manager_server = _start_server(
             manager_app,
             host=manager_settings.host,
@@ -326,7 +329,6 @@ def run_windows_launcher(*, fake_tray: bool = False) -> None:
         )
         manager_client = ManagerClient(ManagerClientSettings.from_layout(manager_settings.layout))
         app.state.manager_client = manager_client
-        dashboard_server = _start_dashboard_server(settings, log_path)
         url = dashboard_url(settings)
         _wait_for_manager_service(manager_client, timeout=10.0)
 

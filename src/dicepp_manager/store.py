@@ -163,6 +163,49 @@ class ManagerOperationStore:
                 ),
             )
 
+    def get_journal(self, transaction_id: str) -> dict[str, Any] | None:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM manager_journal WHERE transaction_id = ?",
+                (transaction_id,),
+            ).fetchone()
+        return self._journal_row(row) if row else None
+
+    def list_recoverable_journals(self) -> list[dict[str, Any]]:
+        with self._transaction() as connection:
+            rows = connection.execute(
+                """SELECT * FROM manager_journal
+                   WHERE status IN ('running', 'interrupted', 'rollback_failed')
+                   ORDER BY updated_at ASC"""
+            ).fetchall()
+        return [self._journal_row(row) for row in rows]
+
+    def protected_archive_names(self) -> set[str]:
+        names: set[str] = set()
+        for journal in self.list_recoverable_journals():
+            detail = journal.get("detail", {})
+            for key in ("pre_restore_filename", "target_filename", "archive"):
+                value = detail.get(key)
+                if isinstance(value, str):
+                    names.add(value)
+        return names
+
+    @staticmethod
+    def _journal_row(row: sqlite3.Row) -> dict[str, Any]:
+        try:
+            detail = json.loads(row["detail"] or "{}")
+        except json.JSONDecodeError:
+            detail = {}
+        return {
+            "transaction_id": row["transaction_id"],
+            "operation_id": row["operation_id"],
+            "kind": row["kind"],
+            "phase": row["phase"],
+            "status": row["status"],
+            "updated_at": row["updated_at"],
+            "detail": detail if isinstance(detail, dict) else {},
+        }
+
     @staticmethod
     def _row(row: sqlite3.Row) -> ManagerOperation:
         try:

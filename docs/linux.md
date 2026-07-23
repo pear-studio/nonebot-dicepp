@@ -85,7 +85,7 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 | `dashboard` | 用户登录、配置和操作界面 | `4090` |
 | `manager` | RuntimeUnit 生命周期、operation 和维护操作 | 不映射；只在内部网络暴露 `4091` |
 
-Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一文件。不要把 `4091` 映射到公网。
+Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一文件。不要把 `4091` 映射到公网。启动时 Dashboard 先通过独立的 `/api/health` 完成数据库语义检查，随后 Manager 才启动并执行未完成事务恢复。该端点同时报告最新 Bot 控制心跳；没有心跳只表示 Bot 尚未运行，不会让 Dashboard 自身 readiness 失败，Manager 会在启动 RuntimeUnit 后单独判断心跳。
 
 只有 Manager 挂载 `/var/run/docker.sock`。它仅执行固定的状态、启动、停止、重启和日志操作，并且只接受带有匹配 DicePP managed、RuntimeUnit 和 deployment schema 标签的 Bot 容器。Dashboard 不挂载 Docker Socket，也不直接控制容器。
 
@@ -100,10 +100,10 @@ Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会�
 └─ manager/
    ├─ state/          # token、operation store、维护状态
    ├─ packages/       # 后续版本下载缓存
-   └─ backups/        # 后续事务安全归档
+   └─ backups/        # 用户归档与事务安全归档
 ```
 
-Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。
+Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
 
 ## 无法拉取镜像时使用离线包
 

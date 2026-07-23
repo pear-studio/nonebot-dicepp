@@ -442,6 +442,62 @@ def test_archive_detail_race_does_not_reopen_detail_panel(dashboard_url: str) ->
             browser.close()
 
 
+def test_archive_terminal_operation_reconnects_from_persisted_id(
+    dashboard_url: str,
+) -> None:
+    """A refresh after Manager completion still maps restore and rollback details."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+        try:
+            _login(page, dashboard_url)
+            result = page.evaluate(
+                """async () => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    localStorage.setItem('dicepp_archive_operation', JSON.stringify({
+                      operation_id: 'restore-terminal',
+                      action: 'archive.restore',
+                    }));
+                    const originalApi = state.api;
+                    state.api = async (path) => {
+                      if (path === '/api/manager/operations/restore-terminal') {
+                        return {operation: {
+                          operation_id: 'restore-terminal',
+                          action: 'archive.restore',
+                          status: 'failed',
+                          message: 'target health failed',
+                          detail: {
+                            rolled_back: true,
+                            pre_restore_filename: 'safety.zip',
+                          },
+                        }};
+                      }
+                      if (path === '/api/archives') return {ok: true, archives: []};
+                      return originalApi.call(state, path);
+                    };
+                    try {
+                      await state.reconnectArchiveOperation();
+                      return {
+                        persisted: localStorage.getItem('dicepp_archive_operation'),
+                        rolledBack: state.archiveRestoreResult?.rolled_back,
+                        safety: state.archiveRestoreResult?.pre_restore_archive?.filename,
+                        error: state.archiveRestoreError,
+                      };
+                    } finally {
+                      state.api = originalApi;
+                    }
+                }"""
+            )
+            assert result == {
+                "persisted": None,
+                "rolledBack": True,
+                "safety": "safety.zip",
+                "error": "target health failed；已自动完整回退",
+            }
+        finally:
+            browser.close()
+
+
 def test_monitor_tab_loads_initial_status_via_rest(dashboard_url: str) -> None:
     """Monitor tab uses REST first paint and keeps bot status isolated from Manager failures."""
     with sync_playwright() as p:
@@ -1202,6 +1258,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
     }
     observed_requests: list[tuple[str, str]] = []
     restore_bodies: dict[str, dict] = {}
+    operations: dict[str, dict] = {}
 
     def _archives_api(route):
         request = route.request
@@ -1218,6 +1275,25 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             )
             return
 
+        if path == "/api/archives/estimate" and method == "POST":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "estimate": {
+                            "profile": "regular",
+                            "file_count": 1,
+                            "input_bytes": 1024,
+                            "available_bytes": 1024 * 1024,
+                            "enough_space": True,
+                        },
+                    }
+                ),
+            )
+            return
+
         if path == "/api/archives" and method == "POST":
             body = json.loads(request.post_data or "{}")
             created = {
@@ -1229,14 +1305,28 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "file_count": 1,
             }
             archives.insert(0, created)
+            operation_id = "archive-create-1"
+            operations[operation_id] = {
+                "operation_id": operation_id,
+                "action": "archive.create",
+                "status": "succeeded",
+                "message": "Archive created",
+                "detail": {
+                    "archive": created,
+                    "manifest": manifests[created["filename"]],
+                },
+            }
             route.fulfill(
-                status=200,
+                status=202,
                 content_type="application/json",
                 body=json.dumps(
                     {
                         "ok": True,
-                        "archive": created,
-                        "manifest": manifests[created["filename"]],
+                        "operation": {
+                            "operation_id": operation_id,
+                            "action": "archive.create",
+                            "status": "queued",
+                        },
                     }
                 ),
             )
@@ -1292,8 +1382,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "description": f"pre-restore {filename}",
                 "file_count": 1,
             }
-            if filename != "partial-failure.zip":
-                archives.insert(0, pre_restore)
+            archives.insert(0, pre_restore)
             restore = {
                 "archive": next(item for item in archives if item["filename"] == filename),
                 "pre_restore_archive": pre_restore,
@@ -1311,6 +1400,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "failed_entries": [],
                 "plan": restore_plans[filename],
             }
+            operation_id = f"archive-restore-{filename}"
             if filename == "partial-failure.zip":
                 restore["failed_entries"] = [
                     {
@@ -1320,53 +1410,42 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                         "error": "simulated restore write failure",
                     }
                 ]
-                runtime_quiesce = None
-                if restore_bodies[filename].get("quiesce_runtime") is True:
-                    runtime_quiesce = {
-                        "enabled": True,
-                        "runtime_units": ["archive_bot", "second_bot"],
-                        "failed_stage": "start",
-                        "restore_started": True,
-                        "restart_attempted": True,
-                        "start_failed": True,
-                        "stop_operations": [
-                            {
-                                "operation_id": "stop-archive-bot",
-                                "runtime_unit_id": "archive_bot",
-                                "action": "stop",
-                                "status": "succeeded",
-                                "message": "runtime stopped",
-                                "detail": {"raw": "not rendered"},
-                            }
-                        ],
-                        "start_operations": [
-                            {
-                                "operation_id": "start-archive-bot",
-                                "runtime_unit_id": "archive_bot",
-                                "action": "start",
-                                "status": "failed",
-                                "message": "simulated start failure",
-                                "detail": {"raw": "not rendered"},
-                            }
-                        ],
-                    }
-                response = {
-                    "ok": False,
+                operations[operation_id] = {
+                    "operation_id": operation_id,
+                    "action": "archive.restore",
+                    "status": "failed",
                     "message": "Archive restore failed",
-                    "restore": restore,
+                    "detail": {
+                        "restore": restore,
+                        "pre_restore_filename": pre_restore["filename"],
+                        "rolled_back": True,
+                    },
                 }
-                if runtime_quiesce is not None:
-                    response["runtime_quiesce"] = runtime_quiesce
-                route.fulfill(
-                    status=500,
-                    content_type="application/json",
-                    body=json.dumps(response),
-                )
-                return
+            else:
+                operations[operation_id] = {
+                    "operation_id": operation_id,
+                    "action": "archive.restore",
+                    "status": "succeeded",
+                    "message": "Archive restore committed",
+                    "detail": {
+                        "restore": restore,
+                        "pre_restore_filename": pre_restore["filename"],
+                        "rolled_back": False,
+                    },
+                }
             route.fulfill(
-                status=200,
+                status=202,
                 content_type="application/json",
-                body=json.dumps({"ok": True, "restore": restore}),
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "operation": {
+                            "operation_id": operation_id,
+                            "action": "archive.restore",
+                            "status": "queued",
+                        },
+                    }
+                ),
             )
             return
 
@@ -1401,12 +1480,33 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
 
         route.fallback()
 
+    def _manager_operations_api(route):
+        path = urlparse(route.request.url).path
+        if path == "/api/manager/operations":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "operations": list(operations.values())}),
+            )
+            return
+        operation_id = unquote(path.removeprefix("/api/manager/operations/"))
+        operation = operations.get(operation_id)
+        if operation is not None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "operation": operation}),
+            )
+            return
+        route.fallback()
+
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
             page.route("**/api/archives**", _archives_api)
+            page.route("**/api/manager/operations**", _manager_operations_api)
             _login(page, dashboard_url)
 
             page.get_by_role("button", name="存档", exact=True).click()
@@ -1519,7 +1619,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             expect(page.locator('[data-testid="archive-restore-button"]')).to_be_disabled()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_be_checked()
+            ).to_contain_text("始终由 Manager 暂停 Bot")
             page.locator('[data-testid="archive-restore-description"]').fill(
                 "operator restore"
             )
@@ -1541,7 +1641,6 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             assert restore_bodies["clean-restore.zip"] == {
                 "confirm_restore": True,
                 "description": "operator restore",
-                "quiesce_runtime": True,
             }
             assert ("POST", "/api/archives/clean-restore.zip/restore") in observed_requests
 
@@ -1552,11 +1651,11 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             failure_row.get_by_role("button", name="恢复预览").click()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_be_checked()
+            ).to_contain_text("始终由 Manager 暂停 Bot")
             page.locator('[data-testid="archive-restore-confirm"]').check()
             page.locator('[data-testid="archive-restore-button"]').click()
             expect(page.locator('[data-testid="archive-restore-error"]')).to_have_text(
-                "Archive restore failed"
+                "Archive restore failed；已自动完整回退"
             )
             expect(page.locator('[data-testid="archive-restore-status"]')).to_have_text(
                 "恢复失败"
@@ -1571,62 +1670,22 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "simulated restore write failure"
             )
             expect(
-                page.locator('[data-testid="archive-restore-runtime-units"]')
-            ).to_have_text("archive_bot, second_bot")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-failed-stage"]')
-            ).to_have_text("启动 Bot")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-restore-started"]')
-            ).to_have_text("是")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-restart-attempted"]')
-            ).to_have_text("是")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-start-failed"]')
-            ).to_have_text("是")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-stop-operations"]')
-            ).to_contain_text("archive_bot")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-stop-operations"]')
-            ).to_contain_text("停止")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-stop-operations"]')
-            ).to_contain_text("成功")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-stop-operations"]')
-            ).to_contain_text("runtime stopped")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-start-operations"]')
-            ).to_contain_text("archive_bot")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-start-operations"]')
-            ).to_contain_text("启动")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-start-operations"]')
-            ).to_contain_text("失败")
-            expect(
-                page.locator('[data-testid="archive-restore-runtime-start-operations"]')
-            ).to_contain_text("simulated start failure")
-            expect(
                 page.locator('[data-testid="archive-restore-runtime-quiesce"]')
-            ).not_to_contain_text("raw")
+            ).to_be_hidden()
             assert restore_bodies["partial-failure.zip"] == {
                 "confirm_restore": True,
-                "quiesce_runtime": True,
             }
             assert ("POST", "/api/archives/partial-failure.zip/restore") in observed_requests
             expect(
                 page.locator('[data-testid="archive-table"]')
-            ).not_to_contain_text("pre-restore-partial-failure.zip")
+            ).to_contain_text("pre-restore-partial-failure.zip")
             page.locator(
                 '[data-testid="archive-restore-pre-restore-plan-button"]'
             ).click()
             expect(page.locator('[data-testid="archive-restore-error"]')).to_be_hidden()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_be_checked()
+            ).to_contain_text("始终由 Manager 暂停 Bot")
             expect(page.locator('[data-testid="archive-plan-panel"]')).to_contain_text(
                 "pre-restore-partial-failure.zip"
             )

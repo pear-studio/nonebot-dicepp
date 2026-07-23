@@ -9,6 +9,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 ManagerAction = Literal["start", "stop", "restart"]
+OperationAction = str
 OperationStatus = Literal["queued", "running", "succeeded", "failed", "rejected", "interrupted"]
 RuntimeState = Literal["unknown", "stopped", "running"]
 VALID_ACTIONS: set[str] = {"start", "stop", "restart"}
@@ -94,7 +95,7 @@ class RuntimeLogs:
 class ManagerOperation:
     operation_id: str
     runtime_unit_id: str
-    action: ManagerAction
+    action: OperationAction
     status: OperationStatus
     created_at: str
     updated_at: str
@@ -110,6 +111,13 @@ class ManagerOperation:
             raise ValueError(f"Unsupported Manager action: {action}")
         now = utc_now()
         return cls(uuid4().hex, runtime_unit_id, action, "queued", now, now)
+
+    @classmethod
+    def create_system(cls, action: str) -> "ManagerOperation":
+        if not action or len(action) > 128:
+            raise ValueError("System operation action must be 1-128 characters")
+        now = utc_now()
+        return cls(uuid4().hex, "instance", action, "queued", now, now)
 
     def transition(
         self,

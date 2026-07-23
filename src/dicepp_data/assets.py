@@ -79,6 +79,7 @@ class DataAsset:
     schema: SchemaReference | None = None
     excludes: tuple[str, ...] = ()
     restore: str = "exact"
+    sensitive: bool = False
 
     def __post_init__(self) -> None:
         if self.area not in {"config", "data", "content"}:
@@ -136,6 +137,7 @@ class DataAsset:
             "schema": self.schema.to_dict() if self.schema else None,
             "excludes": list(self.excludes),
             "restore": self.restore,
+            "sensitive": self.sensitive,
         }
 
     def resolve(self, layout: InstanceLayout, **values: str) -> Path:
@@ -454,6 +456,7 @@ USER_CONFIG_ASSET = DataAsset(
     restore_scope=".",
     kind=DataAssetKind.FILE,
     profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
+    sensitive=True,
 )
 BOT_CONFIGS_ASSET = DataAsset(
     id="config.bots",
@@ -463,6 +466,7 @@ BOT_CONFIGS_ASSET = DataAsset(
     kind=DataAssetKind.FILE_SET,
     profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     excludes=("_template.json",),
+    sensitive=True,
 )
 INSTANCE_DB_ASSET = DataAsset(
     id="data.instance",

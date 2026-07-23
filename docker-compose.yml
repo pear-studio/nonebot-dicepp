@@ -64,15 +64,19 @@ services:
     container_name: dicepp-dashboard
     restart: unless-stopped
 
-    depends_on:
-      - manager
-
     networks:
       - dice-net
       - manager-net
 
     ports:
       - "4090:4090"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4090/api/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
 
     environment:
       - TZ=Asia/Shanghai
@@ -114,6 +118,10 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "dicepp_manager"]
 
+    depends_on:
+      dashboard:
+        condition: service_healthy
+
     networks:
       - manager-net
 
@@ -130,6 +138,7 @@ services:
       - DICEPP_MANAGER_RUNTIME_UNIT_ID=dicepp-runtime
       - DICEPP_MANAGER_DOCKER_COMMAND=unix:///var/run/docker.sock
       - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
+      - DICEPP_DASHBOARD_HEALTH_URL=http://dashboard:4090/api/health
 
     volumes:
       # Manager 是维护操作、归档与后续升级的唯一写入者。

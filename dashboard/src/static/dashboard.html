@@ -758,6 +758,19 @@
                   :disabled="archiveCreating"
                 />
               </div>
+              <div class="w-48">
+                <label for="archive-profile" class="block text-xs font-medium text-gray-500 mb-1">范围</label>
+                <select
+                  id="archive-profile"
+                  x-model="archiveProfile"
+                  data-testid="archive-profile-select"
+                  class="w-full border rounded px-3 py-2 text-sm"
+                  :disabled="archiveCreating"
+                >
+                  <option value="regular">常规（不含 content）</option>
+                  <option value="full">完整（包含 content）</option>
+                </select>
+              </div>
               <button
                 @click="createArchive()"
                 :disabled="archiveCreating"
@@ -765,7 +778,24 @@
                 class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
                 x-text="archiveCreating ? '创建中...' : '创建'"
               ></button>
+              <label class="px-4 py-2 border text-sm rounded cursor-pointer hover:bg-gray-50">
+                导入 ZIP
+                <input
+                  type="file"
+                  accept=".zip,application/zip"
+                  class="hidden"
+                  data-testid="archive-import-input"
+                  @change="importArchiveFile($event)"
+                />
+              </label>
             </div>
+            <div
+              x-show="archiveEstimate"
+              x-cloak
+              data-testid="archive-estimate"
+              class="mt-3 bg-blue-50 border border-blue-200 text-blue-800 p-2 rounded text-sm"
+              x-text="`预计 ${formatFileSize(archiveEstimate?.input_bytes || 0)}，${archiveEstimate?.file_count || 0} 个文件；可用空间 ${formatFileSize(archiveEstimate?.available_bytes || 0)}${archiveEstimate?.large_content_warning ? '；content 较大，Bot 会停机较长时间' : ''}`"
+            ></div>
             <div x-show="archiveCreateMessage" x-cloak data-testid="archive-create-success" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-2 rounded text-sm" x-text="archiveCreateMessage"></div>
             <div x-show="archiveCreateError" x-cloak data-testid="archive-create-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-2 rounded text-sm" x-text="archiveCreateError"></div>
           </div>
@@ -818,6 +848,12 @@
                         data-testid="archive-detail-button"
                         class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                       >详情</button>
+                      <a
+                        :href="`/api/archives/${encodeURIComponent(archive.filename)}/export`"
+                        :class="archive.valid ? '' : 'pointer-events-none opacity-50'"
+                        data-testid="archive-export-button"
+                        class="px-2 py-1 text-xs border rounded hover:bg-gray-100"
+                      >导出</a>
                       <button
                         @click="verifyArchive(archive)"
                         :disabled="!archive.valid || archiveVerifying || archiveDeleting[archive.filename] === true"
@@ -1002,16 +1038,10 @@
                       >
                     </div>
                     <div class="space-y-2">
-                      <label class="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          x-model="archiveRestoreQuiesceRuntime"
-                          :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
-                          data-testid="archive-restore-quiesce-runtime"
-                          class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                        <span>恢复前暂停 Bot（推荐）</span>
-                      </label>
+                      <div
+                        data-testid="archive-restore-quiesce-runtime"
+                        class="text-sm text-gray-600"
+                      >恢复事务始终由 Manager 暂停 Bot 并按原状态恢复</div>
                       <label class="flex items-center gap-2 text-sm text-gray-700">
                         <input
                           type="checkbox"
@@ -1571,6 +1601,9 @@ function app() {
     archivesError: '',
     archivesLoading: false,
     archiveDescription: '',
+    archiveProfile: 'regular',
+    archiveEstimate: null,
+    archiveReconnectInProgress: false,
     archiveCreating: false,
     archiveCreateMessage: '',
     archiveCreateError: '',
@@ -2422,8 +2455,9 @@ function app() {
       }
     },
 
-    async pollManagerOperation(operationId) {
-      const deadline = Date.now() + 30000;
+    async pollManagerOperation(operationId, timeoutMs = 30000) {
+      if (!operationId) throw new Error('Manager 未返回 operation_id');
+      const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const data = await this.api(`/api/manager/operations/${encodeURIComponent(operationId)}`);
         const operation = data.operation || {};
@@ -2469,6 +2503,9 @@ function app() {
       this.archivesError = '';
       this.archivesLoading = false;
       this.archiveDescription = '';
+      this.archiveProfile = 'regular';
+      this.archiveEstimate = null;
+      this.archiveReconnectInProgress = false;
       this.archiveCreating = false;
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
@@ -2501,6 +2538,7 @@ function app() {
       try {
         const data = await this.api('/api/archives');
         this.archives = data.archives || [];
+        void this.reconnectArchiveOperation();
       } catch (err) {
         console?.warn('[DicePP] Failed to load archives:', err);
         this.archives = [];
@@ -2515,24 +2553,162 @@ function app() {
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
       try {
+        const estimateData = await this.api('/api/archives/estimate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile: this.archiveProfile }),
+        });
+        this.archiveEstimate = estimateData.estimate || null;
+        if (this.archiveEstimate && this.archiveEstimate.enough_space === false) {
+          throw new Error('Manager 存档目录空间不足');
+        }
         const data = await this.api('/api/archives', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ description: this.archiveDescription || undefined }),
+          body: JSON.stringify({
+            description: this.archiveDescription || undefined,
+            profile: this.archiveProfile,
+          }),
         });
-        this.archiveCreateMessage = `已创建 ${data.archive?.filename || '存档'}`;
-        this.archiveDescription = '';
-        this.archiveDetail = data.manifest || null;
-        this.archiveDetailArchive = data.archive || null;
-        this.archiveDetailError = '';
-        this.clearArchiveVerify();
-        this.clearArchivePlan();
+        this.rememberArchiveOperation(data.operation, 'archive.create');
+        const operation = await this.pollManagerOperation(
+          data.operation?.operation_id,
+          30 * 60 * 1000,
+        );
+        this.applyCompletedArchiveOperation(operation);
+        this.clearPersistedArchiveOperation(operation.operation_id);
+        if (operation.status !== 'succeeded') throw new Error(operation.message || '创建存档失败');
         await this.loadArchives();
       } catch (err) {
         console?.warn('[DicePP] Failed to create archive:', err);
         this.archiveCreateError = err.message || '创建存档失败';
       } finally {
         this.archiveCreating = false;
+      }
+    },
+
+    async reconnectArchiveOperation() {
+      if (this.archiveReconnectInProgress) return;
+      this.archiveReconnectInProgress = true;
+      try {
+        const persisted = this.persistedArchiveOperation();
+        let operation = persisted;
+        if (!operation?.operation_id) {
+          const data = await this.api('/api/manager/operations?limit=50');
+          operation = (data.operations || []).find((item) =>
+            typeof item?.action === 'string'
+            && item.action.startsWith('archive.')
+            && ['queued', 'running'].includes(item.status)
+          );
+        }
+        if (!operation?.operation_id) return;
+        this.rememberArchiveOperation(operation, operation.action);
+        if (operation.action === 'archive.create') {
+          this.archiveCreating = true;
+          this.archiveCreateMessage = `已重新连接创建任务 ${operation.operation_id.slice(0, 8)}…`;
+        } else if (operation.action === 'archive.restore') {
+          this.archiveRestoring = true;
+        }
+        const completed = await this.pollManagerOperation(
+          operation.operation_id,
+          30 * 60 * 1000,
+        );
+        this.applyCompletedArchiveOperation(completed);
+        this.clearPersistedArchiveOperation(completed.operation_id);
+        const refreshed = await this.api('/api/archives');
+        this.archives = refreshed.archives || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to reconnect archive operation:', err);
+      } finally {
+        this.archiveReconnectInProgress = false;
+      }
+    },
+
+    rememberArchiveOperation(operation, actionFallback = '') {
+      if (!operation?.operation_id) return;
+      try {
+        localStorage.setItem('dicepp_archive_operation', JSON.stringify({
+          operation_id: operation.operation_id,
+          action: operation.action || actionFallback,
+        }));
+      } catch (_) {}
+    },
+
+    persistedArchiveOperation() {
+      try {
+        const value = JSON.parse(localStorage.getItem('dicepp_archive_operation') || 'null');
+        return value && typeof value.operation_id === 'string' ? value : null;
+      } catch (_) {
+        return null;
+      }
+    },
+
+    clearPersistedArchiveOperation(operationId) {
+      const persisted = this.persistedArchiveOperation();
+      if (!persisted || !operationId || persisted.operation_id === operationId) {
+        try { localStorage.removeItem('dicepp_archive_operation'); } catch (_) {}
+      }
+    },
+
+    archiveRestoreResultFromOperation(operation) {
+      const restore = operation.detail?.restore || {
+        failed_entries: operation.status === 'succeeded' ? [] : [{
+          error: operation.message || '恢复失败',
+        }],
+        pre_restore_archive: operation.detail?.pre_restore_filename
+          ? { filename: operation.detail.pre_restore_filename }
+          : null,
+      };
+      restore.restore_failed = operation.status !== 'succeeded';
+      restore.rolled_back = Boolean(operation.detail?.rolled_back);
+      return restore;
+    },
+
+    applyCompletedArchiveOperation(operation) {
+      if (operation.action === 'archive.create') {
+        this.archiveCreating = false;
+        const succeeded = operation.status === 'succeeded';
+        const archive = operation.detail?.archive || null;
+        this.archiveCreateMessage = succeeded ? `已创建 ${archive?.filename || '存档'}` : '';
+        this.archiveCreateError = succeeded ? '' : (operation.message || '创建存档失败');
+        if (succeeded) {
+          this.archiveDescription = '';
+          this.archiveDetail = operation.detail?.manifest || null;
+          this.archiveDetailArchive = archive;
+          this.archiveDetailError = '';
+          this.clearArchiveVerify();
+          this.clearArchivePlan();
+        }
+        return;
+      }
+      if (operation.action === 'archive.restore') {
+        this.archiveRestoring = false;
+        this.archiveRestoreResult = this.archiveRestoreResultFromOperation(operation);
+        this.archiveRestoreConfirmed = false;
+        this.archiveRestoreRuntimeQuiesce = null;
+        this.archiveRestoreError = operation.status === 'succeeded'
+          ? ''
+          : (operation.detail?.rolled_back
+            ? `${operation.message || '恢复失败'}；已自动完整回退`
+            : (operation.message || '恢复失败'));
+      }
+    },
+
+    async importArchiveFile(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      this.archivesError = '';
+      try {
+        await this.api('/api/archives/import', {
+          method: 'POST',
+          headers: { 'X-Archive-Filename': file.name },
+          body: file,
+        });
+        await this.loadArchives();
+      } catch (err) {
+        this.archivesError = err.message || '导入存档失败';
+      } finally {
+        event.target.value = '';
       }
     },
 
@@ -2734,9 +2910,6 @@ function app() {
         if (this.archiveRestoreDescription) {
           body.description = this.archiveRestoreDescription;
         }
-        if (this.archiveRestoreQuiesceRuntime) {
-          body.quiesce_runtime = true;
-        }
         const resp = await fetch(`/api/archives/${encodeURIComponent(filename)}/restore`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2774,6 +2947,17 @@ function app() {
           this.archiveRestoreQuiesceRuntime = true;
           this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || null;
           this.archiveRestoreError = data.message || '恢复预览存在阻塞项，未执行恢复';
+          return;
+        }
+        if (resp.ok && data.ok && data.operation?.operation_id) {
+          this.rememberArchiveOperation(data.operation, 'archive.restore');
+          const operation = await this.pollManagerOperation(
+            data.operation.operation_id,
+            30 * 60 * 1000,
+          );
+          this.applyCompletedArchiveOperation(operation);
+          this.clearPersistedArchiveOperation(operation.operation_id);
+          await this.loadArchives();
           return;
         }
         if (data.restore) {

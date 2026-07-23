@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager, closing
@@ -15,8 +16,9 @@ from datetime import datetime, timezone
 import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from dicepp_data import PERSONA_DB_ASSET
 from dicepp_manager.client import (
@@ -41,20 +43,6 @@ from .auth import (
 )
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
-from .archives import (
-    ArchiveInvalidError,
-    ArchiveNameError,
-    ArchiveNotFoundError,
-    ArchiveRestorePlanBlockedError,
-    ArchiveRestorePlanVerificationError,
-    create_archive,
-    delete_archive,
-    list_archives,
-    plan_archive_restore,
-    read_archive_detail,
-    restore_archive,
-    verify_archive,
-)
 from .config import DashboardPaths
 
 logger = logging.getLogger("dashboard")
@@ -522,258 +510,45 @@ async def auth_status(request: Request):
     })
 
 
-# ── Save archives ────────────────────────────────────────────────────────────
+# ── Save archives (Manager proxy only) ──────────────────────────────────────
 
 
-def _archive_restore_plan_is_blocked(plan: dict) -> bool:
-    return bool(plan.get("problems")) or any(
-        entry.get("action") == "blocked"
-        for entry in plan.get("entries", [])
-        if isinstance(entry, dict)
-    )
-
-
-def _archive_runtime_quiesce_report() -> dict:
-    return {
-        "enabled": True,
-        "runtime_units": [],
-        "stop_operations": [],
-        "start_operations": [],
-        "failed_stage": None,
-        "restore_started": False,
-        "restart_attempted": False,
-        "start_failed": False,
-    }
-
-
-def _archive_runtime_request_detail(
-    filename: str | None,
-    phase: str,
-    *,
-    source: str = "archive_restore",
-) -> dict:
-    detail = {
-        "source": source,
-        "phase": phase,
-    }
-    if filename:
-        detail["archive_filename"] = filename
-    return detail
-
-
-def _archive_runtime_operation_summary(operation: dict) -> dict:
-    summary_keys = (
-        "operation_id",
-        "runtime_unit_id",
-        "action",
-        "status",
-        "message",
-        "created_at",
-        "updated_at",
-        "started_at",
-        "finished_at",
-    )
-    summary = {
-        key: operation[key]
-        for key in summary_keys
-        if key in operation
-    }
-    detail = operation.get("detail")
-    request_detail = detail.get("request") if isinstance(detail, dict) else None
-    request_summary = _archive_runtime_request_summary(request_detail)
-    if request_summary is not None:
-        summary["request"] = request_summary
-    return summary
-
-
-def _archive_runtime_request_summary(request_detail: object) -> dict | None:
-    if not isinstance(request_detail, dict):
-        return None
-    allowed = {
-        key: request_detail[key]
-        for key in ("source", "archive_filename", "phase")
-        if isinstance(request_detail.get(key), str)
-    }
-    return allowed or None
-
-
-async def _archive_start_quiesced_bots(
-    request: Request,
-    *,
-    service: ManagerClient,
-    filename: str | None,
-    runtime_unit_ids: list[str],
-    runtime_quiesce: dict,
-    source: str = "archive_restore",
-) -> int | None:
-    if not runtime_unit_ids:
-        return None
-
-    runtime_quiesce["restart_attempted"] = True
-    first_failure_status: int | None = None
-    for runtime_unit_id in runtime_unit_ids:
-        try:
-            operation = await service.operate(
-                runtime_unit_id,
-                "start",
-            )
-            operation = await _await_manager_operation(service, operation)
-            if operation.get("status") != "succeeded":
-                raise ManagerClientError(
-                    operation.get("message") or "Manager restart failed",
-                    status_code=500,
-                    payload={"operation": operation},
-                )
-        except ManagerClientError as exc:
-            operation_data = {
-                **(exc.payload.get("operation") or {}),
-                "runtime_unit_id": runtime_unit_id,
-                "action": "start",
-                "status": "failed",
-                "message": str(exc) or type(exc).__name__,
-                "detail": {
-                    "request": _archive_runtime_request_detail(
-                        filename,
-                        "restart",
-                        source=source,
-                    ),
-                },
-            }
-            runtime_quiesce["start_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["start_failed"] = True
-            if first_failure_status is None:
-                first_failure_status = exc.status_code
-        else:
-            runtime_quiesce["start_operations"].append(
-                _archive_runtime_operation_summary(operation)
-            )
-
-    if runtime_quiesce["start_failed"] and runtime_quiesce["failed_stage"] is None:
-        runtime_quiesce["failed_stage"] = "start"
-    return first_failure_status
-
-
-async def _archive_stop_runtime_for_restore(
-    request: Request,
-    *,
-    filename: str | None,
-    runtime_quiesce: dict,
-    source: str = "archive_restore",
-) -> tuple[ManagerClient, list[str], JSONResponse | None]:
-    service = _get_manager_client(request)
-    stopped_runtime_unit_ids: list[str] = []
-
-    try:
-        status = await service.status()
-    except ManagerClientError as exc:
-        runtime_quiesce["failed_stage"] = "discover"
-        return service, stopped_runtime_unit_ids, JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "ok": False,
-                "message": f"Manager runtime discovery failed: {str(exc) or type(exc).__name__}",
-                "runtime_quiesce": runtime_quiesce,
-            },
-        )
-
-    runtime_quiesce["runtime_units"] = [
-        unit["runtime_unit_id"]
-        for unit in status.get("runtime_units", [])
-        if isinstance(unit, dict) and isinstance(unit.get("runtime_unit_id"), str)
-    ]
-    for runtime_unit_id in runtime_quiesce["runtime_units"]:
-        try:
-            operation = await service.operate(
-                runtime_unit_id,
-                "stop",
-            )
-            operation = await _await_manager_operation(service, operation)
-            if operation.get("status") != "succeeded":
-                raise ManagerClientError(
-                    operation.get("message") or "Manager quiesce failed",
-                    status_code=500,
-                    payload={"operation": operation},
-                )
-        except ManagerClientError as exc:
-            operation_data = {
-                **(exc.payload.get("operation") or {}),
-                "runtime_unit_id": runtime_unit_id,
-                "action": "stop",
-                "status": "failed",
-                "message": str(exc) or type(exc).__name__,
-                "detail": {
-                    "request": _archive_runtime_request_detail(
-                        filename,
-                        "quiesce",
-                        source=source,
-                    ),
-                },
-            }
-            runtime_quiesce["stop_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["failed_stage"] = "stop"
-            await _archive_start_quiesced_bots(
-                request,
-                service=service,
-                filename=filename,
-                runtime_unit_ids=stopped_runtime_unit_ids,
-                runtime_quiesce=runtime_quiesce,
-                source=source,
-            )
-            return service, stopped_runtime_unit_ids, JSONResponse(
-                status_code=exc.status_code,
-                content={
-                    "ok": False,
-                    "message": f"Manager runtime quiesce failed: {str(exc) or type(exc).__name__}",
-                    "runtime_quiesce": runtime_quiesce,
-                },
-            )
-        else:
-            stopped_runtime_unit_ids.append(runtime_unit_id)
-            runtime_quiesce["stop_operations"].append(
-                _archive_runtime_operation_summary(operation)
-            )
-
-    return service, stopped_runtime_unit_ids, None
-
-
-async def _await_manager_operation(
-    client: ManagerClient,
-    operation: dict,
-    *,
-    timeout: float = 30.0,
-) -> dict:
-    """Reconnect/poll by operation id until the Manager reaches a terminal state."""
-    operation_id = operation.get("operation_id")
-    if not isinstance(operation_id, str):
-        raise ManagerClientError("Manager did not return an operation id")
-    deadline = time.monotonic() + timeout
-    current = operation
-    while current.get("status") in {"queued", "running"}:
-        if time.monotonic() >= deadline:
-            raise ManagerClientError(
-                "Manager operation polling timed out",
-                status_code=504,
-                payload={"operation": current},
-            )
-        await asyncio.sleep(0.05)
-        current = await client.get_operation(operation_id)
-    return current
+def _manager_archive_error(exc: ManagerClientError) -> JSONResponse:
+    content = dict(exc.payload)
+    content.setdefault("ok", False)
+    content.setdefault("message", str(exc) or type(exc).__name__)
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @app.get("/api/archives", dependencies=[Depends(require_auth)])
 async def archives_list(request: Request):
-    """List local Dashboard save archives."""
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
-    return _ok({"archives": list_archives(paths=paths)})
+    try:
+        archives = await _get_manager_client(request).list_archives()
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok({"archives": archives})
+
+
+@app.post("/api/archives/estimate", dependencies=[Depends(require_auth)])
+async def archives_estimate(request: Request):
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        body = {}
+    if not isinstance(body, dict):
+        _err("Archive estimate request body must be a JSON object", 400)
+    profile = body.get("profile", "regular")
+    if profile not in {"regular", "full"}:
+        _err("profile must be regular or full", 400)
+    try:
+        estimate = await _get_manager_client(request).estimate_archive(profile)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok({"estimate": estimate})
 
 
 @app.post("/api/archives", dependencies=[Depends(require_auth)])
 async def archives_create(request: Request):
-    """Create a local Dashboard save archive."""
     try:
         body = await request.json()
     except json.JSONDecodeError:
@@ -782,288 +557,161 @@ async def archives_create(request: Request):
         body = {}
     if not isinstance(body, dict):
         _err("Archive request body must be a JSON object", 400)
-
     description = body.get("description")
+    profile = body.get("profile", "regular")
     if description is not None and not isinstance(description, str):
         _err("description must be a string", 400)
-
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
+    if profile not in {"regular", "full"}:
+        _err("profile must be regular or full", 400)
     try:
-        archive, manifest = create_archive(description=description, paths=paths)
-    except Exception as exc:
-        message = str(exc) or type(exc).__name__
-        _err(f"Archive creation failed: {message}", 500)
-    return _ok({"archive": archive, "manifest": manifest})
+        operation = await _get_manager_client(request).create_archive(
+            description=description,
+            profile=profile,
+        )
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
 
 
 @app.post("/api/archives/{filename:path}/verify", dependencies=[Depends(require_auth)])
 async def archives_verify(filename: str, request: Request):
-    """Verify one local Dashboard save archive before restore."""
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
     try:
-        verification = verify_archive(filename, paths=paths)
-    except ArchiveNameError as exc:
-        _err(str(exc), 400)
-    except ArchiveNotFoundError as exc:
-        _err(str(exc), 404)
-    except ArchiveInvalidError as exc:
-        _err(str(exc), 422)
-    return _ok({"verification": verification})
+        payload = await _get_manager_client(request).verify_archive(filename)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
 
 
 @app.post("/api/archives/{filename:path}/restore-plan", dependencies=[Depends(require_auth)])
 async def archives_restore_plan(filename: str, request: Request):
-    """Return a read-only restore target plan for one verified archive."""
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
     try:
-        plan = plan_archive_restore(filename, paths=paths)
-    except ArchiveNameError as exc:
-        _err(str(exc), 400)
-    except ArchiveNotFoundError as exc:
-        _err(str(exc), 404)
-    except ArchiveInvalidError as exc:
-        _err(str(exc), 422)
-    except ArchiveRestorePlanVerificationError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "message": str(exc),
-                "verification": exc.verification,
-            },
-        )
-    return _ok({"plan": plan})
+        payload = await _get_manager_client(request).plan_archive_restore(filename)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
 
 
 @app.post("/api/archives/{filename:path}/restore", dependencies=[Depends(require_auth)])
 async def archives_restore(filename: str, request: Request):
-    """Restore one verified archive after creating a pre-restore archive."""
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        body = {}
-    if body is None:
         body = {}
     if not isinstance(body, dict):
         _err("Archive restore request body must be a JSON object", 400)
     if body.get("confirm_restore") is not True:
         _err("confirm_restore must be true", 400)
-
     description = body.get("description")
     if description is not None and not isinstance(description, str):
         _err("description must be a string", 400)
-    quiesce_runtime = body.get("quiesce_runtime", False)
-    if not isinstance(quiesce_runtime, bool):
-        _err("quiesce_runtime must be a boolean", 400)
-
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
-    if quiesce_runtime:
-        runtime_quiesce = _archive_runtime_quiesce_report()
-        try:
-            plan = plan_archive_restore(filename, paths=paths)
-            if _archive_restore_plan_is_blocked(plan):
-                runtime_quiesce["failed_stage"] = "plan"
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "ok": False,
-                        "message": "Archive restore plan is blocked",
-                        "plan": plan,
-                        "runtime_quiesce": runtime_quiesce,
-                    },
-                )
-        except ArchiveNameError as exc:
-            _err(str(exc), 400)
-        except ArchiveNotFoundError as exc:
-            _err(str(exc), 404)
-        except ArchiveInvalidError as exc:
-            _err(str(exc), 422)
-        except ArchiveRestorePlanVerificationError as exc:
-            runtime_quiesce["failed_stage"] = "plan"
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": str(exc),
-                    "verification": exc.verification,
-                    "runtime_quiesce": runtime_quiesce,
-                },
-            )
-
-        service, stopped_runtime_unit_ids, stop_response = await _archive_stop_runtime_for_restore(
-            request,
-            filename=filename,
-            runtime_quiesce=runtime_quiesce,
-        )
-        if stop_response is not None:
-            return stop_response
-
-        restore: dict | None = None
-        restore_response: JSONResponse | None = None
-        runtime_quiesce["restore_started"] = True
-        try:
-            restore = restore_archive(filename, description=description, paths=paths)
-        except ArchiveNameError as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            restore_response = JSONResponse(
-                status_code=400,
-                content={"ok": False, "message": str(exc)},
-            )
-        except ArchiveNotFoundError as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            restore_response = JSONResponse(
-                status_code=404,
-                content={"ok": False, "message": str(exc)},
-            )
-        except ArchiveInvalidError as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            restore_response = JSONResponse(
-                status_code=422,
-                content={"ok": False, "message": str(exc)},
-            )
-        except ArchiveRestorePlanVerificationError as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            restore_response = JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": str(exc),
-                    "verification": exc.verification,
-                },
-            )
-        except ArchiveRestorePlanBlockedError as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            restore_response = JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": str(exc),
-                    "plan": exc.plan,
-                },
-            )
-        except Exception as exc:
-            runtime_quiesce["failed_stage"] = "restore"
-            message = str(exc) or type(exc).__name__
-            restore_response = JSONResponse(
-                status_code=500,
-                content={
-                    "ok": False,
-                    "message": f"Archive restore failed: {message}",
-                },
-            )
-        else:
-            if restore["failed_entries"]:
-                runtime_quiesce["failed_stage"] = "restore"
-                restore_response = JSONResponse(
-                    status_code=500,
-                    content={
-                        "ok": False,
-                        "message": "Archive restore failed",
-                        "restore": restore,
-                    },
-                )
-
-        start_failure_status = await _archive_start_quiesced_bots(
-            request,
-            service=service,
-            filename=filename,
-            runtime_unit_ids=stopped_runtime_unit_ids,
-            runtime_quiesce=runtime_quiesce,
-        )
-
-        if restore_response is not None:
-            content = dict(restore_response.body and json.loads(restore_response.body) or {})
-            content["runtime_quiesce"] = runtime_quiesce
-            return JSONResponse(
-                status_code=restore_response.status_code,
-                content=content,
-            )
-
-        if start_failure_status is not None:
-            return JSONResponse(
-                status_code=start_failure_status,
-                content={
-                    "ok": False,
-                    "message": "Archive restore completed but runtime restart failed",
-                    "restore": restore,
-                    "runtime_quiesce": runtime_quiesce,
-                },
-            )
-
-        return _ok({
-            "restore": restore,
-            "runtime_quiesce": runtime_quiesce,
-        })
-
     try:
-        restore = restore_archive(filename, description=description, paths=paths)
-    except ArchiveNameError as exc:
-        _err(str(exc), 400)
-    except ArchiveNotFoundError as exc:
-        _err(str(exc), 404)
-    except ArchiveInvalidError as exc:
-        _err(str(exc), 422)
-    except ArchiveRestorePlanVerificationError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "message": str(exc),
-                "verification": exc.verification,
-            },
+        operation = await _get_manager_client(request).restore_archive(
+            filename,
+            confirm_restore=True,
+            description=description,
         )
-    except ArchiveRestorePlanBlockedError as exc:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "message": str(exc),
-                "plan": exc.plan,
-            },
-        )
-    except Exception as exc:
-        message = str(exc) or type(exc).__name__
-        _err(f"Archive restore failed: {message}", 500)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
 
-    if restore["failed_entries"]:
+
+@app.get("/api/archives/{filename:path}/export", dependencies=[Depends(require_auth)])
+async def archives_export(filename: str, request: Request):
+    try:
+        client = _get_manager_client(request)
+        if hasattr(client, "open_archive_download"):
+            download = await client.open_archive_download(filename)
+            return StreamingResponse(
+                download,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{Path(filename).name}"'
+                },
+                background=BackgroundTask(download.close),
+            )
+        payload = await client.export_archive(filename)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{Path(filename).name}"'},
+    )
+
+
+@app.get("/api/health")
+async def dashboard_health(request: Request):
+    """Independent local readiness contract used by Manager recovery."""
+    db_path = getattr(request.app.state, "dashboard_db", None)
+    if not isinstance(db_path, str):
         return JSONResponse(
-            status_code=500,
+            status_code=503,
             content={
-                "ok": False,
-                "message": "Archive restore failed",
-                "restore": restore,
+                "status": "failed",
+                "component": "dashboard",
+                "message": "Dashboard state is not initialized",
             },
         )
-    return _ok({"restore": restore})
+    try:
+        with sqlite3.connect(db_path) as connection:
+            row = connection.execute(
+                """SELECT MAX(last_heartbeat) FROM bots_meta
+                   WHERE last_heartbeat IS NOT NULL AND last_heartbeat != ''"""
+            ).fetchone()
+    except sqlite3.Error as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "failed",
+                "component": "dashboard",
+                "message": f"Dashboard store is unavailable: {exc}",
+            },
+        )
+    return {
+        "status": "ok",
+        "component": "dashboard",
+        "version": get_version(),
+        "control": {
+            # Lack of a heartbeat means the Bot is stopped, not that Dashboard
+            # readiness failed. Manager evaluates this field separately after
+            # it starts the RuntimeUnit.
+            "latest_heartbeat": row[0] if row is not None else None,
+        },
+    }
+
+
+@app.post("/api/archives/import", dependencies=[Depends(require_auth)])
+async def archives_import(request: Request):
+    filename = request.headers.get("X-Archive-Filename", "")
+    if not filename:
+        _err("X-Archive-Filename is required", 400)
+    with tempfile.SpooledTemporaryFile(max_size=8 * 1024**2) as upload:
+        async for chunk in request.stream():
+            upload.write(chunk)
+        upload.seek(0)
+        try:
+            payload = await _get_manager_client(request).import_archive(filename, upload)
+        except ManagerClientError as exc:
+            return _manager_archive_error(exc)
+    return _ok(payload)
 
 
 @app.get("/api/archives/{filename:path}", dependencies=[Depends(require_auth)])
 async def archives_detail(filename: str, request: Request):
-    """Return one local Dashboard save archive manifest."""
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
     try:
-        archive, manifest = read_archive_detail(filename, paths=paths)
-    except ArchiveNameError as exc:
-        _err(str(exc), 400)
-    except ArchiveNotFoundError as exc:
-        _err(str(exc), 404)
-    except ArchiveInvalidError as exc:
-        _err(str(exc), 422)
-    return _ok({"archive": archive, "manifest": manifest})
+        payload = await _get_manager_client(request).archive_detail(filename)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
 
 
 @app.delete("/api/archives/{filename:path}", dependencies=[Depends(require_auth)])
 async def archives_delete(filename: str, request: Request):
-    """Delete one local Dashboard save archive."""
-    paths = getattr(request.app.state, "dashboard_paths", DashboardPaths)
     try:
-        archive = delete_archive(filename, paths=paths)
-    except ArchiveNameError as exc:
-        _err(str(exc), 400)
-    except ArchiveNotFoundError as exc:
-        _err(str(exc), 404)
-    return _ok({"deleted": filename, "archive": archive})
-
+        payload = await _get_manager_client(request).delete_archive(filename)
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────
 
