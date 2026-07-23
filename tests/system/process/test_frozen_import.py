@@ -35,3 +35,10 @@ assert str(basic_mod.Paths.CONFIG_DIR) == os.path.join(expected_root, "config"),
         timeout=60,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_frozen_bootstrap_does_not_require_a_copied_src_tree():
+    bot_source = (_repository_root() / "bot.py").read_text(encoding="utf-8")
+
+    assert "os.path.join(exe_dir, '_internal', 'src')" not in bot_source
+    assert "PyInstaller's importer/embedded PYZ" in bot_source

@@ -63,6 +63,9 @@ def _check_critical_modules() -> list[str]:
     """
     errors = []
     CRITICAL_MODULES = [
+        # Reached from DicePP's ordinary plugin graph; keep it explicit here
+        # so the frozen smoke check also proves shared project metadata works.
+        'dicepp_meta',
         'lark',
         'aiosqlite',
         'rsa',

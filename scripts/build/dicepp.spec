@@ -9,7 +9,9 @@ DicePP PyInstaller Spec 文件
 """
 
 import os
-import sys
+from pathlib import Path
+
+from PyInstaller.compat import ALL_SUFFIXES
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
 # ============================================================
@@ -19,11 +21,39 @@ block_cipher = None
 
 # 项目根目录 (spec 文件在 scripts/build/ 目录下，需要向上两级)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(SPEC), '..', '..'))
+SOURCE_ROOT = os.path.join(PROJECT_ROOT, 'src')
+DICEPP_PACKAGE_DIR = Path(SOURCE_ROOT) / 'plugins' / 'DicePP'
+DICEPP_PLUGIN_ENTRYPOINT = 'plugins.DicePP.plugin'
+DICEPP_PLUGIN_LAUNCHER = DICEPP_PACKAGE_DIR / 'plugin.py'
+
+
+def collect_dicepp_resources():
+    """Collect package resources without importing the DicePP package.
+
+    DicePP is analyzed as Python modules via ``DICEPP_PLUGIN_ENTRYPOINT`` below.
+    This direct source-tree scan is deliberately limited to non-module files, so
+    it cannot recreate the old ``_internal/src/plugins/DicePP`` source copy or
+    execute package-import side effects while the spec is evaluated.
+    """
+    source_root = Path(SOURCE_ROOT)
+    return [
+        (str(resource), str(resource.parent.relative_to(source_root)))
+        for resource in sorted(DICEPP_PACKAGE_DIR.rglob('*'))
+        if (
+            resource.is_file()
+            and '__pycache__' not in resource.parts
+            and resource.suffix not in ALL_SUFFIXES
+        )
+    ]
 
 # ============================================================
 # Hidden Imports - PyInstaller 静态分析无法发现的模块
 # ============================================================
 hiddenimports = [
+    # NoneBot resolves plugin names dynamically. This canonical seed makes
+    # Analysis/PYZ walk DicePP's ordinary import graph.
+    DICEPP_PLUGIN_ENTRYPOINT,
+
     # NoneBot2 核心及适配器
     'nonebot',
     'nonebot.log',
@@ -97,7 +127,6 @@ hiddenimports = [
     'lark.parsers.earley_forest',
     'lark.parsers.lalr_interactive_parser',
     'lark.parsers.lalr_analysis',
-    'lark.parsers.lalr_traditional',
     'lark.parsers.xearley',
     'lark.grammars',
     'lark.tools',
@@ -118,27 +147,33 @@ hiddenimports = [
     'loguru._logger',
 ]
 
-# 自动收集 nonebot 所有子模块
+# These frameworks discover runtime modules dynamically. DicePP itself is
+# intentionally not collected this way; its explicit canonical seed above
+# keeps its graph visible to Analysis.
 hiddenimports += collect_submodules('nonebot')
-hiddenimports += collect_submodules('nonebot_adapter_onebot')
 hiddenimports += collect_submodules('lark')
-hiddenimports += collect_submodules('cryptography')
-hiddenimports += collect_submodules('dicepp_meta')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件
 # ============================================================
 datas = [
     (os.path.join(PROJECT_ROOT, 'pyproject.toml'), '.'),
-    
-    # DicePP 插件目录 - 保持与 pyproject.toml 中 plugin_dirs 一致的结构
-    (os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP'), os.path.join('src', 'plugins', 'DicePP')),
 
     # config/ 目录：打包全局默认配置和 bot 账号模板
     # 运行时数据（data/）和用户内容（content/）由用户自行挂载，不打包
     (os.path.join(PROJECT_ROOT, 'config', 'global.json'),           os.path.join('config')),
     (os.path.join(PROJECT_ROOT, 'config', 'bots', '_template.json'), os.path.join('config', 'bots')),
 ]
+
+# Keep only non-Python package resources as datas. DicePP's Python modules are
+# supplied by Analysis/PYZ through ``DICEPP_PLUGIN_ENTRYPOINT`` instead, except
+# this one framework adapter: NoneBot 2.5 hard-codes SourceFileLoader for a
+# managed plugin, so its launcher must exist at the source-looking path while
+# it delegates all real registration code back into PYZ.
+datas += [
+    (str(DICEPP_PLUGIN_LAUNCHER), os.path.join('plugins', 'DicePP')),
+]
+datas += collect_dicepp_resources()
 
 # personas 目录（包含 default.json 及用户自定义）
 personas_src = os.path.join(PROJECT_ROOT, 'config', 'personas')
@@ -147,7 +182,6 @@ if os.path.isdir(personas_src):
 
 # 收集 nonebot 的数据文件
 datas += collect_data_files('nonebot')
-datas += collect_data_files('nonebot_adapter_onebot')
 
 # zhconv 库需要 zhcdict.json 字典文件
 datas += collect_data_files('zhconv')
@@ -165,8 +199,7 @@ a = Analysis(
     [os.path.join(PROJECT_ROOT, 'bot.py')],
     pathex=[
         PROJECT_ROOT,
-        os.path.join(PROJECT_ROOT, 'src'),
-        os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP'),
+        SOURCE_ROOT,
     ],
     binaries=[],
     datas=datas,

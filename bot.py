@@ -9,14 +9,11 @@ import sys
 _IS_FROZEN = getattr(sys, "frozen", False)
 if _IS_FROZEN:
     # PyInstaller 打包环境
-    # 1. 将工作目录切换到 EXE 所在位置，确保用户数据目录可被正确访问
+    # 将工作目录切换到 EXE 所在位置，确保用户数据目录可被正确访问。
+    # Python imports come from PyInstaller's importer/embedded PYZ; do not
+    # depend on a copied ``_internal/src`` source tree.
     exe_dir = os.path.dirname(sys.executable)
     os.chdir(exe_dir)
-    # 2. Keep the frozen import surface identical to source: only ``src`` is
-    # exposed, so DicePP can be imported only as ``plugins.DicePP``.
-    _src_root = os.path.join(exe_dir, '_internal', 'src')
-    if _src_root not in sys.path:
-        sys.path.insert(0, _src_root)
 else:
     # 源码环境只暴露 ``src``，禁止 DicePP 内部模块作为顶级包被导入。
     dir_path = os.path.abspath(os.path.dirname(__file__))
