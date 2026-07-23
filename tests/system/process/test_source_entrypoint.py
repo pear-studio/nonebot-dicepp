@@ -1,14 +1,35 @@
 """Source entrypoint smoke checks."""
 
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
 
 
-def test_source_entrypoint_loads_shared_metadata_without_installed_project(tmp_path):
-    """The Docker-style source layout must load the complete DicePP plugin."""
-    project_root = Path.cwd().resolve()
+def _isolated_runtime_environment(
+    project_root: Path,
+    tmp_path: Path,
+) -> tuple[Path, dict[str, str]]:
+    """Give a runtime probe a private cwd, config root, and log directory."""
+    runtime_root = tmp_path / "runtime"
+    shutil.copytree(project_root / "config", runtime_root / "config")
+    env = os.environ.copy()
+    env["DICEPP_PROJECT_ROOT"] = str(runtime_root)
+    env["DICEPP_APP_DIR"] = str(runtime_root)
+    return runtime_root, env
+
+
+def test_source_entrypoint_smoke_check_uses_managed_plugin_registration(
+    tmp_path: Path,
+    pytestconfig,
+) -> None:
+    """The Docker-style source layout must load and validate DicePP via NoneBot."""
+    project_root = Path(str(pytestconfig.rootpath)).resolve()
+    runtime_root, env = _isolated_runtime_environment(project_root, tmp_path)
     bootstrap = textwrap.dedent(
         """
         import runpy
@@ -28,7 +49,8 @@ def test_source_entrypoint_loads_shared_metadata_without_installed_project(tmp_p
     )
     result = subprocess.run(
         [sys.executable, "-I", "-c", bootstrap, str(project_root)],
-        cwd=tmp_path,
+        cwd=runtime_root,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -38,12 +60,19 @@ def test_source_entrypoint_loads_shared_metadata_without_installed_project(tmp_p
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "SMOKE CHECK PASSED" in output
+    assert (
+        "SMOKE CHECK PASSED: plugin=plugins.DicePP.plugin "
+        "matchers=nonempty registry=nonempty"
+    ) in output
 
 
-def test_source_version_does_not_load_nonebot_plugin(tmp_path):
-    """Version lookup exits before importing DicePP's side-effect entry."""
-    project_root = Path.cwd().resolve()
+def test_source_version_is_metadata_only(
+    tmp_path: Path,
+    pytestconfig,
+) -> None:
+    """Version lookup exits before any DicePP or NoneBot runtime import."""
+    project_root = Path(str(pytestconfig.rootpath)).resolve()
+    runtime_root, env = _isolated_runtime_environment(project_root, tmp_path)
     bootstrap = textwrap.dedent(
         """
         import runpy
@@ -58,12 +87,22 @@ def test_source_version_does_not_load_nonebot_plugin(tmp_path):
             assert exc.code == 0, exc.code
         else:
             raise AssertionError("bot.py --version did not exit")
-        assert "plugins.DicePP.plugin" not in sys.modules
+
+        assert not any(
+            module_name == "nonebot" or module_name.startswith("nonebot.")
+            for module_name in sys.modules
+        )
+        assert not any(
+            module_name == "plugins.DicePP"
+            or module_name.startswith("plugins.DicePP.")
+            for module_name in sys.modules
+        )
         """
     )
     result = subprocess.run(
         [sys.executable, "-I", "-c", bootstrap, str(project_root)],
-        cwd=tmp_path,
+        cwd=runtime_root,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",

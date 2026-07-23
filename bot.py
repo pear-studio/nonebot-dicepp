@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import argparse
 import os
 import sys
 
@@ -21,15 +22,9 @@ else:
     if _src_root not in sys.path:
         sys.path.insert(0, _src_root)
 
-from plugins.DicePP.utils.stdio import configure_redirected_stdio_utf8
-
-configure_redirected_stdio_utf8()
-
 # ============================================================
 # Bootstrap CLI — 在 nonebot.init() 之前解析
 # ============================================================
-import argparse
-
 _bootstrap_parser = argparse.ArgumentParser(add_help=False)
 _bootstrap_parser.add_argument('--version', action='store_true')
 _bootstrap_parser.add_argument('--smoke-check', action='store_true')
@@ -40,10 +35,9 @@ if _bootstrap_args.version:
     print(f"DicePP v{version('dicepp')}")
     sys.exit(0)
 
-if _bootstrap_args.smoke_check:
-    from plugins.DicePP import _smoke_check
-    ok = _smoke_check.run_smoke_check()
-    sys.exit(0 if ok else 1)
+from plugins.DicePP.utils.stdio import configure_redirected_stdio_utf8
+
+configure_redirected_stdio_utf8()
 
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
@@ -81,8 +75,29 @@ async def _startup_message():
 driver = nonebot.get_driver()
 driver.register_adapter(OneBot_V11_Adapter)
 
-# 加载规范的 NoneBot side-effect 入口。
-nonebot.load_plugin("plugins.DicePP.plugin")
+# Load DicePP through NoneBot's managed plugin path, then prove that its
+# matchers and business command registry are actually registered.  NoneBot
+# otherwise returns None for import failures and would let the server start
+# without DicePP's command handling.
+from plugins.DicePP.runtime_preflight import (
+    DicePPPluginPreflightError,
+    load_and_validate_dicepp_plugin,
+)
+
+try:
+    _dicepp_plugin = load_and_validate_dicepp_plugin()
+except DicePPPluginPreflightError as exc:
+    if _bootstrap_args.smoke_check:
+        print("\nSMOKE CHECK FAILED: 1 error(s)")
+        print(f"  FAIL: {exc}")
+        sys.exit(1)
+    raise
+
+if _bootstrap_args.smoke_check:
+    from plugins.DicePP import _smoke_check
+
+    ok = _smoke_check.run_smoke_check(_dicepp_plugin)
+    sys.exit(0 if ok else 1)
 
 app = nonebot.get_asgi()
 

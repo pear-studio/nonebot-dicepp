@@ -1,5 +1,6 @@
-"""NoneBot entry point for DicePP's registration side effects."""
+"""Canonical NoneBot launcher adapter for DicePP's PYZ registration module."""
 
-# Importing this module deliberately registers DicePP's matchers and lifecycle
-# hooks with the already-initialized NoneBot runtime.
-from plugins.DicePP.adapter import nonebot_adapter as _nonebot_adapter
+# NoneBot 2.5 loads managed plugins with SourceFileLoader in frozen builds.
+# PyInstaller therefore ships this tiny adapter as the one intentional Python
+# data file; all registration implementation remains in the PYZ archive.
+from plugins.DicePP import _plugin_registration as _registration

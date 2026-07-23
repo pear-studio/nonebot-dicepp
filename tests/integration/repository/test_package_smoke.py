@@ -4,13 +4,31 @@ These tests guard the PyInstaller smoke path that release builds run after
 creating the onedir package.
 """
 
+import ast
 from pathlib import Path
 
 
-def test_smoke_check_imports_dicepp_plugin_entrypoint():
-    from plugins.DicePP._smoke_check import _check_dicepp_plugin_import
+def test_smoke_check_validates_the_managed_plugin_without_reimporting_it(
+    monkeypatch,
+    capsys,
+):
+    from plugins.DicePP import _smoke_check
 
-    assert _check_dicepp_plugin_import() == []
+    managed_plugin = object()
+    received: list[object] = []
+    monkeypatch.setattr(_smoke_check, "_check_frozen_env", lambda: [])
+    monkeypatch.setattr(_smoke_check, "_check_critical_modules", lambda: [])
+    monkeypatch.setattr(_smoke_check, "_check_version", lambda: [])
+
+    assert _smoke_check.run_smoke_check(
+        managed_plugin,
+        plugin_validator=lambda plugin: received.append(plugin),
+    )
+    assert received == [managed_plugin]
+    assert capsys.readouterr().out == (
+        "\nSMOKE CHECK PASSED: "
+        "plugin=plugins.DicePP.plugin matchers=nonempty registry=nonempty\n"
+    )
 
 
 def test_pyinstaller_spec_analyzes_the_canonical_dicepp_plugin_graph():
@@ -19,6 +37,28 @@ def test_pyinstaller_spec_analyzes_the_canonical_dicepp_plugin_graph():
     assert "DICEPP_PLUGIN_ENTRYPOINT = 'plugins.DicePP.plugin'" in spec
     assert 'DICEPP_PLUGIN_ENTRYPOINT,' in spec
     assert "collect_submodules('DicePP')" not in spec
+
+
+def test_canonical_plugin_entrypoint_is_a_launcher_only():
+    plugin_source = Path("src/plugins/DicePP/plugin.py").read_text(encoding="utf-8")
+    module = ast.parse(plugin_source)
+    statements = [
+        statement
+        for statement in module.body
+        if not (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        )
+    ]
+
+    assert len(statements) == 1
+    statement = statements[0]
+    assert isinstance(statement, ast.ImportFrom)
+    assert statement.module == "plugins.DicePP"
+    assert [(name.name, name.asname) for name in statement.names] == [
+        ("_plugin_registration", "_registration"),
+    ]
 
 
 def test_pyinstaller_spec_keeps_implementation_modules_out_of_datas_except_launcher():
