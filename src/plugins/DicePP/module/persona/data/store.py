@@ -98,18 +98,51 @@ class PersonaDataStore:
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA foreign_keys=ON")
 
+    async def _connect_initialized_persona_db(self, db_path: str) -> aiosqlite.Connection:
+        """创建并初始化 persona 连接；初始化失败时不遗留后台线程。"""
+        conn = await aiosqlite.connect(db_path)
+        try:
+            await self._init_connection(conn)
+        except BaseException:
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Persona 数据库初始化失败后的连接关闭失败")
+            raise
+        return conn
+
     async def open(self) -> None:
         """连接 persona_db，设置 PRAGMA，创建表"""
-        self._persona_db = await aiosqlite.connect(self._persona_db_path)
-        await self._init_connection(self._persona_db)
-        await self.ensure_tables()
-        await self._migrate_schema_t6()
+        if self._persona_db is not None:
+            raise RuntimeError("PersonaDataStore 已打开，关闭后才能再次打开")
+
+        conn = await self._connect_initialized_persona_db(self._persona_db_path)
+        self._persona_db = conn
+        try:
+            await self.ensure_tables()
+            await self._migrate_schema_t6()
+        except BaseException:
+            self._persona_db = None
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Persona 数据库打开失败后的连接关闭失败")
+            raise
 
     async def close(self) -> None:
         """关闭 persona_db 连接。core_db 由 Bot 生命周期管理，不在此关闭。"""
         if self._persona_db is not None:
             await self._persona_db.close()
             self._persona_db = None
+
+    async def __aenter__(self) -> "PersonaDataStore":
+        """打开 persona 数据库并返回 store。"""
+        await self.open()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        """退出作用域时关闭由 store 拥有的 persona 数据库。"""
+        await self.close()
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
@@ -192,18 +225,20 @@ class PersonaDataStore:
             raise ValueError("switch_persona_db 不适用于 :memory: 数据库")
         dir_path = os.path.dirname(self._persona_db_path)
         new_path = os.path.join(dir_path, f"personas_data_{new_character_name}.db")
-        new_conn = await aiosqlite.connect(new_path)
-        await self._init_connection(new_conn)
+        new_conn = await self._connect_initialized_persona_db(new_path)
         old_db = self._persona_db
         old_path = self._persona_db_path
         self._persona_db = new_conn
         self._persona_db_path = new_path
         try:
             await self.ensure_tables()
-        except Exception:
+        except BaseException:
             self._persona_db = old_db
             self._persona_db_path = old_path
-            await new_conn.close()
+            try:
+                await new_conn.close()
+            except Exception:
+                logger.exception("Persona 数据库切换回滚时的新连接关闭失败")
             raise
         if old_db is not None:
             await old_db.close()

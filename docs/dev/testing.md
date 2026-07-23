@@ -52,6 +52,11 @@ system 测试，以及 Dashboard integration 中匹配正式跨包调用的测�
 或 fake 如果掩盖了需要验证的组件协作，应将测试上移到 `integration/`，而不是
 继续扩大 mock 范围。
 
+测试中创建的 `aiosqlite` 连接必须在同一测试或 fixture 生命周期内显式关闭，优先
+使用 `async with`，其次在 fixture teardown 或 `finally` 中调用 `close()`。根
+`conftest.py` 会在 function-scoped fixture 清理后检查本测试新建的连接；遗漏关闭
+会在创建它的测试处失败并给出创建位置，而不是等后台线程在后续测试中报错。
+
 ## quick、full 与 external
 
 - `quick` 只标记位于 `unit/` 或 `integration/`、稳定且适合高频反馈的代表性

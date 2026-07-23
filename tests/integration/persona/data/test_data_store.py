@@ -963,10 +963,72 @@ class TestSwitchPersonaDb:
         import aiosqlite
         from module.persona.data.store import PersonaDataStore
         async with aiosqlite.connect(':memory:') as core_db:
+            async with PersonaDataStore(':memory:', core_db) as store:
+                with pytest.raises(ValueError, match=':memory:'):
+                    await store.switch_persona_db('new')
+
+
+class TestPersonaStoreLifecycle:
+    """PersonaDataStore 的连接所有权与失败回收。"""
+
+    @pytest.mark.asyncio
+    async def test_open_cleans_connection_when_schema_setup_fails(self, monkeypatch):
+        """打开失败后 store 不应保留连接，后台 worker 也必须关闭。"""
+        import aiosqlite
+        from module.persona.data.store import PersonaDataStore
+
+        async with aiosqlite.connect(':memory:') as core_db:
             store = PersonaDataStore(':memory:', core_db)
-            store._persona_db = await aiosqlite.connect(':memory:')
-            with pytest.raises(ValueError, match=':memory:'):
+
+            async def fail_ensure_tables():
+                raise RuntimeError('schema setup failed')
+
+            monkeypatch.setattr(store, 'ensure_tables', fail_ensure_tables)
+            with pytest.raises(RuntimeError, match='schema setup failed'):
+                await store.open()
+            with pytest.raises(RuntimeError, match='未打开'):
+                _ = store.db
+
+    @pytest.mark.asyncio
+    async def test_open_cleans_connection_when_initialization_fails(self, monkeypatch):
+        """连接 PRAGMA 初始化失败时也必须关闭刚创建的连接。"""
+        import aiosqlite
+        from module.persona.data.store import PersonaDataStore
+
+        async with aiosqlite.connect(':memory:') as core_db:
+            store = PersonaDataStore(':memory:', core_db)
+
+            async def fail_initialize(_conn):
+                raise RuntimeError('connection setup failed')
+
+            monkeypatch.setattr(store, '_init_connection', fail_initialize)
+            with pytest.raises(RuntimeError, match='connection setup failed'):
+                await store.open()
+            with pytest.raises(RuntimeError, match='未打开'):
+                _ = store.db
+
+    @pytest.mark.asyncio
+    async def test_switch_keeps_old_connection_when_new_initialization_fails(self, tmp_path, monkeypatch):
+        """切换新库初始化失败时旧库继续可用且新连接会被回收。"""
+        import aiosqlite
+        from module.persona.data.store import PersonaDataStore
+
+        old_path = str(tmp_path / 'personas_data_old.db')
+        async with aiosqlite.connect(':memory:') as core_db:
+            store = PersonaDataStore(old_path, core_db)
+            await store.open()
+            old_db = store.db
+
+            async def fail_initialize(_conn):
+                raise RuntimeError('new connection setup failed')
+
+            monkeypatch.setattr(store, '_init_connection', fail_initialize)
+            with pytest.raises(RuntimeError, match='new connection setup failed'):
                 await store.switch_persona_db('new')
+
+            assert store.db is old_db
+            assert store._persona_db_path == old_path
+            await store.close()
 
 class TestMigrateCodeSetting:
     """_migrate_code_setting 测试"""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import tempfile
 import pytest
 
 from tests.support.fs_utils import rmtree_retry
+from tests.support.aiosqlite_lifecycle import AiosqliteConnectionTracker
 from tests.support.paths import find_repository_root
 from tests.support.pollution import (
     assert_repository_unchanged,
@@ -83,6 +85,40 @@ def _test_session_cleanup_and_pollution_check():
     yield
     _assert_no_real_repo_pollution()
     _cleanup_test_app_dir()
+
+
+@pytest.fixture(scope="session")
+def aiosqlite_connection_tracker():
+    """在每个 pytest worker 中追踪本进程创建的 SQLite 异步连接。"""
+    import aiosqlite
+
+    tracker = AiosqliteConnectionTracker(aiosqlite)
+    tracker.install()
+    try:
+        yield tracker
+        leaks = tracker.leaks_since(())
+        if leaks:
+            cleanup_errors = asyncio.run(tracker.close_all(leaks))
+            detail = tracker.format_leaks(leaks)
+            if cleanup_errors:
+                detail += f"\n关闭泄漏连接时还发生 {len(cleanup_errors)} 个异常。"
+            pytest.fail(detail)
+    finally:
+        tracker.uninstall()
+
+
+@pytest.fixture(autouse=True)
+def _guard_aiosqlite_connection_lifecycle(aiosqlite_connection_tracker):
+    """在 function-scoped fixture 清理完成后归因本测试遗留的连接。"""
+    baseline = aiosqlite_connection_tracker.snapshot()
+    yield
+    leaks = aiosqlite_connection_tracker.leaks_since(baseline)
+    if leaks:
+        cleanup_errors = asyncio.run(aiosqlite_connection_tracker.close_all(leaks))
+        detail = aiosqlite_connection_tracker.format_leaks(leaks)
+        if cleanup_errors:
+            detail += f"\n关闭泄漏连接时还发生 {len(cleanup_errors)} 个异常。"
+        pytest.fail(detail)
 
 
 @pytest.fixture
