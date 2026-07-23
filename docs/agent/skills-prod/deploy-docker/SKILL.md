@@ -1,111 +1,103 @@
 ---
 name: deploy-docker
-description: 在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。当用户要求查看服务状态、日志、pull/up/restart 容器、应用镜像或管理 DicePP/协议适配器（NapCat / LLOneBot）容器时使用。
-license: MIT
-metadata:
-  author: DicePP
-  version: "1.0"
+description: 在 Linux 生产环境对 DicePP Docker/Compose 资源执行状态检查、日志读取、pull/load/up/restart/stop/start 和已确认的版本更新命令。当 version-deploy 已生成并确认完整计划时作为受约束执行规范；普通容器运维仍由本技能独立展示影响并确认。
 ---
 
 # Deploy Docker
 
-在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。该技能处理执行层面的服务状态、日志、镜像拉取、容器更新和重启规则。
+处理 Linux Docker/Compose 执行层，不选择发布版本，不改变 `version-deploy` 的目标、Compose 上下文或确认范围。
 
-## 适用场景
+## 资源边界
 
-- 用户要求查看 Docker/Compose 服务状态、容器日志或健康状态。
-- 用户要求 pull/load 镜像、up/restart/stop/start DicePP 服务。
-- 用户要求管理 协议适配器（NapCat / LLOneBot）容器。
-- 'version-deploy' 已确认版本变更, 需要执行 Docker/Compose 更新。
+只允许操作：
 
-## 操作范围
+- 当前 DicePP Compose project 中已识别的 `bot`、`dashboard` 及 Release 明确定义的 DicePP 服务；
+- 已识别 compose project 或容器的 NapCat/LLOneBot 协议适配器。
 
-第一版只允许操作 DicePP 部署相关资源：
+禁止：
 
-- 当前项目 Docker Compose 中声明的 DicePP 服务, 包括 `bot` 和独立 `dashboard` service。
-- DicePP 生产链路明确依赖的 协议适配器（NapCat / LLOneBot）容器/服务。
+- 操作无关 container、service、network 或 volume；
+- `docker system prune`；
+- 删除 volume、数据库、配置、content 或运行时数据；
+- 修改 Docker daemon、宿主机全局网络、防火墙或系统服务；
+- 使用 `git pull`、本地 build 或部署 wrapper 更新生产；
+- 未确认时改变容器或镜像状态。
 
-默认禁止：
+## 确认所有权
 
-- 操作无关容器或无关 compose project。
-- 执行 'docker system prune'。
-- 删除 volume、数据库、配置、content 或运行时数据。
-- 修改 Docker daemon、宿主机全局网络、防火墙或系统服务。
-- 在未确认影响范围时 stop/restart 生产服务。
+- 任何选择、拉取、导入或应用 DicePP Release 镜像的请求都必须先进入 `version-deploy`，不得由本技能用一份较窄的 Docker 确认绕过版本审计。
+- 不改变 DicePP 版本的独立 restart/stop/start 操作，以及已识别协议适配器的普通运维，由本技能展示服务范围、完整命令、影响和回滚方式，并等待明确确认。
+- 从 `version-deploy` 进入时，若目标版本、服务范围、Compose 调用上下文、命令顺序和失败处理都与该会话中已确认的计划一致，直接执行，不重复确认。
+- 任一参数或影响范围发生实质变化时，停止并交还 `version-deploy` 更新计划和确认。本技能不得自行扩大旧确认。
 
-## Default Mode
+## Compose 调用上下文
 
-- 状态查看和日志读取默认允许, 但不得输出 secrets。
-- 会改变服务状态的操作必须先说明影响范围、具体命令、预期结果和回滚方式, 等待用户明确确认。
-- 当操作来自 'version-deploy' 时, 仍需遵守该技能的确认结果和目标版本。
+开始时固定一个 Compose 调用前缀，后续命令全部复用。示例：
 
-## Preferred Entrypoints
+```bash
+docker compose
+docker compose -f docker-compose.yml -f docker-compose.prod.yml
+```
 
-优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper：
+使用同一前缀执行 `config`、`pull`、`up`、`ps` 和 `logs`，不得在某一步漏掉 `-f`、project directory、project name 或其他已确认参数。
 
-- DicePP bot 服务优先使用当前项目的 'docker compose'。
-- DicePP 在线版本更新使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`；离线镜像包更新使用 `docker load` 导入目标镜像后执行 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never`。两种方式都默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
-- 协议适配器操作前必须先识别其 compose 目录或容器名（NapCat 通常在独立 `napcat/` 目录，LLOneBot 在 `llonebot/` 目录）；无法确认时只做只读检查并要求用户提供路径。
-- 禁止使用 `git pull`、本地 build 或项目部署 wrapper 更新生产。
+版本更新时，对所有需要解析镜像的命令显式注入同一个 `DICEPP_IMAGE_TAG=<tag>`。不把它写入 `.env` 或 compose 文件。
 
-## Read-only Checks
+## 只读检查
 
-常用只读检查包括：
+允许的常用检查：
 
-- 'docker compose ps'
-- 'docker compose config --services'
-- 'docker compose logs --tail <N> bot'
-- 'docker compose logs --tail <N> dashboard'
-- 'docker ps' 仅用于识别 DicePP/协议适配器（NapCat / LLOneBot）容器, 不对无关容器执行操作。
+- `<compose> config --services`
+- `<compose> config`
+- `<compose> ps`
+- `<compose> logs --tail <N> <service>`
+- `docker inspect`，仅用于已识别 DicePP/适配器容器的镜像和健康状态
+- `docker image inspect`，仅用于计划涉及的明确镜像
 
-只读检查仍应避免输出 token、cookie、session、密钥、完整敏感配置或二维码敏感内容。
+输出 `config` 或日志前过滤 secret、token、cookie、session、二维码和完整敏感配置。`docker ps` 只用于识别范围，不对无关容器采取动作。
 
-## Confirmed Operations
+## 在线版本更新
 
-以下操作必须等待用户明确确认：
+收到 `version-deploy` 的已确认计划后：
 
-- 'docker compose pull'
-- 'docker load -i <image tar>'
-- 'docker compose up -d'
-- 'docker compose restart'
-- 'docker compose stop' / 'docker compose start'
-- 对已确认的协议适配器 compose project（NapCat 或 LLOneBot）执行 'docker compose up/down/restart'
-- 任何会改变容器、镜像、网络或服务状态的命令
+1. 使用目标 tag 运行 `<compose> config --services` 和 `<compose> config`。
+2. 确认服务和最终镜像与计划一致。
+3. 执行 `DICEPP_IMAGE_TAG=<tag> <compose> pull`。
+4. 执行 `DICEPP_IMAGE_TAG=<tag> <compose> up -d`。
+5. 使用同一 `<compose>` 运行 `ps`、目标服务日志和健康检查。
 
-确认前必须展示：
+默认作用于计划中的整个 DicePP Compose project，不擅自只更新单个 `bot` service。
 
-- 将操作的服务名或容器名。
-- 完整命令。
-- 预期影响, 如短暂断连、服务重启、WebSocket 重连。
-- 基本回滚方式。
+## 离线版本更新
 
-## Version Deploy Integration
+收到 `version-deploy` 的已确认计划后：
 
-当 'version-deploy' 要在线应用镜像版本时, 推荐执行序列为：
+1. 只处理目标 Release 的明确离线包。
+2. 在新临时目录解压，禁止覆盖式解压到部署目录。
+3. 校验外层摘要（可用时）和包内 `checksums.sha256`。
+4. 解压目标 image archive，执行已确认的 `docker load`。
+5. 检查加载结果包含计划要求的 bot/dashboard 镜像。
+6. 使用目标 tag 运行 `<compose> config`。
+7. 执行 `DICEPP_IMAGE_TAG=<tag> <compose> up -d --pull never`。
+8. 使用同一 `<compose>` 运行 `ps`、日志和健康检查。
 
-1. 确认环境变量 'DICEPP_IMAGE_TAG' 已设为目标版本。
-2. 执行 'docker compose config --services', 确认目标 compose 包含预期 DicePP 服务；v3.0.0 起通常应包含 `bot` 和 `dashboard`。
-3. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull'。
-4. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d'。
-5. 执行 'docker compose ps'。
-6. 查看 'docker compose logs --tail 100 bot'；如果存在 `dashboard` service, 同时查看 'docker compose logs --tail 100 dashboard'。
-7. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。
+离线路径禁止执行 `docker compose pull`。
 
-当 'version-deploy' 要离线应用镜像包时, 推荐执行序列为：
+## 普通容器运维
 
-1. 确认目标离线包来自目标 Release: `DicePP-vX.Y.Z-linux-amd64-offline.zip`；如需外层来源校验，可对照 GitHub Release asset digest 或用户下载时留存的 `sha256sum` 输出。
-2. 执行 `unzip -o DicePP-vX.Y.Z-linux-amd64-offline.zip`。
-3. 进入解压目录并执行 `sha256sum -c checksums.sha256`。
-4. 执行 `zstd -d -f images/DicePP-vX.Y.Z-linux-amd64-images.tar.zst`。
-5. 执行 `docker load -i images/DicePP-vX.Y.Z-linux-amd64-images.tar`。
-6. 确认 `docker load` 输出包含 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z` 和 `ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z`。
-7. 将离线包内 `docker-compose.yml` 同步到部署目录后, 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never'。
-8. 执行 'docker compose ps' 并查看 bot/dashboard 日志。
+协议适配器操作前必须识别其 compose 目录或容器名。NapCat 通常位于独立 `napcat/` 目录，LLOneBot 位于 `llonebot/` 目录；无法确认时只做只读检查。
 
-## Important Notes
+以下不涉及 DicePP 版本变更的操作必须在本技能独立展示计划并确认后执行：
 
-- 不把 Docker 运维操作和版本选择混在一起；版本选择由 'version-deploy' 处理。
-- 不调用 scripts/deploy 等 wrapper 执行生产部署。
-- 不自动执行 destructive cleanup。
-- 不修改持久化数据；备份与恢复需要用户明确授权和专门流程。
-- 如果命令需要 sudo, 先说明原因和范围。
+- DicePP `restart`、`stop`、`start`；
+- 已识别协议适配器的 `pull`、`load`、`up`、`restart`、`stop`、`start`；
+- 任何改变已识别容器、镜像、网络或服务状态的命令。
+
+如果需要 `sudo`，先说明原因和范围。
+
+## 验证与回退
+
+- 验证必须使用与变更相同的 Compose 上下文。
+- 检查实际镜像 tag/image ID、Docker healthcheck、关键日志和 Release 定义的本地应用健康端点。
+- 从 `version-deploy` 进入时，只执行其已确认的回退步骤；不得自行恢复数据。
+- 禁止 destructive cleanup。失败时保留现场和必要日志，交还编排器判断。
