@@ -215,6 +215,28 @@ def test_manifest_rejects_unknown_schema_and_invalid_digest() -> None:
         validate_release_manifest(payload)
 
 
+def test_manifest_rejects_automatic_manager_change_scope() -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["change_scope"] = ["runtime", "manager"]
+
+    with pytest.raises(
+        ReleaseContractError, match="change_scope includes manager"
+    ):
+        validate_release_manifest(payload)
+
+
+def test_manifest_rejects_oversized_linux_bundle_before_download() -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["artifacts"][0]["size"] = 16 * 1024**3 + 1
+
+    with pytest.raises(ReleaseContractError, match="size limit"):
+        validate_release_manifest(payload)
+
+
 @pytest.mark.parametrize(
     ("channel", "version", "is_prerelease"),
     [
@@ -541,6 +563,80 @@ def test_download_persists_verified_package_metadata_without_installing(
     )
     assert metadata["artifact"]["sha256"] == manifest["artifacts"][0]["sha256"]
     assert metadata["verified_path"] == "DicePP-v3.1.0-linux-amd64.zip"
+
+
+def test_windows_velopack_download_also_verifies_both_feed_assets(
+    tmp_path: Path,
+) -> None:
+    bodies = {
+        "velopack-full": b"full nupkg",
+        "velopack-releases": b'{"releases":[]}',
+        "velopack-assets": b'{"assets":[]}',
+    }
+    artifacts = []
+    routes = {}
+    for purpose, body in bodies.items():
+        filename = {
+            "velopack-full": "DicePP-3.1.0-full.nupkg",
+            "velopack-releases": "releases.win-x64-stable.json",
+            "velopack-assets": "assets.win-x64-stable.json",
+        }[purpose]
+        url = f"https://downloads/{purpose}"
+        artifacts.append(
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": filename,
+                "purpose": purpose,
+                "size": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "download_url": url,
+            }
+        )
+        routes[url] = [Response(body, headers={"ETag": f'"{purpose}"'})]
+    compatibility = {
+        "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+        "minimum_manager_version": MANAGER_VERSION,
+        "catalog_version": 1,
+        "catalog_digest": "1" * 64,
+        "automatic_upgrade": True,
+        "problems": [],
+    }
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(routes),
+        target=("windows", "amd64"),
+    )
+    with manager._lock:
+        manager._latest_channel = "stable"
+        manager._latest = {
+            "version": "3.1.0",
+            "channel": "stable",
+            "change_scope": ["runtime"],
+            "compatible": True,
+            "compatibility": compatibility,
+            "release_url": "https://example/release",
+            "published_at": "2026-07-23T00:00:00Z",
+            "artifacts": artifacts,
+        }
+
+    result = manager.download(purpose="velopack-full")
+
+    assert result["download"]["status"] == "verified"
+    version_dir = manager.layout.manager_packages_dir / "3.1.0"
+    metadata = json.loads(
+        (version_dir / "verified-release.json").read_text(encoding="utf-8")
+    )
+    assert metadata["artifact"]["purpose"] == "velopack-full"
+    assert {
+        item["artifact"]["purpose"] for item in metadata["companions"]
+    } == {"velopack-releases", "velopack-assets"}
+    assert set(result["packages"][0]["files"]) == {
+        "DicePP-3.1.0-full.nupkg",
+        "releases.win-x64-stable.json",
+        "assets.win-x64-stable.json",
+        "verified-release.json",
+    }
 
 
 def test_verified_state_is_persisted_only_after_package_and_metadata(
@@ -1122,6 +1218,31 @@ def test_cache_retention_also_bounds_failed_partial_versions(
     manager._prune(2, protected_version=None)
 
     assert sorted(item.name for item in layout.manager_packages_dir.iterdir()) == [
+        "3.1.0",
+        "3.2.0",
+    ]
+
+
+def test_cache_retention_never_removes_versions_required_for_upgrade_recovery(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    for index, version in enumerate(("3.0.0", "3.1.0", "3.2.0", "3.3.0")):
+        directory = layout.manager_packages_dir / version
+        directory.mkdir(parents=True)
+        (directory / "package.zip.part").write_bytes(version.encode())
+        timestamp = 1_700_000_000 + index
+        release_module.os.utime(directory, (timestamp, timestamp))
+    manager = ReleaseManager(
+        layout=layout,
+        target=("linux", "amd64"),
+        protected_versions_loader=lambda: {"3.0.0", "3.1.0", "3.2.0"},
+    )
+
+    manager._prune(2, protected_version=None)
+
+    assert sorted(item.name for item in layout.manager_packages_dir.iterdir()) == [
+        "3.0.0",
         "3.1.0",
         "3.2.0",
     ]

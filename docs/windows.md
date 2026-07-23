@@ -53,8 +53,9 @@ Velopack 激活版本时，程序文件实际位于 `DicePP/current/`；Manager 
 不会被写进 `current/`。启动器通过 `DICEPP_APP_DIR` 保留当前程序目录，并把
 版本随附的 `config/global.json` 和 `config/bots/_template.json` 只在稳定实例
 根缺失时以竞争安全方式复制一次；既存普通文件保持不变，符号链接或 reparse
-目标会拒绝启动。`user.json`、账号配置和业务数据绝不覆盖。Portable 没有这一
-层，程序目录与实例根相同，也不执行自复制。
+目标会拒绝启动。`user.json`、账号配置和业务数据绝不覆盖。Velopack 生成的
+Portable 和 Setup 都保留稳定根入口、`Update.exe` 与 `current/` 布局；区别只在
+首次部署是否运行安装器，不会形成两套数据位置或更新协议。
 
 “登录 Windows 后自动启动 DicePP”默认关闭。启用后，Manager 只为当前用户写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不安装 Windows Service，也不需要管理员权限。可以勾选托盘菜单中的“登录后自动启动”，也可以在 DicePP 根目录执行：
 
@@ -186,13 +187,46 @@ manager/state/
 
 网页管理面板通过本机 Manager API 执行运行控制。若 Manager 不可用，面板会明确显示运行管理不受支持，不会直接接管子进程。
 
-## 版本发现与旧版迁移
+## 版本更新与旧版迁移
 
 Dashboard 的“版本更新”页现在可以按 stable 或 opt-in prerelease 频道检查
 GitHub Release，并把匹配 win64 的 Portable、Setup 或 Velopack package 下载到
 `manager/packages/`。下载会校验 Release machine contract、asset digest 和
-SHA-256，但不会安装或切换当前目录；安装与自动完整回退由后续升级事务负责。
-配置和默认值见 [updates.md](./updates.md)。
+SHA-256。检查和下载不会改变当前版本；只有已校验且兼容的版本才会显示安装按钮，
+安装仍需再次确认。
+
+确认后，Manager 会先创建并验证常规 pre-upgrade 归档、保留当前程序，再让
+Velopack 切换版本化程序目录。版本目录外的 `DicePP-UpdateGuard.exe` 观察本次
+升级的健康标记；新版本只有在 migration、Dashboard、Bot RuntimeUnit 和本地
+控制通道都健康后才提交。程序切换、migration、启动或硬性健康检查失败/超时，
+UpdateGuard 会在切换前校验并保留当前版本的 Velopack full package；失败时通过
+`Update.exe apply -p <旧版 full package>` 降级，不直接删除或复制 `current/`。
+旧 Manager 随后恢复 pre-upgrade 数据。started、health 和 rollback marker 都绑定
+事务、目标版本与真实 Manager 进程身份；只有本地 Manager API 已监听且带 token
+的 `/v1/health` 验证通过，才会提交程序升级。
+Guard 终止后，Manager 会按摘要把当前版本随附的 UpdateGuard 原子刷新到实例根；
+活跃事务或 Guard 仍运行时不会替换。启动若发现唯一、路径和协议均有效的非终态
+请求，会核对 source/target 版本、全部 marker 和 Guard 精确进程身份：正常目标
+握手继续发布 started/health，已决定回退时才续作 Guard 或有序退出；source 已经
+恢复且 Guard 已退出时，在证据闭环后补齐程序回退终态并继续 data-only 恢复。
+身份未知、marker 冲突或存在多个活跃请求时保持维护状态并要求人工处理。Guard
+已退出且 Manager 数据恢复/提交日志也已终结的无冲突事务目录随后自动清理。
+LLOneBot、QQ、GitHub、LLM 等外部服务暂时不可用只显示警告，不会误判为程序故障。
+本次握手的 `request.json`、`health.json`、`rollback.json` 位于
+`manager/state/update-guard/`；升级进行中不要手工修改或删除。
+
+升级期间可以关闭浏览器页面，但不要结束 Manager 或 UpdateGuard；重新打开
+Dashboard 会继续展示持久化事务进度。若轮询超时，页面只表示“后台仍在继续”，
+不会取消升级。
+
+Portable 和 Setup 只是两个独立的首次安装入口，Setup 不依赖 Portable ZIP；
+后续兼容更新都使用同一 Velopack full package/feed 和回退协议。实例
+`config/`、`data/`、`content/`、`dashboard/data/`、`manager/` 始终留在稳定
+DicePP 根目录，不跟随 `current/` 切换。发布包缺少 Velopack feed/full package
+或 UpdateGuard、需要升级 Manager 本身，或者当前目录不是受支持的安装布局时，
+自动安装会在修改程序和数据前拒绝；按提示下载新 Portable/Setup 并执行手工迁移。
+
+完整配置、安装门槛和回退边界见 [updates.md](./updates.md)。
 
 从不具备精确归档能力的旧目录迁移时按手动流程处理：
 

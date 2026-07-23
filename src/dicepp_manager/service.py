@@ -75,9 +75,13 @@ class ManagerService:
         self._running_by_unit: dict[str, ManagerOperation] = {}
         self._lifecycle_leases: dict[str, AbstractContextManager[None]] = {}
         self._maintenance_active = False
+        self._startup_maintenance_active = False
         self._lock = threading.RLock()
         self.archive_coordinator = None
         self.release_manager = None
+        self.upgrade_coordinator = None
+        self._shutdown_callback: Callable[[str], None] | None = None
+        self.shutdown_reason: str | None = None
 
     def close(self) -> None:
         with self._lock:
@@ -89,6 +93,17 @@ class ManagerService:
         if self._owner_lock is not None:
             self._owner_lock.release()
             self._owner_lock = None
+
+    def set_shutdown_callback(self, callback: Callable[[str], None]) -> None:
+        self._shutdown_callback = callback
+        if self.shutdown_reason is not None:
+            callback(self.shutdown_reason)
+
+    def request_shutdown(self, reason: str) -> None:
+        self.shutdown_reason = reason
+        callback = self._shutdown_callback
+        if callback is not None:
+            callback(reason)
 
     def units(self) -> list[RuntimeUnit]:
         return sorted(self._unit_provider(), key=lambda unit: unit.runtime_unit_id)
@@ -162,7 +177,7 @@ class ManagerService:
                 self.store.save(rejected)
                 raise OperationConflict(rejected)
             operation = ManagerOperation.create(runtime_unit_id, action)
-            if self._maintenance_active:
+            if self._maintenance_active or self._startup_maintenance_active:
                 operation.transition(
                     "rejected",
                     message="Instance maintenance operation is active",
@@ -250,6 +265,11 @@ class ManagerService:
             with self._lock:
                 self._maintenance_active = False
                 lease.__exit__(None, None, None)
+
+    def set_startup_maintenance_gate(self, active: bool) -> None:
+        """Block lifecycle submissions while startup recovery awaits API bind."""
+        with self._lock:
+            self._startup_maintenance_active = active
 
     def _require_unit(self, runtime_unit_id: str) -> RuntimeUnit:
         for unit in self.units():

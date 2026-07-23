@@ -6,6 +6,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +17,7 @@ from dicepp_manager.discovery import RuntimeUnitDiscovery
 from dicepp_manager.factory import create_manager_service
 from dicepp_manager.maintenance import MaintenanceConflict
 from dicepp_manager.models import RuntimeLogs, RuntimeUnit, RuntimeUnitStatus
+from dicepp_manager.models import ManagerOperation
 from dicepp_manager.owner import ManagerAlreadyRunning
 from dicepp_manager.runtime import RuntimeOperationUnsupported
 from dicepp_manager.service import (
@@ -342,6 +344,40 @@ def test_journal_upsert_and_recovery_marks_running_transaction_interrupted(
     assert status == "interrupted"
 
 
+def test_upgrade_package_protection_covers_every_recoverable_outcome(
+    tmp_path: Path,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db")
+    for status, version in (
+        ("running", "3.1.0"),
+        ("interrupted", "3.2.0"),
+        ("rollback_failed", "3.3.0"),
+    ):
+        store.write_journal(
+            f"upgrade-{status}",
+            kind="upgrade",
+            phase="program_switch",
+            status=status,
+            detail={"target_version": version},
+        )
+    store.write_journal(
+        "completed-upgrade",
+        kind="upgrade",
+        phase="committed",
+        status="committed",
+        detail={"target_version": "3.4.0"},
+    )
+    store.write_journal(
+        "unrelated-restore",
+        kind="archive_restore",
+        phase="rollback_failed",
+        status="rollback_failed",
+        detail={"target_version": "9.9.9"},
+    )
+
+    assert store.protected_upgrade_versions() == {"3.1.0", "3.2.0", "3.3.0"}
+
+
 def test_store_releases_sqlite_handles_after_repeated_operations(tmp_path: Path) -> None:
     from dicepp_manager.models import ManagerOperation
 
@@ -404,10 +440,15 @@ def test_manager_api_requires_its_own_token_and_polls_persisted_operation(tmp_pa
 
     with TestClient(app) as client:
         assert client.get("/v1/status").status_code == 401
+        assert client.get("/v1/health").status_code == 401
         headers = {"Authorization": "Bearer manager-secret"}
         status = client.get("/v1/status", headers=headers)
         assert status.status_code == 200
         assert status.json()["runtime_units"][0]["bot_ids"] == ["10001", "10002"]
+        health = client.get("/v1/health", headers=headers)
+        assert health.status_code == 200
+        assert health.json()["ok"] is True
+        assert health.json()["dicepp_version"]
 
         submitted = client.post("/v1/runtime-units/dicepp-runtime/restart", headers=headers)
         assert submitted.status_code == 202
@@ -505,6 +546,280 @@ def test_manager_release_api_checks_and_downloads_without_touching_runtime(
 
     assert release_manager.download_calls == 1
     assert adapter.actions == []
+
+
+def test_manager_upgrade_api_requires_preview_token_and_returns_durable_operation(
+    tmp_path: Path,
+) -> None:
+    class FakeUpgradeCoordinator:
+        def __init__(self, store) -> None:
+            self.store = store
+            self.token = "confirmation-token"
+            self.last = None
+
+        async def recover(self, **_kwargs):
+            return []
+
+        async def preview(self, version=None):
+            assert version is None
+            return {
+                "version": "3.1.0",
+                "confirmation_token": self.token,
+                "downtime_required": True,
+                "pre_upgrade_archive": "regular",
+                "automatic_rollback": True,
+            }
+
+        def confirm(self, *, version, confirmation_token):
+            assert version == "3.1.0"
+            if confirmation_token != self.token:
+                from dicepp_manager.upgrade import UpgradeConfirmationError
+
+                raise UpgradeConfirmationError("confirmation mismatch")
+            operation = ManagerOperation.create_system("upgrade.install")
+            self.store.save(operation)
+            return operation, {"version": version}
+
+        async def run(self, operation, package):
+            operation.transition(
+                "succeeded",
+                detail={
+                    "phase": "committed",
+                    "progress": 100,
+                    "target_version": package["version"],
+                    "rolled_back": False,
+                },
+            )
+            self.store.save(operation)
+            self.last = operation
+            return operation
+
+        def status(self):
+            return {
+                "active_operation": None,
+                "last_operation": self.last.to_dict() if self.last else None,
+                "journal": None,
+            }
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path)
+    service.upgrade_coordinator = FakeUpgradeCoordinator(service.store)
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    headers = {"Authorization": "Bearer manager-secret"}
+
+    with TestClient(app) as client:
+        preview = client.get("/v1/upgrades/preview", headers=headers)
+        assert preview.status_code == 200
+        assert preview.json()["preview"]["pre_upgrade_archive"] == "regular"
+        rejected = client.post(
+            "/v1/upgrades/confirm",
+            headers=headers,
+            json={"version": "3.1.0", "confirmation_token": "wrong"},
+        )
+        assert rejected.status_code == 400
+        accepted = client.post(
+            "/v1/upgrades/confirm",
+            headers=headers,
+            json={
+                "version": "3.1.0",
+                "confirmation_token": "confirmation-token",
+            },
+        )
+        assert accepted.status_code == 202
+        operation_id = accepted.json()["operation"]["operation_id"]
+        for _ in range(50):
+            persisted = client.get(
+                f"/v1/operations/{operation_id}", headers=headers
+            ).json()["operation"]
+            if persisted["status"] == "succeeded":
+                break
+        status = client.get("/v1/upgrades/status", headers=headers).json()
+
+    assert persisted["detail"]["phase"] == "committed"
+    assert status["last_operation"]["operation_id"] == operation_id
+
+
+@pytest.mark.asyncio
+async def test_manager_shutdown_drains_upgrade_without_cancelling_maintenance_owner(
+    tmp_path: Path,
+) -> None:
+    class BlockingUpgradeCoordinator:
+        install_supported = True
+
+        def __init__(self, service: ManagerService) -> None:
+            self.service = service
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.cancelled = False
+            self.completed = False
+
+        async def recover(self, **_kwargs):
+            return []
+
+        async def preview(self, version=None):
+            return {}
+
+        def confirm(self, *, version, confirmation_token):
+            operation = ManagerOperation.create_system("upgrade.install")
+            self.service.store.save(operation)
+            return operation, {"version": version}
+
+        async def run(self, operation, _package):
+            operation.transition("running")
+            self.service.store.save(operation)
+            try:
+                with self.service.maintenance():
+                    self.entered.set()
+                    await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            operation.transition("succeeded")
+            self.service.store.save(operation)
+            self.completed = True
+            return operation
+
+        def status(self):
+            return {
+                "active_operation": None,
+                "last_operation": None,
+                "journal": None,
+            }
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path)
+    coordinator = BlockingUpgradeCoordinator(service)
+    service.upgrade_coordinator = coordinator
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    shutdown: asyncio.Task | None = None
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://manager.test",
+        ) as client:
+            accepted = await client.post(
+                "/v1/upgrades/confirm",
+                headers={"Authorization": "Bearer manager-secret"},
+                json={
+                    "version": "3.1.0",
+                    "confirmation_token": "x" * 32,
+                },
+            )
+        assert accepted.status_code == 202
+        await asyncio.wait_for(coordinator.entered.wait(), timeout=1)
+        assert len(app.state.critical_operation_tasks) == 1
+
+        shutdown = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(0.05)
+
+        assert not shutdown.done()
+        assert coordinator.cancelled is False
+        competing_service = _service(tmp_path)
+        try:
+            with pytest.raises(MaintenanceConflict):
+                with competing_service.maintenance():
+                    pass
+        finally:
+            competing_service.close()
+
+        coordinator.release.set()
+        await asyncio.wait_for(shutdown, timeout=1)
+        assert coordinator.completed is True
+        assert coordinator.cancelled is False
+    finally:
+        if not coordinator.release.is_set():
+            coordinator.release.set()
+        if shutdown is None:
+            await lifespan.__aexit__(None, None, None)
+        elif not shutdown.done():
+            await shutdown
+
+
+@pytest.mark.asyncio
+async def test_manager_shutdown_drains_post_bind_handoff_recovery(
+    tmp_path: Path,
+) -> None:
+    class HandoffRecoveryCoordinator:
+        install_supported = True
+
+        def __init__(self, service: ManagerService) -> None:
+            self.service = service
+            self.api_ready = asyncio.Event()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.cancelled = False
+            self.completed = False
+
+        async def recover(self, *, prepare_windows_handoff_only=False):
+            if prepare_windows_handoff_only:
+                return [{"action": "awaiting_api_bind"}]
+            try:
+                with self.service.maintenance():
+                    self.entered.set()
+                    await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+            self.completed = True
+            return [{"action": "committed"}]
+
+        async def wait_api_ready(self):
+            await self.api_ready.wait()
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path)
+    coordinator = HandoffRecoveryCoordinator(service)
+    service.upgrade_coordinator = coordinator
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    shutdown: asyncio.Task | None = None
+    try:
+        coordinator.api_ready.set()
+        await asyncio.wait_for(coordinator.entered.wait(), timeout=1)
+        assert len(app.state.critical_operation_tasks) == 1
+
+        shutdown = asyncio.create_task(lifespan.__aexit__(None, None, None))
+        await asyncio.sleep(0.05)
+
+        assert not shutdown.done()
+        assert coordinator.cancelled is False
+        coordinator.release.set()
+        await asyncio.wait_for(shutdown, timeout=1)
+        assert coordinator.completed is True
+    finally:
+        coordinator.api_ready.set()
+        coordinator.release.set()
+        if shutdown is None:
+            await lifespan.__aexit__(None, None, None)
+        elif not shutdown.done():
+            await shutdown
 
 
 def test_release_scheduler_checks_immediately_and_survives_config_error(

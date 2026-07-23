@@ -57,6 +57,12 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         lambda: client.release_status(),
         lambda: client.check_releases(),
         lambda: client.download_release("portable"),
+        lambda: client.upgrade_preview(),
+        lambda: client.confirm_upgrade(
+            version="3.1.0",
+            confirmation_token="confirmation-token",
+        ),
+        lambda: client.upgrade_status(),
     ]
     for entry in entries:
         calls.clear()
@@ -133,3 +139,38 @@ async def test_archive_download_streams_bounded_chunks_from_real_client_boundary
     assert chunks == [b"a" * 17, b"b" * 13]
     assert response.read_sizes == [1024 * 1024] * 3
     assert response.closed is True
+
+
+@pytest.mark.asyncio
+async def test_upgrade_confirmation_forwards_version_and_one_time_token(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path)
+    calls: list[tuple[str, str, dict | None]] = []
+
+    async def request(method: str, path: str, *, json_body=None):
+        calls.append((method, path, json_body))
+        if path == "/v1/status":
+            return _compatible_status()
+        return {"operation": {"operation_id": "upgrade-1", "status": "queued"}}
+
+    monkeypatch.setattr(client, "_request", request)
+
+    operation = await client.confirm_upgrade(
+        version="3.1.0",
+        confirmation_token="confirmation-token",
+    )
+
+    assert operation == {"operation_id": "upgrade-1", "status": "queued"}
+    assert calls == [
+        ("GET", "/v1/status", None),
+        (
+            "POST",
+            "/v1/upgrades/confirm",
+            {
+                "version": "3.1.0",
+                "confirmation_token": "confirmation-token",
+            },
+        ),
+    ]

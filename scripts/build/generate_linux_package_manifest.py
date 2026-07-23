@@ -43,6 +43,7 @@ def build_linux_package_manifest(
     compose: Path,
     image_archive: Path,
     images: list[str],
+    image_ids: list[str],
     metadata: ReleaseMetadata,
 ) -> dict:
     normalized_version = str(Version(version.removeprefix("v")))
@@ -52,6 +53,32 @@ def build_linux_package_manifest(
         item.startswith("ghcr.io/pear-studio/") for item in images
     ):
         raise ValueError("Exactly two official GHCR image references are required")
+    if "nonebot-dicepp" not in images[0] or "dicepp-dashboard" not in images[1]:
+        raise ValueError("Docker image references must be ordered bot, dashboard")
+    if (
+        len(image_ids) != 2
+        or any(
+            not item.startswith("sha256:")
+            or len(item) != 71
+            or any(character not in "0123456789abcdef" for character in item[7:])
+            for item in image_ids
+        )
+    ):
+        raise ValueError("Exactly two immutable Docker image IDs are required")
+    if metadata.automatic_upgrade and "manager" in metadata.change_scope:
+        raise ValueError(
+            "automatic_upgrade cannot be enabled when change_scope includes manager"
+        )
+    image_records = [
+        {
+            "role": role,
+            "reference": reference,
+            "image_id": image_id,
+        }
+        for role, reference, image_id in zip(
+            ("bot", "dashboard"), images, image_ids, strict=True
+        )
+    ]
     return {
         "format_version": 1,
         "version": normalized_version,
@@ -62,9 +89,10 @@ def build_linux_package_manifest(
         "catalog_version": DATA_CATALOG.to_dict()["format_version"],
         "catalog_digest": DATA_CATALOG.digest,
         "automatic_upgrade": metadata.automatic_upgrade,
+        "change_scope": list(metadata.change_scope),
         "compose": _file_record(compose, package_root=package_root),
         "image_archive": _file_record(image_archive, package_root=package_root),
-        "images": images,
+        "images": image_records,
     }
 
 
@@ -75,6 +103,7 @@ def main() -> int:
     parser.add_argument("--compose", type=Path, required=True)
     parser.add_argument("--image-archive", type=Path, required=True)
     parser.add_argument("--image", action="append", required=True)
+    parser.add_argument("--image-id", action="append", required=True)
     parser.add_argument("--release-notes", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -88,6 +117,7 @@ def main() -> int:
         compose=args.compose,
         image_archive=args.image_archive,
         images=args.image,
+        image_ids=args.image_id,
         metadata=metadata,
     )
     args.output.write_text(

@@ -73,3 +73,12 @@ def test_pyinstaller_spec_keeps_implementation_modules_out_of_datas_except_launc
     assert "collect_submodules('dicepp_meta')" not in spec
     assert "os.path.join(PROJECT_ROOT, 'src')" in spec
     assert "os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP')" not in spec
+
+
+def test_update_guard_has_a_separate_pyinstaller_entrypoint():
+    spec = Path("scripts/build/update_guard.spec").read_text(encoding="utf-8")
+    entry = Path("scripts/build/update_guard_entry.py").read_text(encoding="utf-8")
+
+    assert 'name="DicePP-UpdateGuard"' in spec
+    assert '"update_guard_entry.py"' in spec
+    assert "from dicepp_manager.update_guard import main" in entry

@@ -61,7 +61,9 @@ flowchart LR
 - Manager 以读写方式挂载实例目录和独立状态目录。
 - Manager 直接挂载 Docker Socket，通过固定操作集合和 DicePP 标签限制目标。
 - Dashboard 不挂载 Docker Socket，也不直接写归档。
-- GitHub Release 中的 Linux 包优先携带压缩镜像，Manager 下载后执行本地 `docker load`；GHCR pull 仅作为备用。
+- GitHub Release 中的 Linux 包携带压缩镜像，Manager 自动安装时只从该包执行
+  本地 `docker load`，不先尝试 GHCR pull；GHCR 镜像引用只用于首次手工部署、
+  手工恢复和诊断。
 
 ### 4.2 Windows
 
@@ -273,7 +275,9 @@ DicePP-v3.1.0-win64-Setup.exe
 Windows 更新还包含 Velopack 的 full/delta package 和按架构、频道隔离的
 release feed。Linux 使用两层契约：GitHub Release 的
 `dicepp-release.json` 校验外层 zip，zip 内 `dicepp-package.json` 声明安装所需
-deployment/Catalog/Compose/image archive 元数据和内部摘要；因此外层 zip
+deployment/Catalog/Compose/image archive 元数据、镜像引用对应的 immutable
+Image ID、`change_scope` 和内部摘要；外层与内层 `change_scope` 必须完全一致，
+且 `automatic_upgrade: true` 不得包含 `manager`；因此外层 zip
 不需要自我哈希。`offline` 不再作为 Linux 包名的一部分。
 
 Portable ZIP 与 Setup.exe 是独立首次安装入口，Setup 不依赖 ZIP。Velopack 的
@@ -288,20 +292,57 @@ Portable ZIP 与 Setup.exe 是独立首次安装入口，Setup 不依赖 ZIP。V
 
 1. 用户确认并验证 Release、兼容性和磁盘空间。
 2. 创建并验证常规 pre-upgrade 归档。
-3. 保留旧镜像并加载目标 Release 镜像。
+3. 检查 staging 容量和包/成员大小上限，保留旧 immutable Image ID 并加载目标
+   Release 镜像；加载后镜像引用解析出的 ID 必须等于包内声明。
 4. 停止相关 RuntimeUnit，切换 Bot/Dashboard。
 5. 执行 migration 和本地硬性健康检查。
 6. 成功时提交；失败时恢复旧镜像和 pre-upgrade 数据。
 
-需要升级 Manager 自身或修改 Compose service、volume、network 的 Release 标记为不可自动安装，要求一次手动部署迁移。
+安装器校验 bundle 内的 image archive 后执行本地 `docker load`，不会在事务中
+执行 `docker pull`。bundle 中的 Compose 用作当前拓扑的兼容性证明，不会被
+Manager 复制到实例目录。兼容比较会深度归一 Compose，只忽略 Bot/Dashboard 的
+`image`、`build` 和顶层 Compose `version`；mount source/type/mode、service
+依赖、network driver/external/IPAM 等任何其他差异都转为手工迁移。容器重建前
+还会比较旧/新 image defaults；第一阶段无法从 Docker inspect 可靠区分“恰好等于
+旧默认值的 Compose 显式固定值”，因此任一默认值变化都拒绝自动升级。未知的非默认
+Config/HostConfig 也一律拒绝。需要升级 Manager
+自身或修改 Compose/deployment schema 的 Release 标记为不可自动安装，
+要求一次手动部署迁移。自动路径只重建 Bot/Dashboard；Manager 必须在事务期间
+保持旧版本运行，直到提交或完整回退结束。
 
 ### 12.2 Windows
 
 - PyInstaller 继续使用 onedir 输出，由 Velopack 包装 Portable 和 Setup。
 - Manager 发起检查、下载和安装。
 - Velopack 负责切换版本化程序目录和重启。
-- 版本目录外的 UpdateGuard 观察新版本健康标记。
-- 超时或硬性健康失败时，UpdateGuard 触发程序降级，Manager 恢复 pre-upgrade 归档。
+- 发布产物包含独立 UpdateGuard；安装前由当前 Manager 把它准备到稳定实例根
+  的版本目录之外，使 `current/` 切换不会替换正在运行的 guard。
+- Manager 在持久化事务状态中写入目标版本、旧版本、pre-upgrade 归档和健康
+  marker 身份；UpdateGuard 只接受该次事务的匹配 marker，旧 marker 不能提交
+  新事务。
+- 超时或硬性健康失败时，UpdateGuard 使用预先按摘要保留的旧版 full nupkg
+  调用 Velopack 指定版本降级；不得手工删除或复制 `current/`。旧 Manager 随后
+  恢复 pre-upgrade 归档。
+- 新 Manager 最早发布绑定事务、目标版本和 PID/start-time/executable 的
+  started marker，UpdateGuard 不把短暂 launcher stub 当作 Manager。health
+  提交还要求带 token 的本地 `/v1/health` 在监听后返回同一版本和进程身份。
+- stable-root UpdateGuard 必须与当前版本随附副本摘要一致；事务活跃或 Guard
+  进程仍存活时禁止替换，终态且精确 Guard identity 已退出后才原子刷新。
+- Manager 启动只自动接管唯一、协议和路径均有效的非终态握手，并严格核对
+  source/target 版本、started/health/rollback marker 与 Guard 进程身份。目标
+  Manager 在正常握手阶段继续发布 started 和 authenticated health；已经决定
+  回退时才有序退出或续作 Guard。source Manager 已恢复而 Guard 已退出时，只在
+  精确证据闭环后补齐程序回退终态并执行 data-only 补偿。身份未知、marker 冲突
+  或多事务并存时保持 maintenance gate，要求人工处理。只有 Guard 确认退出且
+  Manager journal 已完成提交或数据补偿，才清理无冲突的终态事务目录。
+- UpdateGuard 只监督本地程序切换握手，不自行判断 QQ、GitHub 或第三方 API
+  是否可用；数据恢复仍由能够理解 DataAsset Catalog 和 journal 的 Manager 执行。
+
+Windows 自动安装只接受与当前架构、频道匹配且同时具备 Velopack full package、
+feed 和 UpdateGuard 的发布产物。缺少任一产物、当前目录不是受支持的 Velopack
+安装布局、需要 Manager 自升级或无法保留旧程序时，在创建数据切换前拒绝安装。
+真实 Portable/Setup 首装、进程切换和 Velopack 降级仍属于发布平台烟测门槛；
+单元测试中的伪进程/伪 feed 不能替代该验证。
 
 ## 13. 明确非目标
 

@@ -479,6 +479,16 @@ def run_windows_launcher(*, fake_tray: bool = False) -> None:
             controller.configure_autostart(WindowsAutostart(sys.executable))
         tray = build_tray(controller, fake=fake_tray)
         controller._stop_tray = tray.stop
+        manager_state = getattr(manager_app, "state", None)
+        manager_service = getattr(manager_state, "manager_service", None)
+        if manager_service is not None:
+            manager_service.set_shutdown_callback(
+                lambda _reason: threading.Thread(
+                    target=controller.exit,
+                    name="DicePPUpgradeHandoff",
+                    daemon=False,
+                ).start()
+            )
 
         _auto_start_runtime(controller, log_path)
         if should_open_browser():

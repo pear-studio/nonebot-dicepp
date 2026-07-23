@@ -6,10 +6,12 @@ import asyncio
 import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+from dicepp_meta import get_version
 
 from .archive import (
     MAX_ARCHIVE_BYTES,
@@ -23,9 +25,24 @@ from .archive import (
 from .archive_coordinator import ArchiveCoordinator, ArchiveTransactionError
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
-from .factory import create_manager_service
+from .factory import (
+    cleanup_terminal_update_guard_transactions,
+    create_manager_service,
+    refresh_stable_update_guard_when_safe,
+    resume_interrupted_update_guard,
+    wait_for_update_guard_terminal,
+)
 from .models import ManagerAction, VALID_ACTIONS
 from .release import ReleaseError, ReleaseManager
+from .upgrade import (
+    UnsupportedUpgradeAdapter,
+    UpgradeCompatibilityError,
+    UpgradeConfirmationError,
+    UpgradeCoordinator,
+    UpgradeError,
+    UpgradeTransactionError,
+    WindowsVelopackUpgradeAdapter,
+)
 from .runtime import RuntimeOperationUnsupported
 from .service import ManagerService, OperationConflict, OperationFailed, UnknownRuntimeUnit
 
@@ -47,21 +64,123 @@ def create_manager_app(
         manager_service.release_manager = ReleaseManager(
             layout=settings.layout,
             github_api=settings.github_api,
+            protected_versions_loader=manager_service.store.protected_upgrade_versions,
         )
     release_manager = manager_service.release_manager
+    if manager_service.upgrade_coordinator is None:
+        manager_service.upgrade_coordinator = UpgradeCoordinator(
+            layout=settings.layout,
+            service=manager_service,
+            archive_coordinator=archive_coordinator,
+            release_manager=release_manager,
+            platform_adapter=UnsupportedUpgradeAdapter(
+                getattr(release_manager, "target", ("unknown", "unknown"))[0],
+                "Automatic program installation is not configured",
+            ),
+        )
+    upgrade_coordinator = manager_service.upgrade_coordinator
     expected_token = api_token or ensure_api_token(settings.token_path or settings.layout.manager_token)
     tasks: set[asyncio.Task] = set()
+    critical_tasks: set[asyncio.Task] = set()
     release_tasks: set[asyncio.Task] = set()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         scheduler_task: asyncio.Task | None = None
+        handoff_task: asyncio.Task | None = None
         try:
-            await archive_coordinator.recover()
+            resumed_guard = await resume_interrupted_update_guard(
+                manager_service
+            )
+            recovered = []
+            if resumed_guard is None:
+                await archive_coordinator.recover()
+                recovered = await upgrade_coordinator.recover(
+                    prepare_windows_handoff_only=True
+                )
+                cleanup_terminal_update_guard_transactions(
+                    settings.layout.root,
+                    journal_loader=manager_service.store.get_journal,
+                )
+            if (
+                isinstance(resumed_guard, dict)
+                and resumed_guard.get("awaiting_terminal") is True
+            ):
+                async def finish_source_restore_after_terminal() -> None:
+                    await wait_for_update_guard_terminal(
+                        upgrade_coordinator.platform_adapter,
+                        Path(resumed_guard["request"]),
+                    )
+                    current = asyncio.current_task()
+                    if current is not None:
+                        critical_tasks.add(current)
+                    try:
+                        await archive_coordinator.recover()
+                        results = await upgrade_coordinator.recover()
+                        if any(
+                            item.get("action")
+                            in {"committed", "finalized", "rolled_back"}
+                            for item in results
+                        ):
+                            await refresh_stable_update_guard_when_safe(
+                                settings.layout.root,
+                                journal_loader=manager_service.store.get_journal,
+                            )
+                        cleanup_terminal_update_guard_transactions(
+                            settings.layout.root,
+                            journal_loader=manager_service.store.get_journal,
+                        )
+                    finally:
+                        if current is not None:
+                            critical_tasks.discard(current)
+
+                handoff_task = asyncio.create_task(
+                    finish_source_restore_after_terminal()
+                )
+            elif any(
+                item.get("action") == "awaiting_api_bind"
+                for item in recovered
+            ):
+                async def finish_handoff_after_bind() -> None:
+                    await upgrade_coordinator.wait_api_ready()
+                    current = asyncio.current_task()
+                    if current is not None:
+                        critical_tasks.add(current)
+                    try:
+                        results = await upgrade_coordinator.recover()
+                        if isinstance(
+                            upgrade_coordinator.platform_adapter,
+                            WindowsVelopackUpgradeAdapter,
+                        ) and any(
+                            item.get("action")
+                            in {"committed", "finalized", "rolled_back"}
+                            for item in results
+                        ):
+                            await refresh_stable_update_guard_when_safe(
+                                settings.layout.root,
+                                journal_loader=manager_service.store.get_journal,
+                            )
+                    finally:
+                        if current is not None:
+                            critical_tasks.discard(current)
+
+                handoff_task = asyncio.create_task(
+                    finish_handoff_after_bind()
+                )
             if settings.release_scheduler_enabled:
                 scheduler_task = asyncio.create_task(release_scheduler())
             yield
         finally:
+            if (
+                handoff_task is not None
+                and not handoff_task.done()
+                and handoff_task not in critical_tasks
+            ):
+                # Before API readiness the helper owns no transaction/lease.
+                # Once recovery begins it moves into critical_tasks and must
+                # reach a durable outcome without cancellation.
+                handoff_task.cancel()
+                await asyncio.gather(handoff_task, return_exceptions=True)
             if scheduler_task is not None:
                 scheduler_task.cancel()
                 await asyncio.gather(scheduler_task, return_exceptions=True)
@@ -76,11 +195,20 @@ def create_manager_app(
                     task.cancel()
                 if pending:
                     await asyncio.gather(*pending, return_exceptions=True)
+            if critical_tasks:
+                # Upgrade transactions own the instance maintenance lease and
+                # may be the reason shutdown was requested.  Cancelling one
+                # here can strand the program/data switch half-finished and
+                # release Manager ownership before its durable outcome exists.
+                await asyncio.gather(*critical_tasks, return_exceptions=True)
+            if handoff_task is not None:
+                await asyncio.gather(handoff_task, return_exceptions=True)
             manager_service.close()
 
     app = FastAPI(title="DicePP Manager", version="2", lifespan=lifespan)
     app.state.manager_service = manager_service
     app.state.operation_tasks = tasks
+    app.state.critical_operation_tasks = critical_tasks
     app.state.release_tasks = release_tasks
 
     async def require_manager_auth(authorization: str | None = Header(None)) -> None:
@@ -97,6 +225,24 @@ def create_manager_app(
     @app.get("/v1/status", dependencies=auth)
     async def status():
         return {"ok": True, **(await manager_service.status())}
+
+    @app.get("/v1/health", dependencies=auth)
+    async def health():
+        # This route can only run after Uvicorn has completed ASGI startup and
+        # bound the authenticated local API.  It is the UpdateGuard's readiness
+        # boundary, not merely an in-process lifespan callback.
+        upgrade_coordinator.mark_api_ready()
+        handoff = upgrade_coordinator.handoff_health()
+        return {
+            "ok": True,
+            "dicepp_version": get_version(),
+            "manager_identity": (
+                handoff.get("manager_identity")
+                if isinstance(handoff, dict)
+                else None
+            ),
+            "upgrade_handoff": handoff,
+        }
 
     @app.get("/v1/operations", dependencies=auth)
     async def operations(limit: int = Query(50, ge=1, le=200)):
@@ -202,6 +348,12 @@ def create_manager_app(
         task.add_done_callback(tasks.discard)
         return task
 
+    def track_critical_task(coroutine) -> asyncio.Task:
+        task = asyncio.create_task(coroutine)
+        critical_tasks.add(task)
+        task.add_done_callback(critical_tasks.discard)
+        return task
+
     def track_release_task(coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
         release_tasks.add(task)
@@ -244,6 +396,24 @@ def create_manager_app(
             )
         except (ReleaseError, ValueError):
             return
+
+    async def finish_upgrade(manager_operation, package) -> None:
+        try:
+            await upgrade_coordinator.run(manager_operation, package)
+        except UpgradeTransactionError:
+            return
+        except Exception as exc:
+            manager_operation.transition(
+                "failed",
+                message=str(exc) or type(exc).__name__,
+                detail={
+                    **manager_operation.detail,
+                    "phase": "failed",
+                    "error": str(exc) or type(exc).__name__,
+                    "failure_code": "unexpected_upgrade_failure",
+                },
+            )
+            manager_service.store.save(manager_operation)
 
     @app.post("/v1/runtime-units/{runtime_unit_id}/{action}", dependencies=auth, status_code=202)
     async def operate(runtime_unit_id: str, action: str):
@@ -418,7 +588,11 @@ def create_manager_app(
             result = release_manager.status()
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"ok": True, **result}
+        return {
+            "ok": True,
+            **result,
+            "install_supported": upgrade_coordinator.install_supported,
+        }
 
     @app.post("/v1/releases/check", dependencies=auth, status_code=202)
     async def releases_check():
@@ -451,6 +625,45 @@ def create_manager_app(
             )
         track_release_task(finish_release_download(purpose, reservation))
         return {"ok": True, **release_manager.status()}
+
+    @app.get("/v1/upgrades/preview", dependencies=auth)
+    async def upgrades_preview(version: str | None = None):
+        try:
+            preview = await upgrade_coordinator.preview(version)
+        except (UpgradeError, ReleaseError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"ok": True, "preview": preview}
+
+    @app.get("/v1/upgrades/status", dependencies=auth)
+    async def upgrades_status():
+        return {"ok": True, **upgrade_coordinator.status()}
+
+    @app.post("/v1/upgrades/confirm", dependencies=auth, status_code=202)
+    async def upgrades_confirm(request: Request):
+        body = await _json_body(request)
+        version = body.get("version")
+        token = body.get("confirmation_token")
+        if not isinstance(version, str) or not version:
+            raise HTTPException(status_code=400, detail="version is required")
+        if not isinstance(token, str) or not token:
+            raise HTTPException(
+                status_code=400, detail="confirmation_token is required"
+            )
+        if upgrade_coordinator.status()["active_operation"] is not None:
+            raise HTTPException(
+                status_code=409, detail="Another upgrade operation is active"
+            )
+        try:
+            manager_operation, package = upgrade_coordinator.confirm(
+                version=version,
+                confirmation_token=token,
+            )
+        except UpgradeConfirmationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (UpgradeCompatibilityError, ReleaseError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        track_critical_task(finish_upgrade(manager_operation, package))
+        return {"ok": True, "operation": manager_operation.to_dict()}
 
     return app
 

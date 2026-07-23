@@ -59,11 +59,16 @@ def test_linux_release_package_embeds_docs_and_usage_guide_without_offline_name(
     assert 'cp docs/linux.md "${PACKAGE_DIR}/docs/linux.md"' in script
     assert 'cp docs/configuration.md "${PACKAGE_DIR}/docs/configuration.md"' in script
     assert 'cat > "${PACKAGE_DIR}/使用说明.md"' in script
-    assert 'zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"' in script
+    assert 'cd "${PACKAGE_DIR}"' in script
+    assert 'zip -r "../${PACKAGE_ZIP}" .' in script
+    assert 'zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"' not in script
     assert 'sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"' not in script
     assert "generate_linux_package_manifest.py" in script
     assert 'dicepp-package.json' in script
     assert '--release-notes "docs/releases/${TAG}.md"' in script
+    assert 'docker image inspect --format \'{{.Id}}\'' in script
+    assert '--image-id "${BOT_IMAGE_ID}"' in script
+    assert '--image-id "${DASHBOARD_IMAGE_ID}"' in script
     assert "--minimum-manager-version" not in script
     assert "--automatic-upgrade" not in script
 
@@ -140,6 +145,25 @@ def test_windows_package_only_keeps_localized_usage_readme():
     assert 'Destination (Join-Path $DistDir $localizedReadmeName)' in script
 
 
+def test_windows_packages_a_standalone_update_guard():
+    script = WINDOWS_PACKAGE_SCRIPT.read_text(encoding="utf-8")
+    release_build = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Build Windows executables with PyInstaller",
+    )["run"]
+    ci_build = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Build Windows executables",
+    )["run"]
+
+    assert "pyinstaller scripts/build/update_guard.spec" in release_build
+    assert "pyinstaller scripts/build/update_guard.spec" in ci_build
+    assert '$UpdateGuardSource = "dist/DicePP-UpdateGuard.exe"' in script
+    assert 'Destination (Join-Path $DistDir "DicePP-UpdateGuard.exe")' in script
+
+
 def test_windows_package_smoke_waits_for_windowed_dashboard_launcher():
     step = _workflow_step(TEST_SUITE_WORKFLOW, "windows-package", "Assemble and smoke test package")
     script = step["run"]
@@ -153,6 +177,10 @@ def test_windows_package_smoke_waits_for_windowed_dashboard_launcher():
     assert "(Get-Content $stdout -Raw -ErrorAction SilentlyContinue).Trim()" not in script
     assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")' in script
     assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check")' in script
+    assert (
+        'Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" '
+        '@("--smoke-check")'
+    ) in script
     assert "(& dist/DicePP/DicePP.exe --version)" not in script
 
 
@@ -169,4 +197,8 @@ def test_release_windows_smoke_waits_for_windowed_dashboard_launcher():
     assert "(Get-Content $stdout -Raw -ErrorAction SilentlyContinue).Trim()" not in script
     assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")' in script
     assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check")' in script
+    assert (
+        'Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" '
+        '@("--smoke-check")'
+    ) in script
     assert "./dist/DicePP/DicePP.exe --version" not in script

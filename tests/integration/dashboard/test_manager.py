@@ -67,6 +67,40 @@ class RecordingClient:
             "install_supported": False,
         }
 
+    async def upgrade_preview(self):
+        self.calls.append(("upgrade-preview",))
+        return {
+            "preview": {
+                "version": "3.1.0",
+                "confirmation_token": "confirmation-token",
+                "pre_upgrade_archive": "regular",
+            }
+        }
+
+    async def confirm_upgrade(self, *, version, confirmation_token):
+        self.calls.append(("upgrade-confirm", version, confirmation_token))
+        return {
+            "operation_id": "upgrade-1",
+            "status": "queued",
+            "phase": "preflight",
+        }
+
+    async def upgrade_status(self):
+        self.calls.append(("upgrade-status",))
+        return {
+            "active_operation": {
+                "operation_id": "upgrade-1",
+                "status": "running",
+                "detail": {
+                    "phase": "switch",
+                    "progress": 60,
+                    "rolled_back": False,
+                },
+            },
+            "last_operation": None,
+            "journal": None,
+        }
+
 
 def test_dashboard_exposes_explicit_manager_unavailable(test_client: TestClient) -> None:
     setup_auth(test_client)
@@ -109,7 +143,7 @@ def test_dashboard_has_no_legacy_bot_lifecycle_route(test_client: TestClient) ->
     assert test_client.post("/api/manager/bots/test_bot/start").status_code == 404
 
 
-def test_dashboard_proxies_release_discovery_and_download_but_has_no_install_route(
+def test_dashboard_proxies_release_discovery_download_and_confirmed_upgrade(
     test_client: TestClient,
 ) -> None:
     setup_auth(test_client)
@@ -125,4 +159,41 @@ def test_dashboard_proxies_release_discovery_and_download_but_has_no_install_rou
     assert download.status_code == 202
     assert download.json()["download"]["status"] == "downloading"
     assert client.calls == [("download", "portable")]
-    assert test_client.post("/api/releases/install", json={}).status_code == 404
+
+    preview = test_client.get("/api/upgrades/preview")
+    assert preview.json()["preview"]["confirmation_token"] == "confirmation-token"
+
+    confirmed = test_client.post(
+        "/api/upgrades/confirm",
+        json={
+            "version": "3.1.0",
+            "confirmation_token": "confirmation-token",
+        },
+    )
+    assert confirmed.status_code == 202
+    assert confirmed.json()["operation"]["operation_id"] == "upgrade-1"
+
+    status = test_client.get("/api/upgrades/status")
+    assert status.json()["active_operation"]["detail"]["phase"] == "switch"
+    assert client.calls == [
+        ("download", "portable"),
+        ("upgrade-preview",),
+        ("upgrade-confirm", "3.1.0", "confirmation-token"),
+        ("upgrade-status",),
+    ]
+
+
+def test_dashboard_rejects_incomplete_upgrade_confirmation_before_manager_call(
+    test_client: TestClient,
+) -> None:
+    setup_auth(test_client)
+    client = RecordingClient()
+    test_client.app.state.manager_client = client
+
+    missing_token = test_client.post(
+        "/api/upgrades/confirm",
+        json={"version": "3.1.0"},
+    )
+    assert missing_token.status_code == 400
+    assert "confirmation_token" in missing_token.json()["message"]
+    assert client.calls == []

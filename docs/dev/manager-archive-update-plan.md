@@ -1,6 +1,6 @@
 # Manager、归档恢复与自动升级实施计划
 
-> 状态：执行中。五批严格串行推进，每批均执行“实现、独立审查、主代理验收、测试、提交”的闭环。
+> 状态：已完成。五批严格串行推进，每批均执行“实现、独立审查、主代理验收、测试、提交”的闭环。
 
 ## 1. 执行规则
 
@@ -19,7 +19,7 @@
 | 2. 常驻 Manager 标准化 | 已完成 | 本批实现提交 |
 | 3. 事务化归档与精确恢复 | 已完成 | 本批实现提交 |
 | 4. 版本发现与下载 | 已完成 | 本批实现提交 |
-| 5. 确认安装与自动回退 | 待开始 | - |
+| 5. 确认安装与自动回退 | 已完成 | 本批实现提交 |
 
 ## 3. 第一批：统一实例数据基础
 
@@ -170,5 +170,6 @@
 | K2 | 已接受 | 归档明文包含 API Key | 保持完整恢复能力，界面明确敏感标记，不做自动云上传 |
 | K3 | 已接受 | Linux Manager 挂载 Docker Socket | 内部网络、固定操作、标签过滤和审计，Dashboard 不接触 Socket |
 | K4 | 已接受 | 第一阶段不能自动升级 Manager 或 Compose 拓扑 | Release Contract 阻止自动安装并给出手动迁移指引 |
-| K5 | 待实施验证 | Windows Velopack 与 UpdateGuard 的进程切换边界 | 第五批以故障注入和真实打包烟测验证 |
-| K6 | 已绕过，待清理 | Windows Manager 被强制结束时，已启动的 Bot 子进程可能无法由新 Manager 安全重新接管 | 本批保证托盘正常退出会有序停止；不按进程名扫描或误杀。PID 身份校验与异常接管在第五批 UpdateGuard/进程切换验收时一并处理 |
+| K5 | 待发布平台验证 | Windows Velopack 与 UpdateGuard 的进程切换边界 | 离线测试覆盖事务/marker/PID 身份与故障注入；真实 Portable/Setup 首装、Velopack 切换和降级必须由 Windows 发布构建烟测确认，不能用伪进程结果代替 |
+| K6 | 已实施，待发布平台验证 | Windows Manager 被强制结束时，已启动的 Bot 子进程可能无法由新 Manager 安全重新接管 | Process Runtime 持久化 PID、启动时间和可执行路径；新 Manager 只接管完全匹配的已知身份，PID 复用或身份缺失时按已停止处理，绝不按进程名扫描。离线测试已覆盖接管和停止，真实打包进程仍随 K5 验证 |
+| K7 | 待发布平台验证 | Linux 自动安装依赖真实 Docker daemon 的 load、重建和旧镜像回退边界 | 离线测试只验证 adapter 契约和故障补偿；发布候选需在隔离 Compose project 中用 bundle、`docker load`、`--pull never` 完成烟测 |

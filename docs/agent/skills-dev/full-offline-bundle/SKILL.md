@@ -10,8 +10,12 @@ description: 生成 DicePP 群分发整合离线包。Linux 整合包包含 NapC
 ## 核心约定
 
 - DicePP 版本默认使用 GitHub 最新 Release；用户明确指定版本时才覆盖。
+- 整合包只是首次分发外壳，不改写 DicePP 官方包、Release contract 或自动升级
+  契约。安装后的版本发现、确认安装和回退仍以 GitHub Release 及官方包为准。
 - **Linux 整合包**使用 NapCat 方案：包含 Docker 模板文件（`docker-compose.yml`、`Dockerfile`、`entrypoint.sh`）和预下载的 NapCat.Shell.zip（约 28MB）。QQNT 由用户构建时从腾讯 CDN 在线下载（首次 ~170MB，Docker 缓存后不再重复），避免打包 500MB+ 的 Docker 镜像。
 - **Windows 整合包**使用 LLOneBot Release 的 `LLBot-Desktop-win-x64.zip`，与 `docs/windows.md` 的桌面部署路线一致。
+- 官方 Windows Portable 内必须已有 `DicePP-UpdateGuard.exe`；整合脚本不得另
+  下载、替换或在外层生成 UpdateGuard。
 - NapCat 版本默认复用本 skill `assets/napcat/` 下已有的最新资产；用户通过 `--napcat-version` 指定版本时才重新下载。
 - Windows LLOneBot 版本默认复用本 skill `assets/llonebot/` 下已有的同平台最新资产。
 - 大文件缓存放在本 skill 的 `assets/`，输出放在 `out/`；两者由 `.gitignore` 排除，不提交进 git。
@@ -96,4 +100,8 @@ DicePP-vX.Y.Z-win64-with-llonebot/
     source.txt
 ```
 
-`使用说明.md` 只负责指向 DicePP 官方发布包内的文档，并给出 NapCat/LLOneBot 资产来源。安装、升级、回滚仍以 DicePP 发布包内的 `使用说明.md`、`docs/linux.md` 或 `docs/windows.md` 为准。
+`使用说明.md` 只负责指向 DicePP 官方发布包内的文档，并给出 NapCat/LLOneBot
+资产来源。安装、升级、回滚仍以 DicePP 发布包内的 `使用说明.md`、
+`docs/linux.md` 或 `docs/windows.md` 为准。Linux 官方包的兼容自动安装从内置
+image archive 执行 `docker load`，不要求 `docker pull`；外层 NapCat 模板不
+属于 DicePP Compose，也不会随 DicePP 自动升级。

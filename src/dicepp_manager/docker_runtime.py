@@ -266,13 +266,43 @@ class DockerSocketRuntimeAdapter:
             raise DockerRuntimeError("Docker returned an invalid container id")
         return container_id
 
-    async def _request(self, method: str, path: str, *, expected: set[int], raw: bool = False):
-        return await asyncio.to_thread(self._request_sync, method, path, expected, raw)
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected: set[int],
+        raw: bool = False,
+        json_body: dict | None = None,
+    ):
+        return await asyncio.to_thread(
+            self._request_sync, method, path, expected, raw, json_body
+        )
 
-    def _request_sync(self, method: str, path: str, expected: set[int], raw: bool):
+    def _request_sync(
+        self,
+        method: str,
+        path: str,
+        expected: set[int],
+        raw: bool,
+        json_body: dict | None = None,
+    ):
         connection = _UnixSocketConnection(self._socket_path, self._timeout)
         try:
-            connection.request(method, path)
+            body = (
+                json.dumps(json_body, separators=(",", ":")).encode("utf-8")
+                if json_body is not None
+                else None
+            )
+            headers = (
+                {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                }
+                if body is not None
+                else {}
+            )
+            connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
             body = response.read()
         except (OSError, http.client.HTTPException) as exc:

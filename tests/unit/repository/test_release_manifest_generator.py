@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.build.generate_release_manifest import (
     artifact_record,
     build_manifest,
@@ -7,6 +9,7 @@ from scripts.build.generate_release_manifest import (
     velopack_version,
 )
 from scripts.build.release_metadata import ReleaseMetadata
+from dicepp_manager.release import ReleaseContractError
 
 
 def test_generator_hashes_real_artifacts_and_emits_valid_contract(tmp_path) -> None:
@@ -47,3 +50,27 @@ def test_velopack_uses_semver2_and_architecture_scoped_channels() -> None:
     assert velopack_version("v3.1.0") == "3.1.0"
     assert velopack_channel("stable", "amd64") == "win-x64-stable"
     assert velopack_channel("prerelease", "amd64") == "win-x64-prerelease"
+
+
+def test_outer_release_contract_rejects_automatic_manager_change(
+    tmp_path,
+) -> None:
+    linux = tmp_path / "package.zip"
+    linux.write_bytes(b"linux package")
+
+    with pytest.raises(
+        ReleaseContractError, match="change_scope includes manager"
+    ):
+        build_manifest(
+            version="v3.1.0",
+            channel="stable",
+            artifacts=[artifact_record(f"linux:amd64:linux-bundle:{linux}")],
+            metadata=ReleaseMetadata(
+                version="3.1.0",
+                data_changed=False,
+                config_changed=False,
+                change_scope=("runtime", "manager"),
+                automatic_upgrade=True,
+                minimum_manager_version="1.0",
+            ),
+        )

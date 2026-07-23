@@ -728,12 +728,12 @@
         </div>
       </div>
 
-      <!-- Tab: 版本更新（发现和下载，不执行安装） -->
+      <!-- Tab: 版本更新 -->
       <div x-show="currentTab === 'updates'" x-cloak data-testid="updates-tab">
         <div class="flex items-center justify-between mb-4">
           <div>
             <h2 class="text-xl font-bold">版本更新</h2>
-            <p class="text-xs text-gray-500 mt-1">这里只检查和下载已验证的软件包；安装始终需要单独确认。</p>
+            <p class="text-xs text-gray-500 mt-1">检查和下载不会改变当前版本；只有已验证的软件包才能进入安装确认。</p>
           </div>
           <button
             @click="checkRelease()"
@@ -783,7 +783,88 @@
           <div x-show="releaseState?.download?.status && releaseState.download.status !== 'idle'" data-testid="release-download-status" class="bg-gray-50 border rounded p-3 text-sm">
             <div x-text="`下载状态：${releaseState.download.status}`"></div>
             <div class="text-xs text-gray-500 mt-1" x-text="releaseState.download.filename || ''"></div>
-            <div x-show="releaseState.download.status === 'verified'" class="text-green-700 text-xs mt-1">软件包已通过大小与 SHA-256 校验；尚未安装。</div>
+            <div x-show="releaseState.download.status === 'verified'" class="text-green-700 text-xs mt-1">软件包已通过大小、SHA-256 和安装契约校验；尚未安装。</div>
+            <button
+              x-show="upgradeCanInstall()"
+              x-cloak
+              @click="previewUpgrade()"
+              :disabled="upgradePreviewLoading || upgradeConfirming || upgradeIsRunning()"
+              data-testid="upgrade-preview-button"
+              class="mt-3 px-3 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700 disabled:opacity-50"
+              x-text="upgradePreviewLoading ? '准备中...' : '准备安装'"
+            ></button>
+          </div>
+
+          <div
+            x-show="upgradePreview"
+            x-cloak
+            data-testid="upgrade-confirmation"
+            class="border border-amber-300 bg-amber-50 rounded p-4 space-y-3"
+          >
+            <div class="font-semibold text-amber-900">安装 <span x-text="upgradePreviewVersion()"></span></div>
+            <div class="text-sm text-amber-900">请再次确认以下事务行为：</div>
+            <ul class="list-disc pl-5 text-sm text-amber-900 space-y-1">
+              <li>升级期间 Bot 与 Dashboard 会停机。</li>
+              <li>切换程序前会创建并验证一份常规 pre-upgrade 归档。</li>
+              <li>任何安装、迁移或硬性健康检查失败都会自动完整回退程序和数据。</li>
+            </ul>
+            <label class="flex items-start gap-2 text-sm text-amber-950">
+              <input
+                type="checkbox"
+                x-model="upgradeRisksConfirmed"
+                data-testid="upgrade-risk-confirm"
+                class="mt-1"
+              >
+              <span>我已了解停机、升级前归档和失败自动完整回退，并确认开始安装。</span>
+            </label>
+            <div class="flex gap-2">
+              <button
+                @click="confirmUpgrade()"
+                :disabled="!upgradeRisksConfirmed || upgradeConfirming || !upgradePreviewToken()"
+                data-testid="upgrade-confirm-button"
+                class="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
+                x-text="upgradeConfirming ? '正在提交...' : '确认安装'"
+              ></button>
+              <button
+                @click="cancelUpgradePreview()"
+                :disabled="upgradeConfirming"
+                class="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-white disabled:opacity-50"
+              >取消</button>
+            </div>
+          </div>
+
+          <div
+            x-show="upgradeOperation()"
+            x-cloak
+            data-testid="upgrade-status"
+            class="border rounded p-4 space-y-2 text-sm"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="font-semibold">安装事务</div>
+              <button
+                @click="refreshUpgradeStatus()"
+                :disabled="upgradeStatusLoading"
+                data-testid="upgrade-status-refresh"
+                class="px-2 py-1 border border-gray-300 text-xs rounded hover:bg-gray-50 disabled:opacity-50"
+              >刷新状态</button>
+            </div>
+            <div><span class="text-gray-500">状态：</span><span data-testid="upgrade-operation-state" x-text="upgradeOperation()?.status || '-'"></span></div>
+            <div><span class="text-gray-500">阶段：</span><span data-testid="upgrade-phase" x-text="upgradeOperationDetail()?.phase || '-'"></span></div>
+            <div><span class="text-gray-500">进度：</span><span data-testid="upgrade-progress" x-text="formatUpgradeProgress(upgradeOperationDetail()?.progress)"></span></div>
+            <div x-show="upgradeFailure()" class="text-red-700">
+              <span class="font-medium">失败原因：</span><span data-testid="upgrade-failure" x-text="formatUpgradeDetail(upgradeFailure())"></span>
+            </div>
+            <div x-show="upgradeOperationDetail()?.rollback_status !== undefined">
+              <span class="text-gray-500">回退状态：</span><span data-testid="upgrade-rollback-status" x-text="formatUpgradeDetail(upgradeOperationDetail()?.rollback_status)"></span>
+            </div>
+            <div x-show="upgradeOperationDetail()?.rolled_back !== undefined">
+              <span class="text-gray-500">已执行回退：</span><span data-testid="upgrade-rolled-back" x-text="upgradeOperationDetail()?.rolled_back ? '是' : '否'"></span>
+            </div>
+            <div x-show="upgradeOperationDetail()?.rollback_result !== undefined">
+              <span class="text-gray-500">回退结果：</span><span data-testid="upgrade-rollback-result" x-text="formatUpgradeDetail(upgradeOperationDetail()?.rollback_result)"></span>
+            </div>
+            <div x-show="upgradePolling" class="text-xs text-blue-700">正在跟踪 Manager 中的安装事务；关闭或刷新页面不会取消安装。</div>
+            <div x-show="upgradeError" data-testid="upgrade-error" class="text-xs text-red-700" x-text="upgradeError"></div>
           </div>
         </div>
       </div>
@@ -1663,6 +1744,15 @@ function app() {
     releaseLoading: false,
     releaseChecking: false,
     releaseDownloading: false,
+    upgradePreview: null,
+    upgradeStatus: null,
+    upgradeError: '',
+    upgradePreviewLoading: false,
+    upgradeConfirming: false,
+    upgradeRisksConfirmed: false,
+    upgradeStatusLoading: false,
+    upgradePolling: false,
+    upgradePollGeneration: 0,
 
     // ── Tab: Archives ──
     archives: [],
@@ -1957,7 +2047,10 @@ function app() {
         case 'data': this.loadTables(); break;
         case 'config': this.loadConfig(); break;
         case 'persona': this.loadPersonaConfig(); break;
-        case 'updates': this.loadReleaseStatus(); break;
+        case 'updates':
+          this.loadReleaseStatus();
+          this.loadUpgradeStatus(true);
+          break;
         case 'archives': this.loadArchives(); break;
         case 'monitor': this.loadMonitor(); break;
         case 'audit': this.loadAudit(); break;
@@ -2627,6 +2720,186 @@ function app() {
         this.releaseError = err.message || '下载更新失败';
       } finally {
         this.releaseDownloading = false;
+      }
+    },
+
+    upgradeCanInstall() {
+      return this.releaseState?.download?.status === 'verified'
+        && this.releaseState?.download?.installable === true
+        && this.releaseState?.install_supported !== false
+        && this.releaseState?.available?.compatible !== false;
+    },
+
+    upgradePreviewVersion() {
+      return this.upgradePreview?.version
+        || this.upgradePreview?.target_version
+        || this.releaseState?.available?.version
+        || '';
+    },
+
+    upgradePreviewToken() {
+      return this.upgradePreview?.confirmation_token || '';
+    },
+
+    upgradeOperation() {
+      if (!this.upgradeStatus) return null;
+      if (
+        Object.prototype.hasOwnProperty.call(this.upgradeStatus, 'active_operation')
+        || Object.prototype.hasOwnProperty.call(this.upgradeStatus, 'last_operation')
+      ) {
+        return this.upgradeStatus.active_operation || this.upgradeStatus.last_operation;
+      }
+      if (Object.prototype.hasOwnProperty.call(this.upgradeStatus, 'operation')) {
+        return this.upgradeStatus.operation;
+      }
+      if (Object.prototype.hasOwnProperty.call(this.upgradeStatus, 'upgrade')) {
+        return this.upgradeStatus.upgrade;
+      }
+      return this.upgradeStatus;
+    },
+
+    upgradeOperationDetail() {
+      const operation = this.upgradeOperation();
+      return operation?.detail && typeof operation.detail === 'object'
+        ? operation.detail
+        : operation;
+    },
+
+    upgradeFailure() {
+      const operation = this.upgradeOperation();
+      const detail = this.upgradeOperationDetail();
+      return detail?.failure
+        || detail?.error
+        || operation?.failure
+        || operation?.error
+        || operation?.message
+        || null;
+    },
+
+    upgradeIsRunning() {
+      return ['queued', 'pending', 'running', 'in_progress'].includes(
+        this.upgradeOperation()?.status,
+      );
+    },
+
+    formatUpgradeProgress(progress) {
+      if (progress === null || progress === undefined || progress === '') return '-';
+      if (typeof progress === 'number') {
+        const percent = progress >= 0 && progress <= 1 ? progress * 100 : progress;
+        return `${Math.round(percent)}%`;
+      }
+      if (typeof progress === 'object') {
+        if (progress.message) return progress.message;
+        if (Number.isFinite(progress.current) && Number.isFinite(progress.total) && progress.total > 0) {
+          return `${Math.round(progress.current / progress.total * 100)}%`;
+        }
+      }
+      return String(progress);
+    },
+
+    formatUpgradeDetail(detail) {
+      if (detail === null || detail === undefined || detail === '') return '-';
+      if (typeof detail === 'string') return detail;
+      if (typeof detail === 'object') {
+        return detail.message || detail.error || JSON.stringify(detail);
+      }
+      return String(detail);
+    },
+
+    async previewUpgrade() {
+      if (!this.upgradeCanInstall()) return;
+      this.upgradePreviewLoading = true;
+      this.upgradeError = '';
+      this.upgradeRisksConfirmed = false;
+      try {
+        const payload = await this.api('/api/upgrades/preview');
+        const preview = payload?.preview || payload;
+        if (!preview?.confirmation_token) {
+          throw new Error('Manager 未返回有效的安装确认令牌');
+        }
+        this.upgradePreview = preview;
+      } catch (err) {
+        this.upgradePreview = null;
+        this.upgradeError = err.message || '生成安装预览失败';
+      } finally {
+        this.upgradePreviewLoading = false;
+      }
+    },
+
+    cancelUpgradePreview() {
+      this.upgradePreview = null;
+      this.upgradeRisksConfirmed = false;
+    },
+
+    async confirmUpgrade() {
+      const version = this.upgradePreviewVersion();
+      const confirmationToken = this.upgradePreviewToken();
+      if (!this.upgradeRisksConfirmed || !version || !confirmationToken) return;
+      this.upgradeConfirming = true;
+      this.upgradeError = '';
+      try {
+        const submitted = await this.api('/api/upgrades/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            version,
+            confirmation_token: confirmationToken,
+          }),
+        });
+        this.upgradeStatus = submitted?.operation
+          ? { active_operation: submitted.operation, last_operation: null }
+          : submitted;
+        this.upgradePreview = null;
+        this.upgradeRisksConfirmed = false;
+        this.pollUpgradeStatus();
+      } catch (err) {
+        this.upgradeError = err.message || '确认安装失败';
+      } finally {
+        this.upgradeConfirming = false;
+      }
+    },
+
+    async loadUpgradeStatus(silent = false) {
+      if (!silent) this.upgradeStatusLoading = true;
+      try {
+        const status = await this.api('/api/upgrades/status');
+        this.upgradeStatus = status;
+        if (this.upgradeIsRunning() && !this.upgradePolling) {
+          this.pollUpgradeStatus();
+        }
+      } catch (err) {
+        if (!silent) this.upgradeError = err.message || '读取安装状态失败';
+      } finally {
+        if (!silent) this.upgradeStatusLoading = false;
+      }
+    },
+
+    async refreshUpgradeStatus() {
+      this.upgradeError = '';
+      await this.loadUpgradeStatus();
+    },
+
+    async pollUpgradeStatus() {
+      if (this.upgradePolling) return;
+      const generation = ++this.upgradePollGeneration;
+      this.upgradePolling = true;
+      try {
+        for (let attempt = 0; attempt < 1800; attempt += 1) {
+          if (generation !== this.upgradePollGeneration) return;
+          try {
+            this.upgradeStatus = await this.api('/api/upgrades/status');
+            this.upgradeError = '';
+            if (!this.upgradeIsRunning()) return;
+          } catch (err) {
+            this.upgradeError = `与 Dashboard 的连接暂时中断，安装仍在 Manager 后台继续；正在重连：${err.message || '未知错误'}`;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        this.upgradeError = '安装仍在 Manager 后台继续；自动轮询已暂停，请使用“刷新状态”继续查看。';
+      } finally {
+        if (generation === this.upgradePollGeneration) {
+          this.upgradePolling = false;
+        }
       }
     },
 

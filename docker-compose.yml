@@ -146,6 +146,8 @@ services:
       - ./data:/app/data:rw
       - ./content:/app/content:rw
       - ./manager:/app/manager:rw
+      # 自动升级只读比较当前 Compose 拓扑；Manager 不会修改此文件。
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
       # 仅 Manager 接触 Docker Socket；Dashboard 不挂载。
       - /var/run/docker.sock:/var/run/docker.sock
 

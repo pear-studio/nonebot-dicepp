@@ -31,6 +31,7 @@ RELEASE_CONTRACT_VERSION = 1
 RELEASE_MANIFEST_NAME = "dicepp-release.json"
 DEFAULT_GITHUB_API = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
 MAX_RELEASE_JSON_BYTES = 2 * 1024 * 1024
+MAX_LINUX_BUNDLE_BYTES = 16 * 1024**3
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
 _CONTENT_RANGE_RE = re.compile(r"^bytes ([0-9]+)-([0-9]+)/([0-9]+)$")
@@ -211,6 +212,10 @@ def validate_release_manifest(payload: Any) -> dict[str, Any]:
         or not all(type(item) is str and bool(item.strip()) for item in payload["change_scope"])
     ):
         raise ReleaseContractError("change_scope must be a non-empty string list")
+    if payload["automatic_upgrade"] and "manager" in payload["change_scope"]:
+        raise ReleaseContractError(
+            "automatic_upgrade cannot be enabled when change_scope includes manager"
+        )
     artifacts = payload["artifacts"]
     if not isinstance(artifacts, list) or not artifacts:
         raise ReleaseContractError("Release manifest has no artifacts")
@@ -256,6 +261,14 @@ def _validate_artifact(
         raise ReleaseContractError("Invalid artifact purpose")
     if type(artifact["size"]) is not int or artifact["size"] <= 0:
         raise ReleaseContractError("Invalid artifact size")
+    if (
+        artifact["platform"] == "linux"
+        and artifact["purpose"] == "linux-bundle"
+        and artifact["size"] > MAX_LINUX_BUNDLE_BYTES
+    ):
+        raise ReleaseContractError(
+            "Linux bundle exceeds the automatic-upgrade size limit"
+        )
     digest = artifact["sha256"]
     if type(digest) is not str or not _SHA256_RE.fullmatch(digest):
         raise ReleaseContractError("Invalid artifact SHA-256")
@@ -320,6 +333,7 @@ class ReleaseManager:
         target: tuple[str, str] | None = None,
         now: Callable[[], datetime] | None = None,
         scheduler_error_delay: float = 60.0,
+        protected_versions_loader: Callable[[], set[str]] | None = None,
     ) -> None:
         self.layout = layout
         self.settings_loader = settings_loader or (
@@ -331,6 +345,7 @@ class ReleaseManager:
         self.target = target or current_target()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.scheduler_error_delay = scheduler_error_delay
+        self.protected_versions_loader = protected_versions_loader or set
         self._lock = threading.RLock()
         self._latest: dict[str, Any] | None = None
         self._latest_channel: str | None = None
@@ -494,9 +509,10 @@ class ReleaseManager:
                     "Release is not compatible with this Manager"
                 )
             artifacts = release["artifacts"]
+            selected_artifacts: list[dict[str, Any]]
             if purpose is None:
                 preferred = (
-                    "linux-bundle" if self.target[0] == "linux" else "portable"
+                    "linux-bundle" if self.target[0] == "linux" else "velopack-full"
                 )
                 artifact = next(
                     (item for item in artifacts if item["purpose"] == preferred),
@@ -511,6 +527,19 @@ class ReleaseManager:
                     raise ReleaseDownloadError(
                         f"No {purpose!r} artifact for current target"
                     )
+            if self.target[0] == "windows" and artifact["purpose"] == "velopack-full":
+                companion_purposes = {"velopack-releases", "velopack-assets"}
+                companions = [
+                    item for item in artifacts if item["purpose"] in companion_purposes
+                ]
+                if {item["purpose"] for item in companions} != companion_purposes:
+                    raise ReleaseDownloadError(
+                        "Velopack update feed assets are incomplete"
+                    )
+                selected_artifacts = [artifact, *companions]
+            else:
+                selected_artifacts = [artifact]
+            total_size = sum(item["size"] for item in selected_artifacts)
             with self._lock:
                 self._require_operation_locked(operation, "download")
                 self._download = {
@@ -518,19 +547,24 @@ class ReleaseManager:
                     "version": release["version"],
                     "filename": artifact["filename"],
                     "bytes_downloaded": 0,
-                    "size": artifact["size"],
+                    "size": total_size,
                 }
                 self._persist_state_locked()
-            target = self._download_artifact(
-                release["version"],
-                artifact,
-                operation=operation,
-            )
+            downloaded: list[tuple[dict[str, Any], Path]] = []
+            for selected in selected_artifacts:
+                target_path = self._download_artifact(
+                    release["version"],
+                    selected,
+                    operation=operation,
+                )
+                downloaded.append((selected, target_path))
+            target = downloaded[0][1]
             completed_at = _iso(self.now())
             metadata = self._write_verified_metadata(
                 release,
                 artifact,
                 target,
+                companions=downloaded[1:],
                 completed_at=completed_at,
             )
             self._prune(
@@ -560,7 +594,7 @@ class ReleaseManager:
             self._download = {
                 **self._download,
                 "status": "verified",
-                "bytes_downloaded": artifact["size"],
+                "bytes_downloaded": total_size,
                 "path": str(target),
                 "sha256": artifact["sha256"],
                 "completed_at": completed_at,
@@ -1032,6 +1066,7 @@ class ReleaseManager:
         artifact: dict[str, Any],
         target: Path,
         *,
+        companions: list[tuple[dict[str, Any], Path]] | None = None,
         completed_at: str,
     ) -> Path:
         destination = target.parent / "verified-release.json"
@@ -1066,6 +1101,23 @@ class ReleaseManager:
                     )
                 },
                 "verified_path": target.name,
+                "companions": [
+                    {
+                        "artifact": {
+                            key: companion[key]
+                            for key in (
+                                "platform",
+                                "arch",
+                                "filename",
+                                "purpose",
+                                "size",
+                                "sha256",
+                            )
+                        },
+                        "verified_path": companion_path.name,
+                    }
+                    for companion, companion_path in (companions or [])
+                ],
                 "completed_at": completed_at,
             },
             trusted_parent=version_guard,
@@ -1126,10 +1178,39 @@ class ReleaseManager:
                     version_guard,
                     allow_missing=False,
                 )
+                files = [filename, metadata_path.name]
+                companions = metadata.get("companions", [])
+                if not isinstance(companions, list):
+                    continue
+                companion_valid = True
+                for companion in companions:
+                    companion_name = (
+                        companion.get("verified_path")
+                        if isinstance(companion, dict)
+                        else None
+                    )
+                    if (
+                        type(companion_name) is not str
+                        or not _SAFE_FILENAME_RE.fullmatch(companion_name)
+                    ):
+                        companion_valid = False
+                        break
+                    companion_path = trusted / companion_name
+                    if not companion_path.is_file() or companion_path.is_symlink():
+                        companion_valid = False
+                        break
+                    _validate_regular_path(
+                        companion_path,
+                        version_guard,
+                        allow_missing=False,
+                    )
+                    files.append(companion_name)
+                if not companion_valid:
+                    continue
                 result.append(
                     {
                         "version": directory.name,
-                        "files": [filename, metadata_path.name],
+                        "files": files,
                         "completed_at": completed_at,
                     }
                 )
@@ -1191,7 +1272,12 @@ class ReleaseManager:
             if protected_version is not None
             else None
         )
-        keep_versions = {protected} if protected is not None else set()
+        keep_versions = {
+            _safe_version_segment(version)
+            for version in self.protected_versions_loader()
+        }
+        if protected is not None:
+            keep_versions.add(protected)
         for _timestamp, version in entries:
             if len(keep_versions) >= keep:
                 break
@@ -1780,6 +1866,7 @@ def _parse_iso(value: str) -> datetime:
 
 
 __all__ = [
+    "MAX_LINUX_BUNDLE_BYTES",
     "MAX_RELEASE_JSON_BYTES",
     "RELEASE_CONTRACT_VERSION",
     "RELEASE_MANIFEST_NAME",

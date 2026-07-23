@@ -184,11 +184,27 @@ class ManagerOperationStore:
         names: set[str] = set()
         for journal in self.list_recoverable_journals():
             detail = journal.get("detail", {})
-            for key in ("pre_restore_filename", "target_filename", "archive"):
+            for key in (
+                "pre_restore_filename",
+                "pre_upgrade_filename",
+                "target_filename",
+                "archive",
+            ):
                 value = detail.get(key)
                 if isinstance(value, str):
                     names.add(value)
         return names
+
+    def protected_upgrade_versions(self) -> set[str]:
+        """Return package versions still needed by recoverable upgrades."""
+        versions: set[str] = set()
+        for journal in self.list_recoverable_journals():
+            if journal.get("kind") != "upgrade":
+                continue
+            value = journal.get("detail", {}).get("target_version")
+            if isinstance(value, str) and value:
+                versions.add(value)
+        return versions
 
     @staticmethod
     def _journal_row(row: sqlite3.Row) -> dict[str, Any]:

@@ -25,7 +25,11 @@ metadata:
 - `uv.lock` 必须与 `pyproject.toml` 的项目版本同步；tag 指向的 release commit 内不得出现 `pyproject.toml` 为新版本、`uv.lock` 仍记录旧 `dicepp` 版本的状态。
 - Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64.zip`，内含 Linux
   amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用
-  文档，用于国内或离线环境通过 `docker load` 导入镜像。
+  文档，用于国内或离线环境通过 `docker load` 导入镜像；兼容版本的 Manager
+  自动安装也只使用该本地 image archive，不依赖 `docker pull`。
+- Windows onedir 必须包含独立 `DicePP-UpdateGuard.exe`，再由 Velopack 包装
+  Portable、Setup 和更新 full package/feed。UpdateGuard 是更新事务产物，
+  不是用户需要单独下载的 Release asset。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
@@ -79,7 +83,10 @@ metadata:
 - `变更范围`: 逗号分隔的实际变更域；必须显式声明 `data` / `config`，并与
   前两个风险字段完全一致，否则发布会 fail closed。
 - `自动升级`: 当前常驻 Manager 是否能在无需自身升级和人工迁移部署拓扑的
-  前提下自动完成升级；无法确认时必须写 `no`。
+  前提下自动完成升级；Linux Compose 的 service、volume、network 或
+  deployment schema 有变化时必须写 `no`。无法确认时也必须写 `no`。
+- `变更范围` 包含 `manager` 时，`自动升级` 必须为 `no`；外层 Release contract
+  和 Linux 包内 contract 都会拒绝矛盾声明。
 - `最低 Manager 版本`: 能理解本次发布契约和安装事务的最低 Manager 版本。
 - `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
 - `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
@@ -246,7 +253,7 @@ metadata:
    - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)，运行冒烟测试
    - 将 bot/dashboard 镜像与 Linux 部署文档打包为
      `DicePP-vX.Y.Z-linux-amd64.zip`，并在包内生成 `checksums.sha256`
-   - 在 Windows 上构建 DicePP EXE，运行冒烟测试
+   - 在 Windows 上构建 DicePP EXE 与 UpdateGuard，运行可执行文件冒烟测试
    - 生成独立 Windows Portable、Setup 和 Velopack package/feed
    - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
    - 上传 `docker-compose.yml`、`dicepp-release.json`、Windows artifacts 和
@@ -263,9 +270,20 @@ metadata:
      - `DicePP-v{new_version}-win64-Setup.exe`
      - `DicePP-v{new_version}-linux-amd64.zip`
      - `dicepp-release.json`
+   - Windows Portable 解压后包含 `DicePP.exe`、`DicePP-Runtime.exe` 和
+     `DicePP-UpdateGuard.exe`；Setup 安装后的程序目录具备相同三个入口。
    - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
-   - Linux 离线包下载后可解压，包内 `checksums.sha256` 存在且可用于校验内部文件；GitHub Release asset digest 可作为外层 zip 的来源校验参考。
+   - Linux 发布包下载后可解压，包内 `checksums.sha256` 存在且可用于校验内部
+     文件；`dicepp-package.json` 的 Compose 与当前发布拓扑一致，image archive
+     可以 `docker load`，加载后的 immutable Image ID 与 manifest 声明一致，
+     并可用 `docker compose up -d --pull never` 启动。
+     GitHub Release asset digest 可作为外层 zip 的来源校验参考。
+   - 对声明 `自动升级: yes` 的候选，在隔离测试目录执行一次真实 Windows
+     Portable/Setup 首装 → Velopack 升级 → 健康提交，并故障注入验证
+     UpdateGuard 降级；Linux 在临时 Compose project 中验证 bundle load、
+     `--pull never` 切换和旧镜像回退。若当次发布没有完成这些平台烟测，不得把
+     单元测试结果表述为“真实自动升级已验证”，应把未验边界写入发版摘要。
    - 如任一产物缺失, 查看对应 GHA run 日志排查。
 
 10. **切回原分支**

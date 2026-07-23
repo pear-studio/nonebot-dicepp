@@ -730,7 +730,7 @@ async def archives_delete(filename: str, request: Request):
     return _ok(payload)
 
 
-# ── Release discovery/download (Manager proxy; never installs) ──────────────
+# ── Release discovery/download and confirmed upgrade (Manager proxy) ────────
 
 
 @app.get("/api/releases/status", dependencies=[Depends(require_auth)])
@@ -769,6 +769,51 @@ async def releases_download(request: Request):
     except ManagerClientError as exc:
         return _manager_archive_error(exc)
     return JSONResponse(status_code=202, content={"ok": True, **payload})
+
+
+@app.get("/api/upgrades/preview", dependencies=[Depends(require_auth)])
+async def upgrades_preview(request: Request):
+    try:
+        payload = await _get_manager_client(request).upgrade_preview()
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
+
+
+@app.post("/api/upgrades/confirm", dependencies=[Depends(require_auth)])
+async def upgrades_confirm(request: Request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        _err("Upgrade confirmation body must be a JSON object", 400)
+    if not isinstance(body, dict):
+        _err("Upgrade confirmation body must be a JSON object", 400)
+    version = body.get("version")
+    confirmation_token = body.get("confirmation_token")
+    if not isinstance(version, str) or not version.strip():
+        _err("version must be a non-empty string", 400)
+    if not isinstance(confirmation_token, str) or not confirmation_token.strip():
+        _err("confirmation_token must be a non-empty string", 400)
+    try:
+        operation = await _get_manager_client(request).confirm_upgrade(
+            version=version,
+            confirmation_token=confirmation_token,
+        )
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return JSONResponse(
+        status_code=202,
+        content={"ok": True, "operation": operation},
+    )
+
+
+@app.get("/api/upgrades/status", dependencies=[Depends(require_auth)])
+async def upgrades_status(request: Request):
+    try:
+        payload = await _get_manager_client(request).upgrade_status()
+    except ManagerClientError as exc:
+        return _manager_archive_error(exc)
+    return _ok(payload)
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────
 

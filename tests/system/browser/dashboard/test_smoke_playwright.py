@@ -1039,10 +1039,10 @@ def test_monitor_tab_hides_version_operations(dashboard_url: str) -> None:
             browser.close()
 
 
-def test_updates_tab_discovers_and_downloads_without_install_control(
+def test_updates_tab_confirms_verified_install_and_recovers_operation_status(
     dashboard_url: str,
 ) -> None:
-    """Release UI exposes verified download state but no installation action."""
+    """Only a verified installable package reaches the explicit upgrade transaction."""
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
@@ -1051,7 +1051,9 @@ def test_updates_tab_discovers_and_downloads_without_install_control(
             page.evaluate(
                 """() => {
                     const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.api = async (path) => {
+                    window.upgradeConfirmed = false;
+                    window.upgradeStatusAttempts = 0;
+                    state.api = async (path, options = {}) => {
                         if (path === '/api/releases/status' || path === '/api/releases/check') {
                             return {
                                 current_version: '3.0.0',
@@ -1071,8 +1073,60 @@ def test_updates_tab_discovers_and_downloads_without_install_control(
                                         purpose: 'portable',
                                     }],
                                 },
-                                download: {status: 'verified', filename: 'DicePP-v3.1.0-win64-Portable.zip'},
+                                download: {
+                                    status: 'verified',
+                                    installable: false,
+                                    filename: 'DicePP-v3.1.0-win64-Portable.zip',
+                                },
                             };
+                        }
+                        if (path === '/api/upgrades/preview') {
+                            return {
+                                preview: {
+                                    version: '3.1.0',
+                                    confirmation_token: 'one-time-confirmation',
+                                },
+                            };
+                        }
+                        if (path === '/api/upgrades/confirm') {
+                            const body = JSON.parse(options.body);
+                            if (body.version !== '3.1.0' || body.confirmation_token !== 'one-time-confirmation') {
+                                throw new Error('bad confirmation');
+                            }
+                            window.upgradeConfirmed = true;
+                            return {
+                                operation: {
+                                    operation_id: 'upgrade-1',
+                                    status: 'queued',
+                                    detail: {phase: 'preflight', progress: 0},
+                                },
+                            };
+                        }
+                        if (path === '/api/upgrades/status') {
+                            if (window.upgradeConfirmed) {
+                                window.upgradeStatusAttempts += 1;
+                                if (window.upgradeStatusAttempts === 1) {
+                                    throw new Error('simulated disconnect');
+                                }
+                            }
+                            return window.upgradeConfirmed ? {
+                                active_operation: null,
+                                last_operation: {
+                                    operation_id: 'upgrade-1',
+                                    status: 'failed',
+                                    message: 'Upgrade transaction failed',
+                                    detail: {
+                                        phase: 'rollback',
+                                        progress: 75,
+                                        error: 'migration failed',
+                                        failure_code: 'upgrade_failed',
+                                        rollback_status: 'succeeded',
+                                        rolled_back: true,
+                                        rollback_result: {message: '旧程序与数据已恢复'},
+                                    },
+                                },
+                                journal: {status: 'rolled_back'},
+                            } : {active_operation: null, last_operation: null, journal: null};
                         }
                         throw new Error(`unexpected API: ${path}`);
                     };
@@ -1093,8 +1147,51 @@ def test_updates_tab_discovers_and_downloads_without_install_control(
             expect(page.locator('[data-testid="release-download-status"]')).to_contain_text(
                 "尚未安装"
             )
-            expect(page.get_by_role("button", name="安装")).to_have_count(0)
-            expect(page.get_by_role("button", name="回滚")).to_have_count(0)
+            expect(page.locator('[data-testid="upgrade-preview-button"]')).not_to_be_visible()
+
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.releaseState.download.installable = true;
+                }"""
+            )
+            page.locator('[data-testid="upgrade-preview-button"]').click()
+            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
+                "升级期间 Bot 与 Dashboard 会停机"
+            )
+            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
+                "常规 pre-upgrade 归档"
+            )
+            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
+                "自动完整回退程序和数据"
+            )
+            expect(page.locator('[data-testid="upgrade-confirm-button"]')).to_be_disabled()
+            page.locator('[data-testid="upgrade-risk-confirm"]').check()
+            page.locator('[data-testid="upgrade-confirm-button"]').click()
+
+            expect(page.locator('[data-testid="upgrade-operation-state"]')).to_have_text(
+                "failed"
+            )
+            expect(page.locator('[data-testid="upgrade-phase"]')).to_have_text("rollback")
+            expect(page.locator('[data-testid="upgrade-progress"]')).to_have_text("75%")
+            expect(page.locator('[data-testid="upgrade-failure"]')).to_have_text(
+                "migration failed"
+            )
+            expect(page.locator('[data-testid="upgrade-rolled-back"]')).to_have_text("是")
+            expect(page.locator('[data-testid="upgrade-rollback-result"]')).to_have_text(
+                "旧程序与数据已恢复"
+            )
+
+            page.evaluate(
+                """async () => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.upgradeStatus = null;
+                    await state.loadUpgradeStatus(true);
+                }"""
+            )
+            expect(page.locator('[data-testid="upgrade-operation-state"]')).to_have_text(
+                "failed"
+            )
         finally:
             browser.close()
 

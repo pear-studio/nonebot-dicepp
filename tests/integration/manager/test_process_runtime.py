@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import subprocess
@@ -104,6 +105,120 @@ async def test_process_runtime_kills_after_stop_timeout(tmp_path: Path) -> None:
     assert process.killed is True
     assert result.message == "Process killed after stop timeout"
     assert result.detail["returncode"] == -9
+
+
+@pytest.mark.asyncio
+async def test_process_runtime_adopts_and_stops_only_persisted_exact_identity(
+    tmp_path: Path,
+) -> None:
+    identity_path = tmp_path / "manager" / "state" / "runtime-process.json"
+    identity_path.parent.mkdir(parents=True)
+    identity = {
+        "pid": 4242,
+        "started_at": "exact-start-time",
+        "executable": str((tmp_path / "DicePP-Runtime.exe").resolve()),
+    }
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+    adapter = ProcessRuntimeAdapter(
+        runtime_unit_id="dicepp-runtime",
+        command=_command([sys.executable, "-V"]),
+        stop_timeout=0.1,
+        log_path=tmp_path / "runtime.log",
+        identity_path=identity_path,
+    )
+    class Handle:
+        def __init__(self):
+            self.identity = identity
+            self.terminated = False
+            self.closed = False
+
+        def terminate(self, timeout):
+            assert timeout == 0.1
+            self.terminated = True
+            return True
+
+        def close(self):
+            self.closed = True
+
+    handle = Handle()
+    adapter._inspect_identity = lambda pid: identity
+    adapter._identity_handle_opener = lambda actual: (
+        handle if actual == identity else None
+    )
+
+    status = (await adapter.status(["dicepp-runtime"]))["dicepp-runtime"]
+    stopped = await adapter.operate("dicepp-runtime", "stop")
+
+    assert status.detail == {**identity, "adopted": True}
+    assert stopped.detail == {"pid": 4242, "adopted": True}
+    assert handle.terminated is True
+    assert handle.closed is True
+    assert not identity_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_process_runtime_refuses_pid_reuse_between_status_and_stop(
+    tmp_path: Path,
+) -> None:
+    identity_path = tmp_path / "manager" / "state" / "runtime-process.json"
+    identity_path.parent.mkdir(parents=True)
+    identity = {
+        "pid": 4242,
+        "started_at": "old-start",
+        "executable": str((tmp_path / "DicePP-Runtime.exe").resolve()),
+    }
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+    adapter = ProcessRuntimeAdapter(
+        runtime_unit_id="dicepp-runtime",
+        command=_command([sys.executable, "-V"]),
+        stop_timeout=0.1,
+        log_path=tmp_path / "runtime.log",
+        identity_path=identity_path,
+        identity_handle_opener=lambda _identity: None,
+    )
+    adapter._inspect_identity = lambda _pid: identity
+
+    result = await adapter.operate("dicepp-runtime", "stop")
+
+    assert result.runtime_state == "stopped"
+    assert "identity changed" in result.message
+    assert not identity_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_process_runtime_preserves_identity_when_handle_termination_fails(
+    tmp_path: Path,
+) -> None:
+    identity_path = tmp_path / "manager" / "state" / "runtime-process.json"
+    identity_path.parent.mkdir(parents=True)
+    identity = {
+        "pid": 4242,
+        "started_at": "exact-start",
+        "executable": str((tmp_path / "DicePP-Runtime.exe").resolve()),
+    }
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+    class Handle:
+        def terminate(self, _timeout):
+            return False
+
+        def close(self):
+            return None
+
+    adapter = ProcessRuntimeAdapter(
+        runtime_unit_id="dicepp-runtime",
+        command=_command([sys.executable, "-V"]),
+        stop_timeout=0.1,
+        log_path=tmp_path / "runtime.log",
+        identity_path=identity_path,
+        identity_handle_opener=lambda _identity: Handle(),
+    )
+    adapter._inspect_identity = lambda _pid: identity
+
+    with pytest.raises(RuntimeError, match="did not exit"):
+        await adapter.operate("dicepp-runtime", "stop")
+
+    assert json.loads(identity_path.read_text(encoding="utf-8")) == identity
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows creation flags contract")

@@ -88,6 +88,8 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一文件。不要把 `4091` 映射到公网。启动时 Dashboard 先通过独立的 `/api/health` 完成数据库语义检查，随后 Manager 才启动并执行未完成事务恢复。该端点同时报告最新 Bot 控制心跳；没有心跳只表示 Bot 尚未运行，不会让 Dashboard 自身 readiness 失败，Manager 会在启动 RuntimeUnit 后单独判断心跳。
 
 只有 Manager 挂载 `/var/run/docker.sock`。它仅执行固定的状态、启动、停止、重启和日志操作，并且只接受带有匹配 DicePP managed、RuntimeUnit 和 deployment schema 标签的 Bot 容器。Dashboard 不挂载 Docker Socket，也不直接控制容器。
+Manager 还会把当前 `docker-compose.yml` 只读挂载到实例根，用于自动升级前比较
+service、volume 和 network 拓扑；它不会修改或替换该文件。
 
 目录所有权如下：
 
@@ -226,10 +228,13 @@ sudo apt-get update
 sudo apt-get install -y unzip zstd
 ```
 
-解压发布包：
+创建目标目录并解压发布包。ZIP 的机器契约位于归档根；显式使用 `-d` 可以避免
+把文件散落到当前部署目录：
 
 ```bash
-unzip -o "DicePP-${VERSION}-linux-amd64.zip"
+PACKAGE_DIR="DicePP-${VERSION}-linux-amd64"
+mkdir -p "${PACKAGE_DIR}"
+unzip -o "DicePP-${VERSION}-linux-amd64.zip" -d "${PACKAGE_DIR}"
 ```
 
 解压后会得到一个目录：
@@ -252,7 +257,8 @@ docs/persona.md
 docs/persona-character-card.md
 ```
 
-`dicepp-package.json` 是包内安装契约，记录 Compose、镜像压缩包和镜像引用的
+`dicepp-package.json` 是包内安装契约，记录 Compose、镜像压缩包、镜像引用及
+对应 immutable Image ID 的
 版本、兼容性、size 与 SHA-256；`checksums.sha256` 则覆盖包内所有分发文件。
 Release 页面上的 `dicepp-release.json` 是外层契约，校验整个 zip。两层契约
 各自负责一层，避免 zip 需要记录自身摘要。
@@ -523,6 +529,41 @@ docker compose restart
 docker compose logs -f
 ```
 
+### 通过 Dashboard 更新
+
+标准三服务部署可以在 Dashboard 的“版本更新”页检查、下载并安装兼容 Release。
+自动发现默认开启，自动下载默认关闭；安装始终需要用户确认。Manager 会先创建
+并验证常规 pre-upgrade 归档，再从已下载并校验的
+`DicePP-vX.Y.Z-linux-amd64.zip` 中解压镜像归档并执行本地 `docker load`。
+这条安装路径不会执行 `docker pull`，升级时无法访问 GHCR 也不受影响。
+
+Manager 只会重建当前标准 Compose 中已有的 Bot 和 Dashboard，Manager 容器
+本身保持运行并负责健康检查。程序切换、migration、容器启动或本地硬性健康检查
+失败时，它会重新切回旧镜像并恢复 pre-upgrade 数据。NapCat、LLOneBot、QQ、
+GitHub 或第三方 API 暂时不可用只显示警告，不会误触发程序回退。
+
+自动安装不会替换 `docker-compose.yml`。以下任一情况会在停止容器前拒绝安装：
+
+- Release 要求升级 Manager；
+- Release 的 deployment schema 与当前标准部署不兼容；
+- Release 附带的 Compose 改变 service、volume 或 network；
+- bundle 的 manifest、内部摘要、目标镜像或旧镜像保留校验失败。
+
+其中 Compose 兼容检查会比较完整嵌套配置；除了 Bot/Dashboard 的 `image`、
+`build` 和顶层 Compose `version`，mount source/type/mode、依赖、network
+driver/external/IPAM 等差异都会要求手工迁移。加载后的镜像 ID 也必须和发布包
+声明一致；Docker inspect 无法证明 Compose 显式覆盖来源，因此旧/新 image defaults
+只要变化就拒绝自动升级。容器存在无法安全保留的非默认 HostConfig 时同样拒绝。
+
+遇到这种提示时，按照目标 Release 说明手工同步完整三服务 Compose，再重新启动。
+不要只更新 Bot/Dashboard，也不要移除 Manager。自动安装和详细回退边界见
+[updates.md](./updates.md)。
+
+### 手工更新
+
+下面的命令保留给首次部署、需要手工迁移 Compose 拓扑，或 Dashboard 明确提示
+当前 Release 不可自动安装的情况。
+
 更新到最新镜像：
 
 ```bash
@@ -565,7 +606,9 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 
 如果旧版本镜像已经被清理，先重新下载并 `docker load` 旧版本发布包，再执行上面的回滚命令。
 
-如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
+如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的完整三服务
+`docker-compose.yml`，再执行 `pull` 和 `up -d`。这类变更不会由 Manager 自动
+安装。
 
 更新或回滚前，建议先在网页管理面板中创建并验证存档。版本风险说明见 [releases/](./releases/)。
 

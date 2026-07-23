@@ -174,10 +174,11 @@ jobs:
           echo "version=${VELOPACK_VERSION}" >> $GITHUB_OUTPUT
           echo "channel=${VELOPACK_CHANNEL}" >> $GITHUB_OUTPUT
 
-      - name: Build Bot and Dashboard with PyInstaller
+      - name: Build Windows executables with PyInstaller
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
           uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
+          uv run pyinstaller scripts/build/update_guard.spec --clean --noconfirm
 
       - name: Assemble Windows directory
         shell: pwsh
@@ -237,6 +238,7 @@ jobs:
             throw "Dashboard version mismatch: expected '$dashboardExpected', got '$dashboardActual'"
           }
           Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
+          Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" @("--smoke-check") | Out-Null
 
       - name: Package artifact
         shell: pwsh
@@ -316,14 +318,18 @@ jobs:
           sudo apt-get install -y --no-install-recommends zip zstd
 
           TAG="${{ steps.version.outputs.tag }}"
+          BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
+          DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+          BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${BOT_IMAGE}")"
+          DASHBOARD_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${DASHBOARD_IMAGE}")"
           ARCHIVE="DicePP-${TAG}-linux-amd64-images.tar"
           COMPRESSED="${ARCHIVE}.zst"
           PACKAGE_DIR="DicePP-${TAG}-linux-amd64"
           PACKAGE_ZIP="${PACKAGE_DIR}.zip"
 
           docker save \
-            ghcr.io/pear-studio/nonebot-dicepp:${TAG} \
-            ghcr.io/pear-studio/dicepp-dashboard:${TAG} \
+            "${BOT_IMAGE}" \
+            "${DASHBOARD_IMAGE}" \
             -o "${ARCHIVE}"
           zstd -19 -T0 --rm "${ARCHIVE}" -o "${COMPRESSED}"
           zstd -t "${COMPRESSED}"
@@ -357,8 +363,10 @@ jobs:
             --package-root "${PACKAGE_DIR}" \
             --compose "${PACKAGE_DIR}/docker-compose.yml" \
             --image-archive "${PACKAGE_DIR}/images/${COMPRESSED}" \
-            --image "ghcr.io/pear-studio/nonebot-dicepp:${TAG}" \
-            --image "ghcr.io/pear-studio/dicepp-dashboard:${TAG}" \
+            --image "${BOT_IMAGE}" \
+            --image "${DASHBOARD_IMAGE}" \
+            --image-id "${BOT_IMAGE_ID}" \
+            --image-id "${DASHBOARD_IMAGE_ID}" \
             --release-notes "docs/releases/${TAG}.md" \
             --output "${PACKAGE_DIR}/dicepp-package.json"
 
@@ -376,7 +384,10 @@ jobs:
               > checksums.sha256
           )
 
-          zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"
+          (
+            cd "${PACKAGE_DIR}"
+            zip -r "../${PACKAGE_ZIP}" .
+          )
 
       - name: Generate release machine contract
         run: |

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import json
 import os
 import shlex
 import subprocess
 import threading
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO, Callable
 
 from .models import ManagerAction, RuntimeLogs, RuntimeUnitStatus
 from .runtime_log import append_runtime_log_line, runtime_log_path
@@ -24,6 +25,8 @@ class ProcessRuntimeAdapter:
         cwd: str | os.PathLike[str] | None = None,
         stop_timeout: float = 2.0,
         log_path: str | os.PathLike[str] | None = None,
+        identity_path: str | os.PathLike[str] | None = None,
+        identity_handle_opener: Callable[[dict], Any | None] | None = None,
     ) -> None:
         if not command.strip():
             raise ValueError("Process runtime command must not be empty")
@@ -34,6 +37,8 @@ class ProcessRuntimeAdapter:
         self._cwd = Path(cwd or Path.cwd())
         self._stop_timeout = stop_timeout
         self._log_path = Path(log_path) if log_path else runtime_log_path()
+        self._identity_path = Path(identity_path) if identity_path else None
+        self._identity_handle_opener = identity_handle_opener
         self._process: subprocess.Popen | None = None
         self._log_handle: BinaryIO | None = None
         self._lock = threading.RLock()
@@ -50,6 +55,21 @@ class ProcessRuntimeAdapter:
         with self._lock:
             process = self._process
             if process is None:
+                identity = self._persisted_identity()
+                if identity is not None and self._identity_is_live(identity):
+                    return RuntimeUnitStatus(
+                        runtime_unit_id,
+                        "running",
+                        "healthy",
+                        "Known process is running",
+                        {
+                            "pid": identity["pid"],
+                            "started_at": identity["started_at"],
+                            "executable": identity["executable"],
+                            "adopted": True,
+                        },
+                    )
+                self._remove_identity()
                 return RuntimeUnitStatus(runtime_unit_id, "stopped", "stopped", "Process is not running")
             returncode = process.poll()
             if returncode is None:
@@ -103,6 +123,14 @@ class ProcessRuntimeAdapter:
                 raise
             self._process = process
             self._log_handle = handle
+            if self._identity_path is not None:
+                identity = self._inspect_identity(process.pid)
+                if identity is None:
+                    process.terminate()
+                    process.wait(timeout=self._stop_timeout)
+                    self._cleanup()
+                    raise RuntimeError("Started process identity could not be persisted")
+                self._write_identity(identity)
             return RuntimeUnitStatus(
                 runtime_unit_id,
                 "running",
@@ -112,12 +140,48 @@ class ProcessRuntimeAdapter:
             )
 
     async def _stop(self, runtime_unit_id: str) -> RuntimeUnitStatus:
+        adopted_handle = None
         with self._lock:
             process = self._process
-            if process is None or process.poll() is not None:
+            identity = self._persisted_identity()
+            if process is None and identity is not None and self._identity_is_live(identity):
+                adopted_handle = self._open_identity_handle(identity)
+                if adopted_handle is None:
+                    self._cleanup()
+                    return RuntimeUnitStatus(
+                        runtime_unit_id,
+                        "stopped",
+                        "stopped",
+                        "Known process identity changed before stop",
+                    )
+            elif process is None or process.poll() is not None:
                 self._cleanup()
                 return RuntimeUnitStatus(runtime_unit_id, "stopped", "stopped", "Process is not running")
-            process.terminate()
+            if process is not None:
+                process.terminate()
+        if process is None:
+            stopped = False
+            try:
+                stopped = await asyncio.to_thread(
+                    adopted_handle.terminate, self._stop_timeout
+                )
+                if not stopped:
+                    raise RuntimeError(
+                        "Known process did not exit after termination"
+                    )
+            finally:
+                adopted_handle.close()
+                if stopped:
+                    with self._lock:
+                        self._cleanup()
+            append_runtime_log_line(f"runtime | stopped {runtime_unit_id}", path=self._log_path)
+            return RuntimeUnitStatus(
+                runtime_unit_id,
+                "stopped",
+                "stopped",
+                "Known process stopped",
+                {"pid": identity["pid"], "adopted": True},
+            )
         try:
             await asyncio.to_thread(process.wait, timeout=self._stop_timeout)
             message = "Process stopped"
@@ -157,6 +221,55 @@ class ProcessRuntimeAdapter:
         if self._log_handle is not None:
             self._log_handle.close()
             self._log_handle = None
+        self._remove_identity()
+
+    def _persisted_identity(self) -> dict | None:
+        if self._identity_path is None or not self._identity_path.is_file():
+            return None
+        try:
+            value = json.loads(self._identity_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if (
+            not isinstance(value, dict)
+            or type(value.get("pid")) is not int
+            or value["pid"] <= 0
+            or not isinstance(value.get("started_at"), str)
+            or not isinstance(value.get("executable"), str)
+            or not Path(value["executable"]).is_absolute()
+        ):
+            return None
+        return {
+            "pid": value["pid"],
+            "started_at": value["started_at"],
+            "executable": value["executable"],
+        }
+
+    def _inspect_identity(self, pid: int) -> dict | None:
+        from .update_guard import inspect_process_identity
+
+        return inspect_process_identity(pid)
+
+    def _identity_is_live(self, identity: dict) -> bool:
+        return self._inspect_identity(identity["pid"]) == identity
+
+    def _open_identity_handle(self, identity: dict):
+        if self._identity_handle_opener is not None:
+            return self._identity_handle_opener(identity)
+        from .update_guard import open_process_identity_handle
+
+        return open_process_identity_handle(identity)
+
+    def _write_identity(self, identity: dict) -> None:
+        if self._identity_path is None:
+            return
+        from .upgrade import _atomic_json
+
+        _atomic_json(self._identity_path, identity)
+
+    def _remove_identity(self) -> None:
+        if self._identity_path is not None:
+            self._identity_path.unlink(missing_ok=True)
 
 
 def _split_command(command: str) -> list[str]:
