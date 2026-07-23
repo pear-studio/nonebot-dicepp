@@ -12,23 +12,6 @@
 
 ---
 
-## architecture
-
-### [B-260722-587045] 统一 DicePP 为完整包命名空间
-- 创建: 2026-07-22
-- 优先级: P1
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-  - DicePP 生产源码内部目前主要使用 core/module/utils 等裸导入，但插件入口、Dashboard、Shell 与部分测试仍使用 plugins.DicePP.*。
-  - 同一进程同时加载两种路径时，同一源码会形成不同 module 对象，导致 singleton、ContextVar、dataclass 类型身份和 monkeypatch 不一致。
-  - 2026-07-22 测试架构审查已复现失效 patch 与 ConversationScope 双类型；当前仅先统一测试侧裸导入并限制包路径使用范围。
-- 开发备忘:
-  - 独立评估将生产源码、入口与跨包调用统一迁移为 plugins.DicePP.*，或采用一致的包内相对导入；实施前重新验证方案，不受本条建议约束。
-  - 覆盖 NoneBot 插件加载、bot.py、Dashboard、dicepp-shell、PyInstaller hidden imports、Docker/Windows 包和 smoke test。
-  - 清理不再需要的 sys.path 注入与兼容别名，并增加同一源码不会以两个模块名加载的回归验证。
-  - 风险点：循环导入、NoneBot 插件发现、PyInstaller 收集和现有跨进程入口，需在独立 feature branch 分阶段验证。
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
@@ -64,16 +47,6 @@
     - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
-
-## release
-
-### [B-260617-1cc4a4] 改进 PyInstaller 打包结构以减少 hiddenimports 补丁
-- 创建: 2026-06-17
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现: Windows rc1 包可生成并通过 --smoke-check，但普通启动时 NoneBot 加载 DicePP 插件失败：ModuleNotFoundError: No module named 'cryptography.fernet'。现场包内只有 cryptography/hazmat/bindings/_rust.pyd 和 dist-info，缺少 cryptography/fernet.py；原因是插件源码主要作为 datas 复制，PyInstaller 没有完整分析 DicePP 插件 import 链。短期可用 collect_submodules('cryptography') 修复，但类似动态依赖仍可能再次漏包。
-- 开发备忘: 长期方向：重新梳理 Windows 打包结构，让 DicePP 插件代码尽量作为 PyInstaller 可静态分析的 Python 模块进入 Analysis，而不是主要依赖 datas 复制源码和手写 hiddenimports。需先验证 adapter/module/utils 等当前顶层导入路径是否能迁移或兼容；影响面包括 scripts/build/dicepp.spec、bot.py 的 frozen 路径、插件导入方式、release smoke test。风险点是改动可能影响开发环境插件加载和现有 NoneBot load_plugin 行为，适合在 RC 后续单独处理。
 
 ## statistics
 
