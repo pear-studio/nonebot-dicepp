@@ -27,9 +27,11 @@ if _IS_FROZEN:
     if _plugin_root not in sys.path:
         sys.path.insert(0, _plugin_root)
 else:
-    # 开发环境：保持原有行为
+    # 源码环境：暴露仓库根目录、共享源码和 DicePP 插件源码
     dir_path = os.path.abspath(os.path.dirname(__file__))
     sys.path.insert(0, dir_path)
+    _src_root = os.path.join(dir_path, "src")
+    sys.path.insert(0, _src_root)
     _plugin_root = os.path.join(dir_path, "src", "plugins", "DicePP")
     sys.path.insert(0, _plugin_root)
 
