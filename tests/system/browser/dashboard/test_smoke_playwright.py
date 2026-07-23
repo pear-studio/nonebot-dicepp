@@ -576,14 +576,13 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                         "ok": True,
                         "health": {
                             "status": "ok",
-                            "runtime_backend": "ProcessRuntimeBackend",
+                            "runtime_adapter": "ProcessRuntimeAdapter",
                         },
-                        "bots": [
+                        "runtime_units": [
                             {
-                                "bot_id": "ui_bot",
-                                "version": "7.8.9",
-                                "online": True,
-                                "last_heartbeat_ts": 1782921600,
+                                "runtime_unit_id": "dicepp-runtime",
+                                "bot_ids": ["ui_bot"],
+                                "shared_process": True,
                                 "manager": {
                                     "operation_status": "idle",
                                     "operation_id": None,
@@ -597,6 +596,7 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                                 },
                             }
                         ],
+                        "bots": [],
                     }
                 ),
             )
@@ -612,6 +612,7 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                         "operations": [
                             {
                                 "operation_id": "op-start-visible",
+                                "runtime_unit_id": "dicepp-runtime",
                                 "bot_id": "ui_bot",
                                 "action": "start",
                                 "status": "succeeded",
@@ -644,7 +645,7 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
             )
             return
 
-        if path == "/api/manager/bots/ui_bot/restart" and method == "POST":
+        if path == "/api/manager/runtime-units/dicepp-runtime/restart" and method == "POST":
             route.fulfill(
                 status=200,
                 content_type="application/json",
@@ -653,12 +654,28 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                         "ok": True,
                         "operation": {
                             "operation_id": "op-restart",
-                            "bot_id": "ui_bot",
+                            "runtime_unit_id": "dicepp-runtime",
                             "action": "restart",
-                            "status": "succeeded",
+                            "status": "queued",
                         },
                     }
                 ),
+            )
+            return
+
+        if path == "/api/manager/operations/op-restart" and method == "GET":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "operation": {
+                        "operation_id": "op-restart",
+                        "runtime_unit_id": "dicepp-runtime",
+                        "action": "restart",
+                        "status": "succeeded",
+                    },
+                }),
             )
             return
 
@@ -688,16 +705,16 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                 "Windows 本机进程",
             )
             expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
-                "ProcessRuntimeBackend"
+                "ProcessRuntimeAdapter"
             )
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
                 "Manager：Windows 本机进程"
             )
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "Dashboard 管理服务正常"
+                "独立 Manager 服务正常"
             )
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("ui_bot")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("在线")
+            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("共享进程")
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("健康")
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("运行时状态")
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("运行中")
@@ -705,14 +722,14 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("操作编号")
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("结果")
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("started")
-            for heading in ["Runtime", "Operation", "Action", "Status", "Message"]:
+            for heading in ["Operation", "Action", "Status", "Message"]:
                 expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
                     heading
                 )
 
             for action in ["start", "stop", "restart"]:
                 button = page.locator(
-                    f'[data-testid="manager-lifecycle-{action}-ui_bot"]'
+                    f'[data-testid="manager-lifecycle-{action}-dicepp-runtime"]'
                 )
                 expect(button).to_be_enabled()
 
@@ -745,21 +762,20 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                 "暂无运行日志"
             )
 
-            with page.expect_response("**/api/manager/bots/ui_bot/restart"):
-                page.locator('[data-testid="manager-lifecycle-restart-ui_bot"]').click()
+            with page.expect_response("**/api/manager/runtime-units/dicepp-runtime/restart"):
+                page.locator('[data-testid="manager-lifecycle-restart-dicepp-runtime"]').click()
 
             page.evaluate(
                 """async () => {
                     const state = window.Alpine.$data(document.querySelector('[x-data]'));
                     state.managerHealth = {
                         status: 'ok',
-                        runtime_backend: 'UnavailableRuntimeBackend',
+                        runtime_adapter: 'UnavailableRuntimeAdapter',
                     };
-                    state.managerBots = [{
-                        bot_id: 'ui_bot',
-                        version: '7.8.9',
-                        online: true,
-                        last_heartbeat_ts: 1782921600,
+                    state.managerRuntimeUnits = [{
+                        runtime_unit_id: 'dicepp-runtime',
+                        bot_ids: ['ui_bot'],
+                        shared_process: true,
                         manager: {
                             operation_status: 'idle',
                             operation_id: null,
@@ -778,13 +794,13 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
             )
             for action in ["start", "stop", "restart"]:
                 button = page.locator(
-                    f'[data-testid="manager-lifecycle-{action}-ui_bot"]'
+                    f'[data-testid="manager-lifecycle-{action}-dicepp-runtime"]'
                 )
                 expect(button).to_be_disabled()
         finally:
             browser.close()
 
-    assert ("POST", "/api/manager/bots/ui_bot/restart") in observed_requests
+    assert ("POST", "/api/manager/runtime-units/dicepp-runtime/restart") in observed_requests
     assert ("GET", "/api/manager/logs") in observed_requests
 
 
@@ -828,15 +844,15 @@ def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
                     {
                         "ok": True,
                         "health": {
-                            "status": "ok",
-                            "runtime_backend": "UnavailableRuntimeBackend",
+                            "status": "unavailable",
+                            "runtime_adapter": "UnavailableRuntimeAdapter",
+                            "message": "Manager runtime adapter is unavailable",
                         },
-                        "bots": [
+                        "runtime_units": [
                             {
-                                "bot_id": "offline_bot",
-                                "version": "1.2.3",
-                                "online": False,
-                                "last_heartbeat_ts": "",
+                                "runtime_unit_id": "dicepp-runtime",
+                                "bot_ids": ["offline_bot"],
+                                "shared_process": True,
                                 "manager": {
                                     "operation_status": "idle",
                                     "operation_id": None,
@@ -850,6 +866,7 @@ def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
                                 },
                             }
                         ],
+                        "bots": [],
                     }
                 ),
             )
@@ -882,8 +899,8 @@ def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
             expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
                 "未接入运行时"
             )
-            expect(row).to_contain_text("离线")
-            expect(page.locator('[data-testid="monitor-heartbeat-offline_bot"]')).to_be_hidden()
+            expect(row).to_contain_text("共享进程")
+            expect(row).to_contain_text("Manager 不可用")
             expect(row).to_contain_text("—")
             expect(row).not_to_contain_text("未知")
             expect(page.locator('[data-testid="manager-log-button-offline_bot"]')).to_have_count(0)
@@ -1307,7 +1324,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 if restore_bodies[filename].get("quiesce_runtime") is True:
                     runtime_quiesce = {
                         "enabled": True,
-                        "bots": ["archive_bot", "second_bot"],
+                        "runtime_units": ["archive_bot", "second_bot"],
                         "failed_stage": "start",
                         "restore_started": True,
                         "restart_attempted": True,
@@ -1315,7 +1332,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                         "stop_operations": [
                             {
                                 "operation_id": "stop-archive-bot",
-                                "bot_id": "archive_bot",
+                                "runtime_unit_id": "archive_bot",
                                 "action": "stop",
                                 "status": "succeeded",
                                 "message": "runtime stopped",
@@ -1325,7 +1342,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                         "start_operations": [
                             {
                                 "operation_id": "start-archive-bot",
-                                "bot_id": "archive_bot",
+                                "runtime_unit_id": "archive_bot",
                                 "action": "start",
                                 "status": "failed",
                                 "message": "simulated start failure",
@@ -1554,7 +1571,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "simulated restore write failure"
             )
             expect(
-                page.locator('[data-testid="archive-restore-runtime-bots"]')
+                page.locator('[data-testid="archive-restore-runtime-units"]')
             ).to_have_text("archive_bot, second_bot")
             expect(
                 page.locator('[data-testid="archive-restore-runtime-failed-stage"]')

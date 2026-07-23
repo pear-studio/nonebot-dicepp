@@ -2,7 +2,7 @@
 
 本页面面向想在 Windows 上部署 DicePP 的骰主。
 
-Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它会启动网页管理面板、托盘和实际机器人运行时；发布包里的 `DicePP-Runtime.exe` 只供 `DicePP.exe` 管理，不要手动双击或直接运行。
+Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它本身是常驻托盘 Manager，负责启动、停止和监控网页管理面板与实际机器人运行时；发布包里的 `DicePP-Runtime.exe` 只供 Manager 管理，不要手动双击或直接运行。
 
 需要源码开发时，请回到项目仓库查看开发文档。
 
@@ -18,7 +18,38 @@ Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它会�
 6. 等 LLOneBot 连接后，在网页管理面板中确认机器人状态，并填写账号配置。
 7. 在 QQ 中向机器人发送 `.help` 验证。
 
-`DicePP.exe` 启动后会留在托盘。需要退出时通过托盘菜单退出，退出会关闭网页管理面板和机器人运行时。
+`DicePP.exe` 启动后会留在托盘。托盘菜单可以打开网页管理面板、查看整体状态以及启动、停止或重启 Bot RuntimeUnit。需要退出时通过托盘菜单退出，Manager 会有序关闭网页管理面板和机器人运行时。
+
+一个 Bot RuntimeUnit 可以同时承载多个 QQ 账号，因此托盘和网页管理面板里的启动、停止、重启作用于整个机器人进程，不是只操作某个 QQ 账号。
+
+## 实例目录与登录自启动
+
+Windows 部署保持自包含：配置、用户内容、运行数据、Dashboard 数据和 Manager 状态都放在 DicePP 根目录中，不写入 `%LocalAppData%` 作为隐藏的数据事实来源。复制或完整清理 DicePP 时，只需处理这个根目录。
+
+```text
+DicePP/
+├─ DicePP.exe
+├─ config/
+├─ content/
+├─ data/
+├─ dashboard/data/
+└─ manager/
+   ├─ state/
+   ├─ packages/
+   └─ backups/
+```
+
+“登录 Windows 后自动启动 DicePP”默认关闭。启用后，Manager 只为当前用户写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，不安装 Windows Service，也不需要管理员权限。可以勾选托盘菜单中的“登录后自动启动”，也可以在 DicePP 根目录执行：
+
+```powershell
+.\DicePP.exe --autostart status
+.\DicePP.exe --autostart enable
+.\DicePP.exe --autostart disable
+```
+
+`status` 查询当前状态，`enable` 启用，`disable` 关闭并移除同一个当前用户注册项。
+
+注册项始终指向 DicePP 根目录的稳定入口 `DicePP.exe` 并以托盘模式启动。移动整个 DicePP 目录后，应先关闭旧自启动项，再在新位置重新启用，避免 Windows 继续启动旧路径。
 
 ## 准备
 
@@ -119,6 +150,14 @@ data/logs/dicepp-runtime.log
 每次 `DicePP.exe` 启动时，会先把已有日志按时间戳轮转为 `dicepp-runtime-YYYYMMDD-HHMMSS.log`，再创建新的 `dicepp-runtime.log`。网页管理面板可以查看这份全局运行日志；它不是单个 bot 的业务日志。
 
 升级或迁移前，建议先在网页管理面板中创建存档。
+
+Manager 自身的 token、operation 和维护状态保存在：
+
+```text
+manager/state/
+```
+
+网页管理面板通过本机 Manager API 执行运行控制。若 Manager 不可用，面板会明确显示运行管理不受支持，不会直接接管子进程。
 
 ## 从旧版手动升级
 

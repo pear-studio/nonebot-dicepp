@@ -356,7 +356,11 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - Bot/Dashboard 接入 Manager。
 - DiceHub 远程控制仅保留 TODO。
 
-已完成第一批本地 Dashboard Manager：
+> 以下“Dashboard 内嵌 Manager”段落记录 3.0.0 RC 的历史实现，已由
+> [Manager 与 RuntimeUnit](manager-runtime.md) 取代。当前标准部署使用独立常驻
+> Manager、RuntimeUnit API 和 Manager 自有状态库，不应再按下列环境变量部署。
+
+历史上的第一批本地 Dashboard Manager：
 
 - Dashboard 内嵌 Manager Core，提供 `/api/manager/status`、`/api/manager/operations`、`/api/manager/bots/{bot_id}/{action}` 与全局运行日志 `/api/manager/logs`。
 - Manager API 复用 Dashboard session 鉴权；生命周期操作写入审计日志。

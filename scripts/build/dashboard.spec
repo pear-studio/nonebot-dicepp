@@ -15,6 +15,7 @@ hiddenimports += collect_submodules("starlette")
 hiddenimports += collect_submodules("websockets")
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
+hiddenimports += collect_submodules("dicepp_manager")
 
 datas = [
     (

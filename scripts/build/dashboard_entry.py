@@ -24,7 +24,12 @@ def _configure_launcher_environment(
         "DICEPP_PROJECT_ROOT": app_dir,
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_PORT": "4090",
+        "DICEPP_MANAGER_HOST": "127.0.0.1",
+        "DICEPP_MANAGER_PORT": "4091",
+        "DICEPP_MANAGER_URL": "http://127.0.0.1:4091",
+        "DICEPP_MANAGER_TOKEN_FILE": os.path.join(app_dir, "manager", "state", "api-token"),
         "DICEPP_MANAGER_RUNTIME": "process",
+        "DICEPP_MANAGER_RUNTIME_UNIT_ID": "dicepp-runtime",
         "DICEPP_MANAGER_PROCESS_COMMAND": _quote_command([runtime_path]),
         "DICEPP_MANAGER_PROCESS_CWD": app_dir,
     }

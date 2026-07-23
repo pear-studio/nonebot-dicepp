@@ -16,7 +16,7 @@
 | 批次 | 状态 | 完成提交 |
 |---|---|---|
 | 1. 统一实例数据基础 | 已完成 | 本批实现提交 |
-| 2. 常驻 Manager 标准化 | 待开始 | - |
+| 2. 常驻 Manager 标准化 | 已完成 | 本批实现提交 |
 | 3. 事务化归档与精确恢复 | 待开始 | - |
 | 4. 版本发现与下载 | 待开始 | - |
 | 5. 确认安装与自动回退 | 待开始 | - |
@@ -47,6 +47,8 @@
 - 现有配置、数据库和 Dashboard 测试通过。
 
 ## 4. 第二批：常驻 Manager 标准化
+
+运行时协议与部署契约见 [manager-runtime.md](manager-runtime.md)。
 
 ### 目标
 
@@ -169,3 +171,4 @@
 | K3 | 已接受 | Linux Manager 挂载 Docker Socket | 内部网络、固定操作、标签过滤和审计，Dashboard 不接触 Socket |
 | K4 | 已接受 | 第一阶段不能自动升级 Manager 或 Compose 拓扑 | Release Contract 阻止自动安装并给出手动迁移指引 |
 | K5 | 待实施验证 | Windows Velopack 与 UpdateGuard 的进程切换边界 | 第五批以故障注入和真实打包烟测验证 |
+| K6 | 已绕过，待清理 | Windows Manager 被强制结束时，已启动的 Bot 子进程可能无法由新 Manager 安全重新接管 | 本批保证托盘正常退出会有序停止；不按进程名扫描或误杀。PID 身份校验与异常接管在第五批 UpdateGuard/进程切换验收时一并处理 |

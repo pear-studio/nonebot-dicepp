@@ -14,9 +14,8 @@ from fastapi.testclient import TestClient
 
 from dashboard.src import archives
 from dashboard.src.config import DashboardPaths
-from dashboard.src.app import _compute_bot_statuses
-from dashboard.src.manager import ManagerService
-from dashboard.src.manager.models import BotRuntimeStatus, ManagerAction
+from dicepp_manager.client import ManagerClientError
+from dicepp_manager.models import ManagerAction, RuntimeUnitStatus
 from tests.support.dashboard.app import setup_auth
 
 
@@ -136,10 +135,10 @@ class ArchiveManagerRuntimeBackend:
         self.runtime_detail = runtime_detail or {}
         self.calls: list[tuple[str, str, dict | None]] = []
 
-    async def status(self, bot_ids: list[str]) -> dict[str, BotRuntimeStatus]:
+    async def status(self, bot_ids: list[str]) -> dict[str, RuntimeUnitStatus]:
         return {
-            bot_id: BotRuntimeStatus(
-                bot_id=bot_id,
+            bot_id: RuntimeUnitStatus(
+                runtime_unit_id=bot_id,
                 runtime_state="running",
                 health="healthy",
                 message="archive fake running",
@@ -152,7 +151,7 @@ class ArchiveManagerRuntimeBackend:
         bot_id: str,
         action: ManagerAction,
         request_detail: dict | None = None,
-    ) -> BotRuntimeStatus:
+    ) -> RuntimeUnitStatus:
         detail = dict(request_detail) if request_detail else None
         self.calls.append((bot_id, action, detail))
         self.events.append(f"{action}:{bot_id}")
@@ -161,8 +160,8 @@ class ArchiveManagerRuntimeBackend:
             raise failure
         runtime_state = "stopped" if action == "stop" else "running"
         health = "stopped" if action == "stop" else "healthy"
-        return BotRuntimeStatus(
-            bot_id=bot_id,
+        return RuntimeUnitStatus(
+            runtime_unit_id=bot_id,
             runtime_state=runtime_state,
             health=health,
             message=f"archive fake {action}",
@@ -174,21 +173,61 @@ def _install_archive_manager_service(
     test_client: TestClient,
     backend: ArchiveManagerRuntimeBackend,
 ) -> None:
-    test_client.app.state.manager_service = ManagerService(
-        bot_status_provider=lambda: _compute_bot_statuses(
-            test_client.app.state.dashboard_db
-        ),
-        runtime_backend=backend,
-        db_path=test_client.app.state.dashboard_db,
-    )
-    test_client.app.state.manager_db_path = test_client.app.state.dashboard_db
+    class ArchiveManagerClient:
+        def __init__(self) -> None:
+            self.operations: dict[str, dict] = {}
+            self.counter = 0
+
+        async def status(self):
+            units = []
+            for unit_id in ("another_bot", "test_bot"):
+                runtime = (await backend.status([unit_id]))[unit_id].to_dict()
+                units.append({
+                    "runtime_unit_id": unit_id,
+                    "bot_ids": [unit_id],
+                    "shared_process": False,
+                    "runtime": runtime,
+                    "manager": {"operation_status": "idle"},
+                })
+            return {"runtime_units": units, "bots": [], "health": {"status": "ok"}}
+
+        async def operate(self, runtime_unit_id: str, action: str):
+            self.counter += 1
+            operation_id = f"archive-op-{self.counter}"
+            try:
+                result = await backend.operate(runtime_unit_id, action)
+            except Exception as exc:
+                operation = {
+                    "operation_id": operation_id,
+                    "runtime_unit_id": runtime_unit_id,
+                    "action": action,
+                    "status": "failed",
+                    "message": str(exc),
+                }
+                self.operations[operation_id] = operation
+                raise ManagerClientError(str(exc), status_code=500, payload={"operation": operation}) from exc
+            operation = {
+                "operation_id": operation_id,
+                "runtime_unit_id": runtime_unit_id,
+                "action": action,
+                "status": "succeeded",
+                "message": f"archive fake {action}",
+                "detail": {"runtime": result.to_dict()},
+            }
+            self.operations[operation_id] = operation
+            return operation
+
+        async def get_operation(self, operation_id: str):
+            return self.operations[operation_id]
+
+    test_client.app.state.manager_client = ArchiveManagerClient()
 
 
 def _assert_archive_runtime_operations_are_sanitized(runtime_quiesce: dict) -> None:
     serialized = json.dumps(runtime_quiesce, ensure_ascii=False)
     for forbidden in (
         "detail",
-        "runtime",
+        '"runtime":',
         "service",
         "stdout",
         "stderr",
@@ -201,7 +240,7 @@ def _assert_archive_runtime_operations_are_sanitized(runtime_quiesce: dict) -> N
     ):
         assert set(operation).issubset({
             "operation_id",
-            "bot_id",
+            "runtime_unit_id",
             "action",
             "status",
             "message",
@@ -672,7 +711,7 @@ class TestArchiveApi:
             "start:test_bot",
         ]
         runtime_quiesce = data["runtime_quiesce"]
-        assert runtime_quiesce["bots"] == ["another_bot", "test_bot"]
+        assert runtime_quiesce["runtime_units"] == ["another_bot", "test_bot"]
         assert runtime_quiesce["failed_stage"] is None
         assert runtime_quiesce["restore_started"] is True
         assert runtime_quiesce["restart_attempted"] is True
@@ -685,16 +724,8 @@ class TestArchiveApi:
             "succeeded",
         ]
         _assert_archive_runtime_operations_are_sanitized(runtime_quiesce)
-        assert backend.calls[0][2] == {
-            "source": "archive_restore",
-            "archive_filename": "restore-quiesce-success.zip",
-            "phase": "quiesce",
-        }
-        assert backend.calls[-1][2] == {
-            "source": "archive_restore",
-            "archive_filename": "restore-quiesce-success.zip",
-            "phase": "restart",
-        }
+        assert backend.calls[0][2] is None
+        assert backend.calls[-1][2] is None
 
     def test_archive_restore_quiesce_stop_failure_does_not_write_or_pre_restore(
         self,
@@ -728,7 +759,7 @@ class TestArchiveApi:
         assert runtime_quiesce["failed_stage"] == "stop"
         assert runtime_quiesce["restore_started"] is False
         assert runtime_quiesce["restart_attempted"] is False
-        assert runtime_quiesce["stop_operations"][0]["bot_id"] == "another_bot"
+        assert runtime_quiesce["stop_operations"][0]["runtime_unit_id"] == "another_bot"
         assert runtime_quiesce["stop_operations"][0]["status"] == "failed"
         assert "simulated stop failure" in runtime_quiesce["stop_operations"][0]["message"]
         assert (tmp_dashboard_paths / "config" / "user.json").read_text(
@@ -857,7 +888,7 @@ class TestArchiveApi:
         assert runtime_quiesce["failed_stage"] == "stop"
         assert runtime_quiesce["restore_started"] is False
         assert runtime_quiesce["restart_attempted"] is True
-        assert [op["bot_id"] for op in runtime_quiesce["stop_operations"]] == [
+        assert [op["runtime_unit_id"] for op in runtime_quiesce["stop_operations"]] == [
             "another_bot",
             "test_bot",
         ]
@@ -865,7 +896,7 @@ class TestArchiveApi:
             "succeeded",
             "failed",
         ]
-        assert [op["bot_id"] for op in runtime_quiesce["start_operations"]] == [
+        assert [op["runtime_unit_id"] for op in runtime_quiesce["start_operations"]] == [
             "another_bot"
         ]
         assert [call[:2] for call in backend.calls] == [

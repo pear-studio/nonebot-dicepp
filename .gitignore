@@ -187,5 +187,8 @@ nul
 # Dashboard 运行时数据
 dashboard/data/
 
+# Manager runtime state, API token and downloaded packages
+/manager/
+
 # 本地 superpowers 文档
 docs/superpowers/

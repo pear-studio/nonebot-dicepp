@@ -22,7 +22,7 @@ from dicepp_data import (
 )
 
 from .config import DashboardPaths
-from .manager.models import get_dicepp_version
+from dicepp_meta import get_version as get_dicepp_version
 
 ARCHIVE_FORMAT_VERSION = 1
 MANIFEST_NAME = "manifest.json"

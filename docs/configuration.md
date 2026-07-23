@@ -16,6 +16,10 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 | `config/bots/{QQ号}.json` | 具体机器人账号配置 | 不提交 |
 | `content/` | 用户自己的角色卡、牌组、查询库等内容 | 不提交 |
 | `data/` | 运行时数据 | 不提交 |
+| `dashboard/data/` | Dashboard 账号和会话数据 | 不提交 |
+| `manager/state/` | Manager token、operation 和维护状态 | 不提交 |
+| `manager/packages/` | 已下载的版本包缓存（后续更新功能使用） | 不提交 |
+| `manager/backups/` | 事务安全归档（后续归档功能使用） | 不提交 |
 | `templates/characters/default/` | 随版本发布的只读角色模板，供未来 Dashboard 新建角色使用 | 可以 |
 
 `content/` 完全属于当前实例。DicePP 启动和升级不会从 `templates/` 自动复制、合并或覆盖内容；只有用户显式新建或导入后，文件才会进入 `content/`。
@@ -98,6 +102,33 @@ API Key 放在 `config/user.json`：
 | `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
 | `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
 
+### Manager 环境变量
+
+标准部署已经设置好以下变量，普通用户不需要手动修改。它们属于进程连接和部署元数据，不替代 `config/*.json` 中的 DicePP 业务配置。
+
+| 变量 | 使用方 | 作用 | 默认值/标准部署值 |
+|---|---|---|---|
+| `DICEPP_MANAGER_URL` | Dashboard | Manager 内部 API 地址 | 本机 `http://127.0.0.1:4091`；Compose `http://manager:4091` |
+| `DICEPP_MANAGER_TOKEN_FILE` | Manager、Dashboard | 共享 API token 文件 | `<instance>/manager/state/api-token` |
+| `DICEPP_MANAGER_CLIENT_TIMEOUT` | Dashboard | 调用 Manager 的超时秒数 | `10` |
+| `DICEPP_MANAGER_HOST` | Manager | API 监听地址 | 本机 `127.0.0.1`；Compose `0.0.0.0` |
+| `DICEPP_MANAGER_PORT` | Manager | API 监听端口 | `4091` |
+| `DICEPP_MANAGER_RUNTIME` | Manager | Runtime Adapter 类型 | 标准 Linux 为 `docker`，Windows 为 `process` |
+| `DICEPP_MANAGER_RUNTIME_UNIT_ID` | Manager | 默认运行单元标识 | `dicepp-runtime` |
+| `DICEPP_MANAGER_DOCKER_COMMAND` | Linux Manager | Docker 控制端点；标准部署使用 Unix Socket，测试/兼容环境可指定单一 CLI 路径 | `unix:///var/run/docker.sock` |
+| `DICEPP_MANAGER_DOCKER_TIMEOUT` | Linux Manager | Docker 固定操作超时秒数 | `30` |
+
+Manager API、operation store 和部署拓扑分别带有独立的兼容版本。当前标准部署使用 Manager API `2`、operation schema `2` 和 deployment schema `2`。这些值由程序与发布包共同声明，用户不应通过环境变量强行覆盖。Linux Bot 容器使用以下标签声明可管理范围：
+
+```yaml
+labels:
+  io.dicepp.managed: "true"
+  io.dicepp.runtime-unit: "dicepp-runtime"
+  io.dicepp.deployment-schema: "2"
+```
+
+Manager 只控制三个标签同时匹配的容器。修改 RuntimeUnit id 或部署 schema 时，必须同步 Manager 环境和容器标签；不匹配会被明确报告为不受支持。
+
 ## 修改后如何生效
 
 **Web 管理面板**（推荐）：在面板中修改配置后点击保存，自动写入磁盘并通知 Bot 热重载。
@@ -131,6 +162,8 @@ docker exec dicepp cat /app/config/user.json
 - `config/`：配置
 - `content/`：角色卡、牌组、查询数据等内容
 - `data/`：运行时数据
+- `dashboard/data/`：Dashboard 本地账号和会话数据
+- `manager/`：Manager 状态、下载缓存和事务安全归档
 
 Bot、Dashboard 和 Manager 通过同一份实例布局解析这些目录。除兼容旧部署的 `DICEPP_DATA_DIR` 外，建议让三个目录保持在同一个实例根目录，便于归档和跨平台迁移。
 

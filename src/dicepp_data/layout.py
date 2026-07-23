@@ -125,6 +125,35 @@ class InstanceLayout:
     def backups_dir(self) -> Path:
         return self.data_root / "backups"
 
+    @property
+    def manager_dir(self) -> Path:
+        """Return the Manager-owned instance boundary.
+
+        Manager state is deliberately outside ``dashboard/data`` so the
+        lifecycle authority can survive Dashboard replacement or failure.
+        """
+        return self.root / "manager"
+
+    @property
+    def manager_state_dir(self) -> Path:
+        return self.manager_dir / "state"
+
+    @property
+    def manager_db(self) -> Path:
+        return self.manager_state_dir / "manager.db"
+
+    @property
+    def manager_token(self) -> Path:
+        return self.manager_state_dir / "api-token"
+
+    @property
+    def manager_packages_dir(self) -> Path:
+        return self.manager_dir / "packages"
+
+    @property
+    def manager_backups_dir(self) -> Path:
+        return self.manager_dir / "backups"
+
     def area_root(self, area: str) -> Path:
         roots = {
             "config": self.config_dir,

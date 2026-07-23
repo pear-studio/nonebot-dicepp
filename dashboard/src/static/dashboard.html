@@ -1098,7 +1098,7 @@
                       <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
                         <div>
                           <div class="text-xs text-gray-500">Bot</div>
-                          <div data-testid="archive-restore-runtime-bots" class="font-mono text-xs break-all" x-text="archiveRuntimeQuiesceBots(archiveRestoreRuntimeQuiesce).join(', ') || '-'"></div>
+                          <div data-testid="archive-restore-runtime-units" class="font-mono text-xs break-all" x-text="archiveRuntimeQuiesceUnits(archiveRestoreRuntimeQuiesce).join(', ') || '-'"></div>
                         </div>
                         <div>
                           <div class="text-xs text-gray-500">失败阶段</div>
@@ -1123,16 +1123,16 @@
                           <table data-testid="archive-restore-runtime-stop-operations" class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                               <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Bot</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">运行单元</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
                               </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-200">
-                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations')" :key="`restore-stop-${op.operation_id || op.bot_id || index}`">
+                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations')" :key="`restore-stop-${op.operation_id || op.runtime_unit_id || index}`">
                                 <tr>
-                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.bot_id || '-'"></td>
+                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.runtime_unit_id || '-'"></td>
                                   <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
                                   <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
                                   <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
@@ -1149,16 +1149,16 @@
                           <table data-testid="archive-restore-runtime-start-operations" class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                               <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Bot</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">运行单元</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
                               </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-200">
-                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations')" :key="`restore-start-${op.operation_id || op.bot_id || index}`">
+                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations')" :key="`restore-start-${op.operation_id || op.runtime_unit_id || index}`">
                                 <tr>
-                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.bot_id || '-'"></td>
+                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.runtime_unit_id || '-'"></td>
                                   <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
                                   <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
                                   <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
@@ -1241,8 +1241,8 @@
           <div class="p-4 border-b">
             <div class="flex flex-col gap-1">
               <div class="text-sm font-medium">
-                <div class="text-sm font-medium" x-show="managerHealth?.runtime_backend && managerHealth.runtime_backend !== 'UnavailableRuntimeBackend'">
-                  Manager：<span data-testid="monitor-runtime-backend" :title="runtimeBackendLabel(managerHealth?.runtime_backend)" x-text="runtimeBackendLabel(managerHealth?.runtime_backend)"></span>
+                <div class="text-sm font-medium" x-show="managerHealth?.runtime_adapter">
+                  Manager：<span data-testid="monitor-runtime-backend" :title="runtimeBackendLabel(managerHealth?.runtime_adapter)" x-text="runtimeBackendLabel(managerHealth?.runtime_adapter)"></span>
                 </div>
               </div>
               <div class="text-sm text-gray-500" x-text="managerRuntimeSummary()"></div>
@@ -1253,7 +1253,7 @@
         <div class="bg-white rounded-lg shadow overflow-x-auto mb-4">
           <div class="p-4 border-b flex items-center justify-between">
             <h3 class="font-semibold">运行状态</h3>
-            <span class="text-xs text-gray-500" x-text="monitorLoading || managerLoading ? '加载中...' : `${runtimeBotRows.length} 个 Bot`"></span>
+            <span class="text-xs text-gray-500" x-text="monitorLoading || managerLoading ? '加载中...' : `${runtimeBotRows.length} 个 RuntimeUnit`"></span>
           </div>
           <div x-show="(monitorLoading && eventSourceConnected) || managerLoading" class="space-y-3 p-4">
             <div class="animate-pulse bg-gray-200 rounded h-6 w-1/4"></div>
@@ -1269,50 +1269,45 @@
           <table x-show="!monitorLoading && !managerLoading && runtimeBotRows.length > 0" class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bot ID</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">版本</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">连接状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">RuntimeUnit</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">共享账号</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">运行时状态</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200">
-              <template x-for="row in runtimeBotRows" :key="`${row.bot_id}-${row.manager ? 'runtime' : 'connection'}`">
+              <template x-for="row in runtimeBotRows" :key="row.runtime_unit_id">
                 <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm font-medium" x-text="row.bot_id"></td>
-                  <td class="px-4 py-3 text-sm" x-text="row.monitor?.version || row.manager?.version || '-'"></td>
-                  <td class="px-4 py-3">
-                    <div class="flex items-center gap-1.5">
-                      <span class="w-2.5 h-2.5 rounded-full inline-block" :class="row.monitor?.online ? 'bg-green-500' : 'bg-red-500'"></span>
-                      <span class="text-sm" :class="row.monitor?.online ? 'text-green-700' : 'text-red-700'" x-text="row.monitor?.online ? '在线' : '离线'"></span>
-                    </div>
-                    <div x-show="formatOptionalTimestamp(row.monitor?.last_heartbeat_ts)" :data-testid="`monitor-heartbeat-${row.bot_id}`" class="text-xs text-gray-500 mt-1" x-text="formatOptionalTimestamp(row.monitor?.last_heartbeat_ts)"></div>
+                  <td class="px-4 py-3 text-sm font-medium">
+                    <div x-text="row.runtime_unit_id"></div>
+                    <div x-show="row.shared_process" class="text-xs text-blue-600">共享进程，启停作用于全部账号</div>
                   </td>
+                  <td class="px-4 py-3 text-sm" x-text="(row.bot_ids || []).join('、') || '尚无账号'"></td>
                   <td class="px-4 py-3 text-sm">
-                    <div class="font-medium" x-text="runtimeStatusPrimary(row.manager?.runtime)"></div>
-                    <div x-show="runtimeStatusDetail(row.manager?.runtime)" class="text-xs text-gray-500" x-text="runtimeStatusDetail(row.manager?.runtime)"></div>
-                    <div class="text-xs text-gray-500" x-show="row.manager?.manager?.operation_status === 'running'" x-text="`正在${actionLabel(row.manager?.manager?.action)}`"></div>
+                    <div class="font-medium" x-text="runtimeStatusPrimary(row.runtime)"></div>
+                    <div x-show="runtimeStatusDetail(row.runtime)" class="text-xs text-gray-500" x-text="runtimeStatusDetail(row.runtime)"></div>
+                    <div class="text-xs text-gray-500" x-show="['queued', 'running'].includes(row.manager?.operation_status)" x-text="`正在${actionLabel(row.manager?.action)}`"></div>
                   </td>
-                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs" x-text="row.manager?.runtime?.message || '-'"></td>
+                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs" x-text="row.runtime?.message || '-'"></td>
                   <td class="px-4 py-3">
-                    <template x-if="row.manager">
+                    <template x-if="managerHealth?.status === 'ok'">
                       <div class="flex flex-wrap gap-2">
-                        <template x-for="action in ['start', 'stop', 'restart']" :key="`${row.bot_id}-${action}`">
+                        <template x-for="action in ['start', 'stop', 'restart']" :key="`${row.runtime_unit_id}-${action}`">
                           <button
-                            @click="managerOperate(row.manager, action)"
-                            :disabled="managerActionDisabled(row.manager, row.bot_id)"
-                            :title="managerCanOperate(row.manager) ? actionLabel(action) : 'Manager 未配置，操作不可用'"
-                            :data-testid="`manager-lifecycle-${action}-${row.bot_id}`"
-                            :class="managerActionDisabled(row.manager, row.bot_id) ? '' : 'hover:bg-gray-100'"
+                            @click="managerOperate(row, action)"
+                            :disabled="managerActionDisabled(row, row.runtime_unit_id)"
+                            :title="managerCanOperate(row) ? actionLabel(action) : 'Manager 不可用，操作不可用'"
+                            :data-testid="`manager-lifecycle-${action}-${row.runtime_unit_id}`"
+                            :class="managerActionDisabled(row, row.runtime_unit_id) ? '' : 'hover:bg-gray-100'"
                             class="px-2 py-1 text-xs border rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                            x-text="managerActionLoading[row.bot_id] ? '执行中' : actionLabel(action)"
+                            x-text="managerActionLoading[row.runtime_unit_id] ? '执行中' : actionLabel(action)"
                           ></button>
                         </template>
                       </div>
                     </template>
-                    <template x-if="!row.manager">
-                      <span class="text-xs text-gray-400">Manager 未配置</span>
+                    <template x-if="managerHealth?.status !== 'ok'">
+                      <span class="text-xs text-gray-400">Manager 不可用</span>
                     </template>
                   </td>
                 </tr>
@@ -1363,7 +1358,7 @@
             <thead class="bg-gray-50">
               <tr>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作编号</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bot ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">RuntimeUnit</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">结果</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
@@ -1374,7 +1369,7 @@
               <template x-for="op in managerOperations" :key="op.operation_id">
                 <tr class="hover:bg-gray-50">
                   <td class="px-4 py-3 text-sm font-mono" x-text="shortOperationId(op.operation_id)"></td>
-                  <td class="px-4 py-3 text-sm" x-text="op.bot_id"></td>
+                  <td class="px-4 py-3 text-sm" x-text="op.runtime_unit_id || '-'"></td>
                   <td class="px-4 py-3 text-sm" x-text="actionLabel(op.action)"></td>
                   <td class="px-4 py-3 text-sm" x-text="operationStatusLabel(op.status)"></td>
                   <td class="px-4 py-3 text-sm text-gray-600 max-w-xs">
@@ -1563,6 +1558,7 @@ function app() {
     // ── Tab: Manager ──
     managerHealth: null,
     managerBots: [],
+    managerRuntimeUnits: [],
     managerOperations: [],
     managerActionLoading: {},
     managerLogsBotId: '',
@@ -1766,6 +1762,7 @@ function app() {
       this.runtimeBotRows = [];
       this.managerHealth = null;
       this.managerBots = [];
+      this.managerRuntimeUnits = [];
       this.managerOperations = [];
       this.managerActionLoading = {};
       this.managerLogsBotId = '';
@@ -2340,10 +2337,12 @@ function app() {
         const data = await this.api('/api/manager/status');
         this.managerHealth = data.health || null;
         this.managerBots = data.bots || [];
+        this.managerRuntimeUnits = data.runtime_units || [];
       } catch (err) {
         console?.warn('[DicePP] Failed to load manager status:', err);
         this.managerHealth = null;
         this.managerBots = [];
+        this.managerRuntimeUnits = [];
       } finally {
         this.refreshRuntimeRows();
         this.managerLoading = false;
@@ -2367,40 +2366,35 @@ function app() {
 
     managerRuntimeSummary() {
       if (this.managerHealth?.status === 'ok') {
-        return 'Dashboard 管理服务正常';
+        return '独立 Manager 服务正常；生命周期操作按 RuntimeUnit 执行';
       }
-      return 'Dashboard 管理服务状态未知';
+      if (this.managerHealth?.status === 'unsupported') return `Manager 版本不兼容：${this.managerHealth?.message || ''}`;
+      if (this.managerHealth?.status === 'unavailable') return `Manager 不可用：${this.managerHealth?.message || ''}`;
+      return 'Manager 状态未知';
     },
 
     refreshRuntimeRows() {
-      const rows = new Map();
-      for (const bot of this.monitorBots || []) {
-        if (!bot?.bot_id) continue;
-        rows.set(bot.bot_id, { bot_id: bot.bot_id, monitor: bot, manager: null });
-      }
-      for (const bot of this.managerBots || []) {
-        if (!bot?.bot_id) continue;
-        const row = rows.get(bot.bot_id) || { bot_id: bot.bot_id, monitor: null, manager: null };
-        row.manager = bot;
-        rows.set(bot.bot_id, row);
-      }
-      this.runtimeBotRows = Array.from(rows.values());
+      this.runtimeBotRows = (this.managerRuntimeUnits || []).map((unit) => ({
+        ...unit,
+        monitors: (this.monitorBots || []).filter((bot) => (unit.bot_ids || []).includes(bot?.bot_id)),
+      }));
     },
 
     managerCanOperate(bot) {
       return Boolean(bot)
-        && this.managerHealth?.runtime_backend !== 'UnavailableRuntimeBackend'
+        && this.managerHealth?.status === 'ok'
+        && this.managerHealth?.runtime_adapter !== 'UnavailableRuntimeAdapter'
         && bot.runtime?.health !== 'unavailable'
-        && bot.manager?.operation_status !== 'running';
+        && !['queued', 'running'].includes(bot.manager?.operation_status);
     },
 
     managerActionDisabled(bot, botId) {
-      return !this.managerCanOperate(bot) || Boolean(this.managerActionLoading[botId || bot?.bot_id]);
+      return !this.managerCanOperate(bot) || Boolean(this.managerActionLoading[botId || bot?.runtime_unit_id]);
     },
 
     managerCanViewRuntimeLogs() {
-      return this.managerHealth?.runtime_backend
-        && this.managerHealth.runtime_backend !== 'UnavailableRuntimeBackend';
+      return this.managerHealth?.status === 'ok'
+        && this.managerHealth?.runtime_adapter !== 'UnavailableRuntimeAdapter';
     },
 
     managerRuntimeLogsDisabled() {
@@ -2410,20 +2404,33 @@ function app() {
 
     async managerOperate(bot, action) {
       if (!this.managerCanOperate(bot)) return;
-      this.managerActionLoading = { ...this.managerActionLoading, [bot.bot_id]: true };
+      const unitId = bot.runtime_unit_id;
+      this.managerActionLoading = { ...this.managerActionLoading, [unitId]: true };
       try {
-        await this.api(`/api/manager/bots/${encodeURIComponent(bot.bot_id)}/${action}`, {
+        const data = await this.api(`/api/manager/runtime-units/${encodeURIComponent(unitId)}/${action}`, {
           method: 'POST',
         });
+        if (data.operation?.operation_id) await this.pollManagerOperation(data.operation.operation_id);
         await this.loadMonitor();
       } catch (err) {
         console?.warn('[DicePP] Manager operation failed:', err);
         await this.loadManagerOperations();
       } finally {
         const next = { ...this.managerActionLoading };
-        delete next[bot.bot_id];
+        delete next[unitId];
         this.managerActionLoading = next;
       }
+    },
+
+    async pollManagerOperation(operationId) {
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline) {
+        const data = await this.api(`/api/manager/operations/${encodeURIComponent(operationId)}`);
+        const operation = data.operation || {};
+        if (!['queued', 'running'].includes(operation.status)) return operation;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      throw new Error('Manager 操作等待超时；可刷新页面按 operation_id 继续查看');
     },
 
     async loadManagerRuntimeLogs() {
@@ -2998,9 +3005,9 @@ function app() {
       return this.archives.find((item) => item?.filename === filename) || archive;
     },
 
-    archiveRuntimeQuiesceBots(runtime) {
-      const bots = runtime?.bots;
-      return Array.isArray(bots) ? bots : [];
+    archiveRuntimeQuiesceUnits(runtime) {
+      const units = runtime?.runtime_units;
+      return Array.isArray(units) ? units : [];
     },
 
     archiveRuntimeQuiesceOperations(runtime, key) {
@@ -3096,9 +3103,10 @@ function app() {
 
     runtimeBackendLabel(backend) {
       return {
-        ProcessRuntimeBackend: 'Windows 本机进程',
-        DockerComposeRuntimeBackend: 'Linux Docker Compose',
-        UnavailableRuntimeBackend: 'Manager 未配置',
+        ProcessRuntimeAdapter: 'Windows 本机进程',
+        DockerRuntimeAdapter: 'Linux Docker（标签限定）',
+        DockerSocketRuntimeAdapter: 'Linux Docker Socket（标签限定）',
+        UnavailableRuntimeAdapter: 'Manager 未配置',
       }[backend] || backend || '-';
     },
 

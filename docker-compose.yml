@@ -12,6 +12,12 @@ services:
     container_name: dicepp
     restart: unless-stopped
 
+    # Manager 只会控制同时带有这三个标签且值完全匹配的容器。
+    labels:
+      io.dicepp.managed: "true"
+      io.dicepp.runtime-unit: "dicepp-runtime"
+      io.dicepp.deployment-schema: "2"
+
     # 网络：使用外部 dice-net 网络与协议适配器（NapCat/LLOneBot）通信
     networks:
       - dice-net
@@ -58,8 +64,12 @@ services:
     container_name: dicepp-dashboard
     restart: unless-stopped
 
+    depends_on:
+      - manager
+
     networks:
       - dice-net
+      - manager-net
 
     ports:
       - "4090:4090"
@@ -67,6 +77,8 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - DICEPP_PROJECT_ROOT=/app
+      - DICEPP_MANAGER_URL=http://manager:4091
+      - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
 
     volumes:
       # 配置文件：整目录挂载，应用层控制读写权限
@@ -78,6 +90,55 @@ services:
       - ./content:/app/content:ro
       # Dashboard 运行时数据（可写，例如 session key）
       - ./dashboard/data:/app/dashboard/data
+      # Manager 生成的内部 API token；Dashboard 只能读取
+      - ./manager/state:/app/manager/state:ro
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
+  manager:
+    # Manager 与 Dashboard 复用同一发布镜像，但使用独立入口。
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-latest}}"
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    container_name: dicepp-manager
+    restart: unless-stopped
+    command: ["python", "-m", "dicepp_manager"]
+
+    networks:
+      - manager-net
+
+    # Manager API 只在 Compose 网络内可见，不映射到宿主机。
+    expose:
+      - "4091"
+
+    environment:
+      - TZ=Asia/Shanghai
+      - DICEPP_PROJECT_ROOT=/app
+      - DICEPP_MANAGER_HOST=0.0.0.0
+      - DICEPP_MANAGER_PORT=4091
+      - DICEPP_MANAGER_RUNTIME=docker
+      - DICEPP_MANAGER_RUNTIME_UNIT_ID=dicepp-runtime
+      - DICEPP_MANAGER_DOCKER_COMMAND=unix:///var/run/docker.sock
+      - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
+
+    volumes:
+      # Manager 是维护操作、归档与后续升级的唯一写入者。
+      - ./config:/app/config:rw
+      - ./data:/app/data:rw
+      - ./content:/app/content:rw
+      - ./manager:/app/manager:rw
+      # 仅 Manager 接触 Docker Socket；Dashboard 不挂载。
+      - /var/run/docker.sock:/var/run/docker.sock
 
     logging:
       driver: "json-file"
@@ -89,3 +150,5 @@ services:
 networks:
   dice-net:
     external: true
+  manager-net:
+    driver: bridge

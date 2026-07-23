@@ -9,7 +9,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional
 from datetime import datetime, timezone
 
 import logging
@@ -19,6 +19,14 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 
 from dicepp_data import PERSONA_DB_ASSET
+from dicepp_manager.client import (
+    ManagerClient,
+    ManagerClientError,
+    ManagerIncompatible,
+    ManagerUnavailable,
+)
+from dicepp_manager.config import ManagerClientSettings
+from dicepp_manager.models import VALID_ACTIONS
 from dicepp_meta import get_project_info, get_version
 
 from .auth import (
@@ -48,16 +56,6 @@ from .archives import (
     verify_archive,
 )
 from .config import DashboardPaths
-from .manager import (
-    ManagerService,
-    OperationConflict,
-    OperationFailed,
-    RuntimeOperationUnsupported,
-    UnknownBot,
-)
-from .manager.runtime import UnavailableRuntimeBackend
-from .manager.models import VALID_ACTIONS, ManagerAction
-from .manager.store import MANAGER_OPERATIONS_TABLE_SQL
 
 logger = logging.getLogger("dashboard")
 
@@ -66,7 +64,7 @@ logger = logging.getLogger("dashboard")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: initialize DB, state, and ManagerService."""
+    """Startup: initialize Dashboard state and its external Manager client."""
     db_path = str(DashboardPaths.DASHBOARD_DB)
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     _init_db(db_path)
@@ -77,11 +75,8 @@ async def lifespan(app: FastAPI):
     # 多 worker 部署 (uvicorn --workers > 1) 时，
     # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
     app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
-    app.state.manager_service = ManagerService(
-        bot_status_provider=lambda: _compute_bot_statuses(app.state.dashboard_db),
-        db_path=db_path,
-    )
-    app.state.manager_db_path = db_path
+    layout = DashboardPaths.instance_layout()
+    app.state.manager_client = ManagerClient(ManagerClientSettings.from_layout(layout))
     yield
 
 
@@ -149,8 +144,6 @@ def _init_db(db_path: str) -> None:
                 ip TEXT DEFAULT ''
             )"""
         )
-
-        conn.execute(MANAGER_OPERATIONS_TABLE_SQL)
 
         conn.commit()
     finally:
@@ -543,7 +536,7 @@ def _archive_restore_plan_is_blocked(plan: dict) -> bool:
 def _archive_runtime_quiesce_report() -> dict:
     return {
         "enabled": True,
-        "bots": [],
+        "runtime_units": [],
         "stop_operations": [],
         "start_operations": [],
         "failed_stage": None,
@@ -571,7 +564,7 @@ def _archive_runtime_request_detail(
 def _archive_runtime_operation_summary(operation: dict) -> dict:
     summary_keys = (
         "operation_id",
-        "bot_id",
+        "runtime_unit_id",
         "action",
         "status",
         "message",
@@ -607,47 +600,34 @@ def _archive_runtime_request_summary(request_detail: object) -> dict | None:
 async def _archive_start_quiesced_bots(
     request: Request,
     *,
-    service: ManagerService,
+    service: ManagerClient,
     filename: str | None,
-    bot_ids: list[str],
+    runtime_unit_ids: list[str],
     runtime_quiesce: dict,
     source: str = "archive_restore",
 ) -> int | None:
-    if not bot_ids:
+    if not runtime_unit_ids:
         return None
 
     runtime_quiesce["restart_attempted"] = True
     first_failure_status: int | None = None
-    for bot_id in bot_ids:
+    for runtime_unit_id in runtime_unit_ids:
         try:
             operation = await service.operate(
-                bot_id,
+                runtime_unit_id,
                 "start",
-                request_detail=_archive_runtime_request_detail(
-                    filename,
-                    "restart",
-                    source=source,
-                ),
             )
-        except OperationConflict as exc:
-            operation_data = exc.operation.to_dict()
-            runtime_quiesce["start_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["start_failed"] = True
-            if first_failure_status is None:
-                first_failure_status = 409
-        except OperationFailed as exc:
-            operation_data = exc.operation.to_dict()
-            runtime_quiesce["start_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["start_failed"] = True
-            if first_failure_status is None:
-                first_failure_status = exc.status_code
-        except Exception as exc:
+            operation = await _await_manager_operation(service, operation)
+            if operation.get("status") != "succeeded":
+                raise ManagerClientError(
+                    operation.get("message") or "Manager restart failed",
+                    status_code=500,
+                    payload={"operation": operation},
+                )
+        except ManagerClientError as exc:
             operation_data = {
-                "bot_id": bot_id,
+                **(exc.payload.get("operation") or {}),
+                "runtime_unit_id": runtime_unit_id,
                 "action": "start",
                 "status": "failed",
                 "message": str(exc) or type(exc).__name__,
@@ -664,10 +644,10 @@ async def _archive_start_quiesced_bots(
             )
             runtime_quiesce["start_failed"] = True
             if first_failure_status is None:
-                first_failure_status = 500
+                first_failure_status = exc.status_code
         else:
             runtime_quiesce["start_operations"].append(
-                _archive_runtime_operation_summary(operation.to_dict())
+                _archive_runtime_operation_summary(operation)
             )
 
     if runtime_quiesce["start_failed"] and runtime_quiesce["failed_stage"] is None:
@@ -681,21 +661,16 @@ async def _archive_stop_runtime_for_restore(
     filename: str | None,
     runtime_quiesce: dict,
     source: str = "archive_restore",
-) -> tuple[ManagerService, list[str], JSONResponse | None]:
-    service = _get_manager_service(request)
-    stopped_bot_ids: list[str] = []
-
-    # Manager 未配置时跳过，不阻塞恢复流程
-    if isinstance(service.runtime_backend, UnavailableRuntimeBackend):
-        runtime_quiesce["enabled"] = False
-        return service, stopped_bot_ids, None
+) -> tuple[ManagerClient, list[str], JSONResponse | None]:
+    service = _get_manager_client(request)
+    stopped_runtime_unit_ids: list[str] = []
 
     try:
         status = await service.status()
-    except Exception as exc:
+    except ManagerClientError as exc:
         runtime_quiesce["failed_stage"] = "discover"
-        return service, stopped_bot_ids, JSONResponse(
-            status_code=500,
+        return service, stopped_runtime_unit_ids, JSONResponse(
+            status_code=exc.status_code,
             content={
                 "ok": False,
                 "message": f"Manager runtime discovery failed: {str(exc) or type(exc).__name__}",
@@ -703,70 +678,28 @@ async def _archive_stop_runtime_for_restore(
             },
         )
 
-    runtime_quiesce["bots"] = [
-        bot["bot_id"]
-        for bot in status.get("bots", [])
-        if isinstance(bot, dict) and isinstance(bot.get("bot_id"), str)
+    runtime_quiesce["runtime_units"] = [
+        unit["runtime_unit_id"]
+        for unit in status.get("runtime_units", [])
+        if isinstance(unit, dict) and isinstance(unit.get("runtime_unit_id"), str)
     ]
-
-    for bot_id in runtime_quiesce["bots"]:
+    for runtime_unit_id in runtime_quiesce["runtime_units"]:
         try:
             operation = await service.operate(
-                bot_id,
+                runtime_unit_id,
                 "stop",
-                request_detail=_archive_runtime_request_detail(
-                    filename,
-                    "quiesce",
-                    source=source,
-                ),
             )
-        except OperationConflict as exc:
-            operation_data = exc.operation.to_dict()
-            runtime_quiesce["stop_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["failed_stage"] = "stop"
-            await _archive_start_quiesced_bots(
-                request,
-                service=service,
-                filename=filename,
-                bot_ids=stopped_bot_ids,
-                runtime_quiesce=runtime_quiesce,
-                source=source,
-            )
-            return service, stopped_bot_ids, JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": operation_data["message"],
-                    "runtime_quiesce": runtime_quiesce,
-                },
-            )
-        except OperationFailed as exc:
-            operation_data = exc.operation.to_dict()
-            runtime_quiesce["stop_operations"].append(
-                _archive_runtime_operation_summary(operation_data)
-            )
-            runtime_quiesce["failed_stage"] = "stop"
-            await _archive_start_quiesced_bots(
-                request,
-                service=service,
-                filename=filename,
-                bot_ids=stopped_bot_ids,
-                runtime_quiesce=runtime_quiesce,
-                source=source,
-            )
-            return service, stopped_bot_ids, JSONResponse(
-                status_code=exc.status_code,
-                content={
-                    "ok": False,
-                    "message": f"Manager runtime quiesce failed: {operation_data['message']}",
-                    "runtime_quiesce": runtime_quiesce,
-                },
-            )
-        except Exception as exc:
+            operation = await _await_manager_operation(service, operation)
+            if operation.get("status") != "succeeded":
+                raise ManagerClientError(
+                    operation.get("message") or "Manager quiesce failed",
+                    status_code=500,
+                    payload={"operation": operation},
+                )
+        except ManagerClientError as exc:
             operation_data = {
-                "bot_id": bot_id,
+                **(exc.payload.get("operation") or {}),
+                "runtime_unit_id": runtime_unit_id,
                 "action": "stop",
                 "status": "failed",
                 "message": str(exc) or type(exc).__name__,
@@ -786,12 +719,12 @@ async def _archive_stop_runtime_for_restore(
                 request,
                 service=service,
                 filename=filename,
-                bot_ids=stopped_bot_ids,
+                runtime_unit_ids=stopped_runtime_unit_ids,
                 runtime_quiesce=runtime_quiesce,
                 source=source,
             )
-            return service, stopped_bot_ids, JSONResponse(
-                status_code=500,
+            return service, stopped_runtime_unit_ids, JSONResponse(
+                status_code=exc.status_code,
                 content={
                     "ok": False,
                     "message": f"Manager runtime quiesce failed: {str(exc) or type(exc).__name__}",
@@ -799,12 +732,36 @@ async def _archive_stop_runtime_for_restore(
                 },
             )
         else:
-            stopped_bot_ids.append(bot_id)
+            stopped_runtime_unit_ids.append(runtime_unit_id)
             runtime_quiesce["stop_operations"].append(
-                _archive_runtime_operation_summary(operation.to_dict())
+                _archive_runtime_operation_summary(operation)
             )
 
-    return service, stopped_bot_ids, None
+    return service, stopped_runtime_unit_ids, None
+
+
+async def _await_manager_operation(
+    client: ManagerClient,
+    operation: dict,
+    *,
+    timeout: float = 30.0,
+) -> dict:
+    """Reconnect/poll by operation id until the Manager reaches a terminal state."""
+    operation_id = operation.get("operation_id")
+    if not isinstance(operation_id, str):
+        raise ManagerClientError("Manager did not return an operation id")
+    deadline = time.monotonic() + timeout
+    current = operation
+    while current.get("status") in {"queued", "running"}:
+        if time.monotonic() >= deadline:
+            raise ManagerClientError(
+                "Manager operation polling timed out",
+                status_code=504,
+                payload={"operation": current},
+            )
+        await asyncio.sleep(0.05)
+        current = await client.get_operation(operation_id)
+    return current
 
 
 @app.get("/api/archives", dependencies=[Depends(require_auth)])
@@ -933,7 +890,7 @@ async def archives_restore(filename: str, request: Request):
                 },
             )
 
-        service, stopped_bot_ids, stop_response = await _archive_stop_runtime_for_restore(
+        service, stopped_runtime_unit_ids, stop_response = await _archive_stop_runtime_for_restore(
             request,
             filename=filename,
             runtime_quiesce=runtime_quiesce,
@@ -1010,7 +967,7 @@ async def archives_restore(filename: str, request: Request):
             request,
             service=service,
             filename=filename,
-            bot_ids=stopped_bot_ids,
+            runtime_unit_ids=stopped_runtime_unit_ids,
             runtime_quiesce=runtime_quiesce,
         )
 
@@ -1965,18 +1922,17 @@ async def bot_status(request: Request):
 # ── Manager API ───────────────────────────────────────────────────────────────
 
 
-def _get_manager_service(request: Request) -> ManagerService:
-    """Return the Dashboard-local ManagerService for the active test/app DB."""
-    db_path = request.app.state.dashboard_db
-    service = getattr(request.app.state, "manager_service", None)
-    if service is None or getattr(request.app.state, "manager_db_path", None) != db_path:
-        service = ManagerService(
-            bot_status_provider=lambda: _compute_bot_statuses(request.app.state.dashboard_db),
-            db_path=db_path,
+def _get_manager_client(request: Request) -> ManagerClient:
+    """Return the configured HTTP client; never construct a runtime backend."""
+    client = getattr(request.app.state, "manager_client", None)
+    if client is None:
+        client = ManagerClient(
+            ManagerClientSettings.from_layout(
+                getattr(request.app.state, "dashboard_paths", DashboardPaths).instance_layout()
+            )
         )
-        request.app.state.manager_service = service
-        request.app.state.manager_db_path = db_path
-    return service
+        request.app.state.manager_client = client
+    return client
 
 
 def _audit_manager_operation(request: Request, operation: dict, status_code: int) -> None:
@@ -1990,23 +1946,52 @@ def _audit_manager_operation(request: Request, operation: dict, status_code: int
     audit_log(
         request.app.state.dashboard_db,
         f"manager.{operation['action']}",
-        operation["bot_id"],
+        operation["runtime_unit_id"],
         detail,
         ip=request.client.host if request.client else "",
     )
 
 @app.get("/api/manager/status", dependencies=[Depends(require_auth)])
 async def manager_status(request: Request):
-    """Return discovered bots with Manager and runtime state."""
-    service = _get_manager_service(request)
-    return _ok(await service.status())
+    """Return RuntimeUnits, or an explicit unsupported/unavailable state."""
+    try:
+        return _ok(await _get_manager_client(request).status())
+    except ManagerUnavailable as exc:
+        return _ok({
+            "runtime_units": [],
+            "bots": [],
+            "health": {
+                "status": "unavailable",
+                "message": str(exc),
+                "manager_api_version": None,
+            },
+        })
+    except ManagerIncompatible as exc:
+        return _ok({
+            "runtime_units": [],
+            "bots": [],
+            "health": {"status": "unsupported", "message": str(exc)},
+        })
+    except ManagerClientError as exc:
+        return _ok({
+            "runtime_units": [],
+            "bots": [],
+            "health": {
+                "status": "error",
+                "message": str(exc),
+                "status_code": exc.status_code,
+            },
+        })
 
 
 @app.get("/api/manager/operations", dependencies=[Depends(require_auth)])
 async def manager_operations(request: Request, limit: int = Query(50, ge=1, le=200)):
     """Return recent Manager operations, newest first."""
-    service = _get_manager_service(request)
-    return _ok({"operations": service.list_operations(limit)})
+    try:
+        operations = await _get_manager_client(request).list_operations(limit)
+    except ManagerClientError as exc:
+        _err(str(exc), exc.status_code)
+    return _ok({"operations": operations})
 
 
 @app.get("/api/manager/logs", dependencies=[Depends(require_auth)])
@@ -2015,93 +2000,68 @@ async def manager_runtime_logs(
     lines: int = Query(200, ge=1, le=1000),
 ):
     """Return global runtime logs when the configured runtime supports it."""
-    service = _get_manager_service(request)
     try:
-        logs = await service.runtime_logs(lines)
-    except RuntimeOperationUnsupported as exc:
-        _err(str(exc) or "Manager runtime logs unsupported", 501)
-    except Exception as exc:
-        message = str(exc) or type(exc).__name__
-        _err(f"Manager logs failed: {message}", 500)
+        logs = await _get_manager_client(request).runtime_logs(lines)
+    except ManagerClientError as exc:
+        _err(str(exc), exc.status_code)
     return _ok({"logs": logs})
 
 
-@app.get("/api/manager/bots/{bot_id}/logs", dependencies=[Depends(require_auth)])
-async def manager_bot_logs(
-    bot_id: str,
+@app.get("/api/manager/runtime-units/{runtime_unit_id}/logs", dependencies=[Depends(require_auth)])
+async def manager_unit_logs(
+    runtime_unit_id: str,
     request: Request,
     lines: int = Query(200, ge=1, le=1000),
 ):
-    """Return diagnostic logs for a bot when the configured runtime supports it."""
-    _validate_identifier(bot_id, "bot_id")
-    service = _get_manager_service(request)
+    """Return diagnostic logs for a RuntimeUnit."""
+    _validate_identifier(runtime_unit_id, "runtime_unit_id")
     try:
-        logs = await service.logs(bot_id, lines)
-    except UnknownBot as exc:
-        _err(str(exc), 404)
-    except RuntimeOperationUnsupported as exc:
-        _err(str(exc) or "Manager runtime logs unsupported", 501)
-    except Exception as exc:
-        message = str(exc) or type(exc).__name__
-        _err(f"Manager logs failed: {message}", 500)
+        logs = await _get_manager_client(request).logs(runtime_unit_id, lines)
+    except ManagerClientError as exc:
+        _err(str(exc), exc.status_code)
     return _ok({"logs": logs})
 
 
-@app.post("/api/manager/bots/{bot_id}/{action}", dependencies=[Depends(require_auth)])
-async def manager_bot_action(bot_id: str, action: str, request: Request):
-    """Run a Dashboard-local Manager lifecycle action for a bot."""
-    _validate_identifier(bot_id, "bot_id")
+@app.post("/api/manager/runtime-units/{runtime_unit_id}/{action}", dependencies=[Depends(require_auth)])
+async def manager_unit_action(runtime_unit_id: str, action: str, request: Request):
+    """Submit a RuntimeUnit lifecycle operation to the external Manager."""
+    _validate_identifier(runtime_unit_id, "runtime_unit_id")
     if action not in VALID_ACTIONS:
         _err(
             "Invalid manager action. Allowed: start, stop, restart",
             400,
         )
 
-    service = _get_manager_service(request)
     try:
-        operation = await service.operate(
-            bot_id,
-            cast(ManagerAction, action),
-        )
-    except UnknownBot as exc:
-        audit_log(
-            request.app.state.dashboard_db,
-            "manager.operation",
-            bot_id,
-            json.dumps({"status": "rejected", "message": str(exc), "action": action}, ensure_ascii=False),
-            ip=request.client.host if request.client else "",
-        )
-        _err(str(exc), 404)
-    except OperationConflict as exc:
-        operation_data = exc.operation.to_dict()
-        _audit_manager_operation(request, operation_data, 409)
-        return JSONResponse(
-            status_code=409,
-            content={
-                "ok": False,
-                "message": operation_data["message"],
-                "operation": operation_data,
-            },
-        )
-    except OperationFailed as exc:
-        operation_data = exc.operation.to_dict()
-        _audit_manager_operation(request, operation_data, exc.status_code)
-        _err(f"Manager operation failed: {operation_data['message']}", exc.status_code)
-    except Exception as exc:
-        message = str(exc) or type(exc).__name__
+        operation_data = await _get_manager_client(request).operate(runtime_unit_id, action)
+    except ManagerClientError as exc:
         audit_log(
             request.app.state.dashboard_db,
             f"manager.{action}",
-            bot_id,
-            json.dumps({"status": "failed", "message": message}, ensure_ascii=False),
+            runtime_unit_id,
+            json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
             ip=request.client.host if request.client else "",
         )
-        _err(f"Manager operation failed: {message}", 500)
+        if exc.payload.get("operation"):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"ok": False, "message": str(exc), "operation": exc.payload["operation"]},
+            )
+        _err(str(exc), exc.status_code)
 
-    operation_data = operation.to_dict()
-    _audit_manager_operation(request, operation_data, 200)
+    _audit_manager_operation(request, operation_data, 202)
     content = {"operation": operation_data}
     return _ok(content)
+
+
+@app.get("/api/manager/operations/{operation_id}", dependencies=[Depends(require_auth)])
+async def manager_operation(operation_id: str, request: Request):
+    """Reconnect to a submitted operation after navigation or disconnection."""
+    try:
+        operation = await _get_manager_client(request).get_operation(operation_id)
+    except ManagerClientError as exc:
+        _err(str(exc), exc.status_code)
+    return _ok({"operation": operation})
 
 
 # ── SSE endpoint ────────────────────────────────────────────────────────────────

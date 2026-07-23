@@ -10,7 +10,7 @@
 
 1. 准备 Linux 服务器、Docker 和 Docker Compose。
 2. 创建部署目录，下载 Release 附带的 `docker-compose.yml`。
-3. 创建 Docker 网络并启动 DicePP。
+3. 创建 Docker 网络并启动 Bot、Dashboard、Manager 三个标准服务。
 4. 初始化网页管理面板管理员密码。
 5. 配置 LLOneBot，让 QQ 机器人账号连接 DicePP。
 6. 在网页管理面板中确认机器人状态，并完成账号配置。
@@ -56,7 +56,7 @@ docker compose version
 ```bash
 mkdir -p ~/dicepp
 cd ~/dicepp
-mkdir -p config/bots data content dashboard/data
+mkdir -p config/bots data content dashboard/data manager/{state,packages,backups}
 ```
 
 从 [DicePP Releases](https://github.com/pear-studio/nonebot-dicepp/releases) 下载目标版本附带的 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
@@ -75,9 +75,39 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 ```
 
+### 标准三服务拓扑
+
+当前标准 `docker-compose.yml` 包含：
+
+| Service | 作用 | 宿主机端口 |
+|---|---|---|
+| `bot` | 承载一个可以包含多个 QQ 账号的 RuntimeUnit | 不映射；在 `dice-net` 暴露 `8080` |
+| `dashboard` | 用户登录、配置和操作界面 | `4090` |
+| `manager` | RuntimeUnit 生命周期、operation 和维护操作 | 不映射；只在内部网络暴露 `4091` |
+
+Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一文件。不要把 `4091` 映射到公网。
+
+只有 Manager 挂载 `/var/run/docker.sock`。它仅执行固定的状态、启动、停止、重启和日志操作，并且只接受带有匹配 DicePP managed、RuntimeUnit 和 deployment schema 标签的 Bot 容器。Dashboard 不挂载 Docker Socket，也不直接控制容器。
+
+目录所有权如下：
+
+```text
+~/dicepp/
+├─ config/            # DicePP 配置
+├─ data/              # 运行数据
+├─ content/           # 用户内容
+├─ dashboard/data/    # Dashboard 账号与会话
+└─ manager/
+   ├─ state/          # token、operation store、维护状态
+   ├─ packages/       # 后续版本下载缓存
+   └─ backups/        # 后续事务安全归档
+```
+
+Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。
+
 ## 无法拉取镜像时使用离线包
 
-如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 离线包。离线包包含 DicePP 的两个 Docker 镜像、对应版本的 `docker-compose.yml` 和常用文档：
+如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 离线包。离线包包含 DicePP 的两个 Docker 镜像、对应版本的三服务 `docker-compose.yml` 和常用文档。Manager 与 Dashboard 复用 Dashboard 镜像，因此不需要第三个镜像：
 
 ```text
 ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
@@ -288,6 +318,7 @@ DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 `docker compose up -d --pull never` 成功时会看到类似：
 
 ```text
+Container dicepp-manager    Started
 Container dicepp-dashboard  Started
 Container dicepp            Started
 ```
@@ -535,18 +566,11 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 
 ### 运行管理
 
-Linux Docker Compose 部署如需让网页管理面板直接管理 Bot 服务，需要在 `dashboard` service 中显式启用 Docker Compose runtime：
+标准 Compose 已默认启用独立 Manager。网页管理面板通过 Manager 查询 RuntimeUnit 状态、启动、停止、重启和读取日志；这些操作会作用于整个 Bot 容器，包括其中共享进程的所有 QQ 账号。
 
-```yaml
-environment:
-  - DICEPP_MANAGER_RUNTIME=docker-compose
-  - DICEPP_MANAGER_DOCKER_COMMAND=docker
-  - DICEPP_MANAGER_DOCKER_SERVICE=bot
-  - DICEPP_MANAGER_DOCKER_CWD=/你的/compose/工作目录
-  - DICEPP_MANAGER_DOCKER_TIMEOUT=30
-```
+旧版把 Docker Compose runtime 配在 Dashboard 中的方式不再受支持。升级旧部署时，保留现有 `config/`、`data/`、`content/` 和 `dashboard/data/`，创建 `manager/state`、`manager/packages`、`manager/backups`，然后使用当前 Release 附带的完整三服务 `docker-compose.yml`。不要把 Docker Socket 重新挂回 Dashboard。
 
-启用后，网页管理面板可以执行状态查询、启动、停止、重启和日志读取。它不会替你同步目标 Release 的 `docker-compose.yml` 拓扑；如果目标版本调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 compose。
+如果 Manager 不可用或容器标签、deployment schema 不匹配，Dashboard 会显示运行管理不受支持，不会退回到直接操作 Docker。Manager 不会替你同步目标 Release 的 Compose 拓扑；如果 Release 调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 Compose。
 
 ### 国内拉取镜像很慢
 
@@ -610,6 +634,15 @@ docker ps
 ```
 
 如果还是不行，退出 SSH 后重新登录再试。
+
+如果宿主机命令正常，但 Dashboard 显示 Manager 无法访问 Docker，请检查：
+
+```bash
+docker compose logs manager
+docker compose config
+```
+
+标准 Compose 只把 `/var/run/docker.sock` 挂载给 `manager`。不要通过把 socket 挂到 Dashboard 来绕过错误；应确认 Manager 容器在运行，并检查 socket 挂载和 Bot 的三个 `io.dicepp.*` 标签。
 
 ### dice-net 已存在
 
