@@ -27,7 +27,10 @@ from typing import Any, Callable, Protocol
 
 from dicepp_meta import get_version
 
-from .upgrade import _atomic_json, _read_json_object, _validate_process_identity
+from ._file_utils import _atomic_json, _read_json_object
+from .upgrade import _validate_process_identity
+
+_QUERY_IMAGE_BUFFER_SIZE = 32768
 
 
 class UpdateGuardError(RuntimeError):
@@ -760,7 +763,7 @@ def _identity_from_windows_handle(
         ctypes.byref(user),
     ):
         return None
-    size = ctypes.c_ulong(32768)
+    size = ctypes.c_ulong(_QUERY_IMAGE_BUFFER_SIZE)
     buffer = ctypes.create_unicode_buffer(size.value)
     if not kernel32.QueryFullProcessImageNameW(
         handle, 0, buffer, ctypes.byref(size)

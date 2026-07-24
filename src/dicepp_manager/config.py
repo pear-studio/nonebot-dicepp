@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dicepp_data import InstanceLayout
+from .deployment import MANAGER_DEFAULT_PORT
 from .models import validate_runtime_unit_id
 
 
@@ -36,7 +37,7 @@ def _bool_env(name: str, default: bool) -> bool:
 class ManagerSettings:
     layout: InstanceLayout
     host: str = "127.0.0.1"
-    port: int = 4091
+    port: int = MANAGER_DEFAULT_PORT
     runtime: str = "unavailable"
     runtime_unit_id: str = "dicepp-runtime"
     process_command: str = ""
@@ -57,7 +58,7 @@ class ManagerSettings:
         return cls(
             layout=layout,
             host=os.environ.get("DICEPP_MANAGER_HOST", "127.0.0.1"),
-            port=int(os.environ.get("DICEPP_MANAGER_PORT", "4091")),
+            port=int(os.environ.get("DICEPP_MANAGER_PORT", str(MANAGER_DEFAULT_PORT))),
             runtime=os.environ.get("DICEPP_MANAGER_RUNTIME", "unavailable").strip().lower(),
             runtime_unit_id=os.environ.get("DICEPP_MANAGER_RUNTIME_UNIT_ID", "dicepp-runtime"),
             process_command=os.environ.get("DICEPP_MANAGER_PROCESS_COMMAND", ""),
@@ -86,7 +87,7 @@ class ManagerClientSettings:
     @classmethod
     def from_layout(cls, layout: InstanceLayout) -> "ManagerClientSettings":
         return cls(
-            base_url=os.environ.get("DICEPP_MANAGER_URL", "http://127.0.0.1:4091").rstrip("/"),
+            base_url=os.environ.get("DICEPP_MANAGER_URL", f"http://127.0.0.1:{MANAGER_DEFAULT_PORT}").rstrip("/"),
             token_path=Path(os.environ.get("DICEPP_MANAGER_TOKEN_FILE", str(layout.manager_token))),
             timeout=_float_env("DICEPP_MANAGER_CLIENT_TIMEOUT", 10.0),
         )

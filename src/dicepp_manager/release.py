@@ -30,6 +30,7 @@ from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
 RELEASE_CONTRACT_VERSION = 1
 RELEASE_MANIFEST_NAME = "dicepp-release.json"
 DEFAULT_GITHUB_API = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
+_GITHUB_API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON_BYTES = 2 * 1024 * 1024
 MAX_LINUX_BUNDLE_BYTES = 16 * 1024**3
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -860,7 +861,7 @@ class ReleaseManager:
             headers={
                 "Accept": "application/vnd.github+json",
                 "User-Agent": "DicePP-Manager",
-                "X-GitHub-Api-Version": "2022-11-28",
+                "X-GitHub-Api-Version": _GITHUB_API_VERSION,
             },
         ) as response:
             if response.status != 200:

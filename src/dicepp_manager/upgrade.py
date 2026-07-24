@@ -31,7 +31,8 @@ from packaging.version import Version
 
 from .archive import ArchiveError, apply_archive, create_archive, estimate_archive
 from .archive_coordinator import ArchiveCoordinator
-from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
+from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
+from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
 from .release import (
     MAX_LINUX_BUNDLE_BYTES,
@@ -428,7 +429,7 @@ class WindowsVelopackUpgradeAdapter:
         version_loader: Callable[[], str] = get_version,
         bundled_guard_path: Path | None = None,
         restart_command: list[str] | None = None,
-        health_url: str = "http://127.0.0.1:4091/v1/health",
+        health_url: str = f"http://127.0.0.1:{MANAGER_DEFAULT_PORT}/v1/health",
         auth_token_path: Path | None = None,
         manager_exit_timeout: float = 60.0,
         health_timeout: float = 120.0,
@@ -2262,19 +2263,6 @@ def _identity_belongs_to_instance(
         return False
 
 
-def _atomic_copy(source: Path, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
-    try:
-        with source.open("rb") as input_handle, temporary.open("xb") as output:
-            shutil.copyfileobj(input_handle, output, 1024 * 1024)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def _nupkg_version(path: Path) -> str | None:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -2300,25 +2288,8 @@ def _nupkg_version(path: Path) -> str | None:
     return None
 
 
-def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        with temp.open("x", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-    finally:
-        temp.unlink(missing_ok=True)
 
 
-def _read_json_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError("JSON root must be an object")
-    return value
 
 
 def _sha256_file(path: Path) -> str:

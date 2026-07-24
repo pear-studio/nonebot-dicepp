@@ -19,7 +19,6 @@ from .archive import (
     ArchiveInvalidError,
     ArchiveNameError,
     ArchiveNotFoundError,
-    ArchiveRestorePlanBlockedError,
     ArchiveRestorePlanVerificationError,
 )
 from .archive_coordinator import ArchiveCoordinator, ArchiveTransactionError

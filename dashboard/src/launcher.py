@@ -309,12 +309,12 @@ def sync_version_owned_config(program_dir: Path, instance_root: Path) -> None:
         _ensure_safe_seed_parent(instance_root, relative.parent)
         if _existing_safe_config(destination):
             continue
-        descriptor, temporary_name = tempfile.mkstemp(
+        descriptor, temporary_str = tempfile.mkstemp(
             prefix=f".{destination.name}.",
             suffix=".tmp",
             dir=destination.parent,
         )
-        temporary = Path(temporary_name)
+        temporary = Path(temporary_str)
         try:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(source.read_bytes())

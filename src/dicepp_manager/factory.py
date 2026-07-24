@@ -10,7 +10,6 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from uuid import uuid4
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -19,9 +18,11 @@ from packaging.version import InvalidVersion, Version
 
 from .archive_coordinator import ArchiveCoordinator
 from .config import ManagerSettings
+from .deployment import DASHBOARD_DEFAULT_PORT
 from .discovery import RuntimeUnitDiscovery
 from .docker_runtime import DockerRuntimeAdapter, DockerSocketRuntimeAdapter
 from .docker_upgrade import DockerSocketUpgradeExecutor
+from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
 from .process_runtime import ProcessRuntimeAdapter
 from .release import ReleaseManager
 from .upgrade import (
@@ -30,8 +31,6 @@ from .upgrade import (
     UpgradeCompatibilityError,
     UpgradeCoordinator,
     WindowsVelopackUpgradeAdapter,
-    _atomic_json,
-    _read_json_object,
     _validate_process_identity,
 )
 from .update_guard import (
@@ -212,16 +211,7 @@ def _prepare_stable_update_guard(instance_root: Path) -> None:
         # The stable executable may be running and owns this protocol version.
         # Refresh only after its transaction reaches a terminal marker.
         return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
-    try:
-        with source.open("rb") as input_handle, temporary.open("xb") as output:
-            shutil.copyfileobj(input_handle, output, 1024 * 1024)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    _atomic_copy(source, target)
 
 
 def _has_active_update_guard_transaction(instance_root: Path) -> bool:
@@ -1051,7 +1041,7 @@ def cleanup_terminal_update_guard_transactions(
 def _dashboard_health_payload() -> tuple[str, int | None, dict]:
     url = os.environ.get(
         "DICEPP_DASHBOARD_HEALTH_URL",
-        "http://127.0.0.1:4090/api/health",
+        f"http://127.0.0.1:{DASHBOARD_DEFAULT_PORT}/api/health",
     )
     request = urllib.request.Request(url, method="GET")
     try:

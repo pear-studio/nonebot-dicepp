@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -15,7 +14,6 @@ from dicepp_data import DATA_CATALOG, InstanceLayout
 
 from .archive import (
     ArchiveError,
-    ArchiveInvalidError,
     apply_archive,
     create_archive,
     delete_archive,
