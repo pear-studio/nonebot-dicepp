@@ -111,6 +111,9 @@ uv run dicepp-shell serve dashboard-dev --dashboard http://127.0.0.1:4090
 
 命令中通过 `self.bot.db` 使用仓储 API。
 
+涉及 `InstanceLayout`、DataAsset、Manager、归档恢复或兼容升级的跨进程约束，先读
+[Manager、归档恢复与升级架构](manager-architecture.md)。
+
 涉及 schema 或持久化格式变化时：
 
 1. 新增迁移脚本。

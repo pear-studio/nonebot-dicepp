@@ -4,6 +4,20 @@ DicePP Manager 以 GitHub Release 为版本事实来源。每个 Release 必须�
 `dicepp-release.json`；Manager 不根据文件名猜测版本或平台，也不解析 Release
 正文来决定能否升级。
 
+## 优先使用 Manager，何时手动
+
+对于当前的标准三服务 Linux 部署或受支持的 Windows 安装，Dashboard 的“版本更新”页是升级**兼容的最新版本**的首选入口。Manager 负责校验、pre-upgrade 归档、安装、本地健康检查和失败回退；用户只需确认安装。
+
+以下情形必须使用手动部署或恢复流程：
+
+- 第一次安装、旧式或不受支持的部署迁入标准拓扑；
+- 指定安装较旧版本、人工回退或灾难恢复；
+- 目标 Release 包含 Manager 自身升级；
+- Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
+- 发布被标记为不兼容，或 Manager 的校验、空间、旧版本保留或健康门槛未通过。
+
+手工操作前先创建并验证归档。Linux 请按 [Linux 部署](./linux.md#手工更新) 同步完整三服务 Compose 并更新或回退镜像；Windows 请按 [Windows 部署](./windows.md#版本更新与旧版迁移) 使用目标发布包或已验证归档恢复。不要手工复制 Windows `current/`，也不要未经对比直接用 Release 内的 Compose 覆盖现有实例。
+
 ## 默认行为
 
 - Manager 分页读取 GitHub Release 列表。`stable` 频道只比较非 draft、

@@ -26,7 +26,7 @@ version-release (skill)               version-deploy (skill)
 | `pyproject.toml` `[project].version` | 版本号唯一真相源 |
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
 | `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes）；作为 GitHub Release body 提供 |
-| `docker-compose.yml` | 部署入口；包含 bot 与独立 Dashboard service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
+| `docker-compose.yml` | 部署入口；包含 bot、dashboard 与 manager 三个标准 service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
 | `docs/linux.md` | Linux Docker 部署说明；打入 Linux 发布包，也可从 tag 内容读取 |
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR、Windows Velopack、Linux 发布包和 machine contract 构建，并创建 GitHub Release |
@@ -57,6 +57,8 @@ version-release (skill)               version-deploy (skill)
 
 同一份 `docker-compose.yml` 同时包含 `image:` 和 `build:`。生产部署只使用发布镜像；源码构建仅用于开发或 GHCR 长期无法拉取时的应急验证。
 
+对已处于标准拓扑、要升级兼容最新 Release 的用户，首选 Dashboard 中的 Manager 更新流程。下表和 `version-deploy` 处理的是首次部署、旧部署迁入、指定版本/回退、Manager 自身升级或 Compose/deployment schema 迁移等手工兜底情形。
+
 | 场景 | 变量 | 行为 |
 |------|------|------|
 | 生产部署 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
@@ -66,7 +68,7 @@ version-release (skill)               version-deploy (skill)
 | 临时替换 Dashboard registry | `DASHBOARD_IMAGE=registry.example.com/ns/dicepp-dashboard:v3.0.0` | `docker compose pull` → `up -d` |
 | 开发/应急源码构建 | 不设镜像变量 | `docker compose build` → `up -d` |
 
-生产更新前应先确认当前 `docker-compose.yml` 是否与目标 Release 的部署拓扑一致。新增 service、环境变量、volume 或端口映射时，必须先同步 Release 附带的 `docker-compose.yml` 或按 `docs/linux.md` 的部署说明合并标准块，再执行 `pull` / `up -d`。
+手工 Docker 更新前应先确认当前 `docker-compose.yml` 是否与目标 Release 的部署拓扑一致。新增 service、环境变量、volume 或端口映射时，必须先同步 Release 附带的完整三服务 `docker-compose.yml` 或按 `docs/linux.md` 的部署说明合并标准块，再执行 `pull` / `up -d`。Manager 不会自动改写这份文件。
 
 ## Release 流程
 
@@ -91,7 +93,7 @@ version-release (skill)               version-deploy (skill)
 4. `git tag vX.Y.Z` → `git push origin master --tags`
 5. 等待 GHA 完成
 
-### 生产部署 (version-deploy 技能)
+### 手工部署与回退（version-deploy 技能）
 
 1. 读取目标版本 `vX.Y.Z`
 2. 通过 `gh release view vX.Y.Z --json body`、Release asset 或 `git show` 读取风险元数据，作为人工部署和回滚前的风险检查材料
@@ -102,8 +104,10 @@ version-release (skill)               version-deploy (skill)
 
 ## 用户操作速查
 
+兼容最新版本的日常升级先使用 Dashboard 的 Manager 更新页。下面命令仅用于已经确认需要手工操作的场景；执行前创建并验证归档。
+
 ```bash
-# 生产环境（镜像部署）
+# 手工兜底：生产环境（镜像部署）
 DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker compose up -d  # 更新

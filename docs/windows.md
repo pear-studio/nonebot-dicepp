@@ -189,11 +189,12 @@ manager/state/
 
 ## 版本更新与旧版迁移
 
-Dashboard 的“版本更新”页现在可以按 stable 或 opt-in prerelease 频道检查
-GitHub Release，并把匹配 win64 的 Portable、Setup 或 Velopack package 下载到
-`manager/packages/`。下载会校验 Release machine contract、asset digest 和
-SHA-256。检查和下载不会改变当前版本；只有已校验且兼容的版本才会显示安装按钮，
-安装仍需再次确认。
+Dashboard 的“版本更新”页可以按 stable 或 opt-in prerelease 频道检查 GitHub
+Release，并下载与当前 win64 架构、频道相符的自动升级材料（Velopack full package
+和 release feed）到 `manager/packages/`。下载会校验 Release machine contract、
+asset digest 和 SHA-256。Portable 和 Setup 是首次安装或手工迁移入口，不是兼容后续
+自动更新的替代路径。检查和下载不会改变当前版本；只有已校验且兼容的版本才会显示
+安装按钮，安装仍需再次确认。
 
 确认后，Manager 会先创建并验证常规 pre-upgrade 归档、保留当前程序，再让
 Velopack 切换版本化程序目录。版本目录外的 `DicePP-UpdateGuard.exe` 观察本次
@@ -224,14 +225,16 @@ Portable 和 Setup 只是两个独立的首次安装入口，Setup 不依赖 Por
 `config/`、`data/`、`content/`、`dashboard/data/`、`manager/` 始终留在稳定
 DicePP 根目录，不跟随 `current/` 切换。发布包缺少 Velopack feed/full package
 或 UpdateGuard、需要升级 Manager 本身，或者当前目录不是受支持的安装布局时，
-自动安装会在修改程序和数据前拒绝；按提示下载新 Portable/Setup 并执行手工迁移。
+自动安装会在修改程序和数据前拒绝。
+
+以下情形必须手工处理：第一次安装或旧目录迁入、指定安装较旧版本、人工回退或灾难恢复、Manager 自身升级，以及任何安装布局或发布元数据不兼容。手工操作前先创建并验证归档；退出旧的 `DicePP.exe` 后，使用目标 Release 的官方 Portable 或 Setup 完成程序/部署迁移，再启动目标版本的 `DicePP.exe` 并按需从已验证归档恢复。不要手工复制或删除 `current/`，也不要手动启动 `DicePP-Runtime.exe`。
 
 完整配置、安装门槛和回退边界见 [updates.md](./updates.md)。
 
 从不具备精确归档能力的旧目录迁移时按手动流程处理：
 
 1. 在旧版网页管理面板中创建存档。
-2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `data/backups/`。
+2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `manager/backups/`。
 3. 启动新目录的 `DicePP.exe`，进入网页管理面板后从存档恢复。
 4. `dashboard/data` 可以按需复制；如果不复制，需要重新初始化管理员密码。
 5. 如果旧目录里有自定义 `content/` 内容，请手动复制到新目录。

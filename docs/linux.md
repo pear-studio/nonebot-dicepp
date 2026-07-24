@@ -561,8 +561,15 @@ driver/external/IPAM 等差异都会要求手工迁移。加载后的镜像 ID �
 
 ### 手工更新
 
-下面的命令保留给首次部署、需要手工迁移 Compose 拓扑，或 Dashboard 明确提示
-当前 Release 不可自动安装的情况。
+下面的命令是手动兜底，不是兼容最新版本的首选路径。它们用于：
+
+- 第一次安装、旧式部署迁入当前三服务拓扑；
+- 指定安装较旧版本、人工回退或灾难恢复；
+- Release 需要升级 Manager；
+- Compose、挂载、网络、RuntimeUnit 或 deployment schema 需要迁移；
+- Dashboard 明确提示当前 Release 不能自动安装。
+
+每次手工更新或回退前，都先在 Dashboard 创建并验证归档。涉及 Manager 或 Compose 变更时，先按目标 Release 说明同步完整三服务 Compose；不要只更新 Bot/Dashboard，也不要移除 Manager。
 
 更新到最新镜像：
 

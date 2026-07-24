@@ -143,6 +143,34 @@ content/characters/mychar/
 
 这些命令只对 `master` 或 `admin` 有效。
 
+## 定时主动分享
+
+定时主动分享默认关闭。启用后，角色会在早安、晚安或指定时间点主动生成消息；它不是由某个事件槽位直接触发的旧机制。
+
+在 `config/global.json` 的 `persona_ai` 段中配置。例如：
+
+```json
+{
+  "persona_ai": {
+    "proactive_share_schedule_enabled": true,
+    "proactive_share_schedule_morning_enabled": true,
+    "proactive_share_schedule_evening_enabled": false,
+    "proactive_share_schedule_times": ["14:00", "18:30"],
+    "proactive_share_schedule_jitter_minutes": 15,
+    "proactive_always_send_users": ["你的QQ号"],
+    "proactive_always_send_groups": ["群号"]
+  }
+}
+```
+
+- 总开关打开后，还要至少启用早安、晚安或填入一个 `HH:MM` 时间点；空日程不会发送消息。
+- 早安和晚安根据角色卡的活动日开始/结束时间计算；角色卡没有这些时间时会跳过对应问候。
+- 每个时间点会在设定时间的正负 `proactive_share_schedule_jitter_minutes` 分钟内随机触发。设为 `0` 可关闭随机偏移，允许范围为 `0` 到 `120`。
+- 定时分享只发送给 `proactive_always_send_users` 和 `proactive_always_send_groups` 中明确列出的目标；两个列表都为空时不会发送。重复的同一私聊或群聊只会收到一次。
+- 主动分享与该私聊或群聊中的正常对话串行执行，不计入普通用户的 `daily_limit` 配额。若会话正忙或生成失败，当前时间窗口内可以重试。
+
+需要立即停止时使用 `.ai admin pause`；确认后用 `.ai admin resume` 恢复。修改配置后重启或执行 `.reload` 使新设置生效。
+
 ## 常见问题
 
 ### 启动日志没有 persona.init

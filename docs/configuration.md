@@ -18,7 +18,7 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 | `data/` | 运行时数据 | 不提交 |
 | `dashboard/data/` | Dashboard 账号和会话数据 | 不提交 |
 | `manager/state/` | Manager token、operation 和维护状态 | 不提交 |
-| `manager/packages/` | 已下载的版本包缓存（后续更新功能使用） | 不提交 |
+| `manager/packages/` | Manager 已下载并校验的更新包缓存 | 不提交 |
 | `manager/backups/` | 用户归档与事务安全归档 | 不提交 |
 | `templates/characters/default/` | 随版本发布的只读角色模板，供未来 Dashboard 新建角色使用 | 可以 |
 
@@ -88,6 +88,36 @@ API Key 放在 `config/user.json`：
 ```
 
 不要把 `user.json` 发给别人，也不要提交到 Git。
+
+## Persona 定时主动分享
+
+定时主动分享的字段位于 `config/global.json` 的 `persona_ai` 段，默认全部关闭。它只向明确列入白名单的私聊或群聊发送，不会按好感度或群活跃度自动扩大接收范围。
+
+```json
+{
+  "persona_ai": {
+    "proactive_share_schedule_enabled": true,
+    "proactive_share_schedule_morning_enabled": true,
+    "proactive_share_schedule_evening_enabled": false,
+    "proactive_share_schedule_times": ["14:00", "18:30"],
+    "proactive_share_schedule_jitter_minutes": 15,
+    "proactive_always_send_users": ["123456"],
+    "proactive_always_send_groups": ["123456789"]
+  }
+}
+```
+
+| 字段 | 含义 |
+|------|------|
+| `proactive_share_schedule_enabled` | 日程总开关；必须为 `true` 才会发送 |
+| `proactive_share_schedule_morning_enabled` | 在角色卡定义的活动日开始后发送早安 |
+| `proactive_share_schedule_evening_enabled` | 在角色卡定义的活动日结束前发送晚安 |
+| `proactive_share_schedule_times` | 自定义日程，使用 `HH:MM`，例如 `"18:30"` |
+| `proactive_share_schedule_jitter_minutes` | 每个时间点的正负随机偏移分钟数，范围 `0`–`120` |
+| `proactive_always_send_users` | 接收定时主动消息的私聊 QQ 号列表 |
+| `proactive_always_send_groups` | 接收定时主动消息的群号列表 |
+
+总开关打开但没有任何时间点，或接收者列表都为空时，不会发送消息。早安/晚安需要角色卡具有活动日开始/结束时间；缺失时会跳过。管理员可用 `.ai admin pause` 和 `.ai admin resume` 暂停或恢复主动消息。完整使用说明见 [Persona AI](./persona.md)。
 
 ## 常用环境变量
 
@@ -168,4 +198,4 @@ docker exec dicepp cat /app/config/user.json
 
 Bot、Dashboard 和 Manager 通过同一份实例布局解析这些目录。除兼容旧部署的 `DICEPP_DATA_DIR` 外，建议让三个目录保持在同一个实例根目录，便于归档和跨平台迁移。普通归档只保存配置和 Catalog 管理的 `data/`；完整归档才包含可能很大的 `content/`。
 
-3.0 尚未提供旧 `Data` 目录的自动迁移。若你手上仍有旧版本 `Data` 资产，请先整体备份，再根据当前 `config/`、`content/`、`data/` 文档手工整理到新目录结构；不要假设旧 Excel 文件会被自动兼容或自动导入。
+当前不提供旧 `Data` 目录的自动迁移。若你手上仍有旧版本 `Data` 资产，请先整体备份，再根据当前 `config/`、`content/`、`data/` 文档手工整理到新目录结构；不要假设旧 Excel 文件会被自动兼容或自动导入。
