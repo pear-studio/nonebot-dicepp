@@ -69,12 +69,31 @@ def dashboard_exe_url(tmp_path: Path) -> str:
 
     port = find_free_port()
     base_url = f"http://127.0.0.1:{port}"
+    manager_port = find_free_port()
     env = os.environ.copy()
+    for key in (
+        "DICEPP_MANAGER_HOST",
+        "DICEPP_MANAGER_PORT",
+        "DICEPP_MANAGER_URL",
+        "DICEPP_MANAGER_TOKEN_FILE",
+        "DICEPP_MANAGER_RUNTIME",
+        "DICEPP_MANAGER_PROCESS_COMMAND",
+        "DICEPP_MANAGER_PROCESS_CWD",
+        "DICEPP_MANAGER_PROCESS_STOP_TIMEOUT",
+        "DICEPP_MANAGER_RELEASE_SCHEDULER",
+    ):
+        env.pop(key, None)
     env["DICEPP_PROJECT_ROOT"] = str(project_root)
     env["DASHBOARD_HOST"] = "127.0.0.1"
     env["DASHBOARD_PORT"] = str(port)
     env["DICEPP_DASHBOARD_OPEN_BROWSER"] = "0"
+    env["DICEPP_MANAGER_HOST"] = "127.0.0.1"
+    env["DICEPP_MANAGER_PORT"] = str(manager_port)
+    env["DICEPP_MANAGER_URL"] = f"http://127.0.0.1:{manager_port}"
     env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
+    # Package smoke must stay offline; Manager itself still starts and owns
+    # the config write, while the unavailable runtime prevents Bot startup.
+    env["DICEPP_MANAGER_RELEASE_SCHEDULER"] = "0"
 
     log_path = tmp_path / "DicePP.log"
     with log_path.open("w", encoding="utf-8") as log_file:
@@ -95,18 +114,32 @@ def dashboard_exe_url(tmp_path: Path) -> str:
                 f"{log_path.read_text(encoding='utf-8', errors='replace')}"
             )
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                warnings.warn(
-                    "Packaged Dashboard server 等待 10 秒后仍未退出，"
-                    "将强制终止进程。",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                proc.kill()
-                proc.wait()
+            _stop_packaged_process_tree(proc)
+
+
+def _stop_packaged_process_tree(proc: subprocess.Popen[object]) -> None:
+    """Terminate the onefile parent and extracted child before the next test."""
+    # PyInstaller onefile can leave the extracted child alive when only its
+    # bootstrap parent is terminated.  Kill the verified test-owned process
+    # tree in one operation so its Dashboard and Manager ports are released.
+    result = subprocess.run(
+        ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        warnings.warn(
+            "Packaged Dashboard 进程树等待 10 秒后仍未退出："
+            f"{result.stderr.strip() or result.stdout.strip()}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        proc.kill()
+        proc.wait()
 
 
 def test_windows_dashboard_exe_shows_setup_validation(dashboard_exe_url: str) -> None:
@@ -117,5 +150,57 @@ def test_windows_dashboard_exe_shows_setup_validation(dashboard_exe_url: str) ->
 
         try:
             assert_setup_form_validation(page, dashboard_exe_url)
+        finally:
+            browser.close()
+
+
+def test_windows_dashboard_exe_validates_update_config_from_frozen_schema(
+    dashboard_exe_url: str,
+) -> None:
+    """The packaged onefile accepts valid update config and rejects invalid input."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            page.goto(f"{dashboard_exe_url}/dashboard")
+            page.wait_for_selector('[data-testid="setup-form"]', timeout=10000)
+            page.locator("#setup-password").fill("windows_package_password")
+            page.locator("#setup-confirm").fill("windows_package_password")
+            page.get_by_role("button", name="设置密码并初始化").click()
+            # 会话 Cookie 是 HttpOnly，不能从 document.cookie 读取；通过随请求
+            # 自动携带 Cookie 的认证状态接口确认初始化已经完成。
+            page.wait_for_function(
+                """async () => {
+                    const response = await fetch('/api/auth/status');
+                    return (await response.json()).authenticated === true;
+                }"""
+            )
+
+            valid = page.evaluate(
+                """async () => {
+                    const response = await fetch('/api/config/user/save', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({update: {check_interval_hours: 12.0}}),
+                    });
+                    return {status: response.status, body: await response.json()};
+                }"""
+            )
+            invalid = page.evaluate(
+                """async () => {
+                    const response = await fetch('/api/config/user/save', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({update: {cache_versions: true}}),
+                    });
+                    return {status: response.status, body: await response.json()};
+                }"""
+            )
+
+            assert valid["status"] == 200
+            assert valid["body"]["ok"] is True
+            assert invalid["status"] == 422
+            assert invalid["body"]["ok"] is False
         finally:
             browser.close()

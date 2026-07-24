@@ -12,6 +12,7 @@ import pytest
 import dicepp_manager.archive as archive_module
 from dicepp_data import InstanceLayout
 from dicepp_manager.archive import (
+    ArchiveError,
     MAX_MANIFEST_BYTES,
     apply_archive,
     create_archive,
@@ -26,6 +27,7 @@ from dicepp_manager.archive_coordinator import (
     ArchiveCoordinator,
     ArchiveTransactionError,
 )
+from dicepp_manager.maintenance import MaintenanceConflict
 from dicepp_manager.models import RuntimeLogs, RuntimeUnit, RuntimeUnitStatus
 from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
@@ -149,6 +151,146 @@ def _rewrite_payload(path: Path, arcname: str, payload: bytes) -> None:
         target.writestr("manifest.json", json.dumps(manifest))
 
 
+def _create_instance_database(path: Path, *, values: list[str] | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
+            [("target_name", "instance"), ("current_version", "1")],
+        )
+        connection.execute("CREATE TABLE entries (value TEXT PRIMARY KEY)")
+        connection.executemany(
+            "INSERT INTO entries(value) VALUES (?)",
+            [(value,) for value in values or []],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _read_archive_sqlite_values(path: Path, arcname: str) -> list[str]:
+    with zipfile.ZipFile(path) as archive:
+        payload = archive.read(arcname)
+    extracted = path.with_suffix(".sqlite-check.db")
+    extracted.write_bytes(payload)
+    connection = sqlite3.connect(extracted)
+    try:
+        values = [row[0] for row in connection.execute("SELECT value FROM entries ORDER BY value")]
+    finally:
+        connection.close()
+    try:
+        return values
+    finally:
+        # A closed SQLite connection is required on Windows before unlinking.
+        extracted.with_name(f"{extracted.name}-wal").unlink(missing_ok=True)
+        extracted.with_name(f"{extracted.name}-shm").unlink(missing_ok=True)
+        extracted.unlink(missing_ok=True)
+
+
+def test_create_archive_checkpoints_managed_sqlite_wal_before_snapshot(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    database = layout.data_root / "dicepp.db"
+    _create_instance_database(database, values=["base"])
+
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower() == "wal"
+        connection.execute("INSERT INTO entries(value) VALUES ('wal-committed')")
+        connection.commit()
+        assert Path(f"{database}-wal").exists()
+
+        summary, _manifest = create_archive(layout=layout)
+    finally:
+        connection.close()
+
+    archive_path = export_archive_path(summary["filename"], layout=layout)
+    assert _read_archive_sqlite_values(archive_path, "data/dicepp.db") == [
+        "base",
+        "wal-committed",
+    ]
+
+
+def test_sqlite_checkpoint_failure_prevents_archive_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    _create_instance_database(layout.data_root / "dicepp.db", values=["kept"])
+
+    class BrokenConnection:
+        def execute(self, _statement: str):
+            raise sqlite3.OperationalError("checkpoint is locked")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(archive_module.sqlite3, "connect", lambda *_args, **_kwargs: BrokenConnection())
+
+    with pytest.raises(ArchiveError, match="SQLite checkpoint failed"):
+        create_archive(layout=layout)
+
+    assert not list(layout.manager_backups_dir.glob("*.zip"))
+    assert not list(layout.manager_backups_dir.glob("*.inprogress"))
+
+
+def test_new_archive_fsyncs_file_before_publishing_target(tmp_path: Path, monkeypatch) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    _write(layout.config_user, '{"value": "saved"}')
+    events: list[str] = []
+    real_replace = archive_module.os.replace
+    real_verify = archive_module.verify_archive_path
+
+    def record_file_fsync(path: Path) -> None:
+        events.append(f"file:{path.suffix}")
+
+    def record_verify(*args, **kwargs):
+        events.append("verify")
+        return real_verify(*args, **kwargs)
+
+    def record_replace(source, target) -> None:
+        events.append("replace")
+        real_replace(source, target)
+
+    monkeypatch.setattr(archive_module, "_fsync_file", record_file_fsync, raising=False)
+    monkeypatch.setattr(archive_module, "_fsync_directory", lambda _path: events.append("directory"))
+    monkeypatch.setattr(archive_module, "verify_archive_path", record_verify)
+    monkeypatch.setattr(archive_module.os, "replace", record_replace)
+
+    summary, _manifest = create_archive(layout=layout)
+
+    assert summary["filename"]
+    assert events.index("file:.inprogress") < events.index("verify") < events.index("replace")
+    assert events.index("replace") < events.index("directory")
+
+
+def test_archive_fails_when_an_enumerated_payload_cannot_be_opened_safely(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    _write(layout.config_user, '{"value": "must-not-disappear"}')
+    original_open = archive_module._open_regular_payload
+
+    def missing_user_config(path: Path):
+        if path == layout.config_user:
+            return None
+        return original_open(path)
+
+    monkeypatch.setattr(archive_module, "_open_regular_payload", missing_user_config)
+
+    with pytest.raises(ArchiveError, match="cannot be read safely"):
+        create_archive(layout=layout)
+
+    assert not list(layout.manager_backups_dir.glob("*.zip"))
+    assert not list(layout.manager_backups_dir.glob("*.inprogress"))
+
+
 @pytest.mark.asyncio
 async def test_regular_restore_is_exact_but_never_touches_content(tmp_path: Path) -> None:
     layout, runtime, _service, coordinator = _coordinator(tmp_path)
@@ -213,8 +355,16 @@ async def test_write_failure_automatically_restores_pre_restore_and_health(
     fail["enabled"] = True
 
     operation = coordinator.new_operation("archive.restore")
-    with pytest.raises(ArchiveTransactionError) as raised:
-        await coordinator.restore(operation, filename=archive["filename"])
+    reservation = service.reserve_maintenance()
+    try:
+        with pytest.raises(ArchiveTransactionError) as raised:
+            await coordinator.restore(
+                operation,
+                filename=archive["filename"],
+                maintenance_lease=reservation,
+            )
+    finally:
+        reservation.release()
 
     assert json.loads(layout.config_user.read_text()) == {"value": "before"}
     assert raised.value.detail["rolled_back"] is True
@@ -324,6 +474,72 @@ async def test_restart_recovery_cleans_inprogress_create_and_restarts_runtime(
     assert not inprogress.exists()
     assert runtime.state == "running"
     assert service.store.get(operation.operation_id).status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_update_guard_recovery_can_restart_only_with_explicit_bypass(
+    tmp_path: Path,
+) -> None:
+    layout, runtime, service, coordinator = _coordinator(tmp_path)
+    runtime.state = "stopped"
+    operation = coordinator.new_operation("archive.create")
+    service.store.write_journal(
+        "guarded-crash-create",
+        kind="archive_create",
+        phase="stream",
+        status="interrupted",
+        operation_id=operation.operation_id,
+        detail={"profile": "regular", "original_running": ["dicepp-runtime"]},
+    )
+    service.set_startup_maintenance_gate(True)
+
+    recovered = await coordinator.recover(allow_startup_recovery=True)
+
+    assert recovered == [
+        {"transaction_id": "guarded-crash-create", "action": "create_cleaned"}
+    ]
+    assert runtime.state == "running"
+    assert service.store.get_journal("guarded-crash-create")["status"] == "rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_transferred_maintenance_lease_outlives_archive_commit_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout, _runtime, service, coordinator = _coordinator(tmp_path)
+    observed: list[str] = []
+    original_write_journal = service.store.write_journal
+
+    def write_journal(transaction_id: str, **kwargs) -> None:
+        if kwargs.get("kind") == "archive_create" and kwargs.get("phase") == "committed":
+            try:
+                contender = service.reserve_maintenance()
+            except MaintenanceConflict:
+                observed.append("held")
+            else:
+                contender.release()
+                observed.append("released")
+        original_write_journal(transaction_id, **kwargs)
+
+    monkeypatch.setattr(service.store, "write_journal", write_journal)
+    reservation = service.reserve_maintenance()
+    operation = coordinator.new_operation("archive.create")
+    try:
+        await coordinator.create(
+            operation,
+            description="reserved",
+            profile="regular",
+            maintenance_lease=reservation,
+        )
+        assert observed == ["held"]
+        with pytest.raises(MaintenanceConflict):
+            service.reserve_maintenance()
+    finally:
+        reservation.release()
+
+    with service.maintenance():
+        pass
 
 
 @pytest.mark.asyncio

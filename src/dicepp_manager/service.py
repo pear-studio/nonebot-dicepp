@@ -57,6 +57,34 @@ class MaintenanceSession:
         return await self._service.runtime_adapter.operate(runtime_unit_id, action)
 
 
+class MaintenanceReservation:
+    """A non-reentrant maintenance lease that can cross an async task hand-off."""
+
+    def __init__(
+        self,
+        service: "ManagerService",
+        lease: AbstractContextManager[None],
+    ) -> None:
+        self._service = service
+        self._lease = lease
+        self._released = False
+        self.session = MaintenanceSession(service)
+
+    def __enter__(self) -> MaintenanceSession:
+        return self.session
+
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
+        self.release()
+
+    def release(self) -> None:
+        with self._service._lock:
+            if self._released:
+                return
+            self._lease.__exit__(None, None, None)
+            self._released = True
+            self._service._maintenance_active = False
+
+
 class ManagerService:
     def __init__(
         self,
@@ -251,20 +279,46 @@ class ManagerService:
     async def runtime_logs(self, lines: int) -> dict:
         return (await self.runtime_adapter.runtime_logs(lines)).to_dict()
 
-    @contextmanager
-    def maintenance(self, *, timeout: float = 0) -> Iterator[MaintenanceSession]:
+    def reserve_maintenance(
+        self,
+        *,
+        timeout: float = 0,
+        allow_startup_recovery: bool = False,
+    ) -> MaintenanceReservation:
+        """Reserve instance maintenance before a durable operation is created.
+
+        The reservation is intentionally acquired synchronously by the HTTP
+        submission path and transferred to its critical background task.  This
+        removes the gap where two requests could both create journals before
+        either coordinator entered the maintenance context.
+        """
         with self._lock:
             if self._running_by_unit:
                 raise MaintenanceConflict("A runtime lifecycle operation is active")
+            if self._maintenance_active:
+                raise MaintenanceConflict("An instance maintenance operation is active")
+            if self._startup_maintenance_active and not allow_startup_recovery:
+                raise MaintenanceConflict("Startup maintenance recovery is active")
             lease = self.maintenance_lock.acquire(timeout=timeout)
             lease.__enter__()
             self._maintenance_active = True
+            return MaintenanceReservation(self, lease)
+
+    @contextmanager
+    def maintenance(
+        self,
+        *,
+        timeout: float = 0,
+        allow_startup_recovery: bool = False,
+    ) -> Iterator[MaintenanceSession]:
+        reservation = self.reserve_maintenance(
+            timeout=timeout,
+            allow_startup_recovery=allow_startup_recovery,
+        )
         try:
-            yield MaintenanceSession(self)
+            yield reservation.session
         finally:
-            with self._lock:
-                self._maintenance_active = False
-                lease.__exit__(None, None, None)
+            reservation.release()
 
     def set_startup_maintenance_gate(self, active: bool) -> None:
         """Block lifecycle submissions while startup recovery awaits API bind."""

@@ -580,7 +580,7 @@ def test_manager_upgrade_api_requires_preview_token_and_returns_durable_operatio
             self.store.save(operation)
             return operation, {"version": version}
 
-        async def run(self, operation, package):
+        async def run(self, operation, package, *, maintenance_lease=None):
             operation.transition(
                 "succeeded",
                 detail={
@@ -672,11 +672,15 @@ async def test_manager_shutdown_drains_upgrade_without_cancelling_maintenance_ow
             self.service.store.save(operation)
             return operation, {"version": version}
 
-        async def run(self, operation, _package):
+        async def run(self, operation, _package, *, maintenance_lease=None):
             operation.transition("running")
             self.service.store.save(operation)
             try:
-                with self.service.maintenance():
+                if maintenance_lease is None:
+                    with self.service.maintenance():
+                        self.entered.set()
+                        await self.release.wait()
+                else:
                     self.entered.set()
                     await self.release.wait()
             except asyncio.CancelledError:
@@ -768,17 +772,26 @@ async def test_manager_shutdown_drains_post_bind_handoff_recovery(
             self.cancelled = False
             self.completed = False
 
-        async def recover(self, *, prepare_windows_handoff_only=False):
+        async def recover(
+            self,
+            *,
+            prepare_windows_handoff_only=False,
+            allow_startup_recovery=False,
+        ):
             if prepare_windows_handoff_only:
+                self.service.set_startup_maintenance_gate(True)
                 return [{"action": "awaiting_api_bind"}]
             try:
-                with self.service.maintenance():
+                with self.service.maintenance(
+                    allow_startup_recovery=allow_startup_recovery
+                ):
                     self.entered.set()
                     await self.release.wait()
             except asyncio.CancelledError:
                 self.cancelled = True
                 raise
             self.completed = True
+            self.service.set_startup_maintenance_gate(False)
             return [{"action": "committed"}]
 
         async def wait_api_ready(self):

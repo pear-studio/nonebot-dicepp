@@ -122,12 +122,31 @@ docker load -i images/DicePP-${VERSION}-linux-amd64-images.tar
 cd ..
 DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 
-# 小白部署（从零开始）
-# 1. 浏览器打开 https://github.com/pear-studio/nonebot-dicepp/releases/latest
-# 2. 下载 dicepp-release.json 和 Linux 发布包；Release 页面正文用于人工风险阅读
-# 3. docker network create dice-net
-# 4. docker compose up -d
+# 小白首次离线部署（从零开始）
+# 先确认服务器已有 Docker Compose、unzip 和 zstd；安装方法见下方完整 Linux 文档。
+VERSION=v3.0.0
+
+# 二选一取得发布包：服务器可访问 GitHub 时执行这一段。
+BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64.zip"
+
+# 服务器不能访问 GitHub 时，不执行上面的 curl；在有网设备下载同名文件后传入当前目录：
+# scp "DicePP-${VERSION}-linux-amd64.zip" 用户名@服务器IP:~/dicepp/
+
+# 发布包包含与该版本匹配的 Compose、镜像和校验清单。
+PACKAGE_DIR="DicePP-${VERSION}-linux-amd64"
+unzip -o "DicePP-${VERSION}-linux-amd64.zip" -d "${PACKAGE_DIR}"
+cd "${PACKAGE_DIR}"
+sha256sum -c checksums.sha256
+cp docker-compose.yml ..
+zstd -d -f "images/DicePP-${VERSION}-linux-amd64-images.tar.zst"
+docker load -i "images/DicePP-${VERSION}-linux-amd64-images.tar"
+cd ..
+docker network inspect dice-net >/dev/null 2>&1 || docker network create dice-net
+DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 ```
+
+`dicepp-release.json` 不需要在首次部署时手工下载；它仅供 Manager 在标准部署启动后发现和校验可用版本，不是 Compose 文件或安装脚本。完整的在线、离线传输和初始化说明见[完整 Linux 部署说明](../linux.md)。
 
 ## 约束
 

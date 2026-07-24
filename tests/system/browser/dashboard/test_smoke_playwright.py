@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from importlib.metadata import version as package_version
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -53,6 +54,21 @@ def _login(page, base_url: str, password: str = "test_pass") -> None:
     page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
 
 
+def _wait_for_json_value(path: Path, expected: dict[str, object], *, timeout: float = 10) -> None:
+    """Wait for an atomically replaced JSON file to expose its expected value."""
+    deadline = time.monotonic() + timeout
+    last_value: object = None
+    while time.monotonic() < deadline:
+        try:
+            last_value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            last_value = None
+        if last_value == expected:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"配置保存后未落盘预期内容：{last_value!r}")
+
+
 @pytest.fixture
 def dashboard_url(tmp_path: Path) -> str:
     """Start the dashboard server on a random free port.
@@ -89,8 +105,22 @@ def dashboard_url(tmp_path: Path) -> str:
         "DICEPP_MANAGER_PROCESS_COMMAND",
         "DICEPP_MANAGER_PROCESS_CWD",
         "DICEPP_MANAGER_PROCESS_STOP_TIMEOUT",
+        "DICEPP_MANAGER_HOST",
+        "DICEPP_MANAGER_PORT",
+        "DICEPP_MANAGER_URL",
+        "DICEPP_MANAGER_TOKEN_FILE",
+        "DICEPP_MANAGER_RELEASE_SCHEDULER",
+        "DICEPP_TEST_START_MANAGER",
     ):
         env.pop(key, None)
+    env["DICEPP_MANAGER_HOST"] = "127.0.0.1"
+    # Manager binds an OS-assigned port inside the helper subprocess and then
+    # publishes its final URL before Dashboard starts.  This avoids a free-port
+    # selection race with other full-suite workers.
+    env["DICEPP_MANAGER_PORT"] = "0"
+    env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
+    env["DICEPP_MANAGER_RELEASE_SCHEDULER"] = "0"
+    env["DICEPP_TEST_START_MANAGER"] = "1"
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "tests.support.dashboard_server"],
@@ -239,13 +269,31 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             textarea.wait_for(state="visible", timeout=5000)
             textarea.fill('{"app": {"name": "modified", "version": "1.0.0"}}')
 
-            # 6. Click save
-            page.get_by_role("button", name="保存").click()
+            # 6. Click save and wait for the matching Dashboard response.  This
+            # binds the subsequent disk assertion to this save rather than a
+            # background request triggered while the editor initializes.
+            expected_user_config = {
+                "app": {"name": "modified", "version": "1.0.0"}
+            }
+            with page.expect_response(
+                lambda response: (
+                    urlparse(response.url).path == "/api/config/user/save"
+                    and response.request.method == "POST"
+                )
+            ) as save_response_info:
+                page.get_by_role("button", name="保存").click()
+            save_response = save_response_info.value
+            assert save_response.status == 200
+            assert save_response.json()["ok"] is True
 
             # 7. Verify feedback — saved + reload result headings become visible
             page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
             assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
             assert page.locator("text=运行时重载：").first.is_visible()
+            assert page.locator("text=Bot 离线，将在下次启动时加载").first.is_visible()
+            _wait_for_json_value(
+                tmp_path / "config" / "user.json", expected_user_config
+            )
         finally:
             browser.close()
 

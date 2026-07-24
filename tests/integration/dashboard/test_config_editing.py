@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
+from tests.support.dashboard.manager import PersistingConfigManager
 
 # Check if Pydantic is importable (for integration tests using real models)
 try:
@@ -14,6 +15,12 @@ try:
     _HAVE_PYDANTIC = True
 except ImportError:
     _HAVE_PYDANTIC = False
+
+
+@pytest.fixture(autouse=True)
+def _install_config_manager(test_client: TestClient) -> None:
+    """Keep this suite at the Dashboard/Manager HTTP boundary, not direct I/O."""
+    test_client.app.state.manager_client = PersistingConfigManager()
 
 
 class TestMergedView:
@@ -200,15 +207,6 @@ class TestBotConfig:
         # Verify the file was written
         saved = json.loads(DashboardPaths.bot_config_path("test_bot").read_text())
         assert saved == new_config
-
-    def test_atomic_save_cleanup(self, test_client: TestClient, tmp_dashboard_paths):
-        """After a save, the ``.tmp`` file is cleaned up."""
-        setup_auth(test_client)
-        test_client.post(
-            "/api/config/bots/test_bot/save", json={"master": ["m"]}
-        )
-        tmp_file = DashboardPaths.bot_config_path("test_bot").with_suffix(".tmp")
-        assert not tmp_file.exists(), ".tmp file was not cleaned up"
 
     def test_bot_config_read_nonexistent(self, test_client: TestClient):
         """Reading a non-existent bot config returns empty dict."""

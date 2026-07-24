@@ -25,6 +25,7 @@ from dicepp_data import (
     ARCHIVE_PROFILE_FULL,
     ARCHIVE_PROFILE_REGULAR,
     DATA_CATALOG,
+    DataAssetKind,
     InstanceLayout,
 )
 
@@ -151,6 +152,33 @@ def collect_archive_payloads(
         ArchivePayload(path=match.path, arcname=_safe_arcname(match.logical_path))
         for match in DATA_CATALOG.collect(layout, profile)
     ]
+
+
+def _checkpoint_managed_sqlite_assets(layout: InstanceLayout, profile: str) -> None:
+    """Fold every catalogued SQLite WAL into its main database before snapshotting.
+
+    Archive creation only stores the main ``.db`` payload.  After the Runtime has
+    stopped, a successful truncate checkpoint makes that payload a complete
+    snapshot while keeping the archive format independent from SQLite sidecars.
+    """
+    for match in DATA_CATALOG.collect(layout, profile):
+        asset = DATA_CATALOG.find_for_logical_path(match.logical_path, profile=profile)
+        if asset is None or asset.kind is not DataAssetKind.SQLITE:
+            continue
+        try:
+            connection = sqlite3.connect(match.path, timeout=5)
+            try:
+                checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            finally:
+                connection.close()
+        except sqlite3.Error as exc:
+            raise ArchiveError(
+                f"SQLite checkpoint failed for {match.logical_path}: {exc}"
+            ) from exc
+        if not isinstance(checkpoint, tuple) or not checkpoint or checkpoint[0] != 0:
+            raise ArchiveError(
+                f"SQLite checkpoint did not complete for {match.logical_path}"
+            )
 
 
 def _validate_profile(profile: str) -> str:
@@ -329,6 +357,7 @@ def create_archive(
     filename = _archive_filename(now, description)
     target = target_dir / filename
     tmp = target.with_name(f"{target.name}.inprogress")
+    _checkpoint_managed_sqlite_assets(layout, profile)
     payloads = collect_archive_payloads(layout, profile)
     file_records: list[dict] = []
     manifest: dict | None = None
@@ -339,24 +368,27 @@ def create_archive(
                 phase_callback("stream")
             for payload in payloads:
                 written = _write_payload_to_archive(archive, payload)
-                if written is not None:
-                    checksum, size = written
-                    asset = DATA_CATALOG.find_for_logical_path(
-                        payload.arcname,
-                        profile=profile,
+                if written is None:
+                    raise ArchiveError(
+                        f"Archive payload cannot be read safely: {payload.arcname}"
                     )
-                    if asset is None:
-                        raise ArchiveError(
-                            f"Collected payload is not owned by the profile: {payload.arcname}"
-                        )
-                    file_records.append(
-                        {
-                            "path": payload.arcname,
-                            "asset_id": asset.id,
-                            "size": size,
-                            "sha256": checksum,
-                        }
+                checksum, size = written
+                asset = DATA_CATALOG.find_for_logical_path(
+                    payload.arcname,
+                    profile=profile,
+                )
+                if asset is None:
+                    raise ArchiveError(
+                        f"Collected payload is not owned by the profile: {payload.arcname}"
                     )
+                file_records.append(
+                    {
+                        "path": payload.arcname,
+                        "asset_id": asset.id,
+                        "size": size,
+                        "sha256": checksum,
+                    }
+                )
             manifest = _build_manifest(
                 created_at=_format_created_at(now),
                 description=description or "",
@@ -368,6 +400,7 @@ def create_archive(
                 MANIFEST_NAME,
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
             )
+        _fsync_file(tmp)
         # Verify the exact bytes written before making the archive observable.
         verification = verify_archive_path(tmp, expected_filename=target.name)
         if not verification["verified"]:
@@ -1207,6 +1240,14 @@ def _absolute_path(path: Path) -> Path:
     return Path(os.path.abspath(path))
 
 
+def _fsync_file(path: Path) -> None:
+    """Persist a completed file before publishing it with ``os.replace``."""
+    # Windows requires a writable handle for FlushFileBuffers (used by
+    # ``os.fsync``), even though this helper never changes the contents.
+    with path.open("r+b") as handle:
+        os.fsync(handle.fileno())
+
+
 def _fsync_directory(directory: Path) -> None:
     if os.name == "nt":
         return
@@ -1215,6 +1256,28 @@ def _fsync_directory(directory: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def _remove_sqlite_sidecars(target: Path, root: Path) -> None:
+    """Remove stale WAL/SHM files after changing a managed SQLite main database."""
+    _ensure_restore_parent(target.parent, root)
+    for suffix in ("-wal", "-shm"):
+        sidecar = target.with_name(f"{target.name}{suffix}")
+        try:
+            sidecar_stat = os.lstat(sidecar)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ArchiveError(f"SQLite sidecar cannot be inspected: {sidecar.name}") from exc
+        if stat.S_ISLNK(sidecar_stat.st_mode):
+            raise ArchiveError(f"SQLite sidecar is a symlink: {sidecar.name}")
+        if not stat.S_ISREG(sidecar_stat.st_mode):
+            raise ArchiveError(f"SQLite sidecar is not a regular file: {sidecar.name}")
+        try:
+            sidecar.unlink()
+        except OSError as exc:
+            raise ArchiveError(f"SQLite sidecar cannot be removed: {sidecar.name}") from exc
+    _fsync_directory(target.parent)
 
 
 def _ensure_restore_parent(parent: Path, root: Path) -> None:
@@ -1277,6 +1340,7 @@ def _write_zip_payload_to_target(
     *,
     target: Path,
     root: Path,
+    clear_sqlite_sidecars: bool = False,
 ) -> int:
     """Atomically restore one verified zip payload to a regular target path."""
     _ensure_restore_parent(target.parent, root)
@@ -1300,6 +1364,8 @@ def _write_zip_payload_to_target(
         if action not in {"create", "overwrite"}:
             raise ArchiveError(problem or f"Restore target is blocked: {target.name}")
         os.replace(tmp, target)
+        if clear_sqlite_sidecars:
+            _remove_sqlite_sidecars(target, root)
         _fsync_directory(target.parent)
     except Exception:
         try:
@@ -1519,12 +1585,19 @@ def apply_archive(
                     })
                     break
                 target, root, _display_path = mapped
+                asset = DATA_CATALOG.find_for_logical_path(
+                    arcname,
+                    profile=profile,
+                )
                 try:
                     bytes_written = _write_zip_payload_to_target(
                         archive,
                         arcname,
                         target=target,
                         root=root,
+                        clear_sqlite_sidecars=(
+                            asset is not None and asset.kind is DataAssetKind.SQLITE
+                        ),
                     )
                 except Exception as exc:
                     failed_entries.append({
@@ -1559,6 +1632,8 @@ def apply_archive(
                         break
                     try:
                         _remove_restore_target(mapped.path, mapped.scope_root)
+                        if asset.kind is DataAssetKind.SQLITE:
+                            _remove_sqlite_sidecars(mapped.path, mapped.scope_root)
                     except Exception as exc:
                         failed_entries.append(
                             {**entry, "error": str(exc) or type(exc).__name__}

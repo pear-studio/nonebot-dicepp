@@ -72,6 +72,30 @@ class ArchiveManagerClient:
         return {"import": {"archive": {"filename": filename}, "restored": False}}
 
 
+class RecordingUpload:
+    """Small in-memory stand-in that exposes exactly what Dashboard writes."""
+
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self._stream = io.BytesIO()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info) -> None:
+        self._stream.close()
+
+    def write(self, chunk: bytes) -> int:
+        self.writes.append(chunk)
+        return self._stream.write(chunk)
+
+    def seek(self, *args) -> int:
+        return self._stream.seek(*args)
+
+    def read(self, *args) -> bytes:
+        return self._stream.read(*args)
+
+
 def _install(test_client: TestClient) -> ArchiveManagerClient:
     client = ArchiveManagerClient()
     test_client.app.state.manager_client = client
@@ -151,6 +175,83 @@ def test_export_and_import_stream_through_manager(test_client: TestClient) -> No
         ("export", "a.zip"),
         ("import", "from-linux.zip", b"PK-upload"),
     ]
+
+
+def test_import_rejects_oversize_payload_before_temp_or_manager(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    """Dashboard enforces the same cap before a request can consume temp disk."""
+    import dashboard.src.app as app_module
+
+    manager = _install(test_client)
+    upload = RecordingUpload()
+    monkeypatch.setattr(app_module, "MAX_ARCHIVE_BYTES", 4, raising=False)
+    monkeypatch.setattr(
+        app_module.tempfile,
+        "SpooledTemporaryFile",
+        lambda **_kwargs: upload,
+    )
+
+    response = test_client.post(
+        "/api/archives/import",
+        headers={"X-Archive-Filename": "too-large.zip"},
+        content=b"12345",
+    )
+
+    assert response.status_code == 413
+    assert manager.calls == []
+    assert sum(len(chunk) for chunk in upload.writes) <= 4
+
+
+def test_import_stream_cap_catches_a_smaller_declared_length(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    """A lying or absent request length cannot bypass per-chunk accounting."""
+    import dashboard.src.app as app_module
+
+    manager = _install(test_client)
+    upload = RecordingUpload()
+    monkeypatch.setattr(app_module, "MAX_ARCHIVE_BYTES", 4, raising=False)
+    monkeypatch.setattr(
+        app_module.tempfile,
+        "SpooledTemporaryFile",
+        lambda **_kwargs: upload,
+    )
+
+    response = test_client.post(
+        "/api/archives/import",
+        headers={
+            "X-Archive-Filename": "lying-length.zip",
+            "content-length": "4",
+        },
+        content=b"12345",
+    )
+
+    assert response.status_code == 413
+    assert manager.calls == []
+    assert sum(len(chunk) for chunk in upload.writes) <= 4
+
+
+def test_import_at_shared_cap_still_reaches_manager(
+    test_client: TestClient,
+    monkeypatch,
+) -> None:
+    """The hard cap is inclusive, matching Manager's own upload contract."""
+    import dashboard.src.app as app_module
+
+    manager = _install(test_client)
+    monkeypatch.setattr(app_module, "MAX_ARCHIVE_BYTES", 4, raising=False)
+
+    response = test_client.post(
+        "/api/archives/import",
+        headers={"X-Archive-Filename": "at-cap.zip"},
+        content=b"1234",
+    )
+
+    assert response.status_code == 200
+    assert manager.calls == [("import", "at-cap.zip", b"1234")]
 
 
 def test_manager_error_status_and_payload_are_preserved(test_client: TestClient) -> None:

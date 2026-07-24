@@ -16,11 +16,24 @@ hiddenimports += collect_submodules("websockets")
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
 hiddenimports += collect_submodules("dicepp_manager")
+hiddenimports += collect_submodules("pydantic")
 
 datas = [
     (
         os.path.join(PROJECT_ROOT, "dashboard", "src", "static"),
         os.path.join("dashboard", "src", "static"),
+    ),
+    (
+        os.path.join(
+            PROJECT_ROOT,
+            "src",
+            "plugins",
+            "DicePP",
+            "core",
+            "config",
+            "pydantic_models.py",
+        ),
+        os.path.join("dashboard_config_schema"),
     ),
     (os.path.join(PROJECT_ROOT, "templates"), "templates"),
 ]

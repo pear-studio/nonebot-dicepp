@@ -1,8 +1,15 @@
 """Tests for the ``/api/audit`` endpoint and audit-logging behaviour."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.dashboard.app import setup_auth
+from tests.support.dashboard.manager import PersistingConfigManager
+
+
+@pytest.fixture(autouse=True)
+def _install_config_manager(test_client: TestClient) -> None:
+    test_client.app.state.manager_client = PersistingConfigManager()
 
 
 class TestAuditLogCreated:

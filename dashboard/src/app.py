@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from dicepp_data import PERSONA_DB_ASSET
+from dicepp_manager.archive import MAX_ARCHIVE_BYTES
 from dicepp_manager.client import (
     ManagerClient,
     ManagerClientError,
@@ -164,37 +165,6 @@ def _read_json_safe(path: Path) -> dict:
     except (json.JSONDecodeError, OSError):
         logger.warning(f"Skipping unreadable config file: {path}")
         return {}
-
-
-# Config files that the dashboard must never overwrite (git-managed).
-_READONLY_CONFIG_NAMES: set[str] = {"global.json"}
-
-
-def _write_json_atomic(path: Path, data: dict) -> None:
-    """Atomically write a dict to a JSON file using .tmp + os.replace.
-
-    Refuses to write to protected files (global.json) which
-    is git-managed and should only be changed via code review.
-    """
-    if path.name in _READONLY_CONFIG_NAMES:
-        raise HTTPException(
-            status_code=403,
-            detail={"ok": False, "message": f"对 {path.name} 的写入被拒绝：此文件由版本库管理，不可通过 Web 接口修改"},
-        )
-    # Pre-validate serializability so we don't leave a half-written .tmp
-    try:
-        json.dumps(data, ensure_ascii=False)
-    except (TypeError, ValueError) as e:
-        raise HTTPException(
-            status_code=400,
-            detail={"ok": False, "message": f"数据无法序列化为 JSON: {e}"},
-        )
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
 
 
 def _is_path_traversal(path: str, base: Path) -> bool:
@@ -526,10 +496,11 @@ async def auth_status(request: Request):
     })
 
 
-# ── Save archives (Manager proxy only) ──────────────────────────────────────
+# ── Manager proxy errors ────────────────────────────────────────────────────
 
 
-def _manager_archive_error(exc: ManagerClientError) -> JSONResponse:
+def _manager_error_response(exc: ManagerClientError) -> JSONResponse:
+    """Preserve Manager status and payload for every Dashboard proxy route."""
     content = dict(exc.payload)
     content.setdefault("ok", False)
     content.setdefault("message", str(exc) or type(exc).__name__)
@@ -541,7 +512,7 @@ async def archives_list(request: Request):
     try:
         archives = await _get_manager_client(request).list_archives()
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok({"archives": archives})
 
 
@@ -559,7 +530,7 @@ async def archives_estimate(request: Request):
     try:
         estimate = await _get_manager_client(request).estimate_archive(profile)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok({"estimate": estimate})
 
 
@@ -585,7 +556,7 @@ async def archives_create(request: Request):
             profile=profile,
         )
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
 
 
@@ -594,7 +565,7 @@ async def archives_verify(filename: str, request: Request):
     try:
         payload = await _get_manager_client(request).verify_archive(filename)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -603,7 +574,7 @@ async def archives_restore_plan(filename: str, request: Request):
     try:
         payload = await _get_manager_client(request).plan_archive_restore(filename)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -627,7 +598,7 @@ async def archives_restore(filename: str, request: Request):
             description=description,
         )
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
 
 
@@ -647,7 +618,7 @@ async def archives_export(filename: str, request: Request):
             )
         payload = await client.export_archive(filename)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return Response(
         content=payload,
         media_type="application/zip",
@@ -701,14 +672,25 @@ async def archives_import(request: Request):
     filename = request.headers.get("X-Archive-Filename", "")
     if not filename:
         _err("X-Archive-Filename is required", 400)
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            if int(declared_length) > MAX_ARCHIVE_BYTES:
+                _err("Archive upload is too large", 413)
+        except ValueError:
+            _err("Invalid Content-Length", 400)
+    total = 0
     with tempfile.SpooledTemporaryFile(max_size=8 * 1024**2) as upload:
         async for chunk in request.stream():
+            total += len(chunk)
+            if total > MAX_ARCHIVE_BYTES:
+                _err("Archive upload is too large", 413)
             upload.write(chunk)
         upload.seek(0)
         try:
             payload = await _get_manager_client(request).import_archive(filename, upload)
         except ManagerClientError as exc:
-            return _manager_archive_error(exc)
+            return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -717,7 +699,7 @@ async def archives_detail(filename: str, request: Request):
     try:
         payload = await _get_manager_client(request).archive_detail(filename)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -726,7 +708,7 @@ async def archives_delete(filename: str, request: Request):
     try:
         payload = await _get_manager_client(request).delete_archive(filename)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -738,7 +720,7 @@ async def releases_status(request: Request):
     try:
         payload = await _get_manager_client(request).release_status()
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -747,7 +729,7 @@ async def releases_check(request: Request):
     try:
         payload = await _get_manager_client(request).check_releases()
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return JSONResponse(status_code=202, content={"ok": True, **payload})
 
 
@@ -767,7 +749,7 @@ async def releases_download(request: Request):
     try:
         payload = await _get_manager_client(request).download_release(purpose)
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return JSONResponse(status_code=202, content={"ok": True, **payload})
 
 
@@ -776,7 +758,7 @@ async def upgrades_preview(request: Request):
     try:
         payload = await _get_manager_client(request).upgrade_preview()
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 
@@ -800,7 +782,7 @@ async def upgrades_confirm(request: Request):
             confirmation_token=confirmation_token,
         )
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return JSONResponse(
         status_code=202,
         content={"ok": True, "operation": operation},
@@ -812,7 +794,7 @@ async def upgrades_status(request: Request):
     try:
         payload = await _get_manager_client(request).upgrade_status()
     except ManagerClientError as exc:
-        return _manager_archive_error(exc)
+        return _manager_error_response(exc)
     return _ok(payload)
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────
@@ -985,11 +967,13 @@ _pydantic_module_cache = None
 
 
 def _load_pydantic_models_module():
-    """Import pydantic_models.py via importlib (avoids pulling in nonebot2).
+    """Load the standalone config schema without importing the bot package.
 
     Returns the module on success, or None.
     Module reference is cached so _cached_config_field_metadata() and
-    _cached_config_layout() share a single import.
+    _cached_config_layout() share a single import.  PyInstaller onefile builds
+    carry the canonical schema as a minimal data asset under ``_MEIPASS``;
+    source-tree candidates are development fallbacks only.
     """
     global _pydantic_module_cache
     if _pydantic_module_cache is not None:
@@ -997,10 +981,21 @@ def _load_pydantic_models_module():
 
     import importlib.util
 
-    relative_path = Path("src/plugins/DicePP/core/config/pydantic_models.py")
-    candidates = (
-        DashboardPaths.PROJECT_ROOT / relative_path,
-        DashboardPaths.SOURCE_ROOT / relative_path,
+    source_relative_path = Path("src/plugins/DicePP/core/config/pydantic_models.py")
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    frozen_candidate = (
+        Path(frozen_root) / "dashboard_config_schema" / "pydantic_models.py"
+        if frozen_root
+        else None
+    )
+    candidates = tuple(
+        path
+        for path in (
+            frozen_candidate,
+            DashboardPaths.PROJECT_ROOT / source_relative_path,
+            DashboardPaths.SOURCE_ROOT / source_relative_path,
+        )
+        if path is not None
     )
     _pydantic_path = next((path for path in candidates if path.exists()), None)
     if _pydantic_path is None:
@@ -1247,7 +1242,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.post("/api/config/set", dependencies=[Depends(require_auth)])
 async def config_set(request: Request):
-    """Deep merge a value into user.json at a dotted path. Atomic write."""
+    """Deep merge a value into user.json, then persist it through Manager."""
     body = await request.json()
     path = body.get("path", "")
     value = body.get("value")
@@ -1260,7 +1255,10 @@ async def config_set(request: Request):
 
     _apply_deep(user_cfg, path, value)
     _validate_merged_update_config(user_cfg)
-    _write_json_atomic(user_path, user_cfg)
+    try:
+        await _get_manager_client(request).save_user_config(user_cfg)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     db_path = request.app.state.dashboard_db
     audit_detail = json.dumps({"value": "***"}, ensure_ascii=False) if re.search(r'\.api_key$', path) else json.dumps({"value": value}, ensure_ascii=False)
@@ -1275,7 +1273,7 @@ async def config_set(request: Request):
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
 async def config_reset(request: Request):
-    """Remove a key from user.json. Atomic write."""
+    """Remove a key from user.json, then persist it through Manager."""
     body = await request.json()
     path = body.get("path", "")
 
@@ -1286,7 +1284,10 @@ async def config_reset(request: Request):
     user_cfg = _read_json_safe(user_path)
 
     removed = _remove_deep(user_cfg, path)
-    _write_json_atomic(user_path, user_cfg)
+    try:
+        await _get_manager_client(request).save_user_config(user_cfg)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.reset", path, "reset to default",
@@ -1310,12 +1311,16 @@ async def config_bot_get(bot_id: str, request: Request):
 
 @app.post("/api/config/bots/{bot_id}/save", dependencies=[Depends(require_auth)])
 async def config_bot_save(bot_id: str, request: Request):
-    """Validate JSON, atomically write bot config, audit, notify reload."""
+    """Validate JSON, persist bot config through Manager, audit, notify reload."""
     _validate_identifier(bot_id, "bot_id")
     body = await request.json()
+    if not isinstance(body, dict):
+        _err("Body must be a JSON object")
 
-    cfg_path = DashboardPaths.bot_config_path(bot_id)
-    _write_json_atomic(cfg_path, body)
+    try:
+        await _get_manager_client(request).save_bot_config(bot_id, body)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.bot.save", f"bots/{bot_id}", "",
@@ -1335,13 +1340,16 @@ async def config_user_get(request: Request):
 
 @app.post("/api/config/user/save", dependencies=[Depends(require_auth)])
 async def config_user_save(request: Request):
-    """Overwrite user.json with full JSON body. Atomic write + audit + reload."""
+    """Validate then overwrite user.json through Manager, audit and reload."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
     _validate_merged_update_config(body)
 
-    _write_json_atomic(DashboardPaths.CONFIG_USER, body)
+    try:
+        await _get_manager_client(request).save_user_config(body)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.user.save", "user.json", "",
@@ -1411,7 +1419,7 @@ async def persona_character_save(name: str, request: Request):
 
     yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: .tmp + fsync + os.replace (consistent with _write_json_atomic)
+    # Atomic write: .tmp + fsync + os.replace.
     tmp_path = yaml_path.with_suffix(".yaml.tmp")
     tmp_path.write_text(content, encoding="utf-8")
     fd = os.open(str(tmp_path), os.O_RDWR)

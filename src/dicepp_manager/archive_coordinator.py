@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -27,7 +28,7 @@ from .archive import (
     verify_archive,
 )
 from .models import ManagerOperation
-from .service import ManagerService
+from .service import MaintenanceReservation, ManagerService
 
 
 HealthProbe = Callable[[], bool | dict[str, Any] | Awaitable[bool | dict[str, Any]]]
@@ -100,6 +101,27 @@ class ArchiveCoordinator:
         self.store.save(operation)
         return operation
 
+    @contextmanager
+    def _maintenance_context(
+        self,
+        reservation: MaintenanceReservation | None,
+        *,
+        timeout: float = 0,
+        allow_startup_recovery: bool = False,
+    ):
+        if reservation is not None:
+            # The HTTP critical-task owner releases a transferred reservation
+            # only after the operation and journal have reached a durable
+            # terminal state.  Coordinators may leave this scope for
+            # compensation, so they must not release it here.
+            yield reservation.session
+            return
+        with self.service.maintenance(
+            timeout=timeout,
+            allow_startup_recovery=allow_startup_recovery,
+        ) as maintenance:
+            yield maintenance
+
     async def create(
         self,
         operation: ManagerOperation,
@@ -107,6 +129,7 @@ class ArchiveCoordinator:
         description: str | None,
         profile: str,
         archive_kind: str = "manual",
+        maintenance_lease: MaintenanceReservation | None = None,
     ) -> ManagerOperation:
         transaction_id = uuid4().hex
         create_detail: dict[str, Any] = {
@@ -127,7 +150,7 @@ class ArchiveCoordinator:
         stopped: list[str] = []
         original_running: list[str] = []
         try:
-            with self.service.maintenance() as maintenance:
+            with self._maintenance_context(maintenance_lease) as maintenance:
                 def record_runtime_state(running: list[str]) -> None:
                     create_detail["original_running"] = running
                     self.store.write_journal(
@@ -192,7 +215,10 @@ class ArchiveCoordinator:
             )
             return operation
         except Exception as exc:
-            restart_error = await self._best_effort_restart(stopped or original_running)
+            restart_error = await self._best_effort_restart(
+                stopped or original_running,
+                maintenance_lease=maintenance_lease,
+            )
             detail = {
                 "transaction_id": transaction_id,
                 "error": str(exc) or type(exc).__name__,
@@ -221,6 +247,7 @@ class ArchiveCoordinator:
         *,
         filename: str,
         description: str | None = None,
+        maintenance_lease: MaintenanceReservation | None = None,
     ) -> ManagerOperation:
         transaction_id = uuid4().hex
         try:
@@ -266,7 +293,7 @@ class ArchiveCoordinator:
                 baseline.get("heartbeat") if isinstance(baseline, dict) else None
             )
             self._journal(transaction_id, operation, "preparing", detail)
-            with self.service.maintenance() as maintenance:
+            with self._maintenance_context(maintenance_lease) as maintenance:
                 def record_restore_state(running: list[str]) -> None:
                     detail["original_running"] = running
                     self._journal(transaction_id, operation, "quiescing", detail)
@@ -341,7 +368,12 @@ class ArchiveCoordinator:
             self.store.save(operation)
             return operation
         except Exception as exc:
-            rollback = await self._rollback_transaction(transaction_id, operation, detail)
+            rollback = await self._rollback_transaction(
+                transaction_id,
+                operation,
+                detail,
+                maintenance_lease=maintenance_lease,
+            )
             failed_detail = {
                 **detail,
                 "error": str(exc) or type(exc).__name__,
@@ -361,7 +393,11 @@ class ArchiveCoordinator:
                 detail=failed_detail,
             ) from exc
 
-    async def recover(self) -> list[dict[str, Any]]:
+    async def recover(
+        self,
+        *,
+        allow_startup_recovery: bool = False,
+    ) -> list[dict[str, Any]]:
         """Deterministically finish or compensate transactions after restart."""
         recovered: list[dict[str, Any]] = []
         for journal in self.store.list_recoverable_journals():
@@ -381,7 +417,8 @@ class ArchiveCoordinator:
                         value
                         for value in detail.get("original_running", [])
                         if isinstance(value, str)
-                    ]
+                    ],
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 status = "rollback_failed" if restart_error else "rolled_back"
                 self.store.write_journal(
@@ -425,7 +462,8 @@ class ArchiveCoordinator:
                         value
                         for value in detail.get("original_running", [])
                         if isinstance(value, str)
-                    ]
+                    ],
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 self._journal(
                     transaction_id,
@@ -474,6 +512,7 @@ class ArchiveCoordinator:
                 transaction_id,
                 operation,
                 detail,
+                allow_startup_recovery=allow_startup_recovery,
             )
             recovered.append(
                 {
@@ -500,6 +539,9 @@ class ArchiveCoordinator:
         transaction_id: str,
         operation: ManagerOperation,
         detail: dict[str, Any],
+        *,
+        maintenance_lease: MaintenanceReservation | None = None,
+        allow_startup_recovery: bool = False,
     ) -> dict[str, Any]:
         pre_name = detail.get("pre_restore_filename")
         if detail.get("commit_point") == "not_started" or not isinstance(pre_name, str):
@@ -508,7 +550,9 @@ class ArchiveCoordinator:
                     value
                     for value in detail.get("original_running", [])
                     if isinstance(value, str)
-                ]
+                ],
+                maintenance_lease=maintenance_lease,
+                allow_startup_recovery=allow_startup_recovery,
             )
             self._journal(
                 transaction_id,
@@ -527,7 +571,11 @@ class ArchiveCoordinator:
             rollback_baseline_result = await self._probe_once(self.control_probe)
             rollback_baseline = rollback_baseline_result.get("heartbeat")
             detail["rollback_control_heartbeat_baseline"] = rollback_baseline
-            with self.service.maintenance(timeout=1) as maintenance:
+            with self._maintenance_context(
+                maintenance_lease,
+                timeout=1,
+                allow_startup_recovery=allow_startup_recovery,
+            ) as maintenance:
                 await self._quiesce(maintenance)
                 rollback_result = await asyncio.to_thread(
                     apply_archive,
@@ -605,11 +653,21 @@ class ArchiveCoordinator:
         for unit_id in runtime_unit_ids:
             await maintenance.operate_runtime_unit(unit_id, "start")
 
-    async def _best_effort_restart(self, runtime_unit_ids: list[str]) -> str | None:
+    async def _best_effort_restart(
+        self,
+        runtime_unit_ids: list[str],
+        *,
+        maintenance_lease: MaintenanceReservation | None = None,
+        allow_startup_recovery: bool = False,
+    ) -> str | None:
         if not runtime_unit_ids:
             return None
         try:
-            with self.service.maintenance(timeout=1) as maintenance:
+            with self._maintenance_context(
+                maintenance_lease,
+                timeout=1,
+                allow_startup_recovery=allow_startup_recovery,
+            ) as maintenance:
                 await self._restart(maintenance, runtime_unit_ids)
         except Exception as exc:
             return str(exc) or type(exc).__name__

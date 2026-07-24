@@ -299,7 +299,7 @@ async def test_each_post_switch_failure_restores_program_and_preupgrade_data(
     tmp_path: Path,
     fault: str,
 ):
-    _layout, data_file, runtime, _service, coordinator, platform = _setup(
+    _layout, data_file, runtime, service, coordinator, platform = _setup(
         tmp_path, fault=fault
     )
     preview = await coordinator.preview()
@@ -308,8 +308,16 @@ async def test_each_post_switch_failure_restores_program_and_preupgrade_data(
         confirmation_token=preview["confirmation_token"],
     )
 
-    with pytest.raises(UpgradeTransactionError) as raised:
-        await coordinator.run(operation, package)
+    reservation = service.reserve_maintenance()
+    try:
+        with pytest.raises(UpgradeTransactionError) as raised:
+            await coordinator.run(
+                operation,
+                package,
+                maintenance_lease=reservation,
+            )
+    finally:
+        reservation.release()
 
     assert raised.value.detail["rolled_back"] is True
     assert raised.value.detail["rollback_result"]["program_restored"] is True
@@ -488,7 +496,7 @@ async def test_windows_handoff_requests_orderly_exit_then_new_manager_commits(
     with pytest.raises(OperationFailed, match="maintenance"):
         service.submit("dicepp-runtime", "restart")
     coordinator.mark_api_ready()
-    recovered = await coordinator.recover()
+    recovered = await coordinator.recover(allow_startup_recovery=True)
 
     assert recovered[0]["action"] == "committed"
     assert service._startup_maintenance_active is False
@@ -667,7 +675,7 @@ async def test_authoritative_guard_rollback_restores_data_without_target_package
         path.unlink()
     version_dir.rmdir()
 
-    recovered = await coordinator.recover()
+    recovered = await coordinator.recover(allow_startup_recovery=True)
 
     assert recovered[0]["action"] == "rolled_back"
     assert recovered[0]["result"]["program"] == {
@@ -746,7 +754,7 @@ async def test_guard_program_restore_keeps_gate_when_data_recovery_fails(
         detail=detail,
     )
 
-    recovered = await coordinator.recover()
+    recovered = await coordinator.recover(allow_startup_recovery=True)
 
     assert recovered[0]["action"] == "rollback_failed"
     assert recovered[0]["manual_recovery_required"] is True
@@ -937,7 +945,7 @@ async def test_health_passed_without_guard_marker_stays_gated_until_api_handoff(
     assert coordinator.handoff_health()["status"] == "started"
 
     coordinator.mark_api_ready()
-    recovered = await coordinator.recover()
+    recovered = await coordinator.recover(allow_startup_recovery=True)
 
     assert recovered[0]["action"] == "committed"
     assert service._startup_maintenance_active is False
@@ -1047,7 +1055,7 @@ async def test_guard_rollback_started_stays_gated_until_terminal_marker(
     assert journal["status"] == "interrupted"
 
     coordinator.mark_api_ready()
-    waiting = await coordinator.recover()
+    waiting = await coordinator.recover(allow_startup_recovery=True)
 
     assert waiting[0]["action"] == "awaiting_guard_rollback"
     assert shutdown == ["windows_update_guard_rollback_pending"]
@@ -1056,7 +1064,7 @@ async def test_guard_rollback_started_stays_gated_until_terminal_marker(
 
     marker["status"] = "program_rolled_back"
     rollback_marker.write_text(json.dumps(marker), encoding="utf-8")
-    recovered = await coordinator.recover()
+    recovered = await coordinator.recover(allow_startup_recovery=True)
 
     assert recovered[0]["action"] == "rolled_back"
     assert service._startup_maintenance_active is False

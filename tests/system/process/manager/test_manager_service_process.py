@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dicepp_manager.client import ManagerClient
 from dicepp_manager.config import ManagerClientSettings
+from dicepp_manager.deployment import MANAGER_API_VERSION
 from dashboard.src.app import _init_db
 from dashboard.src.auth import set_password_db
 
@@ -85,7 +86,7 @@ def test_standalone_manager_process_auth_status_and_operation_persistence(tmp_pa
         )
         client = ManagerClient(settings)
         status = asyncio.run(client.status())
-        assert status["health"]["manager_api_version"] == 2
+        assert status["health"]["manager_api_version"] == MANAGER_API_VERSION
         assert status["runtime_units"][0]["runtime_unit_id"] == "dicepp-runtime"
 
         operation = asyncio.run(client.operate("dicepp-runtime", "start"))

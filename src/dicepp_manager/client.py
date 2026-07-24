@@ -98,6 +98,19 @@ class ManagerClient:
         await self._ensure_compatible()
         return (await self._request("GET", f"/v1/logs?lines={lines}")).get("logs", {})
 
+    async def save_user_config(self, config: dict) -> dict:
+        await self._ensure_compatible()
+        return await self._request("PUT", "/v1/config/user", json_body=config)
+
+    async def save_bot_config(self, bot_id: str, config: dict) -> dict:
+        await self._ensure_compatible()
+        segment = urllib.parse.quote(bot_id, safe="")
+        return await self._request(
+            "PUT",
+            f"/v1/config/bots/{segment}",
+            json_body=config,
+        )
+
     async def list_archives(self) -> list[dict]:
         await self._ensure_compatible()
         return (await self._request("GET", "/v1/archives")).get("archives", [])

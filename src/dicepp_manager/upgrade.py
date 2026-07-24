@@ -19,6 +19,7 @@ import subprocess
 import re
 import zipfile
 import xml.etree.ElementTree as ElementTree
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -39,7 +40,7 @@ from .release import (
     ReleaseDownloadError,
     ReleaseManager,
 )
-from .service import ManagerService
+from .service import MaintenanceReservation, ManagerService
 
 UPGRADE_JOURNAL_KIND = "upgrade"
 CONFIRMATION_FORMAT = 1
@@ -779,6 +780,26 @@ class UpgradeCoordinator:
         self.store.save(operation)
         return operation
 
+    @contextmanager
+    def _maintenance_context(
+        self,
+        reservation: MaintenanceReservation | None,
+        *,
+        timeout: float = 0,
+        allow_startup_recovery: bool = False,
+    ):
+        if reservation is not None:
+            # A transferred HTTP reservation remains owned by the critical
+            # task until its durable operation and journal terminal state are
+            # saved.  Do not release it when an inner coordinator scope ends.
+            yield reservation.session
+            return
+        with self.service.maintenance(
+            timeout=timeout,
+            allow_startup_recovery=allow_startup_recovery,
+        ) as maintenance:
+            yield maintenance
+
     def status(self) -> dict[str, Any]:
         recent = [
             op
@@ -882,6 +903,8 @@ class UpgradeCoordinator:
         self,
         operation: ManagerOperation,
         package: VerifiedUpgradePackage,
+        *,
+        maintenance_lease: MaintenanceReservation | None = None,
     ) -> ManagerOperation:
         transaction_id = uuid4().hex
         detail: dict[str, Any] = {
@@ -906,7 +929,7 @@ class UpgradeCoordinator:
             self._phase(operation, detail, "pre_upgrade_archive", 15)
             baseline = await self.archive._probe_once(self.archive.control_probe)
             detail["control_heartbeat_baseline"] = baseline.get("heartbeat")
-            with self.service.maintenance() as maintenance:
+            with self._maintenance_context(maintenance_lease) as maintenance:
                 original, _ = await self.archive._quiesce(
                     maintenance,
                     state_callback=lambda running: self._record_running(
@@ -995,7 +1018,12 @@ class UpgradeCoordinator:
             self.store.save(operation)
             return operation
         except Exception as exc:
-            rollback = await self._rollback(operation, package, detail)
+            rollback = await self._rollback(
+                operation,
+                package,
+                detail,
+                maintenance_lease=maintenance_lease,
+            )
             failed = {
                 **detail,
                 "phase": "failed",
@@ -1012,7 +1040,10 @@ class UpgradeCoordinator:
             raise UpgradeTransactionError(failed["error"], detail=failed) from exc
 
     async def recover(
-        self, *, prepare_windows_handoff_only: bool = False
+        self,
+        *,
+        prepare_windows_handoff_only: bool = False,
+        allow_startup_recovery: bool = False,
     ) -> list[dict[str, Any]]:
         recovered: list[dict[str, Any]] = []
         for journal in self.store.list_recoverable_journals():
@@ -1067,6 +1098,7 @@ class UpgradeCoordinator:
                     None,
                     detail,
                     validated_rollback_marker=authoritative_rollback,
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 recovered.append(
                     {
@@ -1200,7 +1232,10 @@ class UpgradeCoordinator:
                     continue
             if guard_pending or journal.get("phase") == "awaiting_update_guard":
                 guard_result = await self._recover_update_guard_handoff(
-                    operation, package, detail
+                    operation,
+                    package,
+                    detail,
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 recovered.append(
                     {
@@ -1213,7 +1248,8 @@ class UpgradeCoordinator:
                 self.archive._cleanup_inprogress()
                 cleanup_error = await self._cleanup_platform_staging(detail)
                 restart_error = await self.archive._best_effort_restart(
-                    _string_list(detail.get("original_running"))
+                    _string_list(detail.get("original_running")),
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 status = (
                     "rolled_back"
@@ -1246,7 +1282,12 @@ class UpgradeCoordinator:
                     {"transaction_id": transaction_id, "action": status}
                 )
                 continue
-            rollback = await self._rollback(operation, package, detail)
+            rollback = await self._rollback(
+                operation,
+                package,
+                detail,
+                allow_startup_recovery=allow_startup_recovery,
+            )
             operation.transition(
                 "failed",
                 message="Interrupted upgrade automatically rolled back",
@@ -1274,6 +1315,7 @@ class UpgradeCoordinator:
         detail: dict[str, Any],
         *,
         validated_rollback_marker: dict[str, Any] | None = None,
+        allow_startup_recovery: bool = False,
     ) -> dict[str, Any]:
         staged = dict(detail.get("platform_staged") or {})
         rollback_marker = Path(str(staged.get("rollback_marker", "")))
@@ -1308,6 +1350,7 @@ class UpgradeCoordinator:
                     package,
                     detail,
                     program_already_restored=marker_was_validated,
+                    allow_startup_recovery=allow_startup_recovery,
                 )
                 rollback_succeeded = rollback.get("succeeded") is True
                 recovery_error = (
@@ -1382,7 +1425,11 @@ class UpgradeCoordinator:
             started = self._publish_started_marker(detail)
             if started["status"] != "started":
                 raise UpgradeCompatibilityError(started["error"])
-            with self.service.maintenance(timeout=1) as maintenance:
+            with self._maintenance_context(
+                None,
+                timeout=1,
+                allow_startup_recovery=allow_startup_recovery,
+            ) as maintenance:
                 migrations = await asyncio.to_thread(
                     self.archive._migrate_and_validate_schema
                 )
@@ -1612,12 +1659,18 @@ class UpgradeCoordinator:
         detail: dict[str, Any],
         *,
         program_already_restored: bool = False,
+        maintenance_lease: MaintenanceReservation | None = None,
+        allow_startup_recovery: bool = False,
     ) -> dict[str, Any]:
         transaction_id = str(detail["transaction_id"])
         original = _string_list(detail.get("original_running"))
         if detail.get("commit_point") == "not_started":
             cleanup_error = await self._cleanup_platform_staging(detail)
-            restart_error = await self.archive._best_effort_restart(original)
+            restart_error = await self.archive._best_effort_restart(
+                original,
+                maintenance_lease=maintenance_lease,
+                allow_startup_recovery=allow_startup_recovery,
+            )
             self._journal(
                 operation,
                 {
@@ -1642,7 +1695,11 @@ class UpgradeCoordinator:
         detail["rollback_status"] = "running"
         self._journal(operation, detail, phase="rolling_back")
         try:
-            with self.service.maintenance(timeout=1) as maintenance:
+            with self._maintenance_context(
+                maintenance_lease,
+                timeout=1,
+                allow_startup_recovery=allow_startup_recovery,
+            ) as maintenance:
                 await self.archive._quiesce(maintenance)
                 if program_already_restored:
                     program = {"already_restored_by_update_guard": True}

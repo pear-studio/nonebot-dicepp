@@ -85,9 +85,8 @@ services:
       - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
 
     volumes:
-      # 配置文件：整目录挂载，应用层控制读写权限
-      # global.json 由 API 层做只读保护
-      - ./config:/app/config:rw
+      # Dashboard 只读取共享配置；所有配置写入经 Manager API 进行事务仲裁。
+      - ./config:/app/config:ro
       # 运行时数据：只读
       - ./data:/app/data:ro
       # 内容资源：只读

@@ -1219,7 +1219,7 @@ def test_source_program_waiter_recovers_when_live_guard_dies_before_terminal(
     recovered = []
 
     class Archive:
-        async def recover(self):
+        async def recover(self, **_kwargs):
             recovered.append("archive")
             return []
 

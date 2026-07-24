@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,7 +46,47 @@ from .upgrade import (
     WindowsVelopackUpgradeAdapter,
 )
 from .runtime import RuntimeOperationUnsupported
-from .service import ManagerService, OperationConflict, OperationFailed, UnknownRuntimeUnit
+from .maintenance import MaintenanceConflict
+from .service import (
+    MaintenanceReservation,
+    ManagerService,
+    OperationConflict,
+    OperationFailed,
+    UnknownRuntimeUnit,
+)
+
+
+def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "ok": False,
+            "message": str(exc),
+            "code": "maintenance_conflict",
+        },
+    )
+
+
+def _write_managed_config(path: Path, payload: dict) -> None:
+    """Atomically persist a Manager-authorized config document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        if os.name != "nt":
+            descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def create_manager_app(
@@ -114,8 +157,12 @@ def create_manager_app(
                     if current is not None:
                         critical_tasks.add(current)
                     try:
-                        await archive_coordinator.recover()
-                        results = await upgrade_coordinator.recover()
+                        await archive_coordinator.recover(
+                            allow_startup_recovery=True
+                        )
+                        results = await upgrade_coordinator.recover(
+                            allow_startup_recovery=True
+                        )
                         if any(
                             item.get("action")
                             in {"committed", "finalized", "rolled_back"}
@@ -146,7 +193,9 @@ def create_manager_app(
                     if current is not None:
                         critical_tasks.add(current)
                     try:
-                        results = await upgrade_coordinator.recover()
+                        results = await upgrade_coordinator.recover(
+                            allow_startup_recovery=True
+                        )
                         if isinstance(
                             upgrade_coordinator.platform_adapter,
                             WindowsVelopackUpgradeAdapter,
@@ -280,13 +329,20 @@ def create_manager_app(
             # unhandled task exception after the caller has received the id.
             return
 
-    async def finish_archive_create(manager_operation, body: dict) -> None:
+    async def finish_archive_create(
+        manager_operation,
+        body: dict,
+        maintenance_lease: MaintenanceReservation,
+    ) -> None:
         try:
-            await archive_coordinator.create(
-                manager_operation,
-                description=body.get("description"),
-                profile=body.get("profile", "regular"),
-                archive_kind=body.get("archive_kind", "manual"),
+            await await_critical_transaction(
+                archive_coordinator.create(
+                    manager_operation,
+                    description=body.get("description"),
+                    profile=body.get("profile", "regular"),
+                    archive_kind=body.get("archive_kind", "manual"),
+                    maintenance_lease=maintenance_lease,
+                )
             )
         except ArchiveTransactionError:
             return
@@ -297,13 +353,23 @@ def create_manager_app(
                 detail={"error": "unexpected_archive_create_failure"},
             )
             manager_service.store.save(manager_operation)
+        finally:
+            maintenance_lease.release()
 
-    async def finish_archive_restore(manager_operation, filename: str, body: dict) -> None:
+    async def finish_archive_restore(
+        manager_operation,
+        filename: str,
+        body: dict,
+        maintenance_lease: MaintenanceReservation,
+    ) -> None:
         try:
-            await archive_coordinator.restore(
-                manager_operation,
-                filename=filename,
-                description=body.get("description"),
+            await await_critical_transaction(
+                archive_coordinator.restore(
+                    manager_operation,
+                    filename=filename,
+                    description=body.get("description"),
+                    maintenance_lease=maintenance_lease,
+                )
             )
         except ArchiveTransactionError:
             return
@@ -317,6 +383,8 @@ def create_manager_app(
                 },
             )
             manager_service.store.save(manager_operation)
+        finally:
+            maintenance_lease.release()
 
     async def release_scheduler() -> None:
         while True:
@@ -352,6 +420,21 @@ def create_manager_app(
         critical_tasks.add(task)
         task.add_done_callback(critical_tasks.discard)
         return task
+
+    async def await_critical_transaction(coroutine):
+        """Let a critical transaction reach a durable outcome after cancellation.
+
+        ``asyncio.to_thread`` keeps running after its awaiter is cancelled.  The
+        inner task is therefore shielded and drained before the task that owns
+        the Manager maintenance reservation can leave its finally path.
+        """
+        transaction = asyncio.create_task(coroutine)
+        while True:
+            try:
+                return await asyncio.shield(transaction)
+            except asyncio.CancelledError:
+                if transaction.done():
+                    return transaction.result()
 
     def track_release_task(coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
@@ -396,9 +479,19 @@ def create_manager_app(
         except (ReleaseError, ValueError):
             return
 
-    async def finish_upgrade(manager_operation, package) -> None:
+    async def finish_upgrade(
+        manager_operation,
+        package,
+        maintenance_lease: MaintenanceReservation,
+    ) -> None:
         try:
-            await upgrade_coordinator.run(manager_operation, package)
+            await await_critical_transaction(
+                upgrade_coordinator.run(
+                    manager_operation,
+                    package,
+                    maintenance_lease=maintenance_lease,
+                )
+            )
         except UpgradeTransactionError:
             return
         except Exception as exc:
@@ -413,6 +506,8 @@ def create_manager_app(
                 },
             )
             manager_service.store.save(manager_operation)
+        finally:
+            maintenance_lease.release()
 
     @app.post("/v1/runtime-units/{runtime_unit_id}/{action}", dependencies=auth, status_code=202)
     async def operate(runtime_unit_id: str, action: str):
@@ -437,6 +532,30 @@ def create_manager_app(
         task.add_done_callback(tasks.discard)
         return {"ok": True, "operation": manager_operation.to_dict()}
 
+    @app.put("/v1/config/user", dependencies=auth)
+    async def config_user_save(request: Request):
+        body = await _json_body(request)
+        try:
+            with manager_service.maintenance():
+                _write_managed_config(settings.layout.config_user, body)
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        return {"ok": True, "saved": True}
+
+    @app.put("/v1/config/bots/{bot_id}", dependencies=auth)
+    async def config_bot_save(bot_id: str, request: Request):
+        body = await _json_body(request)
+        try:
+            path = settings.layout.bot_config_path(bot_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            with manager_service.maintenance():
+                _write_managed_config(path, body)
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        return {"ok": True, "saved": True}
+
     @app.get("/v1/archives", dependencies=auth)
     async def archives_list():
         return {"ok": True, "archives": archive_coordinator.list()}
@@ -456,10 +575,18 @@ def create_manager_app(
         description = body.get("description")
         if description is not None and not isinstance(description, str):
             raise HTTPException(status_code=400, detail="description must be a string")
-        manager_operation = archive_coordinator.new_operation("archive.create")
-        task = asyncio.create_task(finish_archive_create(manager_operation, body))
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        try:
+            maintenance_lease = manager_service.reserve_maintenance()
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        try:
+            manager_operation = archive_coordinator.new_operation("archive.create")
+            track_critical_task(
+                finish_archive_create(manager_operation, body, maintenance_lease)
+            )
+        except BaseException:
+            maintenance_lease.release()
+            raise
         return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.get("/v1/archives/{filename}", dependencies=auth)
@@ -509,8 +636,13 @@ def create_manager_app(
         if body.get("confirm_restore") is not True:
             raise HTTPException(status_code=400, detail="confirm_restore must be true")
         try:
+            maintenance_lease = manager_service.reserve_maintenance()
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        try:
             plan = archive_coordinator.plan(filename)
         except ArchiveRestorePlanVerificationError as exc:
+            maintenance_lease.release()
             return JSONResponse(
                 status_code=409,
                 content={
@@ -519,14 +651,25 @@ def create_manager_app(
                     "verification": exc.verification,
                 },
             )
+        except ArchiveError as exc:
+            maintenance_lease.release()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if plan.get("problems") or plan.get("blocked"):
+            maintenance_lease.release()
             raise HTTPException(status_code=409, detail="Archive restore plan is blocked")
-        manager_operation = archive_coordinator.new_operation("archive.restore")
-        task = asyncio.create_task(
-            finish_archive_restore(manager_operation, filename, body)
-        )
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
+        try:
+            manager_operation = archive_coordinator.new_operation("archive.restore")
+            track_critical_task(
+                finish_archive_restore(
+                    manager_operation,
+                    filename,
+                    body,
+                    maintenance_lease,
+                )
+            )
+        except BaseException:
+            maintenance_lease.release()
+            raise
         return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.delete("/v1/archives/{filename}", dependencies=auth)
@@ -653,15 +796,27 @@ def create_manager_app(
                 status_code=409, detail="Another upgrade operation is active"
             )
         try:
+            maintenance_lease = manager_service.reserve_maintenance()
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        try:
             manager_operation, package = upgrade_coordinator.confirm(
                 version=version,
                 confirmation_token=token,
             )
         except UpgradeConfirmationError as exc:
+            maintenance_lease.release()
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except (UpgradeCompatibilityError, ReleaseError, ValueError) as exc:
+            maintenance_lease.release()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        track_critical_task(finish_upgrade(manager_operation, package))
+        try:
+            track_critical_task(
+                finish_upgrade(manager_operation, package, maintenance_lease)
+            )
+        except BaseException:
+            maintenance_lease.release()
+            raise
         return {"ok": True, "operation": manager_operation.to_dict()}
 
     return app
