@@ -1,11 +1,24 @@
 ---
 name: deploy-docker
-description: 在 Linux 生产环境对 DicePP Docker/Compose 资源执行状态检查、日志读取、pull/load/up/restart/stop/start 和已确认的版本更新命令。当 version-deploy 已生成并确认完整计划时作为受约束执行规范；普通容器运维仍由本技能独立展示影响并确认。
+description: 在 Linux 生产环境对 DicePP Docker/Compose 资源执行状态检查、日志读取、pull/load/up/restart/stop/start 和已确认的手工回退/首装版本更新命令。仅在 version-deploy 已判定 Manager 不适用并确认完整计划时作为受约束执行规范；普通容器运维仍由本技能独立展示影响并确认。
 ---
 
 # Deploy Docker
 
 处理 Linux Docker/Compose 执行层，不选择发布版本，不改变 `version-deploy` 的目标、Compose 上下文或确认范围。
+
+## Manager 优先与适用范围（本节具有优先级）
+
+本技能是两类场景的受约束执行器：
+
+- `version-deploy` 已明确判定为手工回退的部署/回退；
+- 没有可用 Manager 的首次安装或 legacy 拓扑。
+
+正常版本更新先交给 `version-deploy`。如果 Manager 健康、API 兼容，并且目标是 Manager 当前选择的可安装候选，本技能不得以 Docker/Compose 命令绕过 Manager，也不得把“手工更新”包装成较窄的容器操作。Manager 的当前候选不是任意 tag 选择器；指定历史版本、回退版本或其他非当前候选由 `version-deploy` 决定是否进入手工路径。
+
+只有收到同一会话内 `version-deploy` 已确认的手工计划，并且计划明确包含 `路径: 手工回退/首装`、Manager 不适用的原因、目标版本、服务范围、Compose 调用上下文、命令顺序和失败处理时，才可执行版本相关 Docker 操作。该计划是唯一确认来源，不得重复确认。
+
+Manager 已接受 upgrade operation、Manager operation 仍活动、或其终态/恢复状态不明时，禁止执行任何与该版本变更相关的 Docker、Compose、镜像或回退命令；交还 `version-deploy` 监控持久 operation。不得为了“帮助恢复”而与 Manager 并行拉取、加载、重建服务或切换镜像。
 
 ## 资源边界
 

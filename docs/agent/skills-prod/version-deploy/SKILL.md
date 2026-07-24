@@ -7,6 +7,53 @@ description: 在生产环境审计、部署或回退 DicePP 已发布版本。�
 
 作为生产版本变更的唯一编排器，完整持有目标版本、审计证据、部署计划、用户确认、执行状态、健康验证和回退判断。Docker/Compose 命令遵守 `deploy-docker`，但同一份已确认计划不得被重复确认。
 
+## Manager 优先路由（本节具有优先级）
+
+先判定 Manager 路由；只有该路由不适用时才进入本文件后续的手工 Docker/Compose 流程。后续的 `Discover`、`Audit`、`Plan`、`Execute` 与回退细节，除非本节明确说是 Manager 路由，否则均只适用于“手工回退/首装”路径。不得把这些手工命令拿来绕过一个可用、兼容的 Manager 正常更新。
+
+Manager 是兼容更新的持久事务所有者。`version-deploy` 仍是唯一的生产编排和用户确认所有者：它选择路由、展示完整计划、取得一次明确确认、发起受支持的 Manager 生命周期并监控其持久 operation；它不在 Manager operation 旁并行执行 Docker、Compose、Git 切换或镜像回退。
+
+### 确认前的路由审计
+
+1. 通过已批准的、经认证的 Manager API 或客户端读取 Manager 健康/API 兼容性、`/v1/releases/status`、当前 channel 和当前候选版本；不得打印认证材料、API token、cookie 或请求头。
+2. 正常情况下先使用已持久化的 release status。仅当需要刷新候选版本时，允许调用一次 Manager 的 `/v1/releases/check` 作为**窄范围审计例外**：它会访问发布源并持久化 discovery 状态，但不得下载包、创建升级 operation、修改部署、拉取/加载镜像或确认安装。调用后重新读取 status。此例外只用于确认前候选发现，不能泛化为任意外部写操作。
+3. 在用户确认前，禁止调用 `/v1/releases/download`、`/v1/upgrades/preview` 和 `/v1/upgrades/confirm`；也禁止直接 Docker/Compose 写操作。下载、预检和 Manager 确认都必须属于已展示并获得确认的同一计划。
+
+仅当以下条件全部满足时选择 Manager 路由：
+
+- Manager 健康，且其 API/operation 契约与当前客户端兼容；
+- 目标正是 Manager 当前选中的兼容候选（通常是当前 channel 的最新合格候选），而不是仅凭 tag 猜测的版本；
+- Release discovery/status 提供可核对的 release metadata、平台/架构和 artifact 线索；
+- Manager 宣告 `install_supported`，并且确认后实际下载、摘要/契约验证和 `preview` 都通过；
+- 目标不要求 Manager 自身升级，且没有 Manager 已判定不支持的 deployment schema、Compose 拓扑、配置或实例契约变更。
+
+Manager 路由不承诺安装任意指定历史版本，也不承诺由 Manager 执行任意版本回退。即使内部 endpoint 接受 version 字段，生产编排也只能消费当前 Manager 选择并验证的候选；不要用它试探或实现任意 tag 安装/降级。
+
+### Manager 路由生命周期
+
+确认前的计划必须明确写出“路径: Manager”、当前候选、当前运行版本、兼容性证据、预计影响、归档/回退语义、健康证据，以及在同一目标和同一范围下是否允许手工回退。待用户用目标版本作出一次明确确认后，按以下顺序执行：
+
+1. 让 Manager 执行受支持的 release download，并以 release status 确认下载完成、目标包已验证且仍对应已展示候选；
+2. 调用 upgrade preview，核对 `install_supported`、平台预检、磁盘/归档门槛、目标版本和 preview 返回的 change scope；
+3. 使用该 preview 的 confirmation token 调用 Manager confirm。这是对已经取得的那一次用户确认的机器提交，不是第二次向用户索取确认；
+4. 记录 operation id，持续通过 upgrade status 和 operation/status 查询监控 Manager 的持久 operation，直到终态；
+5. 根据 Manager 的终态、归档、回退和健康证据汇报结果。Manager 已接收 confirm 后，它负责本次事务、补偿和回退判断。
+
+download、preview 或 confirm 在 Manager 接收持久 operation 之前失败时，只有已展示的手工回退计划仍完全相同、目标/范围/契约未变化且没有活动 Manager operation 时，才可把这份已确认计划交给 `deploy-docker`，不得重复确认。Manager 已接受 operation 后即使 API 短暂不可用，也只能重连并监控持久状态；不得并行手工接管。状态不明、仍有活动 operation、或失败改变了目标/契约时停止并保留现场，重新审计或人工处理。
+
+### 何时必须手工回退/首装
+
+下列任一情况选择手工路径，并在计划中逐项写明原因：
+
+- 首次安装、bootstrap 或没有 Manager 的 legacy 部署拓扑；
+- 用户要求的明确版本或回退不是当前 Manager 可选择的候选；
+- 目标需要 Manager 自升级，或 `minimum_manager_version` 与当前 Manager 不匹配；
+- Compose 拓扑、deployment schema、配置迁移或其他人工迁移工作；
+- release/package/平台/实例契约不兼容，`install_supported` 为 false，或 preview 不通过；
+- Manager 不可用、健康/API 不兼容，或在尚未接受 durable operation 前失败。
+
+手工路径仍由 `version-deploy` 完成审计、计划、唯一用户确认和最终验证判断；确认后把固定的目标、Compose 上下文、服务范围、命令顺序和失败处理交给 `deploy-docker` 执行。`deploy-docker` 不得再次确认，也不得改变这些边界。
+
 ## 不变约束
 
 - 只在生产环境使用。

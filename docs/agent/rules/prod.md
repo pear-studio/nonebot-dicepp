@@ -20,20 +20,26 @@
 
 ### Version Audit Read Exception
 
-用户已经要求部署、回退、升级或核对发布版本时，允许在部署确认前执行必要的只读审计：
+用户已经要求部署、回退、升级或核对发布版本时，允许在部署确认前执行必要的审计。`version-deploy` 必须先作出 Manager 优先的路由判断：
 
 - 读取本地 Git/Docker/Compose 状态。
-- 使用 `gh release view` 或等价的只读 GitHub GET 请求读取公开 Release、tag、asset metadata 和目标版本文件。
-- 查询最新正式 Release 作为候选版本，但不得据此直接部署。
-- 确认目标 tag 和 origin 指向预期仓库后，执行 `git fetch --no-tags origin tag <tag>` 获取该精确 Release tag，用于读取目标版本文件和验证 commit。
+- 通过获批准、经认证的 Manager 客户端或 API 读取 Manager 健康/API 兼容性、`/v1/releases/status`、当前 channel 和当前候选；不得输出认证凭据或敏感值。
+- 仅当需要刷新当前候选时，允许调用一次 `/v1/releases/check`。该调用会访问发布源并持久化 Manager discovery 状态，是本规则对默认“无外部调用/无写入”的窄范围例外；调用后只能重新读取状态。
+- `/v1/releases/check` 不得下载发布包、创建升级记录、调用 `/v1/releases/download`、`/v1/upgrades/preview` 或 `/v1/upgrades/confirm`，也不得拉取/加载镜像、修改部署或服务状态。
+- 只有 Manager 路由不适用、已明确转入手工回退审计时，才可使用 `gh release view` 或等价的只读 GitHub GET 请求读取公开 Release、tag、产物元数据和目标版本文件，或查询最新正式 Release 作为候选。
+- 确认手工目标 tag 和 origin 指向预期仓库后，允许执行 `git fetch --no-tags origin tag <tag>` 获取该精确 Release tag，用于读取目标版本文件和验证 commit。
 
-目标 tag fetch 不得使用 `--force`、`--prune`、分支 refspec 或通配 tag，不得改变当前 branch/HEAD、checkout/reset/merge 工作树，也不得覆盖冲突的本地 tag。该例外不允许下载文件到部署目录、修改认证状态、远程写入或调用无关 API。不得输出 token 或其他敏感值。
+目标 tag fetch 不得使用 `--force`、`--prune`、分支 refspec 或通配 tag，不得改变当前 branch/HEAD、checkout/reset/merge 工作树，也不得覆盖冲突的本地 tag。上述审计例外不允许下载文件到部署目录、远程写入、修改生产认证状态或调用无关 API。不得输出认证凭据或其他敏感值。
 
 ## Version Deployment
 
 当用户要求部署、上线、更新代码、切换版本、回退、rollback、pull 新镜像、使用离线镜像包或应用某个 release 时，必须使用 version-deploy。version-deploy 是完整版本变更计划和确认的唯一所有者；同一份已确认计划交给 deploy-docker 执行时不得重复确认。
 
-- 生产发布/回退以明确 Release tag 为单位：自动发现只选择正式版 `vX.Y.Z`；只有用户明确指定时才允许 `vX.Y.ZrcN`。不部署浮动的 `latest`、分支 HEAD 或“最新代码”。
+- 必须先判断 Manager 是否健康、API 兼容，且目标是否为 Manager 当前选择的兼容候选。条件满足时，Manager 是持久事务所有者；`version-deploy` 只在获得一次用户明确确认后，按 Manager 的 download → preview → confirm → status 生命周期发起并监控 operation，不得并行执行 Docker、Compose、Git 切换或镜像回退。
+- Manager 正常路径不承诺任意历史 tag 安装或任意版本回退。指定目标/回退不在当前候选、首次安装或旧式拓扑、Manager 自升级或最低版本不匹配、Compose/部署架构/配置人工迁移、契约不兼容、`install_supported` 为 false、preview 不通过、或 Manager 不可用/失败时，才进入手工回退/首装路径。
+- 手工路径由 version-deploy 展示完整计划并取得唯一确认；确认后才把相同的目标、服务范围、Compose 上下文、命令顺序和失败处理交给 deploy-docker。Manager 已接受 operation、operation 仍活动或其恢复状态不明时，禁止手工 Docker 接管。
+
+- Manager 路径只消费 Manager 当前选择的兼容候选（通常是当前 channel 的最新合格版本），不把它当作任意 tag 选择器；手工路径以明确 Release tag 为单位。自动发现只选择正式版 `vX.Y.Z`；只有用户明确指定时才允许 `vX.Y.ZrcN`。不部署浮动的 `latest`、分支 HEAD 或“最新代码”。
 - 目标 release 必须读取 docs/releases/vX.Y.Z.md 或 GitHub Release body 作为生产更新风险摘要；缺失时按未知风险处理。
 - DICEPP_IMAGE_TAG 通过命令环境变量传递, 不写入配置文件。不得输出 secrets。
 - 镜像回退不等于数据回退；涉及数据、配置、迁移或风险未知时，必须确认已有可靠备份，缺少备份时停止部署。
@@ -45,6 +51,8 @@
 ## Docker Deployment Ops
 
 当用户要求查看或操作 Docker/Compose 服务、DicePP bot 容器、协议适配器（NapCat / LLOneBot）容器、服务日志、pull/load/up/restart/stop/start 时，必须使用 deploy-docker。
+
+- 与版本变更有关的 Docker/Compose 操作只允许执行 `version-deploy` 已确认的手工回退/首装计划；可用 Manager 的正常更新不得由 deploy-docker 绕过。Manager operation 已被接受、仍活动或状态不明时，停止 Docker 操作并交还 version-deploy 监控持久状态。
 
 - 第一版只允许操作 DicePP 部署相关资源：当前项目 compose 服务、DicePP bot、协议适配器（NapCat / LLOneBot）和项目文档明确关联的运维入口。
 - 协议适配器操作只允许在识别到明确的 compose project（NapCat 在 `napcat/` 目录，LLOneBot 在 `llonebot/` 目录）或容器后执行；不要依赖项目内安装脚本或其他 wrapper。

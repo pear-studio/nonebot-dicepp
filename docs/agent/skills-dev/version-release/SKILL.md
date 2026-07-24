@@ -75,6 +75,15 @@ metadata:
 - 升级注意事项，如数据迁移步骤、配置变更细节、手动操作等
 ```
 
+### Manager 自动升级兼容性声明
+
+`version-release` 只生成并验证 Release contract，不执行生产部署、不直接调用 Manager，也不替代 `version-deploy`。
+
+- 将 `自动升级` 写为 `yes` 前，确认当前标准 Manager 能对已采用标准拓扑的兼容实例完成下载、归档、安装、健康检查和失败回退，且无需 Manager 自身升级或人工迁移。
+- 当前 Manager 不满足 `最低 Manager 版本`、目标包含 Manager 自身升级、需要 Compose、deployment schema、RuntimeUnit、宿主配置或人工配置迁移、发布产物或兼容性未知时，必须写 `no`。
+- `数据变更` 或 `配置变更` 本身不自动等于 `no`；只有当前 Manager 的受支持事务能覆盖相应迁移且已在 release 验收中验证时才可写 `yes`。
+- 不能确认时写 `no`，并在 `Risk Notes` 说明手工迁移或恢复要求。
+
 字段含义：
 
 - `镜像`: 生产部署使用的 GHCR 镜像 tag。
@@ -82,12 +91,10 @@ metadata:
 - `配置变更`: 是否影响运行环境变量、`config/`、配置 schema 或配置加载行为。
 - `变更范围`: 逗号分隔的实际变更域；必须显式声明 `data` / `config`，并与
   前两个风险字段完全一致，否则发布会 fail closed。
-- `自动升级`: 当前常驻 Manager 是否能在无需自身升级和人工迁移部署拓扑的
-  前提下自动完成升级；Linux Compose 的 service、volume、network 或
-  deployment schema 有变化时必须写 `no`。无法确认时也必须写 `no`。
-- `变更范围` 包含 `manager` 时，`自动升级` 必须为 `no`；外层 Release contract
-  和 Linux 包内 contract 都会拒绝矛盾声明。
-- `最低 Manager 版本`: 能理解本次发布契约和安装事务的最低 Manager 版本。
+- `自动升级`: 表示当前兼容的常驻 Manager 能否对已采用标准部署拓扑的实例完成一次兼容的最新版本升级；不表示任意 tag 安装或回退。Linux Compose 的 service、volume、network 或 deployment schema 有变化时必须写 `no`。
+- `变更范围` 包含 `manager` 时，`自动升级` 必须为 `no`；外层 Release contract 和 Linux 包内 contract 都会拒绝矛盾声明。
+- `最低 Manager 版本`: 能理解本次发布契约和安装事务的最低 Manager 版本；它不能让旧 Manager 自动升级自身。当前 Manager 不满足该版本时，`自动升级` 必须为 `no`。
+
 - `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
 - `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
 
