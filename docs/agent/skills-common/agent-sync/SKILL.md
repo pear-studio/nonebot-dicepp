@@ -1,6 +1,6 @@
 ---
 name: agent-sync
-description: 管理 DicePP agent 配置同步、环境识别、首次接管、后续同步、工作目录检查、rules/skills 投影与平台差异处理。需要调整或排查 .codex、.claude 中的 agent rules、skills、Claude Linux settings/hooks，新增、移动、重命名、删除 agent skill/rule，检查环境是否暴露了错误技能，或汇报当前 agent 配置状态时使用。
+description: 管理 DicePP agent 配置同步、环境识别、首次接管、后续同步、工作目录检查、rules/skills 投影与平台差异处理。需要调整或排查 .codex、.claude、.kimi-code 中的 agent rules、skills、Claude Linux settings/hooks，新增、移动、重命名、删除 agent skill/rule，检查环境是否暴露了错误技能，或汇报当前 agent 配置状态时使用。
 ---
 
 # Agent Sync
@@ -10,7 +10,7 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 ## 核心原则
 
 - 先读取并遵循 `docs/agent/sync.py` 的 help 输出；具体命令、参数和配置格式以脚本为准。
-- 以 `docs/agent` 为项目 agent 配置源目录，`.codex` 和 `.claude` 是同步后的工作目录。
+- 以 `docs/agent` 为项目 agent 配置源目录，`.codex`、`.claude` 和 `.kimi-code` 是同步后的工作目录。
 - 不在本技能中复制具体命令或参数细节。
 - 同步前先判断当前是首次接管、后续同步、环境切换还是故障排查。
 - 每次写入前先运行 report/doctor，明确源技能、旧同步状态与目标目录之间的新增、stale managed、broken managed、unknown 差异。
@@ -20,7 +20,7 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 
 ### 首次接管
 
-适用于目标目录没有同步状态、存在旧链接脚本遗留、旧 `docs/agent/skills` 链接、手工创建的 skill，或无法确定 `.codex` / `.claude` 当前来源的情况。
+适用于目标目录没有同步状态、存在旧链接脚本遗留、旧 `docs/agent/skills` 链接、手工创建的 skill，或无法确定 `.codex` / `.claude` / `.kimi-code` 当前来源的情况。
 
 处理重点：
 
@@ -107,4 +107,4 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 - 首次接管或发现 unknown 内容时，不要直接清理；先向用户说明它们可能是个人 skill、旧工具遗留或错误暴露。
 - “未同步但保留”表示目标目录中存在本次同步不处理的内容，通常是 `.agent-env.json` 中 ignore 规则匹配的个人/本地专用 skill；未匹配 ignore 的未知内容应作为问题汇报。
 - 生产环境同步前，确认目标 env 为 `prod`，并确认暴露技能集合符合生产边界。
-- 不把 `.codex` 或 `.claude` 中的临时内容当成项目事实来源；需要纳入项目时，应迁回 `docs/agent` 下对应目录。
+- 不把 `.codex`、`.claude` 或 `.kimi-code` 中的临时内容当成项目事实来源；需要纳入项目时，应迁回 `docs/agent` 下对应目录。

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 
-TARGETS = ("codex", "claude")
+TARGETS = ("codex", "claude", "kimi")
 STATE_FILE = ".agent-sync.json"
 ENV_FILE = ".agent-env.json"
 
@@ -141,6 +141,9 @@ def target_spec(name: str) -> TargetSpec:
     if name == "claude":
         base = root / ".claude"
         return TargetSpec(name, base, base / "skills", (base / "CLAUDE.md",))
+    if name == "kimi":
+        base = root / ".kimi-code"
+        return TargetSpec(name, base, base / "skills", (base / "AGENTS.md",))
     raise SyncError(f"Unknown target {name!r}. Expected one of: {', '.join(TARGETS)}, all.")
 
 
@@ -694,7 +697,7 @@ def print_help_text() -> None:
 
 Purpose:
   Synchronize docs/agent rules and skills into local agent tool directories.
-  The source of truth is docs/agent; .codex/.claude are working
+  The source of truth is docs/agent; .codex/.claude/.kimi-code are working
   directories managed by this script.
 
 Environment:
@@ -737,6 +740,7 @@ Optional peer paths:
 Targets:
   codex   -> .codex/AGENTS.md, .codex/CODEX.md, .codex/skills/
   claude  -> .claude/CLAUDE.md, .claude/skills/
+  kimi    -> .kimi-code/AGENTS.md, .kimi-code/skills/
   all     -> all targets above
 
 Commands:

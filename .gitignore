@@ -167,6 +167,7 @@ src/plugins/DicePP/module/misc/log_command.py
 .claude/
 .agents/
 .codex/
+.kimi-code/
 docs/agent/.agent-env.json
 
 # Cursor IDE 配置

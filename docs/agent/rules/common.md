@@ -8,7 +8,7 @@ DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG 场景。
 
 ## Agent Config
 
-Agent 规则与技能由 `docs/agent/sync.py` 管理。需要同步、检查或解释 `.codex`、`.claude` 中的 agent 配置时，运行该脚本的 help 并按脚本输出操作。
+Agent 规则与技能由 `docs/agent/sync.py` 管理。需要同步、检查或解释 `.codex`、`.claude`、`.kimi-code` 中的 agent 配置时，运行该脚本的 help 并按脚本输出操作。
 
 ## Working Principles
 
