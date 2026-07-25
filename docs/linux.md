@@ -136,6 +136,14 @@ BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERS
 curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64.zip"
 ```
 
+发布包约 100MB。如果服务器到 GitHub 的线路不稳定（下载中途断开、速度骤降），不要反复重下，直接用续传命令，中断后再执行同一命令会从断点继续：
+
+```bash
+curl -L -C - --retry 10 --retry-delay 30 --retry-max-time 1200 \
+  -o "DicePP-${VERSION}-linux-amd64.zip" \
+  "${BASE_URL}/DicePP-${VERSION}-linux-amd64.zip"
+```
+
 `curl` 正常下载时会显示进度，结束后能看到类似文件：
 
 ```bash
@@ -616,6 +624,13 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的完整三服务
 `docker-compose.yml`，再执行 `pull` 和 `up -d`。这类变更不会由 Manager 自动
 安装。
+
+同步 Compose 文件时总是用新版本**整体替换** `~/dicepp/docker-compose.yml`，
+不要试图用 `docker-compose.override.yml` 或多个 `-f` 文件去覆盖端口、卷等
+列表字段：Docker Compose v2 对 `ports`、`volumes` 等列表字段做合并而非
+替换，override 无法移除主文件里已定义的端口（`!reset`/`!override` 标签
+虽能强制重置，但容易用错），override 里写新端口不会移除旧端口，只会两个
+都绑定，导致旧端口冲突启动失败。
 
 更新或回滚前，建议先在网页管理面板中创建并验证存档。版本风险说明见 [releases/](./releases/)。
 

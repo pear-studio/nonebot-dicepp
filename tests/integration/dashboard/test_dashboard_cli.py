@@ -23,3 +23,14 @@ def test_admin_init_rejects_existing_password(tmp_dashboard_paths, monkeypatch):
     assert dashboard_main._admin_init() == 0
 
     assert dashboard_main._admin_init() == 1
+
+
+def test_ensure_dirs_does_not_write_config(tmp_dashboard_paths):
+    """Dashboard 从不写入 config/：它可能以只读挂载，Manager 是唯一写入者。"""
+    user_config = DashboardPaths.CONFIG_USER
+    assert not user_config.exists()
+
+    dashboard_main.ensure_dirs()
+
+    assert not user_config.exists()
+    assert DashboardPaths.DATA_DIR.is_dir()
