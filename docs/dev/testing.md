@@ -61,6 +61,19 @@ singleton 或 ContextVar。
 `conftest.py` 会在 function-scoped fixture 清理后检查本测试新建的连接；遗漏关闭
 会在创建它的测试处失败并给出创建位置，而不是等后台线程在后续测试中报错。
 
+## 指令集成测试的 Bot 隔离
+
+使用完整 Bot 的指令集成测试（`tests/integration/commands/`、
+`tests/integration/core/command/`）使用 module 级 `bot` fixture（各自目录的
+`conftest.py`）：每个测试文件一个独立 Bot，带独立
+DB、配置和数据目录。同一文件内的测试可以按顺序共享 Bot 状态（例如同 class 内
+先建卡再删卡的流程）；跨文件必须隔离，因为共享 Bot 会让先攻、昵称、群配置等
+可变状态经默认群/用户键空间泄漏到后续文件，且 xdist `--dist loadfile` 以文件为
+单位调度，同 worker 的文件会稳定复现泄漏。隔离采用 module 边界整体重建 Bot，
+而不是逐表清理，以覆盖全部 DB 表与缓存。新增指令测试不得假设其他文件写入的
+数据存在；需要逐测试隔离时使用 `tests/support/bot_test_base.py` 的
+`_CommandTestBase`（每测试独立 Bot）。
+
 ## quick、full 与 external
 
 - `quick` 只标记位于 `unit/` 或 `integration/`、稳定且适合高频反馈的代表性
