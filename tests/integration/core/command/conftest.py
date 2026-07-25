@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
-from plugins.DicePP.core.bot import Bot
-from tests.support.bot import TestProxy
+from tests.support.bot import async_make_test_bot, async_teardown_test_bot
 from tests.support.core_command import IntegrationHelper
-from tests.support.fs_utils import rmtree_retry
 
 
 @pytest.fixture(scope="module")
@@ -22,23 +18,9 @@ async def bot():
     整体重建 Bot 覆盖 Bot 实例持有的全部可变状态（全部 DB 表、配置、
     缓存），无需逐表枚举清理。
     """
-    bot_instance = Bot(
-        f"test_cmd_{uuid.uuid4().hex[:12]}",
-        readonly=True,
-        no_tick=True,
-    )
-    bot_instance.config.master = ["test_master"]
-    proxy = TestProxy()
-    bot_instance.set_client_proxy(proxy)
-    await bot_instance.delay_init_command()
-    proxy.mute = True
-    bot_instance.loc_helper.load_localization()
-    bot_instance.loc_helper.load_chat()
+    bot_instance, _proxy = await async_make_test_bot("test_cmd")
     yield bot_instance
-    try:
-        await bot_instance.shutdown_async()
-    finally:
-        rmtree_retry(bot_instance.data_path)
+    await async_teardown_test_bot(bot_instance)
 
 
 @pytest.fixture
