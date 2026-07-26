@@ -80,12 +80,11 @@ class InboundMessageHook(Protocol):
 
 # noinspection PyBroadException
 class Bot:
-    def __init__(self, account: str, readonly: bool = False, no_tick: bool = False):
+    def __init__(self, account: str, no_tick: bool = False):
         """
         实例化机器人
         Args:
             account: QQ账号
-            readonly: 只读模式，跳过本地化文件写入（适用于测试环境）
             no_tick: 为 True 时不启动 tick_loop（供确定性自动化测试）
         """
         import plugins.DicePP.core.command as command
@@ -173,7 +172,7 @@ class Bot:
         # 消息入站记录 hook 列表
         self._inbound_message_hooks: List[InboundMessageHook] = []
 
-        self.start_up(readonly=readonly)
+        self.start_up()
 
     def set_client_proxy(self, proxy):
         from plugins.DicePP.adapter import ClientProxy
@@ -261,7 +260,7 @@ class Bot:
 
         return unregister
 
-    def start_up(self, readonly: bool = False):
+    def start_up(self):
         self.register_command()
         # Apply persona overrides after commands have registered their loc keys
         self.loc_helper.set_persona(self.config.persona)

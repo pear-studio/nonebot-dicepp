@@ -39,7 +39,6 @@ async def uninitialized_log_bot():
     try:
         bot = Bot(
             f"test_log_runtime_{uuid4().hex[:12]}",
-            readonly=True,
             no_tick=True,
         )
         bot.config.command_split = "\n"
