@@ -416,6 +416,85 @@ class TestSilenceRotation:
         assert conv.length == 1
 
 
+class TestSilenceTimezoneBaseline:
+    """静默判定的"现在"必须与 last_active_at 写入侧同一时区基准。
+
+    life scope 的 last_active_at 由生产 Clock 写入（上海 naive，见
+    ConversationRegistry._create_session / ConversationStore）；修复前
+    _is_silence_expired 统一用 SQL julianday('now')（UTC）比较，life 私聊的
+    静默间隔被少算 8 小时（24h 阈值实际 ~16h 即判过期）。chat scope 写
+    CURRENT_TIMESTAMP（UTC），判定必须保持 UTC 基准、不受 Clock 影响。
+    """
+
+    async def test_life_scope_silence_uses_clock_baseline(self, temp_db):
+        """life scope：last_active_at=Clock 现在-20h 未过期；-25h 过期。"""
+        import datetime
+        from plugins.DicePP.utils.time import SteppedClock, set_clock
+
+        clock = SteppedClock(datetime.datetime(2042, 6, 3, 20, 0))
+        set_clock(clock)
+        # life.dm 走 group_silence_seconds 档位；阈值固定 24h 以复现生产语义
+        reg = ConversationRegistry(
+            temp_db,
+            runtime_factory=_runtime_factory,
+            group_silence_seconds=86400,
+        )
+        scope = ConversationScope.for_life_dm("char-tz")
+        conv = await reg.get_or_create(scope)
+        sid = int(conv.id)
+
+        async def set_last_active(hours_ago: float) -> None:
+            last = clock.now() - datetime.timedelta(hours=hours_ago)
+            await temp_db.db.execute(
+                "UPDATE persona_session SET last_active_at=? WHERE session_id=?",
+                (last.isoformat(sep=" "), sid),
+            )
+            await temp_db.db.commit()
+
+        # 20h 前：未超 24h 阈值 → 未过期
+        await set_last_active(20)
+        assert await reg._is_silence_expired(scope) is False
+
+        # 25h 前：超过 24h 阈值 → 过期。修复前按 SQL 'now'（UTC/真实墙钟）
+        # 少算 8h（或虚拟钟下完全不触发），会误判未过期。
+        await set_last_active(25)
+        assert await reg._is_silence_expired(scope) is True
+
+    async def test_chat_scope_silence_keeps_utc_baseline(self, temp_db):
+        """chat scope：保持 UTC 语义，不受注入的 Clock 影响。"""
+        import datetime
+        from plugins.DicePP.utils.time import SteppedClock, set_clock
+
+        # Clock 故意拨到未来：chat scope 写 CURRENT_TIMESTAMP（UTC 墙钟），
+        # 判定也必须用 UTC 墙钟而非 Clock。
+        set_clock(SteppedClock(datetime.datetime(2042, 6, 3, 20, 0)))
+        reg = ConversationRegistry(
+            temp_db,
+            runtime_factory=_runtime_factory,
+            group_silence_seconds=86400,
+        )
+        scope = ConversationScope.for_group("g-tz")
+        conv = await reg.get_or_create(scope)
+        sid = int(conv.id)
+
+        def utc_now() -> "datetime.datetime":
+            return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+        async def set_last_active(hours_ago: float) -> None:
+            last = utc_now() - datetime.timedelta(hours=hours_ago)
+            await temp_db.db.execute(
+                "UPDATE persona_session SET last_active_at=? WHERE session_id=?",
+                (last.isoformat(sep=" "), sid),
+            )
+            await temp_db.db.commit()
+
+        await set_last_active(20)
+        assert await reg._is_silence_expired(scope) is False
+
+        await set_last_active(25)
+        assert await reg._is_silence_expired(scope) is True
+
+
 class TestSummaryInheritance:
     """P1-9 / P1-10 / P1-11 / P1-12 / P1-14: 摘要继承与失败处理"""
 

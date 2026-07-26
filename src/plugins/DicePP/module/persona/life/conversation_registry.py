@@ -528,26 +528,42 @@ class ConversationRegistry:
     async def _is_silence_expired(self, scope: ConversationScope) -> bool:
         """读 DB last_active_at，判断同 scope 活跃会话是否已超静默阈值。
 
-        使用 SQLite julianday 函数进行时间比较（SQLite CURRENT_TIMESTAMP 返回 UTC，
-        julianday('now') 同为 UTC，避免 Python datetime.now() 与 UTC 的时区偏差）。
+        "现在"的基准必须与写入侧一致，在 Python 侧取数比较（不用 SQL 'now'）：
+        - life scope 的 last_active_at 由生产 Clock 写入（上海 naive，
+          见 _create_session / ConversationStore），"现在"取同一 Clock；
+        - chat scope 的 last_active_at 由 SQLite CURRENT_TIMESTAMP 写入（UTC），
+          "现在"取 UTC naive。
 
-        无活跃会话时返回 False（不触发轮换）。
+        无活跃会话或 last_active_at 缺失/不可解析时返回 False（不触发轮换）。
 
         配置假设：silence_seconds 应为正的常规值（生产群 1800s / 私聊 86400s）。
-        julianday 有亚秒浮点精度，gap 取 0 这类极端值会把刚创建 session 的微小时差判为
-        超时并触发级联轮换；这不是生产配置，不额外防御。
+        gap 取 0 这类极端值会把刚创建 session 的微小时差判为超时并触发级联轮换；
+        这不是生产配置，不额外防御。
         """
+        import datetime
         db = self._store._persona_db
         gap = self._private_silence_seconds if scope.is_private else self._group_silence_seconds
         cursor = await db.execute(
-            "SELECT 1 FROM persona_session "
+            "SELECT last_active_at FROM persona_session "
             "WHERE status='active' AND scope_namespace=? AND scope_key=? "
-            "AND (julianday('now') - julianday(last_active_at)) * 86400 > ? "
             "ORDER BY session_id DESC LIMIT 1",
-            (scope.namespace, scope.key, gap),
+            (scope.namespace, scope.key),
         )
         row = await cursor.fetchone()
-        return row is not None
+        if row is None:
+            return False
+        last_active_str = str(_cell(row, 0, "last_active_at") or "")
+        if not last_active_str:
+            return False
+        try:
+            last_active = datetime.datetime.fromisoformat(last_active_str)
+        except ValueError:
+            return False
+        if scope.is_life:
+            now = get_clock().now()
+        else:
+            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        return (now - last_active).total_seconds() > gap
 
     async def _read_inherited_summary(self, scope: ConversationScope) -> str:
         """读取同 scope 紧邻上一段 closed session 的摘要（只读，不生成、不调 LLM）。

@@ -2382,9 +2382,9 @@ class PersonaDataStore:
         status: str,
         last_active_at: datetime,
     ) -> "PersonaSession":
-        # 不变量：last_active_at 必须是 UTC。静默判定 _is_silence_expired 用 SQL
-        # julianday('now')（UTC）对比本列，传入本地时间会导致静默时长偏差。registry
-        # 热路径走 _create_session（依赖 DDL CURRENT_TIMESTAMP 默认，UTC），不经此方法。
+        # 不变量：last_active_at 的时区基准必须与 scope 写入侧一致——静默判定
+        # _is_silence_expired 对 life scope 用生产 Clock（上海 naive）、chat scope 用
+        # UTC 比较本列。registry 热路径走 _create_session，不经此方法。
         from .models import PersonaSession
         now_iso = last_active_at.isoformat()
         cursor = await self.db.execute(
