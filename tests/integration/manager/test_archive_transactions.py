@@ -4,7 +4,9 @@ import io
 import hashlib
 import json
 import sqlite3
+import time
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -405,6 +407,75 @@ async def test_each_restore_failure_phase_is_compensated(
     assert (layout.config_bots_dir / "extra.json").exists()
     assert runtime.state == "running"
     assert raised.value.detail["rolled_back"] is True
+    assert service.store.get_journal(
+        raised.value.detail["transaction_id"]
+    )["status"] == "rolled_back"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("heartbeat_style", ["iso", "epoch"])
+async def test_rollback_health_gate_uses_real_control_probe_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    heartbeat_style: str,
+) -> None:
+    """The rollback hard-health gate accepts the heartbeat shapes the
+    Dashboard actually persists: ISO-8601 (current) or epoch seconds
+    (legacy).  A rollback that restored data and restarted the runtime
+    must not be misjudged as rollback_failed by the control probe.
+    """
+    from dicepp_manager import factory as manager_factory
+
+    def heartbeat() -> str:
+        if heartbeat_style == "epoch":
+            return str(time.time())
+        return datetime.now(timezone.utc).isoformat()
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _limit):
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "component": "dashboard",
+                    "control": {"latest_heartbeat": heartbeat()},
+                }
+            ).encode()
+
+    monkeypatch.setattr(
+        manager_factory.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+    armed = {"value": True}
+
+    def fault(phase: str) -> None:
+        if armed["value"] and phase == "migration":
+            armed["value"] = False
+            raise OSError("injected migration failure")
+
+    layout, runtime, service, coordinator = _coordinator(
+        tmp_path, fault_hook=fault
+    )
+    coordinator.control_probe = manager_factory._control_channel_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+    operation = coordinator.new_operation("archive.restore")
+
+    with pytest.raises(ArchiveTransactionError) as raised:
+        await coordinator.restore(operation, filename=target["filename"])
+
+    assert raised.value.detail["rolled_back"] is True
+    assert json.loads(layout.config_user.read_text()) == {"value": "before"}
+    assert runtime.state == "running"
     assert service.store.get_journal(
         raised.value.detail["transaction_id"]
     )["status"] == "rolled_back"
@@ -955,6 +1026,61 @@ async def test_pre_switch_restart_failure_is_retryable_after_manager_restart(
     assert recovered[0]["action"] == "rolled_back"
     assert service.store.get_journal(transaction_id)["status"] == "rolled_back"
     assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_post_switch_rollback_failure_is_not_replayed_after_restart(
+    tmp_path: Path,
+) -> None:
+    """A rollback already adjudicated failed past the data switch is
+    terminal: Manager restart must not replay the destructive rollback
+    (stop Bots, re-apply the old archive) again.
+    """
+    layout, runtime, service, coordinator = _coordinator(tmp_path)
+    _write(layout.config_user, '{"value": "current"}')
+    pre, _ = create_archive(layout=layout)
+    transaction_id = "f" * 32
+    detail = {
+        "transaction_id": transaction_id,
+        "target_filename": "target.zip",
+        "profile": "regular",
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "data_switch_started",
+        "pre_restore_filename": pre["filename"],
+    }
+    operation = coordinator.new_operation("archive.restore")
+    operation.transition(
+        "failed",
+        message="Rollback failed; manual recovery required",
+        detail={**detail, "rolled_back": False},
+    )
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="archive_restore",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+
+    recovered = await coordinator.recover()
+
+    assert recovered == [
+        {
+            "transaction_id": transaction_id,
+            "action": "rollback_failed",
+            "manual_recovery_required": True,
+        }
+    ]
+    # No replay: runtime untouched, data untouched, journal preserved so
+    # archive/package protection and manual evidence survive.
+    assert runtime.actions == []
+    assert runtime.state == "running"
+    assert json.loads(layout.config_user.read_text()) == {"value": "current"}
+    journal = service.store.get_journal(transaction_id)
+    assert journal["status"] == "rollback_failed"
+    assert pre["filename"] in service.store.protected_archive_names()
 
 
 @pytest.mark.asyncio

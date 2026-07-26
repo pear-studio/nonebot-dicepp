@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import zipfile
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 
 from dicepp_data import DATA_CATALOG, InstanceLayout
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
+from dicepp_manager.release import RELEASE_CONTRACT_VERSION, ReleaseManager
 from dicepp_manager.update_guard import UpdateGuardError, run_guard
 from dicepp_manager.upgrade import (
     LinuxBundleUpgradeAdapter,
@@ -574,12 +576,14 @@ async def test_windows_preflight_rejects_noop_and_requires_old_full_package(
         version_loader=lambda: "3.1.0",
     )
 
-    with pytest.raises(UpgradeCompatibilityError, match="full package"):
-        await adapter.preflight(_windows_package(tmp_path))
-
-    _write_full_nupkg(tmp_path, "3.1.0")
+    # A no-op target is rejected up front, before any rollback material
+    # resolution (which may download the current-version full package).
     with pytest.raises(UpgradeCompatibilityError, match="already installed"):
         await adapter.preflight(_windows_package(tmp_path))
+
+    # A real target still requires the current-version full package.
+    with pytest.raises(UpgradeCompatibilityError, match="full package"):
+        await adapter.preflight(_windows_package(tmp_path, "3.2.0"))
 
 
 @pytest.mark.asyncio
@@ -1073,3 +1077,356 @@ def test_update_guard_rejects_request_without_full_process_identity(
 
     with pytest.raises(UpgradeCompatibilityError, match="PID/start time"):
         run_guard(path, inspect_identity=lambda _pid: None)
+
+
+# ── Rollback material: Release fetch + packages directory invariant ──────
+
+
+class _Response:
+    def __init__(self, body: bytes, *, status: int = 200, headers=None) -> None:
+        self.body = body
+        self.status = status
+        self.headers = headers or {}
+        self.offset = 0
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.body) - self.offset
+        result = self.body[self.offset : self.offset + size]
+        self.offset += len(result)
+        return result
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+
+class _Transport:
+    def __init__(self, routes: dict[str, list[_Response]]) -> None:
+        self.routes = routes
+        self.requests: list[str] = []
+
+    def open(self, url: str, *, headers=None, timeout=30):
+        self.requests.append(url)
+        return self.routes[url].pop(0)
+
+
+def _nupkg_bytes(version: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "DicePP.nuspec",
+            f"<package><metadata><version>{version}</version></metadata></package>",
+        )
+        archive.writestr("lib/net8.0/DicePP.exe", f"program-{version}")
+    return buffer.getvalue()
+
+
+def _make_nupkg(path: Path, version: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_nupkg_bytes(version))
+    return path
+
+
+def _verified_nupkg_package(path: Path, version: str) -> VerifiedUpgradePackage:
+    return VerifiedUpgradePackage(
+        version=version,
+        platform="windows",
+        arch="amd64",
+        path=path,
+        metadata_path=path.parent / "verified-release.json",
+        artifact={
+            "purpose": "velopack-full",
+            "filename": path.name,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        },
+        release={},
+    )
+
+
+def _current_release_routes(version: str, nupkg_body: bytes) -> dict:
+    feeds = {
+        f"releases.win-x64-stable.json": (b'{"Assets":[]}', "velopack-releases"),
+        f"assets.win-x64-stable.json": (b"[]", "velopack-assets"),
+    }
+    bodies = {f"DicePP-{version}-full.nupkg": (nupkg_body, "velopack-full")}
+    bodies.update(feeds)
+    artifacts = [
+        {
+            "platform": "windows",
+            "arch": "amd64",
+            "filename": filename,
+            "purpose": purpose,
+            "size": len(body),
+            "sha256": hashlib.sha256(body).hexdigest(),
+        }
+        for filename, (body, purpose) in bodies.items()
+    ]
+    manifest = {
+        "contract_version": RELEASE_CONTRACT_VERSION,
+        "version": version,
+        "channel": "stable",
+        "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+        "minimum_manager_version": MANAGER_VERSION,
+        "catalog_version": 1,
+        "catalog_digest": "1" * 64,
+        "change_scope": ["runtime"],
+        "automatic_upgrade": True,
+        "artifacts": artifacts,
+        "fallbacks": {
+            "linux_ghcr_images": [
+                f"ghcr.io/pear-studio/nonebot-dicepp:v{version}",
+                f"ghcr.io/pear-studio/dicepp-dashboard:v{version}",
+            ]
+        },
+    }
+    manifest_bytes = json.dumps(manifest).encode()
+    release = {
+        "tag_name": f"v{version}",
+        "draft": False,
+        "prerelease": False,
+        "html_url": "https://github.com/example/release",
+        "published_at": "2026-07-23T00:00:00Z",
+        "assets": [
+            {
+                "name": "dicepp-release.json",
+                "size": len(manifest_bytes),
+                "digest": f"sha256:{hashlib.sha256(manifest_bytes).hexdigest()}",
+                "browser_download_url": "https://downloads/manifest",
+            }
+        ]
+        + [
+            {
+                "name": artifact["filename"],
+                "size": artifact["size"],
+                "digest": f"sha256:{artifact['sha256']}",
+                "browser_download_url": f"https://downloads/{artifact['purpose']}",
+            }
+            for artifact in artifacts
+        ],
+    }
+    return {
+        "https://api/releases?per_page=100&page=1": [
+            _Response(json.dumps([release]).encode())
+        ],
+        "https://downloads/manifest": [_Response(manifest_bytes)],
+        "https://downloads/velopack-full": [
+            _Response(nupkg_body, headers={"ETag": '"full"'})
+        ],
+    }
+
+
+def _rollback_fetch_manager(
+    layout: InstanceLayout, transport: _Transport
+) -> ReleaseManager:
+    return ReleaseManager(
+        layout=layout,
+        transport=transport,
+        github_api="https://api",
+        target=("windows", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+
+
+def _rollback_adapter(
+    tmp_path: Path,
+    layout: InstanceLayout,
+    *,
+    version: str,
+    fetcher=None,
+) -> WindowsVelopackUpgradeAdapter:
+    return WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(tmp_path / "DicePP-UpdateGuard.exe")],
+        install_command=[str(tmp_path / "Update.exe"), "apply", "-p", "{package}"],
+        restart_command=[str(tmp_path / "DicePP.exe")],
+        process_identity_loader=lambda: {
+            "pid": 1,
+            "started_at": "old",
+            "executable": str((tmp_path / "current" / "DicePP.exe").resolve()),
+        },
+        version_loader=lambda: version,
+        bundled_guard_path=tmp_path / "DicePP-UpdateGuard.exe",
+        rollback_package_fetcher=fetcher,
+    )
+
+
+@pytest.mark.asyncio
+async def test_windows_first_upgrade_fetches_rollback_package_from_release(
+    tmp_path: Path,
+):
+    """Portable first install has no packages/ directory: the rollback
+    material for the current version is downloaded from the GitHub
+    Release (verified against the contract) instead of refusing."""
+    layout = _windows_adapter_layout(tmp_path)
+    nupkg_body = _nupkg_bytes("3.0.0")
+    transport = _Transport(_current_release_routes("3.0.0", nupkg_body))
+    manager = _rollback_fetch_manager(layout, transport)
+    adapter = _rollback_adapter(
+        tmp_path,
+        layout,
+        version="3.0.0",
+        fetcher=manager.fetch_rollback_package,
+    )
+    package = _windows_package(tmp_path, "3.1.0")
+    assert not (tmp_path / "packages").exists()
+
+    preflight = await adapter.preflight(package)
+    staged = await adapter.stage(package, "f" * 32)
+
+    digest = hashlib.sha256(nupkg_body).hexdigest()
+    assert preflight["rollback_package_sha256"] == digest
+    downloaded = Path(preflight["rollback_package"])
+    assert downloaded.is_file()
+    assert downloaded.read_bytes() == nupkg_body
+    assert Path(staged["rollback_package"]).read_bytes() == nupkg_body
+    assert staged["rollback_package_sha256"] == digest
+    assert "https://downloads/velopack-full" in transport.requests
+
+
+@pytest.mark.asyncio
+async def test_windows_commit_maintains_packages_dir_for_next_upgrade(
+    tmp_path: Path,
+):
+    """After a healthy commit the target nupkg is the only full package in
+    packages/, so the next upgrade finds its rollback material locally and
+    never downloads."""
+    layout = _windows_adapter_layout(tmp_path)
+    _write_full_nupkg(tmp_path, "3.0.0")
+    target = _make_nupkg(
+        layout.manager_packages_dir / "3.1.0" / "DicePP-3.1.0-full.nupkg",
+        "3.1.0",
+    )
+    package = _verified_nupkg_package(target, "3.1.0")
+    marker_dir = layout.manager_state_dir / "update-guard" / ("c" * 32)
+    marker_dir.mkdir(parents=True)
+    health = marker_dir / "health.json"
+    health.write_text(
+        json.dumps(
+            {
+                "format_version": 2,
+                "transaction_id": "c" * 32,
+                "target_version": "3.1.0",
+                "status": "healthy",
+                "manager_identity": {
+                    "pid": 2,
+                    "started_at": "new",
+                    "executable": str(
+                        (tmp_path / "current" / "DicePP.exe").resolve()
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    adapter = _rollback_adapter(tmp_path, layout, version="3.0.0")
+
+    result = await adapter.commit(
+        package,
+        current={},
+        staged={"health_marker": str(health)},
+        transaction_id="c" * 32,
+    )
+
+    assert "packages_maintenance_error" not in result
+    packages_dir = tmp_path / "packages"
+    remaining = list(packages_dir.glob("*-full.nupkg"))
+    assert [item.name for item in remaining] == ["DicePP-3.1.0-full.nupkg"]
+    assert remaining[0].read_bytes() == target.read_bytes()
+
+    def forbidden_fetch(_version: str):
+        pytest.fail("rollback material must come from packages/, not the Release")
+
+    second = _rollback_adapter(
+        tmp_path, layout, version="3.1.0", fetcher=forbidden_fetch
+    )
+    preflight = await second.preflight(_windows_package(tmp_path, "3.2.0"))
+
+    assert Path(preflight["rollback_package"]).resolve() == remaining[0].resolve()
+
+
+@pytest.mark.asyncio
+async def test_windows_commit_reports_packages_maintenance_failure_without_failing(
+    tmp_path: Path,
+):
+    """Maintaining packages/ is best-effort: a failure there is reported
+    on the commit result, never raised, so an already healthy commit is
+    not adjudicated failed."""
+    layout = _windows_adapter_layout(tmp_path)
+    target = _make_nupkg(
+        layout.manager_packages_dir / "3.1.0" / "DicePP-3.1.0-full.nupkg",
+        "3.1.0",
+    )
+    package = _verified_nupkg_package(target, "3.1.0")
+    marker_dir = layout.manager_state_dir / "update-guard" / ("c" * 32)
+    marker_dir.mkdir(parents=True)
+    health = marker_dir / "health.json"
+    health.write_text(
+        json.dumps(
+            {
+                "format_version": 2,
+                "transaction_id": "c" * 32,
+                "target_version": "3.1.0",
+                "status": "healthy",
+                "manager_identity": {
+                    "pid": 2,
+                    "started_at": "new",
+                    "executable": str(
+                        (tmp_path / "current" / "DicePP.exe").resolve()
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    # A symlinked packages/ drives _maintain_packages_dir onto its first
+    # failure return path without raising.
+    (tmp_path / "packages").symlink_to(tmp_path / "elsewhere")
+    adapter = _rollback_adapter(tmp_path, layout, version="3.0.0")
+
+    result = await adapter.commit(
+        package,
+        current={},
+        staged={"health_marker": str(health)},
+        transaction_id="c" * 32,
+    )
+
+    assert result["status"] == "healthy"
+    assert result["transaction_id"] == "c" * 32
+    assert isinstance(result["packages_maintenance_error"], str)
+    assert result["packages_maintenance_error"]
+
+
+@pytest.mark.asyncio
+async def test_windows_unavailable_rollback_material_requires_manual_update(
+    tmp_path: Path,
+):
+    """When the current version's Release/artifact cannot be fetched, the
+    upgrade is rejected with a manual-update hint and no half state."""
+    layout = _windows_adapter_layout(tmp_path)
+    transport = _Transport(
+        {
+            "https://api/releases?per_page=100&page=1": [
+                _Response(json.dumps([]).encode())
+            ]
+        }
+    )
+    manager = _rollback_fetch_manager(layout, transport)
+    adapter = _rollback_adapter(
+        tmp_path,
+        layout,
+        version="3.0.0",
+        fetcher=manager.fetch_rollback_package,
+    )
+
+    with pytest.raises(UpgradeCompatibilityError, match="manual"):
+        await adapter.preflight(_windows_package(tmp_path, "3.1.0"))
+
+    assert not (tmp_path / "packages").exists()
+    assert list(tmp_path.rglob("*.part")) == []
+    assert not (layout.manager_state_dir / "update-guard").exists()

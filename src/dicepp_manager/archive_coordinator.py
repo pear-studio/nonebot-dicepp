@@ -366,6 +366,7 @@ class ArchiveCoordinator:
                 },
             )
             self.store.save(operation)
+            self.store.retire_terminal_rollback_journals()
             return operation
         except Exception as exc:
             rollback = await self._rollback_transaction(
@@ -447,6 +448,24 @@ class ArchiveCoordinator:
                 continue
             detail = dict(journal.get("detail") or {})
             transaction_id = str(journal["transaction_id"])
+            if journal.get("status") == "rollback_failed" and detail.get(
+                "commit_point"
+            ) not in (None, "not_started"):
+                # Terminal rollback adjudication rule (shared with
+                # upgrade.UpgradeCoordinator.recover): the rollback already
+                # re-applied the pre-restore archive and was adjudicated
+                # failed.  Replaying it after a restart would only repeat
+                # the damage, so this state is terminal and requires manual
+                # recovery.  A rollback that failed before the data switch
+                # only owes a best-effort restart and stays retryable.
+                recovered.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "action": "rollback_failed",
+                        "manual_recovery_required": True,
+                    }
+                )
+                continue
             phase = str(journal.get("phase"))
             operation = (
                 self.store.get(str(journal.get("operation_id")))

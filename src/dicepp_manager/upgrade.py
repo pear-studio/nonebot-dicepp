@@ -434,6 +434,7 @@ class WindowsVelopackUpgradeAdapter:
         auth_token_path: Path | None = None,
         manager_exit_timeout: float = 60.0,
         health_timeout: float = 120.0,
+        rollback_package_fetcher: Callable[[str], tuple[Path, str]] | None = None,
     ) -> None:
         if not guard_command or not install_command:
             raise ValueError("UpdateGuard and Velopack commands are required")
@@ -445,6 +446,8 @@ class WindowsVelopackUpgradeAdapter:
         )
         self.process_identity_loader = process_identity_loader
         self.version_loader = version_loader
+        self.rollback_package_fetcher = rollback_package_fetcher
+        self._fetched_rollback: dict[str, tuple[Path, str]] = {}
         self.bundled_guard_path = bundled_guard_path or (
             Path(os.environ.get("DICEPP_APP_DIR", str(layout.root)))
             / "DicePP-UpdateGuard.exe"
@@ -464,13 +467,13 @@ class WindowsVelopackUpgradeAdapter:
                 "Windows automatic updates require a Velopack full package; "
                 "Portable and Setup are first-install artifacts"
             )
-        source_version, rollback_package, rollback_digest = (
-            self._current_full_package()
-        )
-        if Version(source_version) == Version(package.version):
+        if Version(self._current_version()) == Version(package.version):
             raise UpgradeCompatibilityError(
                 "Windows automatic update target is already installed"
             )
+        source_version, rollback_package, rollback_digest = (
+            await self._current_full_package()
+        )
         update_exe = Path(self.install_command[0])
         stable_guard = Path(self.guard_command[0])
         bundled_guard = self.bundled_guard_path
@@ -508,13 +511,13 @@ class WindowsVelopackUpgradeAdapter:
         }
 
     async def capture_current(self, package) -> dict[str, Any]:
-        source_version, rollback_package, rollback_digest = (
-            self._current_full_package()
-        )
-        if Version(source_version) == Version(package.version):
+        if Version(self._current_version()) == Version(package.version):
             raise UpgradeCompatibilityError(
                 "Windows automatic update target is already installed"
             )
+        source_version, rollback_package, rollback_digest = (
+            await self._current_full_package()
+        )
         return {
             "process_identity": _validate_process_identity(
                 self.process_identity_loader()
@@ -527,11 +530,14 @@ class WindowsVelopackUpgradeAdapter:
     async def stage(
         self, package: VerifiedUpgradePackage, transaction_id: str
     ) -> dict[str, Any]:
+        # Resolve the rollback material before creating the transaction
+        # directory: the resolution may download from the Release, and a
+        # failure there must not leave an orphan guard_dir/<uuid>/ behind.
+        source_version, rollback_source, rollback_digest = (
+            await self._current_full_package()
+        )
         transaction_dir = self.guard_dir / transaction_id
         transaction_dir.mkdir(parents=True, exist_ok=False)
-        source_version, rollback_source, rollback_digest = (
-            self._current_full_package()
-        )
         rollback_package = transaction_dir / rollback_source.name
         _atomic_copy(rollback_source, rollback_package)
         if _sha256_file(rollback_package) != rollback_digest:
@@ -644,12 +650,15 @@ class WindowsVelopackUpgradeAdapter:
             return None
         return marker
 
-    def _current_full_package(self) -> tuple[str, Path, str]:
+    def _current_version(self) -> str:
         current_version = self.version_loader()
         if not isinstance(current_version, str) or current_version == "unknown":
             raise UpgradeCompatibilityError(
                 "Current Windows program version is unavailable"
             )
+        return current_version
+
+    def _local_full_packages(self, current_version: str) -> list[Path]:
         packages_dir = self.layout.root / "packages"
         matches: list[Path] = []
         if packages_dir.is_dir() and not packages_dir.is_symlink():
@@ -660,12 +669,78 @@ class WindowsVelopackUpgradeAdapter:
                     and _nupkg_version(candidate) == current_version
                 ):
                     matches.append(candidate.resolve())
-        if len(matches) != 1:
+        return matches
+
+    async def _current_full_package(self) -> tuple[str, Path, str]:
+        current_version = self._current_version()
+        matches = self._local_full_packages(current_version)
+        if len(matches) > 1:
             raise UpgradeCompatibilityError(
                 "Exactly one verified current-version Velopack full package "
                 "is required for automatic rollback"
             )
-        return current_version, matches[0], _sha256_file(matches[0])
+        if len(matches) == 1:
+            return current_version, matches[0], _sha256_file(matches[0])
+        if self.rollback_package_fetcher is None:
+            raise UpgradeCompatibilityError(
+                "Exactly one verified current-version Velopack full package "
+                "is required for automatic rollback"
+            )
+        # Neither the Portable zip nor Update.exe maintains root/packages,
+        # so the current-version full package may be missing locally.  Fetch
+        # it from the GitHub Release (verified against the Release contract)
+        # instead of refusing the automatic update.  The result is memoized:
+        # preflight, capture_current, and stage all resolve the material.
+        cached = self._fetched_rollback.get(current_version)
+        if cached is not None and cached[0].is_file():
+            return current_version, cached[0], cached[1]
+        try:
+            path, digest = await asyncio.to_thread(
+                self.rollback_package_fetcher, current_version
+            )
+        except Exception as exc:
+            raise UpgradeCompatibilityError(
+                "The current-version Velopack full package is unavailable "
+                "locally and could not be fetched from the Release; "
+                "use a manual Windows update"
+            ) from exc
+        self._fetched_rollback[current_version] = (path, digest)
+        return current_version, path, digest
+
+    def _maintain_packages_dir(self, package: VerifiedUpgradePackage) -> str | None:
+        """Best-effort: keep exactly the committed full package in root/packages.
+
+        Neither Update.exe apply nor DicePP maintains the Velopack packages
+        directory; without this housekeeping the next automatic update would
+        not find its rollback material locally.  A failure here must not
+        invalidate an already healthy commit, so it is reported, not raised.
+        """
+        try:
+            packages_dir = self.layout.root / "packages"
+            if packages_dir.is_symlink():
+                return "Velopack packages directory is not a regular directory"
+            packages_dir.mkdir(parents=True, exist_ok=True)
+            expected = package.artifact.get("sha256")
+            if not isinstance(expected, str) or not expected:
+                return "Committed package digest is unavailable"
+            target = packages_dir / package.path.name
+            if (
+                target.is_symlink()
+                or not target.is_file()
+                or _sha256_file(target) != expected
+            ):
+                _atomic_copy(package.path, target)
+            if _sha256_file(target) != expected:
+                return "Refreshed rollback package digest mismatch"
+            for candidate in packages_dir.glob("*-full.nupkg"):
+                if (
+                    candidate.is_file()
+                    and candidate.resolve() != target.resolve()
+                ):
+                    candidate.unlink()
+            return None
+        except OSError as exc:
+            return str(exc) or type(exc).__name__
 
     async def rollback(
         self,
@@ -720,6 +795,11 @@ class WindowsVelopackUpgradeAdapter:
             )
         ):
             raise UpgradeError("UpdateGuard did not report healthy")
+        maintenance_error = await asyncio.to_thread(
+            self._maintain_packages_dir, package
+        )
+        if maintenance_error is not None:
+            result = {**result, "packages_maintenance_error": maintenance_error}
         return result
 
     def validate_health_marker(
@@ -1016,6 +1096,7 @@ class UpgradeCoordinator:
                 detail=detail,
             )
             self.store.save(operation)
+            self.store.retire_terminal_rollback_journals()
             return operation
         except Exception as exc:
             rollback = await self._rollback(
@@ -1051,13 +1132,6 @@ class UpgradeCoordinator:
                 continue
             detail = dict(journal.get("detail") or {})
             transaction_id = str(journal["transaction_id"])
-            operation = (
-                self.store.get(str(journal.get("operation_id")))
-                if journal.get("operation_id")
-                else None
-            )
-            if operation is None:
-                operation = self.new_operation()
             rollback_validator = getattr(
                 self.platform_adapter,
                 "validate_rollback_marker",
@@ -1067,12 +1141,6 @@ class UpgradeCoordinator:
                 self.platform_adapter,
                 "validate_health_marker",
                 None,
-            )
-            guard_handoff = self._is_guard_handoff(
-                journal,
-                detail,
-                rollback_validator=rollback_validator,
-                health_validator=health_validator,
             )
             authoritative_rollback = None
             authoritative_health = None
@@ -1087,6 +1155,50 @@ class UpgradeCoordinator:
                     authoritative_health = health_validator(detail)
                 except (OSError, ValueError, json.JSONDecodeError):
                     authoritative_health = None
+            # Terminal rollback adjudication rule (shared with
+            # archive_coordinator.ArchiveCoordinator.recover): a rollback
+            # that already ran its destructive phase and was adjudicated
+            # failed is terminal and requires manual recovery.  Replaying it
+            # after a restart would only repeat the damage (stop Bots,
+            # rebuild the old containers, re-apply the old archive).  A
+            # rollback that failed before the program switch only owes a
+            # best-effort restart and stays retryable.  Exemption: when the
+            # UpdateGuard rollback marker already validated
+            # program_rolled_back, the destructive program rollback is known
+            # to have completed and only data recovery/restart/health
+            # failed; retrying via _recover_update_guard_handoff never
+            # replays the destructive phase, so the journal stays
+            # recoverable instead of terminal.
+            if (
+                journal.get("status") == "rollback_failed"
+                and detail.get("commit_point") not in (None, "not_started")
+                and not (
+                    isinstance(authoritative_rollback, dict)
+                    and authoritative_rollback.get("status")
+                    == "program_rolled_back"
+                )
+            ):
+                recovered.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "action": "rollback_failed",
+                        "manual_recovery_required": True,
+                    }
+                )
+                continue
+            operation = (
+                self.store.get(str(journal.get("operation_id")))
+                if journal.get("operation_id")
+                else None
+            )
+            if operation is None:
+                operation = self.new_operation()
+            guard_handoff = self._is_guard_handoff(
+                journal,
+                detail,
+                rollback_validator=rollback_validator,
+                health_validator=health_validator,
+            )
             if guard_handoff:
                 self.service.set_startup_maintenance_gate(True)
             if (
@@ -1222,6 +1334,7 @@ class UpgradeCoordinator:
                         detail={**detail, "recovered": True},
                     )
                     self.store.save(operation)
+                    self.store.retire_terminal_rollback_journals()
                     # Commit, journal, and operation state are now durable.
                     # Later Guard refresh/cleanup may retry independently and
                     # must not keep ordinary runtime lifecycle work blocked.
@@ -1480,6 +1593,7 @@ class UpgradeCoordinator:
                 detail={**detail, "recovered": True},
             )
             self.store.save(operation)
+            self.store.retire_terminal_rollback_journals()
             self.archive._apply_retention_if_safe()
             self.service.set_startup_maintenance_gate(False)
             return {"action": "committed"}
@@ -1948,11 +2062,24 @@ class UpgradeCoordinator:
                             "Verified Velopack feed asset changed after download"
                         )
                     try:
-                        _read_json_object(companion_path)
-                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        feed = json.loads(
+                            companion_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, ValueError) as exc:
                         raise UpgradeCompatibilityError(
                             "Velopack feed asset is invalid JSON"
                         ) from exc
+                    # Velopack publishes the releases feed as a JSON object
+                    # ({"Assets": [...]}) but the assets feed as a bare array.
+                    expected_root = (
+                        dict if purpose == "velopack-releases" else list
+                    )
+                    if not isinstance(feed, expected_root):
+                        raise UpgradeCompatibilityError(
+                            "Velopack releases feed must be a JSON object"
+                            if purpose == "velopack-releases"
+                            else "Velopack assets feed must be a JSON array"
+                        )
                     seen_companions.add(str(purpose))
                 if seen_companions != {"velopack-releases", "velopack-assets"}:
                     raise UpgradeCompatibilityError(

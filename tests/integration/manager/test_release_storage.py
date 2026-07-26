@@ -519,8 +519,10 @@ def test_windows_velopack_download_also_verifies_both_feed_assets(
 ) -> None:
     bodies = {
         "velopack-full": b"full nupkg",
-        "velopack-releases": b'{"releases":[]}',
-        "velopack-assets": b'{"assets":[]}',
+        # Real Velopack output: the releases feed is a JSON object while
+        # the assets feed is a bare JSON array.
+        "velopack-releases": b'{"Assets":[]}',
+        "velopack-assets": b"[]",
     }
     artifacts = []
     routes = {}

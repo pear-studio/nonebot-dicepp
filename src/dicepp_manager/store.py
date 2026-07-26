@@ -180,6 +180,40 @@ class ManagerOperationStore:
             ).fetchall()
         return [self._journal_row(row) for row in rows]
 
+    def retire_terminal_rollback_journals(self) -> list[str]:
+        """Retire terminal rollback_failed journals after a successful recovery.
+
+        A rollback adjudicated failed past its commit point is terminal
+        (the terminal rollback adjudication rule shared by
+        upgrade.UpgradeCoordinator.recover and
+        archive_coordinator.ArchiveCoordinator.recover); its journal stays
+        in the recoverable set so the target package and pre-upgrade
+        archive remain protected while manual recovery is pending.  Once a
+        recovery operation succeeds (an archive restore or an upgrade
+        commit), that protection duty is fulfilled: the journal is marked
+        retired (kept as evidence, but outside the recoverable set), which
+        lifts the package/archive protection and stops the repeated
+        manual_recovery_required report on Manager restart.
+        """
+        retired: list[str] = []
+        for journal in self.list_recoverable_journals():
+            detail = journal.get("detail") or {}
+            if journal.get("status") != "rollback_failed":
+                continue
+            if detail.get("commit_point") in (None, "not_started"):
+                continue
+            transaction_id = str(journal["transaction_id"])
+            self.write_journal(
+                transaction_id,
+                kind=str(journal.get("kind") or ""),
+                phase=str(journal.get("phase") or ""),
+                status="retired",
+                operation_id=journal.get("operation_id"),
+                detail=detail,
+            )
+            retired.append(transaction_id)
+        return retired
+
     def protected_archive_names(self) -> set[str]:
         names: set[str] = set()
         for journal in self.list_recoverable_journals():

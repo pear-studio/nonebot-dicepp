@@ -290,6 +290,231 @@ async def test_upgrade_commits_only_after_archive_migration_and_hard_health(
     assert (layout.manager_backups_dir / result.detail["pre_upgrade_filename"]).is_file()
 
 
+def test_windows_verified_package_accepts_real_velopack_feed_shapes(
+    tmp_path: Path,
+):
+    """Real Velopack feeds: releases is a JSON object, assets a bare array."""
+    _layout, _data, _runtime, _service, coordinator, _ = _setup(tmp_path)
+    version_dir = _layout.manager_packages_dir / "3.1.0"
+    for stale in version_dir.iterdir():
+        stale.unlink()
+    bodies = {
+        "DicePP-3.1.0-full.nupkg": b"full nupkg",
+        "releases.win-x64-stable.json": b'{"Assets":[{"Version":"3.1.0"}]}',
+        "assets.win-x64-stable.json": (
+            b'[{"RelativeFileName":"DicePP-3.1.0-full.nupkg"}]'
+        ),
+    }
+    purposes = {
+        "DicePP-3.1.0-full.nupkg": "velopack-full",
+        "releases.win-x64-stable.json": "velopack-releases",
+        "assets.win-x64-stable.json": "velopack-assets",
+    }
+    artifacts = []
+    for filename, body in bodies.items():
+        (version_dir / filename).write_bytes(body)
+        artifacts.append(
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": filename,
+                "purpose": purposes[filename],
+                "size": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+            }
+        )
+    available = coordinator.release_manager.value["available"]
+    available["artifacts"] = artifacts
+    (version_dir / "verified-release.json").write_text(
+        json.dumps(
+            {
+                "version": "3.1.0",
+                "channel": "stable",
+                "change_scope": available["change_scope"],
+                "compatibility": available["compatibility"],
+                "artifact": artifacts[0],
+                "verified_path": artifacts[0]["filename"],
+                "companions": [
+                    {
+                        "artifact": artifact,
+                        "verified_path": artifact["filename"],
+                    }
+                    for artifact in artifacts[1:]
+                ],
+                "completed_at": "2026-07-23T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    package = coordinator._verified_package("3.1.0")
+
+    assert package.version == "3.1.0"
+    assert package.artifact["purpose"] == "velopack-full"
+
+
+@pytest.mark.asyncio
+async def test_post_switch_rollback_failure_is_not_replayed_after_restart(
+    tmp_path: Path,
+):
+    """A rollback already adjudicated failed past the program switch is
+    terminal: Manager restart must not replay the destructive rollback
+    (stop Bots, restore the old program, re-apply the old archive).
+    """
+    _layout, _data, runtime, service, coordinator, platform = _setup(tmp_path)
+    transaction_id = "e" * 32
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "program_switch_started",
+        "pre_upgrade_filename": "pre-upgrade.zip",
+        "platform_current": {"images": ["old-bot"]},
+        "platform_staged": {"images": ["new-bot"]},
+    }
+    operation = coordinator.new_operation()
+    operation.transition(
+        "failed",
+        message="Rollback failed; manual recovery required",
+        detail={**detail, "rolled_back": False},
+    )
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+
+    recovered = await coordinator.recover()
+
+    assert recovered == [
+        {
+            "transaction_id": transaction_id,
+            "action": "rollback_failed",
+            "manual_recovery_required": True,
+        }
+    ]
+    # No replay: neither the runtime nor the platform adapter is touched,
+    # and the journal survives so package/archive protection remains.
+    assert runtime.actions == []
+    assert platform.calls == []
+    journal = service.store.get_journal(transaction_id)
+    assert journal["status"] == "rollback_failed"
+    assert "3.1.0" in service.store.protected_upgrade_versions()
+
+
+@pytest.mark.asyncio
+async def test_terminal_rollback_journal_retires_after_successful_upgrade_commit(
+    tmp_path: Path,
+):
+    """A terminal rollback_failed journal keeps its package/archive
+    protection while manual recovery is pending; a subsequent successful
+    upgrade commit retires it: out of the recoverable set, protection
+    lifted, and no repeated manual_recovery_required on restart.
+    """
+    _layout, _data, runtime, service, coordinator, platform = _setup(tmp_path)
+    transaction_id = "e" * 32
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "program_switch_started",
+        "pre_upgrade_filename": "pre-upgrade.zip",
+        "platform_current": {"images": ["old-bot"]},
+        "platform_staged": {"images": ["new-bot"]},
+    }
+    failed_operation = coordinator.new_operation()
+    failed_operation.transition(
+        "failed",
+        message="Rollback failed; manual recovery required",
+        detail={**detail, "rolled_back": False},
+    )
+    service.store.save(failed_operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=failed_operation.operation_id,
+        detail=detail,
+    )
+    # While unrecovered the terminal journal still protects its material.
+    assert "3.1.0" in service.store.protected_upgrade_versions()
+    assert "pre-upgrade.zip" in service.store.protected_archive_names()
+
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+    result = await coordinator.run(operation, package)
+
+    assert result.status == "succeeded"
+    journal = service.store.get_journal(transaction_id)
+    assert journal["status"] == "retired"
+    assert journal["phase"] == "rollback_failed"
+    assert journal["operation_id"] == failed_operation.operation_id
+    assert "3.1.0" not in service.store.protected_upgrade_versions()
+    assert "pre-upgrade.zip" not in service.store.protected_archive_names()
+    runtime.actions.clear()
+    platform.calls.clear()
+    recovered = await coordinator.recover()
+    assert all(
+        entry.get("transaction_id") != transaction_id for entry in recovered
+    )
+
+
+@pytest.mark.asyncio
+async def test_pre_switch_rollback_failed_is_retryable_after_manager_restart(
+    tmp_path: Path,
+):
+    """A rollback adjudicated failed before the program switch only owes a
+    best-effort restart and stays retryable: the terminal adjudication
+    must not swallow it into manual recovery.
+    """
+    _layout, _data, runtime, service, coordinator, platform = _setup(tmp_path)
+    transaction_id = "f" * 32
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "release_snapshot": coordinator.release_manager.value["available"],
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "not_started",
+        "pre_upgrade_filename": "pre-upgrade.zip",
+        "platform_current": {"images": ["old-bot"]},
+        "platform_staged": {"images": ["new-bot"]},
+    }
+    operation = coordinator.new_operation()
+    operation.transition(
+        "failed",
+        message="Upgrade interrupted before program switch",
+        detail={**detail, "rolled_back": False},
+    )
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+
+    recovered = await coordinator.recover()
+
+    assert recovered == [
+        {"transaction_id": transaction_id, "action": "rolled_back"}
+    ]
+    assert "cleanup" in platform.calls
+    assert "start" in runtime.actions
+    journal = service.store.get_journal(transaction_id)
+    assert journal["phase"] == "aborted_before_switch"
+    assert journal["status"] == "rolled_back"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "fault",
@@ -686,6 +911,103 @@ async def test_authoritative_guard_rollback_restores_data_without_target_package
     assert journal is not None
     assert journal["status"] == "rolled_back"
     assert service._startup_maintenance_active is False
+
+
+@pytest.mark.asyncio
+async def test_post_switch_rollback_failed_journal_with_validated_guard_marker_still_recovers(
+    tmp_path: Path,
+):
+    """A rollback_failed journal past the switch whose UpdateGuard marker
+    already validated program_rolled_back stays recoverable: the Guard
+    restored the program, so retrying only re-runs data recovery and never
+    replays the destructive program rollback.
+    """
+    layout, data_file, _runtime, service, coordinator, _ = _setup(tmp_path)
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=["guard.exe"],
+        install_command=["Update.exe", "apply", "{package}"],
+        process_identity_loader=lambda: {
+            "pid": 10,
+            "started_at": "old-start",
+            "executable": str((layout.root / "DicePP.exe").resolve()),
+        },
+    )
+    coordinator.platform_adapter = adapter
+    from dicepp_manager.archive import create_archive
+
+    pre, _manifest = create_archive(
+        "pre-upgrade guard recovery",
+        layout=layout,
+        profile="regular",
+        archive_kind="system",
+    )
+    data_file.write_text('{"value": "new data"}', encoding="utf-8")
+    transaction_id = "guard-rollback-failed-retry"
+    marker_dir = layout.manager_state_dir / "update-guard" / transaction_id
+    marker_dir.mkdir(parents=True)
+    rollback_marker = marker_dir / "rollback.json"
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "phase": "awaiting_update_guard",
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "program_switch_started",
+        "pre_upgrade_filename": pre["filename"],
+        "platform_current": {"source_version": "3.0.0"},
+        "platform_staged": {
+            "started_marker": str((marker_dir / "started.json").resolve()),
+            "health_marker": str((marker_dir / "health.json").resolve()),
+            "rollback_marker": str(rollback_marker.resolve()),
+            "source_version": "3.0.0",
+        },
+    }
+    rollback_marker.write_text(
+        json.dumps(
+            {
+                "format_version": 2,
+                "status": "program_rolled_back",
+                "transaction_id": transaction_id,
+                "target_version": "3.1.0",
+                "source_version": "3.0.0",
+                "manager_identity": {
+                    "pid": 20,
+                    "started_at": "new-start",
+                    "executable": str(
+                        (layout.root / "current" / "DicePP.exe").resolve()
+                    ),
+                },
+                "updated_at": "2026-07-23T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    operation = coordinator.new_operation()
+    operation.transition(
+        "failed",
+        message="Previous program is active but data recovery failed",
+        detail={**detail, "rolled_back": False},
+    )
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+
+    recovered = await coordinator.recover(allow_startup_recovery=True)
+
+    assert recovered[0]["action"] == "rolled_back"
+    assert recovered[0]["result"]["program"] == {
+        "already_restored_by_update_guard": True
+    }
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    journal = service.store.get_journal(transaction_id)
+    assert journal is not None
+    assert journal["status"] == "rolled_back"
 
 
 @pytest.mark.asyncio

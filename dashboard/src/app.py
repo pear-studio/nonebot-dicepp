@@ -641,6 +641,12 @@ async def dashboard_health(request: Request):
         )
     try:
         with sqlite3.connect(db_path) as connection:
+            # MAX() on a TEXT column is lexicographic: during the epoch →
+            # ISO-8601 transition window a stale ISO row outranks fresher
+            # epoch rows.  The window self-converges as each live bot's
+            # next heartbeat is written in the new format (same-format ISO
+            # strings order chronologically), so a Python-side parse+max is
+            # not worth a full bots_meta scan on every poll.
             row = connection.execute(
                 """SELECT MAX(last_heartbeat) FROM bots_meta
                    WHERE last_heartbeat IS NOT NULL AND last_heartbeat != ''"""
@@ -1439,6 +1445,27 @@ async def persona_character_save(name: str, request: Request):
 # ── Shared bot status computation ──────────────────────────────────────────────
 
 
+def _heartbeat_to_epoch(value: object) -> float | None:
+    """Parse a stored heartbeat into epoch seconds.
+
+    New Dashboards persist ISO-8601 UTC strings; rows written by older
+    versions hold bare epoch-second numbers.  Both are accepted.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 def _compute_bot_statuses(db_path: str) -> list[dict]:
     """Read bots_meta + discovered bots, compute online status.
 
@@ -1453,7 +1480,7 @@ def _compute_bot_statuses(db_path: str) -> list[dict]:
             meta_bots[row["bot_id"]] = {
                 "bot_id": row["bot_id"],
                 "version": row["version"] or "",
-                "last_heartbeat_ts": row["last_heartbeat"] or "",
+                "last_heartbeat_ts": _heartbeat_to_epoch(row["last_heartbeat"]) or "",
             }
     finally:
         conn.close()
@@ -1475,13 +1502,7 @@ def _compute_bot_statuses(db_path: str) -> list[dict]:
             "last_heartbeat_ts": "",
         })
         last_hb = entry.get("last_heartbeat_ts", "")
-        online = False
-        if last_hb:
-            try:
-                online = (now - float(last_hb)) <= 15
-            except (ValueError, TypeError):
-                pass
-        entry["online"] = online
+        entry["online"] = bool(last_hb) and (now - float(last_hb)) <= 15
         result.append(entry)
     return result
 

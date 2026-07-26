@@ -2,13 +2,14 @@
 
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
 from tests.support.dashboard.app import setup_auth
 
 
-def _set_last_heartbeat(client: TestClient, bot_id: str, timestamp: float) -> None:
+def _set_last_heartbeat(client: TestClient, bot_id: str, timestamp: float | str) -> None:
     """Directly set a bot's last_heartbeat in the dashboard DB."""
     db_path = client.app.state.dashboard_db
     conn = sqlite3.connect(db_path)
@@ -34,6 +35,30 @@ class TestBotStatus:
         bots = resp.json()["bots"]
         bot = next(b for b in bots if b["bot_id"] == "test_bot")
         assert bot["online"] is True
+
+    def test_bot_status_online_with_iso_heartbeat(self, test_client: TestClient):
+        """A recent ISO-8601 heartbeat (current contract) shows as online."""
+        _set_last_heartbeat(
+            test_client, "test_bot", datetime.now(timezone.utc).isoformat()
+        )
+        setup_auth(test_client)
+        resp = test_client.get("/api/bots/status")
+        bots = resp.json()["bots"]
+        bot = next(b for b in bots if b["bot_id"] == "test_bot")
+        assert bot["online"] is True
+        # The status API keeps exposing epoch seconds to the frontend.
+        assert time.time() - float(bot["last_heartbeat_ts"]) < 15
+
+    def test_health_exposes_iso_parseable_latest_heartbeat(
+        self, test_client: TestClient
+    ):
+        """``/api/health`` returns the stored ISO-8601 heartbeat verbatim."""
+        stored = datetime.now(timezone.utc).isoformat()
+        _set_last_heartbeat(test_client, "test_bot", stored)
+        resp = test_client.get("/api/health")
+        assert resp.status_code == 200
+        latest = resp.json()["control"]["latest_heartbeat"]
+        assert datetime.fromisoformat(latest) == datetime.fromisoformat(stored)
 
     def test_bot_status_offline(self, test_client: TestClient):
         """An old heartbeat shows the bot as offline."""

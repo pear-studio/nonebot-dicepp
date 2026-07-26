@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import time as _time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -155,7 +156,12 @@ class TestWebSocketControl:
                 ).fetchone()
                 if row is None or row["version"] != "2.0.0":
                     return False
-                return float(row["last_heartbeat"]) > _time.time() - 10
+                # The heartbeat contract is ISO-8601 UTC (Manager parses it
+                # with datetime.fromisoformat during upgrade health gates).
+                parsed = datetime.fromisoformat(row["last_heartbeat"])
+                return (
+                    datetime.now(timezone.utc) - parsed
+                ).total_seconds() < 10
             finally:
                 conn.close()
 

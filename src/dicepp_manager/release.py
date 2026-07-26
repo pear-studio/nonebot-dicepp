@@ -690,6 +690,7 @@ class ReleaseManager:
         *,
         operation: ReleaseOperation,
     ) -> tuple[dict[str, Any] | None, list[str]]:
+        # 分页逻辑与 _find_release_by_version 重复；统一抽取见 backlog B-260726-7d886d。
         releases: list[dict[str, Any]] = []
         for page in range(1, 11):
             self._check_cancelled(operation)
@@ -737,6 +738,73 @@ class ReleaseManager:
                 + (f": {summary}" if summary else "")
             )
         return None, errors[:20]
+
+    def fetch_rollback_package(self, version: str) -> tuple[Path, str]:
+        """Download the verified Velopack full package for *version*.
+
+        Supplies Windows rollback material for the currently installed
+        version when the local packages directory does not hold it (first
+        Portable upgrade, or a Setup directory that Update.exe does not
+        maintain).  The artifact is selected and verified against the
+        Release contract (size + SHA-256), never local directory state.
+
+        Deliberately not serialized through the operation lock and not
+        cancellable on Manager shutdown: it runs on a throwaway
+        ReleaseOperation so it never queues behind (or deadlocks against)
+        a user-driven download of the target version.  Concurrent fetches
+        of the same version race on the same ``.part`` file, but the loser
+        fails safely on the post-download digest check and the caller
+        re-verifies/re-fetches on the next attempt.
+        """
+        wanted = Version(_normalized_version(version))
+        release = self._find_release_by_version(wanted)
+        artifact = next(
+            (
+                item
+                for item in release["artifacts"]
+                if item.get("purpose") == "velopack-full"
+            ),
+            None,
+        )
+        if artifact is None:
+            raise ReleaseContractError(
+                f"Release {wanted} has no Velopack full package artifact"
+            )
+        path = self._download_artifact(str(wanted), artifact)
+        return path, str(artifact["sha256"])
+
+    def _find_release_by_version(self, wanted: Version) -> dict[str, Any]:
+        # 分页逻辑与 _discover_latest 重复；统一抽取见 backlog B-260726-7d886d。
+        for page in range(1, 11):
+            payload = self._get_json(
+                f"{self.github_api}/releases?per_page=100&page={page}"
+            )
+            if not isinstance(payload, list):
+                raise ReleaseContractError("GitHub releases response must be a list")
+            for release in payload:
+                if not isinstance(release, dict) or release.get("draft"):
+                    continue
+                tag = release.get("tag_name")
+                if type(tag) is not str:
+                    continue
+                try:
+                    tag_version = Version(tag.removeprefix("v"))
+                except InvalidVersion:
+                    continue
+                if tag_version != wanted:
+                    continue
+                channel = "prerelease" if release.get("prerelease") else "stable"
+                try:
+                    return self._parse_release(release, expected_channel=channel)
+                except Exception as exc:
+                    raise ReleaseContractError(
+                        f"Release {wanted} is unusable: {exc}"
+                    ) from exc
+            if len(payload) < 100:
+                break
+        raise ReleaseContractError(
+            f"No GitHub Release found for version {wanted}"
+        )
 
     def _parse_release(
         self,
@@ -1283,6 +1351,16 @@ class ReleaseManager:
             if len(keep_versions) >= keep:
                 break
             keep_versions.add(version)
+        # Additive protection, outside the recency keep budget: rollback
+        # material fetched for the currently installed version lives in its
+        # (metadata-less) version directory; never prune it out from under
+        # an in-flight upgrade transaction.
+        try:
+            keep_versions.add(
+                _safe_version_segment(self.current_version_loader())
+            )
+        except (ReleaseContractError, TypeError):
+            pass
         for _timestamp, version in entries:
             if version in keep_versions:
                 continue

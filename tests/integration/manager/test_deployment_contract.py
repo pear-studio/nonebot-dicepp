@@ -246,6 +246,55 @@ def test_control_probe_reads_semantic_dashboard_health_over_http(monkeypatch) ->
     assert manager_factory._control_channel_probe()["heartbeat"] == heartbeat
 
 
+def _stub_health_heartbeat(monkeypatch, heartbeat: str) -> None:
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _limit):
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "component": "dashboard",
+                    "control": {"latest_heartbeat": heartbeat},
+                }
+            ).encode()
+
+    monkeypatch.setattr(
+        manager_factory.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+
+def test_control_probe_tolerates_legacy_epoch_heartbeat(monkeypatch) -> None:
+    """Dashboards older than the ISO contract persist epoch seconds."""
+    _stub_health_heartbeat(monkeypatch, str(time.time()))
+
+    result = manager_factory._control_channel_probe()
+
+    assert result["status"] == "ok"
+    assert result["ok"] is True
+    # The probe normalizes any accepted heartbeat to ISO-8601 UTC.
+    parsed = datetime.fromisoformat(result["heartbeat"])
+    assert (datetime.now(timezone.utc) - parsed).total_seconds() < 120
+
+
+def test_control_probe_rejects_unparseable_heartbeat(monkeypatch) -> None:
+    _stub_health_heartbeat(monkeypatch, "not-a-timestamp")
+
+    result = manager_factory._control_channel_probe()
+
+    assert result["status"] == "failed"
+    assert result["ok"] is False
+    assert result["message"] == "Invalid Bot control heartbeat"
+
+
 def test_stable_update_guard_refreshes_atomically_by_digest_when_idle(
     monkeypatch,
     tmp_path: Path,

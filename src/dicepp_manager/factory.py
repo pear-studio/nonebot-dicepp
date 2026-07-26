@@ -150,6 +150,9 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
                     auth_token_path=(
                         settings.token_path or settings.layout.manager_token
                     ),
+                    rollback_package_fetcher=(
+                        service.release_manager.fetch_rollback_package
+                    ),
                 )
             else:
                 platform_adapter = UnsupportedUpgradeAdapter(
@@ -1074,6 +1077,29 @@ def _dashboard_probe() -> dict:
     }
 
 
+def _parse_control_heartbeat(raw: str) -> datetime | None:
+    """Parse a Dashboard control heartbeat.
+
+    Current Dashboards persist ISO-8601 UTC strings; older versions wrote
+    bare epoch-second numbers, which are still accepted here so a stale
+    Dashboard does not block Manager health gates.
+    """
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    else:
+        if parsed.tzinfo is None:
+            # Naive ISO heartbeats are UTC, matching the Dashboard-side
+            # _heartbeat_to_epoch contract.
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    try:
+        return datetime.fromtimestamp(float(raw), timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _control_channel_probe() -> dict:
     url, status, payload = _dashboard_health_payload()
     if (
@@ -1098,18 +1124,17 @@ def _control_channel_probe() -> dict:
             "url": url,
             "message": "No Bot control heartbeat",
         }
-    try:
-        heartbeat = datetime.fromisoformat(raw_heartbeat.replace("Z", "+00:00"))
-        age = (
-            datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)
-        ).total_seconds()
-    except (TypeError, ValueError):
+    heartbeat = _parse_control_heartbeat(raw_heartbeat)
+    if heartbeat is None:
         return {
             "ok": False,
             "status": "failed",
             "url": url,
             "message": "Invalid Bot control heartbeat",
         }
+    age = (
+        datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)
+    ).total_seconds()
     return {
         "ok": age <= 120,
         "status": "ok" if age <= 120 else "failed",

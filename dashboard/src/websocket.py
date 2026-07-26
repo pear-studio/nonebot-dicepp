@@ -206,7 +206,7 @@ def _update_bot_status(bot_id: str, payload: dict) -> None:
         return
 
     import sqlite3
-    import time as _time
+    from datetime import datetime, timezone
 
     version = payload.get("version", "")
     conn = sqlite3.connect(db_path)
@@ -217,7 +217,9 @@ def _update_bot_status(bot_id: str, payload: dict) -> None:
                ON CONFLICT(bot_id) DO UPDATE SET
                    last_heartbeat = excluded.last_heartbeat,
                    version = excluded.version""",
-            (bot_id, str(_time.time()), version),
+            # ISO-8601 UTC: the Manager control probe parses this value with
+            # datetime.fromisoformat during upgrade health gates.
+            (bot_id, datetime.now(timezone.utc).isoformat(), version),
         )
         conn.commit()
     finally:
