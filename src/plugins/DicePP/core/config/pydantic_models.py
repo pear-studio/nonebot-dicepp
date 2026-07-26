@@ -3,7 +3,7 @@ Pydantic models for DicePP configuration.
 
 All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
-  global defaults < global secrets < persona < account overrides < env vars
+  global defaults < global user overrides < persona < account overrides < env vars
 """
 from typing import List, Literal, Optional, Dict
 
