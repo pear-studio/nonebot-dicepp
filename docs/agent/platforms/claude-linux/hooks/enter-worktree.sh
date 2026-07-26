@@ -23,21 +23,6 @@ for wt in "$MAIN_ROOT/.claude/worktrees/"*/; do
         echo "[hook] content/ copied: $wt"
     fi
 
-    # ── config/secrets.json ──
-    # 文件被 .gitignore 排除，worktree 中不会自动出现；主 repo 中可能是符号链接
-    if [ ! -f "$wt/config/secrets.json" ]; then
-        if [ -f "$MAIN_ROOT/config/secrets.json" ]; then
-            cp "$(readlink -f "$MAIN_ROOT/config/secrets.json")" "$wt/config/secrets.json"
-            echo "[hook] secrets.json created: $wt"
-        fi
-    elif [ -L "$wt/config/secrets.json" ]; then
-        target=$(readlink -f "$wt/config/secrets.json")
-        if [ -f "$target" ]; then
-            cp "$target" "$wt/config/secrets.json"
-            echo "[hook] secrets.json resolved (symlink → real file): $wt"
-        fi
-    fi
-
     # ── .claude/ agent 配置同步 ──
     if [ -f "$wt/docs/agent/sync.py" ]; then
         if [ -f "$MAIN_ROOT/docs/agent/.agent-env.json" ] && [ ! -f "$wt/docs/agent/.agent-env.json" ]; then
