@@ -1994,20 +1994,23 @@ class TestCrossDayBoundary:
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_life_dm("char-1")
 
-        # 创建第一个 session（last_active_at=CURRENT_TIMESTAMP=今天）
+        # 创建第一个 session（last_active_at=生产 Clock 的今天）
         conv1 = await reg.get_or_create(scope)
         sid1 = int(conv1.id)
 
-        # 手动设 last_active_at 为旧日期（昨天的日期）
-        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        # 手动设 last_active_at 为旧日期（生产 Clock 的昨天；
+        # 不能用进程本地 date.today()，TZ 与上海日期错位时基准会错）
+        from plugins.DicePP.utils.time import get_clock
+
+        yesterday = (get_clock().now().date() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
         await temp_db.db.execute(
             "UPDATE persona_session SET last_active_at=? || ' 00:00:00' WHERE session_id=?",
             (yesterday, sid1),
         )
         await temp_db.db.commit()
 
-        # 设置 Clock 到今天（当前真实日期的 noon）
-        set_test_clock(datetime.datetime.combine(datetime.date.today(), datetime.time(12, 0)))
+        # 设置 Clock 到今天（生产 Clock 日期的 noon）
+        set_test_clock(datetime.datetime.combine(get_clock().now().date(), datetime.time(12, 0)))
 
         # 清除缓存使 get_or_create 从 DB 重新加载
         reg.clear_cache()
@@ -2049,8 +2052,11 @@ class TestCrossDayBoundary:
         conv1 = await reg.get_or_create(scope)
         sid1 = int(conv1.id)
 
-        # 设置 Clock 到今天（与 CURRENT_TIMESTAMP 同日）
-        set_test_clock(datetime.datetime.combine(datetime.date.today(), datetime.time(12, 0)))
+        # 设置 Clock 到今天（生产 Clock 日期的 noon，与 conv1 写入基准一致；
+        # 不能用进程本地 date.today()，TZ 与上海日期错位时会注入"昨天"）
+        from plugins.DicePP.utils.time import get_clock
+
+        set_test_clock(datetime.datetime.combine(get_clock().now().date(), datetime.time(12, 0)))
 
         reg.clear_cache()
 
