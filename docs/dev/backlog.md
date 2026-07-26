@@ -12,6 +12,23 @@
 
 ---
 
+## manager
+
+### [B-260726-7d886d] 统一 _discover_latest 与 _find_release_by_version 的分页逻辑（抽 _iter_release_entries 生成器）
+- 创建: 2026-07-26
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - release.py:767-797（_find_release_by_version，manager-upgrade-path-fixes 分支新增）与 :694-703（_discover_latest）的 10 页 × per_page=100 分页循环、list 校验、错误文案几乎逐字重复
+    - 将来调整分页上限或 GitHub API 行为时极易只改一处，两处行为静默分叉
+    - 来源: review-260726-2209-manager-upgrade-path-fixes R14（已共识·延后）
+- 开发备忘:
+    - 修复方向: 抽 _iter_release_entries() 私有生成器统一分页与 list 校验，两处各自只做过滤/匹配
+    - 生成器需接受可选 operation 参数，保留 _discover_latest 每页 _check_cancelled(operation) 的取消纪律，抽取时一并统一两侧取消纪律
+    - 影响面: src/dicepp_manager/release.py 单模块；_discover_latest 是下载热路径，需跑 tests/integration/manager/test_release_storage.py 等既有回归
+    - 何时拉起: 下次需要调整分页上限/GitHub API 行为，或第三次出现同款分页循环时
+
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

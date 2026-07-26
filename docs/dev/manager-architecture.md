@@ -102,6 +102,10 @@ format v1 仍以保守兼容方式读取：它被视为 `regular`，并按旧 ma
 
 任一步失败都会自动应用 pre-restore、再次检查 schema 和本地健康，并恢复原运行状态。Manager 重启或断电恢复时，未开始切换的事务清理临时状态；已经开始切换但尚未提交的事务自动回退；已写入健康标记的事务完成收尾。回退失败会保留 journal 和安全归档，等待后续恢复重试。NapCat、QQ、GitHub、LLM 等外部依赖只形成 warning，不触发这一本地数据回退。
 
+回退在破坏阶段开始后被判定失败的事务是终态的（terminal rollback adjudication rule，升级与归档恢复两侧共用同一规则）：Manager 重启不会重放破坏性回退，只重复上报需要人工恢复，journal 保留在可恢复集合中以持续保护目标版本包与安全归档。终态 journal 在任一恢复性操作成功时自动退役——成功恢复归档（典型为 pre-upgrade 归档）或成功完成一次升级 commit——状态移出可恢复集合并保留 operation 历史作证据，目标版本包与安全归档的保护随之解除（归档转为普通归档走正常保留策略，不立即删除），Manager 重启不再重复上报。退役之前仍需人工介入：按目标平台的部署指南完成手工恢复，再通过一次归档恢复或升级让系统回到受管健康状态。
+
+Bot 控制心跳契约：Dashboard 将 Bot 控制心跳以 ISO-8601 UTC 字符串写入 `bots_meta.last_heartbeat`；旧版本写入的是裸 epoch 秒数字，Manager 探针两种格式都接受（naive ISO 一律按 UTC 解释）。`/api/health` 的 `control.latest_heartbeat` 对外暴露 ISO-8601，`/api/bots/status` 对前端仍暴露 epoch 秒。旧 Manager 执行升级、新 Dashboard 写入 ISO 的方向天然兼容（旧探针本就按 ISO 解析）；反向由 Manager 对遗留 epoch 行的容忍覆盖。
+
 手动归档不会被自动删除。`system` 安全归档默认只保留最近 5 份，活跃或失败事务引用的归档受保护。浏览器可从 Manager 导出已验证的 ZIP，也可向 Manager 导入 ZIP；导入会先流式校验并原子加入列表，绝不会自动恢复，仍需要预览和确认。
 
 ## 发布发现、自动升级与人工兜底
