@@ -65,6 +65,26 @@
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
 
+## runtime
+
+### [B-260727-de3b6b] OneBot Runtime 硬编码绑定 0.0.0.0，HOST 环境变量无效
+- 创建: 2026-07-27
+- 优先级: P2
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - 打包版 bot.py 显式以 host="0.0.0.0" 初始化 NoneBot，HOST 环境变量不生效，OneBot Runtime 实际监听 0.0.0.0:8080
+    - Dashboard(4090)/Manager(4091) 均绑 127.0.0.1，仅 OneBot 8080 暴露全部网卡
+    - Windows 首启时系统自动为该 exe 创建 TCP/UDP 入站阻止规则（事件 ID 2097）；真实用户环境可能弹防火墙/UAC 询问，干扰首次使用
+    - 复现：Windows 启动 RC13 Portable，netstat/Get-NetTCPConnection 可见 0.0.0.0:8080
+    - 证据：.temp/dicepp-v3.0.0rc13-windows-migration-acceptance-evidence.md「Windows UAC / 防火墙自动化」节、rc13-post-windows-network.json
+- 开发备忘:
+    - 修复方向 A：bot.py 读取配置项（如 global 配置或环境变量 DICEPP_ONEBOT_HOST）决定 bind host，默认 0.0.0.0 保持兼容
+    - 修复方向 B：评估默认改为 127.0.0.1（LLOneBot/NapCat 通常同机部署），需确认远程 OneBot 客户端场景是否存在
+    - 需先验证：打包后环境变量/配置在 PyInstaller onefile 运行时的读取路径；linux docker 部署是否依赖 0.0.0.0
+    - 影响面：bot.py 及打包入口、docs/windows.md、docs/linux.md 部署文档
+    - 风险点：改默认值会让远程连接 OneBot 的既有用户在升级后断连，需 release note 明示
+
 ## statistics
 
 ### [B-260622-d85176] StatManager 规模化运维
