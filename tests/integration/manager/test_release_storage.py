@@ -14,8 +14,10 @@ from dicepp_data import InstanceLayout
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
 from dicepp_manager.release import (
     RELEASE_CONTRACT_VERSION,
+    ReleaseCancelledError,
     ReleaseContractError,
     ReleaseDownloadError,
+    ReleaseError,
     ReleaseManager,
     ReleaseOperation,
     UpdateSettings,
@@ -815,7 +817,10 @@ def test_production_transport_exposes_416_and_download_restarts_without_range(
     assert "Range" not in calls[1]
 
 
-def test_digest_failure_removes_untrusted_partial(tmp_path: Path) -> None:
+def test_digest_failure_removes_untrusted_partial(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     expected = b"expected"
     artifact = {
         **_artifact("DicePP-v3.1.0-linux-amd64.zip", expected),
@@ -825,8 +830,12 @@ def test_digest_failure_removes_untrusted_partial(tmp_path: Path) -> None:
         {
             "https://downloads/artifact": [
                 Response(b"corrupt!", headers={"ETag": '"etag"'})
+                for _ in range(5)
             ]
         }
+    )
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
     )
     layout = InstanceLayout.from_root(tmp_path)
     manager = ReleaseManager(
@@ -835,9 +844,11 @@ def test_digest_failure_removes_untrusted_partial(tmp_path: Path) -> None:
         target=("linux", "amd64"),
     )
 
-    with pytest.raises(ReleaseDownloadError, match="SHA-256"):
+    with pytest.raises(ReleaseDownloadError, match="SHA-256") as excinfo:
         manager._download_artifact("3.1.0", artifact)
 
+    assert "after 5 attempts" in str(excinfo.value)
+    assert len(transport.requests) == 5
     version_dir = layout.manager_packages_dir / "3.1.0"
     assert list(version_dir.iterdir()) == []
 
@@ -921,6 +932,283 @@ def test_resumed_artifact_stream_uses_the_same_remaining_size_limit(
         manager._download_artifact("3.1.0", artifact)
 
     assert list(version_dir.iterdir()) == []
+
+
+def test_truncated_download_resumes_with_range_and_verifies(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    body = b"partial body that completes on resume"
+    artifact = {
+        **_artifact("DicePP-v3.1.0-linux-amd64.zip", body),
+        "download_url": "https://downloads/artifact",
+    }
+    cut = 12
+    transport = Transport(
+        {
+            "https://downloads/artifact": [
+                Response(body[:cut], headers={"ETag": '"etag"'}),
+                Response(
+                    body[cut:],
+                    status=206,
+                    headers={
+                        "ETag": '"etag"',
+                        "Content-Range": f"bytes {cut}-{len(body) - 1}/{len(body)}",
+                    },
+                ),
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=transport,
+        target=("linux", "amd64"),
+    )
+
+    target = manager._download_artifact("3.1.0", artifact)
+
+    assert target.read_bytes() == body
+    assert len(transport.requests) == 2
+    assert "Range" not in transport.requests[0][1]
+    assert transport.requests[1][1]["Range"] == f"bytes={cut}-"
+    assert transport.requests[1][1]["If-Range"] == '"etag"'
+    version_dir = manager.layout.manager_packages_dir / "3.1.0"
+    assert not (version_dir / f"{artifact['filename']}.part").exists()
+    assert not (version_dir / f"{artifact['filename']}.part.json").exists()
+
+
+def test_zero_progress_truncation_fails_after_five_attempts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    body = b"0123456789abcdef"
+    artifact = {
+        **_artifact("package.zip", body),
+        "download_url": "https://downloads/artifact",
+    }
+    layout = InstanceLayout.from_root(tmp_path)
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    part = version_dir / "package.zip.part"
+    offset = 5
+    part.write_bytes(body[:offset])
+    part.with_suffix(".part.json").write_text(
+        json.dumps(
+            {
+                "url": artifact["download_url"],
+                "sha256": artifact["sha256"],
+                "validator": '"etag"',
+            }
+        ),
+        encoding="utf-8",
+    )
+    transport = Transport(
+        {
+            "https://downloads/artifact": [
+                Response(
+                    b"",
+                    status=206,
+                    headers={
+                        "ETag": '"etag"',
+                        "Content-Range": f"bytes {offset}-{len(body) - 1}/{len(body)}",
+                    },
+                )
+                for _ in range(5)
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
+    )
+    manager = ReleaseManager(
+        layout=layout,
+        transport=transport,
+        target=("linux", "amd64"),
+    )
+
+    with pytest.raises(ReleaseDownloadError, match="after 5 attempts"):
+        manager._download_artifact("3.1.0", artifact)
+
+    assert len(transport.requests) == 5
+    assert all(
+        headers["Range"] == f"bytes={offset}-"
+        for _url, headers in transport.requests
+    )
+    assert part.read_bytes() == body[:offset]
+    assert part.with_suffix(".part.json").is_file()
+
+
+def test_progress_resets_the_no_progress_budget(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    body = b"0123456789abcdefghij"
+    artifact = {
+        **_artifact("package.zip", body),
+        "download_url": "https://downloads/artifact",
+    }
+
+    def partial(start: int, end: int) -> Response:
+        if start == 0:
+            return Response(body[start:end], headers={"ETag": '"etag"'})
+        return Response(
+            body[start:end],
+            status=206,
+            headers={
+                "ETag": '"etag"',
+                "Content-Range": f"bytes {start}-{len(body) - 1}/{len(body)}",
+            },
+        )
+
+    # 每段进展之间插入 4 次零进展截断；没有预算重置时累计 12 次零进展
+    # 早已超过 5 次上限。
+    responses = (
+        [partial(0, 0) for _ in range(4)]
+        + [partial(0, 8)]
+        + [partial(8, 8) for _ in range(4)]
+        + [partial(8, 16)]
+        + [partial(16, 16) for _ in range(4)]
+        + [partial(16, len(body))]
+    )
+    transport = Transport({"https://downloads/artifact": responses})
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=transport,
+        target=("linux", "amd64"),
+    )
+
+    target = manager._download_artifact("3.1.0", artifact)
+
+    assert target.read_bytes() == body
+    assert len(transport.requests) == 15
+
+
+def test_cancel_during_retry_backoff_raises_promptly(tmp_path: Path) -> None:
+    body = b"interrupted download body"
+    artifact = {
+        **_artifact("package.zip", body),
+        "download_url": "https://downloads/artifact",
+    }
+
+    class BackoffCancelEvent:
+        def __init__(self) -> None:
+            self._set = False
+            self.waits: list[float] = []
+
+        def is_set(self) -> bool:
+            return self._set
+
+        def set(self) -> None:
+            self._set = True
+
+        def wait(self, timeout: float | None = None) -> bool:
+            self.waits.append(timeout)
+            self._set = True
+            return True
+
+    cancel_event = BackoffCancelEvent()
+    operation = ReleaseOperation(
+        kind="download",
+        generation=-1,
+        cancel_event=cancel_event,
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(
+            {
+                "https://downloads/artifact": [
+                    Response(body[:6], headers={"ETag": '"etag"'})
+                ]
+            }
+        ),
+        target=("linux", "amd64"),
+    )
+
+    with pytest.raises(ReleaseCancelledError, match="cancelled"):
+        manager._download_artifact("3.1.0", artifact, operation=operation)
+
+    assert cancel_event.waits == [5.0]
+    part = (
+        manager.layout.manager_packages_dir / "3.1.0" / "package.zip.part"
+    )
+    assert part.read_bytes() == body[:6]
+
+
+def test_digest_failure_redownloads_from_zero_and_verifies(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    body = b"expected"
+    artifact = {
+        **_artifact("package.zip", body),
+        "download_url": "https://downloads/artifact",
+    }
+    transport = Transport(
+        {
+            "https://downloads/artifact": [
+                Response(b"corrupt!", headers={"ETag": '"etag"'}),
+                Response(body, headers={"ETag": '"etag"'}),
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=transport,
+        target=("linux", "amd64"),
+    )
+
+    target = manager._download_artifact("3.1.0", artifact)
+
+    assert target.read_bytes() == body
+    assert len(transport.requests) == 2
+    assert all(
+        "Range" not in headers for _url, headers in transport.requests
+    )
+
+
+def test_http_error_fails_immediately_without_retry(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    artifact = {
+        **_artifact("package.zip", b"forbidden package"),
+        "download_url": "https://downloads/artifact",
+    }
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(dict(request.header_items()))
+        raise urllib.error.HTTPError(
+            request.full_url,
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(b""),
+        )
+
+    monkeypatch.setattr(release_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        release_module, "_DOWNLOAD_BACKOFF_SECONDS", (0.0,) * 5
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=UrlTransport(),
+        target=("linux", "amd64"),
+    )
+
+    with pytest.raises(ReleaseError, match="HTTP 403"):
+        manager._download_artifact("3.1.0", artifact)
+
+    assert len(calls) == 1
 
 
 def test_artifact_replace_is_followed_by_parent_directory_fsync(

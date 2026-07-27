@@ -7,6 +7,7 @@ Neither operation installs a package or changes the running DicePP version.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -36,6 +37,11 @@ MAX_LINUX_BUNDLE_BYTES = 16 * 1024**3
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
 _CONTENT_RANGE_RE = re.compile(r"^bytes ([0-9]+)-([0-9]+)/([0-9]+)$")
+# Bounded download retry budget: consecutive failures that left no new bytes
+# abort the download; any attempt that grows the .part file resets both the
+# failure count and the backoff sequence.
+_DOWNLOAD_MAX_NO_PROGRESS_FAILURES = 5
+_DOWNLOAD_BACKOFF_SECONDS = (5.0, 10.0, 20.0, 40.0, 60.0)
 
 
 class ReleaseError(RuntimeError):
@@ -52,6 +58,18 @@ class ReleaseDownloadError(ReleaseError):
 
 class ReleaseCancelledError(ReleaseDownloadError):
     """A release operation was cooperatively cancelled during shutdown."""
+
+
+class _ArtifactTruncatedError(ReleaseDownloadError):
+    """Download ended before the manifest size; the partial can be resumed."""
+
+
+class _ArtifactDigestError(ReleaseDownloadError):
+    """Download completed but failed SHA-256 verification."""
+
+
+class _ArtifactConnectionError(ReleaseDownloadError):
+    """The connection broke mid-stream; the partial can be resumed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -985,6 +1003,77 @@ class ReleaseManager:
             version_guard,
             allow_missing=True,
         )
+        if (
+            target_info is not None
+            and target.stat().st_size == artifact["size"]
+            and _sha256_file(target) == artifact["sha256"]
+        ):
+            return target
+        _unlink_trusted_file(target, version_guard, missing_ok=True)
+        attempts = 0
+        no_progress_failures = 0
+        backoff_index = 0
+        while True:
+            before = _existing_file_size(part)
+            attempts += 1
+            try:
+                return self._download_artifact_once(
+                    artifact,
+                    operation=operation,
+                    target=target,
+                    part=part,
+                    metadata_path=metadata_path,
+                    version_guard=version_guard,
+                )
+            except ReleaseCancelledError:
+                raise
+            except (
+                _ArtifactTruncatedError,
+                _ArtifactDigestError,
+                _ArtifactConnectionError,
+            ) as exc:
+                reason = exc
+            except ReleaseError as exc:
+                cause = exc.__cause__
+                if (
+                    type(exc) is not ReleaseError
+                    or cause is None
+                    or isinstance(cause, urllib.error.HTTPError)
+                ):
+                    # HTTP status errors and local validation failures do not
+                    # benefit from a retry; only connection-level open
+                    # failures (ReleaseError with a non-HTTPError cause) do.
+                    raise
+                reason = exc
+            if _existing_file_size(part) > before:
+                no_progress_failures = 0
+                backoff_index = 0
+            else:
+                no_progress_failures += 1
+                if no_progress_failures >= _DOWNLOAD_MAX_NO_PROGRESS_FAILURES:
+                    raise ReleaseDownloadError(
+                        f"{reason} after {attempts} attempts"
+                    ) from reason
+            backoff = _DOWNLOAD_BACKOFF_SECONDS[
+                min(backoff_index, len(_DOWNLOAD_BACKOFF_SECONDS) - 1)
+            ]
+            backoff_index += 1
+            if operation.cancel_event.wait(backoff):
+                self._check_cancelled(operation)
+
+    def _download_artifact_once(
+        self,
+        artifact: dict[str, Any],
+        *,
+        operation: ReleaseOperation,
+        target: Path,
+        part: Path,
+        metadata_path: Path,
+        version_guard: TrustedDirectory,
+    ) -> Path:
+        """Run one download attempt, resuming from any kept .part file."""
+        offset = 0
+        validator: str | None = None
         part_info = _validate_regular_path(
             part,
             version_guard,
@@ -995,15 +1084,6 @@ class ReleaseManager:
             version_guard,
             allow_missing=True,
         )
-        if (
-            target_info is not None
-            and target.stat().st_size == artifact["size"]
-            and _sha256_file(target) == artifact["sha256"]
-        ):
-            return target
-        _unlink_trusted_file(target, version_guard, missing_ok=True)
-        offset = 0
-        validator: str | None = None
         if part_info is not None and metadata_info is not None:
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -1079,7 +1159,6 @@ class ReleaseManager:
         except Exception:
             response.close()
             raise
-        mode = "ab" if resume else "wb"
         try:
             expected_remaining = artifact["size"] - offset
             received = 0
@@ -1091,7 +1170,19 @@ class ReleaseManager:
                 while True:
                     self._check_cancelled(operation)
                     allowance = expected_remaining - received
-                    chunk = response.read(min(1024 * 1024, allowance + 1))
+                    try:
+                        chunk = response.read(min(1024 * 1024, allowance + 1))
+                    except (
+                        http.client.IncompleteRead,
+                        ConnectionError,
+                        TimeoutError,
+                        urllib.error.URLError,
+                    ) as exc:
+                        if isinstance(exc, urllib.error.HTTPError):
+                            raise
+                        raise _ArtifactConnectionError(
+                            f"Artifact download connection failed: {exc}"
+                        ) from exc
                     if not chunk:
                         break
                     received += len(chunk)
@@ -1105,11 +1196,16 @@ class ReleaseManager:
                 output.flush()
                 os.fsync(output.fileno())
             if part.stat().st_size != artifact["size"]:
-                raise ReleaseDownloadError(
+                # A cleanly truncated body keeps its .part file so the next
+                # attempt resumes with a Range request.
+                raise _ArtifactTruncatedError(
                     "Downloaded artifact size differs from manifest"
                 )
             if _sha256_file(part) != artifact["sha256"]:
-                raise ReleaseDownloadError(
+                _unlink_trusted_file(part, version_guard, missing_ok=True)
+                _unlink_trusted_file(metadata_path, version_guard, missing_ok=True)
+                _fsync_trusted_directory(version_guard)
+                raise _ArtifactDigestError(
                     "Downloaded artifact SHA-256 differs from manifest"
                 )
             _replace_trusted_file(part, target, version_guard)
@@ -1117,6 +1213,12 @@ class ReleaseManager:
             _unlink_trusted_file(metadata_path, version_guard, missing_ok=True)
             _fsync_trusted_directory(version_guard)
             return target
+        except (
+            _ArtifactTruncatedError,
+            _ArtifactDigestError,
+            _ArtifactConnectionError,
+        ):
+            raise
         except ReleaseDownloadError:
             _unlink_trusted_file(part, version_guard, missing_ok=True)
             _unlink_trusted_file(metadata_path, version_guard, missing_ok=True)
@@ -1631,6 +1733,13 @@ def _validate_cached_latest(
 
 def _response_validator(headers: Mapping[str, str]) -> str | None:
     return headers.get("ETag") or headers.get("Last-Modified")
+
+
+def _existing_file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def _valid_resume_response(
