@@ -14,23 +14,19 @@
 
 ## manager
 
-### [B-260727-33bf96] Windows UpdateGuard 交接无法形成可恢复终态，真实自动升级必败
+### [B-260727-4589da] %LOCALAPPDATA%\DicePP-UpdateGuard 旧版本 Guard 缓存目录无清理策略
 - 创建: 2026-07-27
-- 优先级: P0
-- 类型: bug
-- 改动量: XL
+- 优先级: P2
+- 类型: feature
+- 改动量: S
 - 问题表现:
-    - 实证（2026-07-27 rc14 Windows 验收，报告 .temp/dicepp-v3.0.0rc14-windows-upgrade-acceptance-evidence.md）：发现/下载/校验/preview/回退包准备全部通过后，首次真实 confirm 失败
-    - 三段式故障链：(1) Manager 创建事务进入 awaiting_update_guard 并记录 Guard PID 后正常退出，但该 Guard 未写出 guard.json/started.json 即消失，实例离线；(2) 人工启动稳定根 DicePP-UpdateGuard.exe，Guard 写出 guard.json(running)、Velopack 实际将 current 切到 RC14，随后 Guard 再次消失，无 started/health/rollback marker；(3) RC14 Manager 启动能识别中断事务（interrupted）并进入维护恢复，但 Dashboard/Manager 停止监听后 launcher/current 两进程不退出，交接不闭合
-    - 终态：程序已是 RC14 但 journal interrupted/awaiting_update_guard，guard marker running 绑定死 PID，packages/ 空，升级未提交
-    - 可排除项：非 UAC（无弹窗无拦截事件）；非心跳门（未走到健康确认）；GitHub 限流与防火墙均已合规绕过并留证
-    - 影响：Windows 自动升级在真实环境从未完成过一次；rc12 卡 preview 409（已修），本问题是其后下一层。阻塞 v3.0.0
+    - UpdateGuard 外部化修复（76b28a4）每次升级把当前版本 Guard 复制到 %LOCALAPPDATA%\DicePP-UpdateGuard\<实例根摘要>\<Guard SHA-256>\，按摘要分目录隔离
+    - 旧摘要目录永久保留：每个版本每实例约遗留一个 onefile Guard（数 MB~十余 MB），随版本数线性累积
+    - 不影响正确性（preflight 校验稳定根与 bundled 摘要一致，外部目录按摘要寻址），属磁盘占用缓慢增长
 - 开发备忘:
-    - 初步嫌疑（待代码验证）：首次 Guard 连 guard.json 都未写出，疑似 Guard 作为 Manager/launcher 子进程在 launcher 退出时被进程组/Job 对象连带终止（脱离标志不对）；人工启动活到 apply 后再消失，指向 Velopack apply(Update.exe apply --norestart) 边界的进程生命周期问题；维护恢复不退出是第三个独立问题
-    - 验收方 4 条建议即修复验收标准：Guard stdout/stderr 与退出码持久化到事务目录（不得 DEVNULL）；apply 期间 Guard 进程存活观测；维护恢复时 tray/launcher 必须退出（Runtime stop 409 也要完成退出）；补真实 Windows 回归（正常切换、目标 Manager 强杀后自动回退、apply 边界中断幂等恢复）
-    - 推进方式（用户已定方案 B）：授权 Windows agent 配 repo+工具链本地迭代，dev 侧出诊断指引（交接时序、仪表化点位、实验矩阵）；修复需覆盖 Guard 启动脱离方式、apply 边界存活、维护恢复退出三处
-    - 关键代码：src/dicepp_manager/update_guard.py、upgrade.py WindowsVelopackUpgradeAdapter（handoff/awaiting_update_guard）、factory.py Windows 装配、UpdateGuard exe 打包入口（scripts/build）
-    - 现场保留在 Windows 机 D:\Workplace\nonebot-dicepp\.temp\rc14-windows-upgrade-20260727\（事务目录、manager.db、包缓存、evidence/*.json），诊断时优先复用
+    - 清理方向：升级 commit 成功后（或 _prepare_external_guard 时）删除 guard_runtime_dir 下非当前摘要的旧版本目录
+    - 安全约束：不得清理进行中事务引用的目录——事务目录 markers 记录 guard_executable，清理前扫描 manager/state/update-guard/*/ 的活跃事务；或保守只在无 recoverable journal 时清理
+    - 影响面：src/dicepp_manager/upgrade.py（WindowsVelopackUpgradeAdapter）+ tests/integration/manager/test_upgrade_platforms.py
 
 ### [B-260726-7d886d] 统一 _discover_latest 与 _find_release_by_version 的分页逻辑（抽 _iter_release_entries 生成器）
 - 创建: 2026-07-26
