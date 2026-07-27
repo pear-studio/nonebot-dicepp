@@ -140,6 +140,7 @@ def _setup(
     *,
     platform: Platform | None = None,
     fault: str | None = None,
+    bot_ids: tuple[str, ...] = ("10001",),
 ):
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_dir.mkdir(parents=True)
@@ -196,7 +197,7 @@ def _setup(
     runtime = Runtime()
     service = ManagerService(
         unit_provider=lambda: [
-            RuntimeUnit("dicepp-runtime", ("10001",), True, "fake")
+            RuntimeUnit("dicepp-runtime", bot_ids, True, "fake")
         ],
         runtime_adapter=runtime,
         store=ManagerOperationStore(layout.manager_db),
@@ -288,6 +289,72 @@ async def test_upgrade_commits_only_after_archive_migration_and_hard_health(
     assert runtime.actions == ["stop", "start"]
     assert service.store.get_journal(result.detail["transaction_id"])["status"] == "committed"
     assert (layout.manager_backups_dir / result.detail["pre_upgrade_filename"]).is_file()
+
+
+def _no_heartbeat_control_probe() -> dict:
+    """The Dashboard contract when no bot ever connected the control channel."""
+    return {
+        "ok": False,
+        "status": "failed",
+        "message": "No Bot control heartbeat",
+    }
+
+
+@pytest.mark.asyncio
+async def test_upgrade_health_gate_skips_control_probe_without_bound_bots(
+    tmp_path: Path,
+):
+    """An instance with no bound bot never reports a control heartbeat, so
+    the upgrade hard-health gate must skip the control probe instead of
+    failing the upgrade."""
+    _layout, _data, runtime, _service, coordinator, _platform = _setup(
+        tmp_path, bot_ids=()
+    )
+    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    result = await coordinator.run(operation, package)
+
+    assert result.status == "succeeded"
+    assert result.detail["control_gate"] == "skipped_no_bound_bots"
+    assert result.detail["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_bound_bots",
+    }
+    assert runtime.actions == ["stop", "start"]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_health_gate_skips_control_probe_without_bound_bots(
+    tmp_path: Path,
+):
+    """The rollback after a failed upgrade must not be trapped by the same
+    control gate when no bot was bound at baseline time."""
+    _layout, data_file, runtime, _service, coordinator, _platform = _setup(
+        tmp_path, fault="migration", bot_ids=()
+    )
+    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    assert raised.value.detail["rolled_back"] is True
+    assert raised.value.detail["control_gate"] == "skipped_no_bound_bots"
+    assert raised.value.detail["rollback_result"]["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_bound_bots",
+    }
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
 
 
 def test_windows_verified_package_accepts_real_velopack_feed_shapes(

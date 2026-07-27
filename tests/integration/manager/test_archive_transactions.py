@@ -85,12 +85,13 @@ def _coordinator(
     tmp_path: Path,
     *,
     fault_hook=None,
+    bot_ids: tuple[str, ...] = ("10001",),
 ) -> tuple[InstanceLayout, StatefulRuntime, ManagerService, ArchiveCoordinator]:
     layout = InstanceLayout.from_root(tmp_path)
     runtime = StatefulRuntime()
     service = ManagerService(
         unit_provider=lambda: [
-            RuntimeUnit("dicepp-runtime", ("10001",), True, "fake")
+            RuntimeUnit("dicepp-runtime", bot_ids, True, "fake")
         ],
         runtime_adapter=runtime,
         store=ManagerOperationStore(layout.manager_db),
@@ -1154,6 +1155,106 @@ async def test_control_heartbeat_must_advance_after_target_restart(
     assert "heartbeat did not advance" in raised.value.detail["error"]
     assert json.loads(layout.config_user.read_text()) == {"before": True}
     assert runtime.state == "running"
+
+
+def _no_heartbeat_control_probe() -> dict:
+    """The Dashboard contract when no bot ever connected the control channel."""
+    return {
+        "ok": False,
+        "status": "failed",
+        "message": "No Bot control heartbeat",
+    }
+
+
+@pytest.mark.asyncio
+async def test_restore_health_gate_skips_control_probe_without_bound_bots(
+    tmp_path: Path,
+) -> None:
+    """An instance with no bound bot never reports a control heartbeat, so
+    the restore hard-health gate must skip the control probe instead of
+    failing the restore."""
+    layout, _runtime, _service, coordinator = _coordinator(tmp_path, bot_ids=())
+    coordinator.control_probe = _no_heartbeat_control_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+
+    operation = coordinator.new_operation("archive.restore")
+    await coordinator.restore(operation, filename=target["filename"])
+
+    assert operation.status == "succeeded"
+    assert json.loads(layout.config_user.read_text()) == {"value": "target"}
+    assert operation.detail["control_gate"] == "skipped_no_bound_bots"
+    assert operation.detail["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_bound_bots",
+    }
+
+
+@pytest.mark.asyncio
+async def test_restore_rollback_health_gate_skips_control_probe_without_bound_bots(
+    tmp_path: Path,
+) -> None:
+    """The rollback after a failed restore must not be trapped by the same
+    control gate when no bot was bound at rollback baseline time."""
+    armed = {"value": True}
+
+    def fault(phase: str) -> None:
+        if armed["value"] and phase == "health":
+            armed["value"] = False
+            raise OSError("injected health failure")
+
+    layout, runtime, _service, coordinator = _coordinator(
+        tmp_path, fault_hook=fault, bot_ids=()
+    )
+    coordinator.control_probe = _no_heartbeat_control_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+
+    operation = coordinator.new_operation("archive.restore")
+    with pytest.raises(ArchiveTransactionError) as raised:
+        await coordinator.restore(operation, filename=target["filename"])
+
+    assert raised.value.detail["rolled_back"] is True
+    assert raised.value.detail["rollback_control_gate"] == "skipped_no_bound_bots"
+    assert raised.value.detail["rollback"]["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_bound_bots",
+    }
+    assert json.loads(layout.config_user.read_text()) == {"value": "before"}
+    assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_control_gate_decision_is_anchored_at_baseline_time(
+    tmp_path: Path,
+) -> None:
+    """With no bound bots at baseline time the gate must not consult the
+    control probe again: the decision anchors at baseline time."""
+    layout, _runtime, _service, coordinator = _coordinator(tmp_path, bot_ids=())
+    calls = {"count": 0}
+
+    def control_probe() -> dict:
+        calls["count"] += 1
+        return _no_heartbeat_control_probe()
+
+    coordinator.control_probe = control_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+
+    operation = coordinator.new_operation("archive.restore")
+    await coordinator.restore(operation, filename=target["filename"])
+
+    assert operation.status == "succeeded"
+    assert operation.detail["control_gate"] == "skipped_no_bound_bots"
+    assert operation.detail["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_bound_bots",
+    }
+    # Baseline capture is the only probe call; the gate skips the probe entirely.
+    assert calls["count"] == 1
 
 
 def test_list_treats_oversized_manifest_as_invalid_without_parsing_it(

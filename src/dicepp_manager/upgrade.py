@@ -1007,8 +1007,11 @@ class UpgradeCoordinator:
             preflight = await self.platform_adapter.preflight(package)
             detail["preflight"] = preflight
             self._phase(operation, detail, "pre_upgrade_archive", 15)
-            baseline = await self.archive._probe_once(self.archive.control_probe)
-            detail["control_heartbeat_baseline"] = baseline.get("heartbeat")
+            baseline, control_required = await self.archive._capture_control_baseline()
+            detail["control_heartbeat_baseline"] = baseline
+            detail["control_gate"] = (
+                "enforced" if control_required else "skipped_no_bound_bots"
+            )
             with self._maintenance_context(maintenance_lease) as maintenance:
                 original, _ = await self.archive._quiesce(
                     maintenance,
@@ -1074,6 +1077,7 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     original,
                     control_baseline=detail.get("control_heartbeat_baseline"),
+                    control_required=control_required,
                 )
                 self._fault("health")
                 detail["health"] = health
@@ -1552,6 +1556,9 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     _string_list(detail.get("original_running")),
                     control_baseline=detail.get("control_heartbeat_baseline"),
+                    control_required=(
+                        detail.get("control_gate") != "skipped_no_bound_bots"
+                    ),
                 )
             detail.update(
                 {
@@ -1845,7 +1852,12 @@ class UpgradeCoordinator:
                     self.archive._migrate_and_validate_schema
                 )
                 await self.archive._restart(maintenance, original)
-                health = await self.archive._hard_health(original)
+                health = await self.archive._hard_health(
+                    original,
+                    control_required=(
+                        detail.get("control_gate") != "skipped_no_bound_bots"
+                    ),
+                )
             result = {
                 "succeeded": True,
                 "program_restored": True,

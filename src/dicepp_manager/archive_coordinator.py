@@ -288,9 +288,10 @@ class ArchiveCoordinator:
         }
         self._journal(transaction_id, operation, "preparing", detail)
         try:
-            baseline = await self._probe_once(self.control_probe)
-            detail["control_heartbeat_baseline"] = (
-                baseline.get("heartbeat") if isinstance(baseline, dict) else None
+            baseline, control_required = await self._capture_control_baseline()
+            detail["control_heartbeat_baseline"] = baseline
+            detail["control_gate"] = (
+                "enforced" if control_required else "skipped_no_bound_bots"
             )
             self._journal(transaction_id, operation, "preparing", detail)
             with self._maintenance_context(maintenance_lease) as maintenance:
@@ -341,6 +342,7 @@ class ArchiveCoordinator:
                 health = await self._hard_health(
                     original_running,
                     control_baseline=detail.get("control_heartbeat_baseline"),
+                    control_required=control_required,
                 )
 
                 detail["commit_point"] = "health_passed"
@@ -587,9 +589,13 @@ class ArchiveCoordinator:
             }
         self._journal(transaction_id, operation, "rolling_back", detail)
         try:
-            rollback_baseline_result = await self._probe_once(self.control_probe)
-            rollback_baseline = rollback_baseline_result.get("heartbeat")
+            rollback_baseline, rollback_control_required = (
+                await self._capture_control_baseline()
+            )
             detail["rollback_control_heartbeat_baseline"] = rollback_baseline
+            detail["rollback_control_gate"] = (
+                "enforced" if rollback_control_required else "skipped_no_bound_bots"
+            )
             with self._maintenance_context(
                 maintenance_lease,
                 timeout=1,
@@ -620,6 +626,7 @@ class ArchiveCoordinator:
                 health = await self._hard_health(
                     detail.get("original_running", []),
                     control_baseline=rollback_baseline,
+                    control_required=rollback_control_required,
                 )
             detail["rollback_health"] = health
             self._journal(
@@ -722,12 +729,13 @@ class ArchiveCoordinator:
         expected_running: list[str],
         *,
         control_baseline: str | None = None,
+        control_required: bool = True,
     ) -> dict[str, Any]:
         self.store.ensure_schema()
         config = self._validate_config()
         runtime = await self._wait_runtime_healthy(expected_running)
         dashboard = await self._run_probe(self.dashboard_probe, "dashboard")
-        if expected_running:
+        if expected_running and control_required:
             control = await self._run_probe(
                 self.control_probe,
                 "control",
@@ -737,6 +745,10 @@ class ArchiveCoordinator:
                 ),
                 failure_message="Bot control heartbeat did not advance after restart",
             )
+        elif expected_running:
+            # No bot was bound at baseline time, so no control heartbeat can
+            # ever arrive; requiring it to advance would always fail.
+            control = {"status": "not_applicable", "reason": "no_bound_bots"}
         else:
             control = {"status": "not_applicable"}
         # The runtime must still be healthy after the slower endpoint/control
@@ -806,6 +818,19 @@ class ArchiveCoordinator:
                 return expected_running
             await asyncio.sleep(self.health_interval)
         raise ArchiveError(last_error)
+
+    async def _capture_control_baseline(self) -> tuple[Any, bool]:
+        """Capture the control heartbeat baseline and the bound-bot state.
+
+        The bound-bot decision is anchored at baseline time: an instance
+        without any bound bot never reports a control heartbeat, so the
+        restart health gate must not require the heartbeat to advance.
+        """
+        baseline = await self._probe_once(self.control_probe)
+        heartbeat = baseline.get("heartbeat") if isinstance(baseline, dict) else None
+        status = await self.service.status()
+        bots = status.get("bots") if isinstance(status, dict) else None
+        return heartbeat, bool(bots)
 
     async def _probe_once(self, probe: HealthProbe | None) -> dict[str, Any]:
         if probe is None:
