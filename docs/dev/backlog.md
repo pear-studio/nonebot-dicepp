@@ -14,6 +14,22 @@
 
 ## manager
 
+### [B-260727-bd8bb8] Release 下载在干净 EOF 截断时删除部分文件且无自动重试，劣质网络下大 bundle 几乎无法下载
+- 创建: 2026-07-27
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - 实测（2026-07-27 rc14 Linux 验收）：99.6MB linux bundle 经 Manager 下载，在 41,943,040 字节处被对端干净 EOF，报 Downloaded artifact size differs from manifest；.part 与 .part.json 被删除，重新触发 POST /v1/releases/download 从 0 开始
+    - 本机到 GitHub 链路约 17KB/s 且单连接约 40MB 必断，100MB 级 bundle 在该路径下几乎永远无法完成；国内用户经 Manager 自动升级下载 GitHub Release 资产时命中同一场景
+    - 根因：release.py:1107-1124 把截断（size 不符）与 SHA 不符合并为 ReleaseDownloadError 并删除 .part；Range/If-Range 续传机制（release.py:1036-1067，有测试覆盖）只在连接异常中断（非 ReleaseDownloadError）时保得住部分文件；下载路径无任何自动重试
+- 开发备忘:
+    - 修复方案：干净 EOF 截断改判为可续传失败（保留 .part + validator），在 _download_artifact 外层加有界重试循环，复用已有 Range/If-Range 续传与 416 stale-range 处理；带退避、最大尝试次数与既有 _check_cancelled 取消纪律；SHA 校验不符仍删除重下（数据损坏语义不同）
+    - 预计核心改动 40-80 行，限 src/dicepp_manager/release.py 单模块；测试在 tests/integration/manager/test_release_storage.py 用 fake transport 模拟 截断-续传-成功 / 超预算失败 / 取消
+    - 需先验证：UrlTransport 对 IncompleteRead 与干净 EOF 的区分；重试预算与 416 内部重试的叠加关系
+    - 风险：低-中，只触下载路径，升级事务语义不变
+    - 排期（用户已定）：RC14 两平台验收收官后实施，随后发 RC15（含 manager 变更，自动升级: no），两平台手工迁移实证后再发 v3.0.0
+
 ### [B-260726-7d886d] 统一 _discover_latest 与 _find_release_by_version 的分页逻辑（抽 _iter_release_entries 生成器）
 - 创建: 2026-07-26
 - 优先级: P2
