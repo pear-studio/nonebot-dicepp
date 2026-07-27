@@ -479,6 +479,76 @@ def test_discovery_never_offers_current_or_older_version(tmp_path: Path) -> None
         manager.download()
 
 
+def test_discovery_cancellation_stops_pagination(tmp_path: Path) -> None:
+    cancel_event = threading.Event()
+
+    class CancellingTransport(Transport):
+        def open(self, url, *, headers=None, timeout=30):
+            response = super().open(url, headers=headers, timeout=timeout)
+            cancel_event.set()
+            return response
+
+    page1 = "https://api/releases?per_page=100&page=1"
+    transport = CancellingTransport(
+        {page1: [_json_response([{"tag_name": f"v1.0.{i}"} for i in range(100)])]}
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=transport,
+        github_api="https://api",
+        target=("linux", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+    operation = ReleaseOperation(
+        kind="discovery",
+        generation=-1,
+        cancel_event=cancel_event,
+    )
+
+    with pytest.raises(ReleaseCancelledError, match="cancelled"):
+        manager._discover_latest("stable", operation=operation)
+
+    assert [url for url, _headers in transport.requests] == [page1]
+
+
+def test_rollback_package_search_traverses_release_pages(tmp_path: Path) -> None:
+    body = b"rollback package body"
+    manifest = _manifest(
+        [_artifact("rollback.nupkg", body, purpose="velopack-full")],
+        version="3.0.0",
+    )
+    release = _release(manifest, body)
+    filler = [
+        {"tag_name": f"v2.0.{i}", "draft": False, "prerelease": False}
+        for i in range(100)
+    ]
+    page1 = "https://api/releases?per_page=100&page=1"
+    page2 = "https://api/releases?per_page=100&page=2"
+    transport = Transport(
+        {
+            page1: [_json_response(filler)],
+            page2: [_json_response([release])],
+            "https://downloads/manifest": [_json_response(manifest)],
+            "https://downloads/artifact": [
+                Response(body, headers={"ETag": '"release-etag"'})
+            ],
+        }
+    )
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=transport,
+        github_api="https://api",
+        target=("linux", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+
+    path, sha256 = manager.fetch_rollback_package("3.0.0")
+
+    assert sha256 == hashlib.sha256(body).hexdigest()
+    assert path.read_bytes() == body
+    assert [url for url, _headers in transport.requests][:2] == [page1, page2]
+
+
 def test_download_persists_verified_package_metadata_without_installing(
     tmp_path: Path,
 ) -> None:

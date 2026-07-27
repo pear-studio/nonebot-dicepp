@@ -20,7 +20,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from packaging.version import InvalidVersion, Version
 
@@ -702,24 +702,38 @@ class ReleaseManager:
         if operation.cancel_event.is_set():
             raise ReleaseCancelledError("Release operation cancelled during shutdown")
 
+    def _iter_release_entries(
+        self,
+        operation: ReleaseOperation | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield release entries across the paginated GitHub releases endpoint.
+
+        Fetches up to 10 pages of 100 entries and stops at the first short
+        page.  Every page payload must be a list; non-dict entries are
+        skipped.  When *operation* is given, cancellation is checked before
+        each page request.
+        """
+        for page in range(1, 11):
+            if operation is not None:
+                self._check_cancelled(operation)
+            payload = self._get_json(
+                f"{self.github_api}/releases?per_page=100&page={page}"
+            )
+            if not isinstance(payload, list):
+                raise ReleaseContractError("GitHub releases response must be a list")
+            for item in payload:
+                if isinstance(item, dict):
+                    yield item
+            if len(payload) < 100:
+                break
+
     def _discover_latest(
         self,
         channel: str,
         *,
         operation: ReleaseOperation,
     ) -> tuple[dict[str, Any] | None, list[str]]:
-        # 分页逻辑与 _find_release_by_version 重复；统一抽取见 backlog B-260726-7d886d。
-        releases: list[dict[str, Any]] = []
-        for page in range(1, 11):
-            self._check_cancelled(operation)
-            payload = self._get_json(
-                f"{self.github_api}/releases?per_page=100&page={page}"
-            )
-            if not isinstance(payload, list):
-                raise ReleaseContractError("GitHub releases response must be a list")
-            releases.extend(item for item in payload if isinstance(item, dict))
-            if len(payload) < 100:
-                break
+        releases = list(self._iter_release_entries(operation))
         wanted_prerelease = channel == "prerelease"
         current = Version(_normalized_version(self.current_version_loader()))
         candidates: list[tuple[Version, dict[str, Any]]] = []
@@ -792,34 +806,25 @@ class ReleaseManager:
         return path, str(artifact["sha256"])
 
     def _find_release_by_version(self, wanted: Version) -> dict[str, Any]:
-        # 分页逻辑与 _discover_latest 重复；统一抽取见 backlog B-260726-7d886d。
-        for page in range(1, 11):
-            payload = self._get_json(
-                f"{self.github_api}/releases?per_page=100&page={page}"
-            )
-            if not isinstance(payload, list):
-                raise ReleaseContractError("GitHub releases response must be a list")
-            for release in payload:
-                if not isinstance(release, dict) or release.get("draft"):
-                    continue
-                tag = release.get("tag_name")
-                if type(tag) is not str:
-                    continue
-                try:
-                    tag_version = Version(tag.removeprefix("v"))
-                except InvalidVersion:
-                    continue
-                if tag_version != wanted:
-                    continue
-                channel = "prerelease" if release.get("prerelease") else "stable"
-                try:
-                    return self._parse_release(release, expected_channel=channel)
-                except Exception as exc:
-                    raise ReleaseContractError(
-                        f"Release {wanted} is unusable: {exc}"
-                    ) from exc
-            if len(payload) < 100:
-                break
+        for release in self._iter_release_entries():
+            if release.get("draft"):
+                continue
+            tag = release.get("tag_name")
+            if type(tag) is not str:
+                continue
+            try:
+                tag_version = Version(tag.removeprefix("v"))
+            except InvalidVersion:
+                continue
+            if tag_version != wanted:
+                continue
+            channel = "prerelease" if release.get("prerelease") else "stable"
+            try:
+                return self._parse_release(release, expected_channel=channel)
+            except Exception as exc:
+                raise ReleaseContractError(
+                    f"Release {wanted} is unusable: {exc}"
+                ) from exc
         raise ReleaseContractError(
             f"No GitHub Release found for version {wanted}"
         )
