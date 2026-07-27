@@ -8,7 +8,6 @@ import json
 import hashlib
 import shlex
 import shutil
-import subprocess
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -605,14 +604,7 @@ async def resume_interrupted_update_guard(service) -> dict | None:
             and guard_state == "missing"
             and _request_proves_guard_never_started(request)
         ):
-            process = await asyncio.create_subprocess_exec(
-                *adapter.guard_command,
-                "--request",
-                str(request_path),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            process, _guard_executable = adapter.start_guard(request_path)
         else:
             service.set_startup_maintenance_gate(True)
             raise RuntimeError(

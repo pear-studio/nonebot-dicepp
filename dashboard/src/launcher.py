@@ -206,12 +206,39 @@ class TrayController:
         if self._exiting:
             return
         self._exiting = True
+        exit_started = time.monotonic()
         try:
             append_runtime_log_line(
                 "launcher | stopping runtime and exiting",
                 path=self._log_path,
             )
-            self.stop_runtime()
+            phase_started = time.monotonic()
+            append_runtime_log_line(
+                "launcher | phase runtime stop started",
+                path=self._log_path,
+            )
+            try:
+                stop_result = self.stop_runtime()
+            except BaseException as exc:
+                append_runtime_log_line(
+                    "launcher | phase runtime stop failed"
+                    f" | elapsed_ms={(time.monotonic() - phase_started) * 1000:.1f}"
+                    f" | error={type(exc).__name__}: {exc}",
+                    path=self._log_path,
+                )
+                raise
+            else:
+                stop_status = (
+                    stop_result.get("status", "unknown")
+                    if isinstance(stop_result, dict)
+                    else type(stop_result).__name__
+                )
+                append_runtime_log_line(
+                    "launcher | phase runtime stop completed"
+                    f" | status={stop_status}"
+                    f" | elapsed_ms={(time.monotonic() - phase_started) * 1000:.1f}",
+                    path=self._log_path,
+                )
         finally:
             for label, callback in (
                 ("Dashboard", self._stop_dashboard),
@@ -219,14 +246,31 @@ class TrayController:
                 ("services", self._join_services),
                 ("tray", self._stop_tray),
             ):
+                phase_started = time.monotonic()
+                append_runtime_log_line(
+                    f"launcher | phase {label} stop started",
+                    path=self._log_path,
+                )
                 try:
                     callback()
                 except Exception as exc:
                     logger.exception("launcher | failed to stop %s", label)
                     append_runtime_log_line(
-                        f"launcher | failed to stop {label}: {exc}",
+                        f"launcher | failed to stop {label}: {exc}"
+                        f" | elapsed_ms={(time.monotonic() - phase_started) * 1000:.1f}",
                         path=self._log_path,
                     )
+                else:
+                    append_runtime_log_line(
+                        f"launcher | phase {label} stop completed"
+                        f" | elapsed_ms={(time.monotonic() - phase_started) * 1000:.1f}",
+                        path=self._log_path,
+                    )
+            append_runtime_log_line(
+                "launcher | exit sequence completed"
+                f" | elapsed_ms={(time.monotonic() - exit_started) * 1000:.1f}",
+                path=self._log_path,
+            )
 
     def _operate(self, action: str) -> Any:
         try:

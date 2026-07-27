@@ -386,6 +386,23 @@ def test_exit_waits_for_stop_terminal_before_stopping_and_joining_services(
         "join:services",
         "stop:tray",
     ]
+    log = DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
+    ordered_phases = [
+        "launcher | phase runtime stop started",
+        "launcher | phase runtime stop completed | status=succeeded",
+        "launcher | phase Dashboard stop started",
+        "launcher | phase Dashboard stop completed",
+        "launcher | phase Manager stop started",
+        "launcher | phase Manager stop completed",
+        "launcher | phase services stop started",
+        "launcher | phase services stop completed",
+        "launcher | phase tray stop started",
+        "launcher | phase tray stop completed",
+        "launcher | exit sequence completed",
+    ]
+    offsets = [log.index(phase) for phase in ordered_phases]
+    assert offsets == sorted(offsets)
+    assert log.count("elapsed_ms=") >= 6
 
 
 def test_exit_is_bounded_and_still_joins_after_operation_timeout(

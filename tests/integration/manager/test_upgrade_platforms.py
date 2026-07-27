@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -559,6 +560,106 @@ async def test_windows_guard_markers_are_scoped_to_one_transaction(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_windows_guard_spawn_persists_child_output_without_creation_flags(
+    monkeypatch,
+    tmp_path: Path,
+):
+    instance_root = tmp_path / "instance"
+    transaction_dir = (
+        instance_root / "manager" / "state" / "update-guard" / "tx"
+    )
+    transaction_dir.mkdir(parents=True)
+    package = _windows_package(tmp_path)
+    rollback_package = tmp_path / "rollback.nupkg"
+    rollback_package.write_bytes(b"rollback")
+    guard_source = instance_root / "DicePP-UpdateGuard.exe"
+    guard_source.write_bytes(b"guard-binary")
+    guard_runtime_root = tmp_path / "external-guard"
+    staged = {
+        "request": str(transaction_dir / "request.json"),
+        "guard_marker": str(transaction_dir / "guard.json"),
+        "started_marker": str(transaction_dir / "started.json"),
+        "health_marker": str(transaction_dir / "health.json"),
+        "rollback_marker": str(transaction_dir / "rollback.json"),
+        "rollback_package": str(rollback_package),
+        "rollback_package_sha256": hashlib.sha256(
+            rollback_package.read_bytes()
+        ).hexdigest(),
+    }
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=InstanceLayout.from_root(instance_root),
+        guard_command=[str(guard_source), "--diagnostic"],
+        install_command=["Update.exe", "apply", "{package}"],
+        restart_command=["DicePP.exe"],
+        process_identity_loader=lambda: {
+            "pid": 1,
+            "started_at": "old",
+            "executable": str((tmp_path / "current" / "DicePP.exe").resolve()),
+        },
+        version_loader=lambda: "3.0.0",
+        guard_runtime_root=guard_runtime_root,
+    )
+    observed: dict = {}
+
+    def fake_spawn(argv, **kwargs):
+        observed["argv"] = argv
+        observed["kwargs"] = kwargs
+        kwargs["stdout"].write(b"guard bootstrap diagnostics\n")
+
+        class Process:
+            pid = 4321
+
+        return Process()
+
+    monkeypatch.setattr(
+        "dicepp_manager.upgrade.subprocess.Popen",
+        fake_spawn,
+    )
+
+    result = await adapter.switch(
+        package,
+        current={
+            "source_version": "3.0.0",
+            "process_identity": adapter.process_identity_loader(),
+        },
+        staged=staged,
+        transaction_id="tx",
+    )
+
+    assert result["guard_pid"] == 4321
+    guard_executable = Path(result["guard_executable"])
+    assert guard_executable.read_bytes() == b"guard-binary"
+    assert guard_executable.is_relative_to(guard_runtime_root)
+    assert not guard_executable.is_relative_to(instance_root)
+    assert observed["argv"] == [
+        str(guard_executable),
+        "--diagnostic",
+        "--request",
+        staged["request"],
+    ]
+    assert observed["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert observed["kwargs"]["stderr"] is subprocess.STDOUT
+    assert observed["kwargs"]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert "creationflags" not in observed["kwargs"]
+    assert (transaction_dir / "guard-output.log").read_bytes() == (
+        b"guard bootstrap diagnostics\n"
+    )
+
+
+def test_windows_guard_runtime_must_be_outside_install_root(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="outside the install root"):
+        WindowsVelopackUpgradeAdapter(
+            layout=InstanceLayout.from_root(tmp_path),
+            guard_command=[str(tmp_path / "DicePP-UpdateGuard.exe")],
+            install_command=["Update.exe", "apply", "{package}"],
+            process_identity_loader=lambda: {},
+            guard_runtime_root=tmp_path / "manager" / "external-guard",
+        )
+
+
+@pytest.mark.asyncio
 async def test_windows_preflight_rejects_noop_and_requires_old_full_package(
     tmp_path: Path,
 ):
@@ -817,6 +918,65 @@ def test_update_guard_accepts_only_exact_known_process_identity(tmp_path: Path):
     assert result["status"] == "healthy"
     assert inspected == [123]
     assert commands == [request["install_command"]]
+
+
+def test_update_guard_persists_ordered_process_lifecycle_trace(tmp_path: Path):
+    path, request = _guard_request(tmp_path)
+    health = _healthy_guard_markers(request)
+    started_payload = Path(request["started_marker"]).read_text(encoding="utf-8")
+    Path(request["started_marker"]).unlink()
+
+    class StartedProcess:
+        pid = 999
+
+    result = run_guard(
+        path,
+        inspect_identity=lambda _pid: None,
+        run_command=lambda _argv: None,
+        start_command=lambda _argv: (
+            Path(request["started_marker"]).write_text(
+                started_payload,
+                encoding="utf-8",
+            )
+            and StartedProcess()
+        ),
+        health_probe=lambda _request: {
+            "ok": True,
+            "dicepp_version": request["target_version"],
+            "upgrade_handoff": health,
+        },
+    )
+
+    trace = [
+        json.loads(line)
+        for line in (tmp_path / "guard-trace.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert result["status"] == "healthy"
+    assert [entry["stage"] for entry in trace] == [
+        "run_guard_enter",
+        "request_validated",
+        "guard_identity_acquired",
+        "guard_marker_running",
+        "manager_exit_wait_started",
+        "manager_exit_confirmed",
+        "package_digests_verified",
+        "target_apply_started",
+        "target_apply_completed",
+        "target_manager_restart_requested",
+        "started_marker_wait_started",
+        "started_marker_received",
+        "authenticated_health_wait_started",
+        "authenticated_health_received",
+        "health_marker_wait_started",
+        "health_marker_received",
+        "guard_completed_healthy",
+    ]
+    assert all(entry["format_version"] == 1 for entry in trace)
+    assert all(entry["pid"] == trace[0]["pid"] for entry in trace)
+    assert all(entry["ppid"] == trace[0]["ppid"] for entry in trace)
+    assert all(entry["timestamp"] for entry in trace)
 
 
 def test_update_guard_rolls_program_back_when_install_or_health_fails(

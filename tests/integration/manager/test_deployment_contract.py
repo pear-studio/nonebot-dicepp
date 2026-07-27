@@ -529,26 +529,21 @@ def test_manager_startup_relaunches_dead_guard_from_failed_health_to_rollback(
     class Process:
         pid = 4321
 
-    async def fake_spawn(*argv, **kwargs):
-        spawned.append((argv, kwargs))
+    def fake_start_guard(request_path: Path):
+        spawned.append(request_path)
         run_guard(
-            Path(argv[-1]),
+            request_path,
             inspect_identity=lambda _pid: None,
             run_command=lambda _command: None,
             start_command=lambda _command: object(),
         )
-        return Process()
+        return Process(), stable_guard
 
     new_identity = {
         "pid": 20,
         "started_at": "restarted-manager",
         "executable": str((current / "DicePP.exe").resolve()),
     }
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        fake_spawn,
-    )
     monkeypatch.setattr(
         manager_factory, "current_process_identity", lambda: new_identity
     )
@@ -568,6 +563,7 @@ def test_manager_startup_relaunches_dead_guard_from_failed_health_to_rollback(
         process_identity_loader=lambda: new_identity,
         version_loader=lambda: "3.1.0",
     )
+    monkeypatch.setattr(adapter, "start_guard", fake_start_guard)
     service.archive_coordinator = SimpleNamespace()
     service.release_manager = SimpleNamespace()
     service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
@@ -588,11 +584,7 @@ def test_manager_startup_relaunches_dead_guard_from_failed_health_to_rollback(
             service.submit("dicepp-runtime", "restart")
 
     assert len(spawned) == 1
-    assert spawned[0][0] == (
-        str(stable_guard),
-        "--request",
-        str((transaction / "request.json").resolve()),
-    )
+    assert spawned[0] == (transaction / "request.json").resolve()
     rewritten = json.loads(
         (transaction / "request.json").read_text(encoding="utf-8")
     )
@@ -787,15 +779,14 @@ async def test_manager_resume_requires_strict_guard_identity_before_mutation(
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )
-    service.upgrade_coordinator = SimpleNamespace(
-        platform_adapter=WindowsVelopackUpgradeAdapter(
-            layout=layout,
-            guard_command=[str(stable_guard)],
-            install_command=["Update.exe", "apply", "-p", "{package}"],
-            process_identity_loader=lambda: current_identity,
-            version_loader=lambda: program_version,
-        )
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(stable_guard)],
+        install_command=["Update.exe", "apply", "-p", "{package}"],
+        process_identity_loader=lambda: current_identity,
+        version_loader=lambda: program_version,
     )
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
     service.pending_update_guard_resume = pending
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
@@ -805,14 +796,10 @@ async def test_manager_resume_requires_strict_guard_identity_before_mutation(
         lambda: current_identity,
     )
 
-    async def forbidden_spawn(*_args, **_kwargs):
+    def forbidden_start_guard(*_args, **_kwargs):
         pytest.fail("unknown Guard identity must never be spawned over")
 
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        forbidden_spawn,
-    )
+    monkeypatch.setattr(adapter, "start_guard", forbidden_start_guard)
     try:
         with pytest.raises(RuntimeError, match="identity is unavailable"):
             await manager_factory.resume_interrupted_update_guard(service)
@@ -857,15 +844,14 @@ async def test_manager_resume_can_start_guard_proven_never_started(
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )
-    service.upgrade_coordinator = SimpleNamespace(
-        platform_adapter=WindowsVelopackUpgradeAdapter(
-            layout=layout,
-            guard_command=[str(stable_guard)],
-            install_command=["Update.exe", "apply", "-p", "{package}"],
-            process_identity_loader=lambda: request["manager_identity"],
-            version_loader=lambda: "3.0.0",
-        )
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(stable_guard)],
+        install_command=["Update.exe", "apply", "-p", "{package}"],
+        process_identity_loader=lambda: request["manager_identity"],
+        version_loader=lambda: "3.0.0",
     )
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
     service.pending_update_guard_resume = pending
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
@@ -874,33 +860,23 @@ async def test_manager_resume_can_start_guard_proven_never_started(
     class Process:
         pid = 4040
 
-    async def fake_spawn(*argv, **_kwargs):
-        spawned.append(argv)
-        return Process()
+    def fake_start_guard(request_path: Path):
+        spawned.append(request_path)
+        return Process(), stable_guard
 
     monkeypatch.setattr(
         manager_factory,
         "current_process_identity",
         lambda: request["manager_identity"],
     )
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        fake_spawn,
-    )
+    monkeypatch.setattr(adapter, "start_guard", fake_start_guard)
     try:
         result = await manager_factory.resume_interrupted_update_guard(service)
     finally:
         service.close()
 
     assert result["guard_pid"] == 4040
-    assert spawned == [
-        (
-            str(stable_guard),
-            "--request",
-            str((transaction / "request.json").resolve()),
-        )
-    ]
+    assert spawned == [(transaction / "request.json").resolve()]
     assert shutdown == ["windows_update_guard_resume"]
 
 
@@ -962,14 +938,10 @@ async def test_manager_resume_reuses_exact_running_guard_without_duplicate_spawn
         lambda _pid: guard_identity,
     )
 
-    async def forbidden_spawn(*_args, **_kwargs):
+    def forbidden_start_guard(*_args, **_kwargs):
         pytest.fail("exact running Guard must not be spawned twice")
 
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        forbidden_spawn,
-    )
+    monkeypatch.setattr(adapter, "start_guard", forbidden_start_guard)
     try:
         result = await manager_factory.resume_interrupted_update_guard(service)
     finally:
@@ -1011,27 +983,22 @@ async def test_manager_resume_rechecks_terminal_marker_after_startup_scan(
         state_dir=layout.manager_state_dir,
     )
     identity = request["manager_identity"]
-    service.upgrade_coordinator = SimpleNamespace(
-        platform_adapter=WindowsVelopackUpgradeAdapter(
-            layout=layout,
-            guard_command=[str(stable_guard)],
-            install_command=["Update.exe", "apply", "-p", "{package}"],
-            process_identity_loader=lambda: identity,
-            version_loader=lambda: "3.1.0",
-        )
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(stable_guard)],
+        install_command=["Update.exe", "apply", "-p", "{package}"],
+        process_identity_loader=lambda: identity,
+        version_loader=lambda: "3.1.0",
     )
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
     service.pending_update_guard_resume = pending
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
 
-    async def forbidden_spawn(*_args, **_kwargs):
+    def forbidden_start_guard(*_args, **_kwargs):
         pytest.fail("terminal Guard request must not be relaunched")
 
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        forbidden_spawn,
-    )
+    monkeypatch.setattr(adapter, "start_guard", forbidden_start_guard)
     try:
         result = await manager_factory.resume_interrupted_update_guard(service)
     finally:
@@ -1070,27 +1037,22 @@ async def test_manager_resume_waits_for_live_guard_on_restored_source_program(
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )
-    service.upgrade_coordinator = SimpleNamespace(
-        platform_adapter=WindowsVelopackUpgradeAdapter(
-            layout=layout,
-            guard_command=[str(stable_guard)],
-            install_command=["Update.exe", "apply", "-p", "{package}"],
-            process_identity_loader=lambda: request["manager_identity"],
-            version_loader=lambda: "3.0.0",
-        )
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(stable_guard)],
+        install_command=["Update.exe", "apply", "-p", "{package}"],
+        process_identity_loader=lambda: request["manager_identity"],
+        version_loader=lambda: "3.0.0",
     )
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
     service.pending_update_guard_resume = pending
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
 
-    async def forbidden_spawn(*_args, **_kwargs):
+    def forbidden_start_guard(*_args, **_kwargs):
         pytest.fail("source program must wait for terminal state, not relaunch Guard")
 
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        forbidden_spawn,
-    )
+    monkeypatch.setattr(adapter, "start_guard", forbidden_start_guard)
     monkeypatch.setattr(
         manager_factory,
         "inspect_process_identity",
@@ -1163,13 +1125,6 @@ async def test_manager_resume_completes_dead_guard_from_active_source_program(
     }
 
     monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        lambda *_args, **_kwargs: pytest.fail(
-            "active source Manager must not relaunch or reapply through Guard"
-        ),
-    )
-    monkeypatch.setattr(
         manager_factory,
         "current_process_identity",
         lambda: current_identity,
@@ -1186,6 +1141,13 @@ async def test_manager_resume_completes_dead_guard_from_active_source_program(
         install_command=["Update.exe", "apply", "-p", "{package}"],
         process_identity_loader=lambda: current_identity,
         version_loader=lambda: "3.0.0",
+    )
+    monkeypatch.setattr(
+        adapter,
+        "start_guard",
+        lambda *_args, **_kwargs: pytest.fail(
+            "active source Manager must not relaunch or reapply through Guard"
+        ),
     )
     service = ManagerService(
         unit_provider=lambda: [],
@@ -1416,7 +1378,7 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
     class Process:
         pid = 4322
 
-    async def fake_spawn(*argv, **_kwargs):
+    def fake_start_guard(request_path: Path):
         def start(command):
             commands.append(command)
             started = {
@@ -1444,7 +1406,7 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
             return object()
 
         health = run_guard(
-            Path(argv[-1]),
+            request_path,
             inspect_identity=lambda _pid: None,
             run_command=lambda command: commands.append(command),
             start_command=start,
@@ -1457,13 +1419,7 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
             },
         )
         assert health["status"] == "healthy"
-        return Process()
-
-    monkeypatch.setattr(
-        manager_factory.asyncio,
-        "create_subprocess_exec",
-        fake_spawn,
-    )
+        return Process(), stable_guard
     monkeypatch.setattr(
         manager_factory,
         "current_process_identity",
@@ -1476,15 +1432,15 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )
-    service.upgrade_coordinator = SimpleNamespace(
-        platform_adapter=WindowsVelopackUpgradeAdapter(
-            layout=layout,
-            guard_command=[str(stable_guard)],
-            install_command=["Update.exe", "apply", "-p", "{package}"],
-            process_identity_loader=lambda: current_identity,
-            version_loader=lambda: "3.1.0",
-        )
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(stable_guard)],
+        install_command=["Update.exe", "apply", "-p", "{package}"],
+        process_identity_loader=lambda: current_identity,
+        version_loader=lambda: "3.1.0",
     )
+    monkeypatch.setattr(adapter, "start_guard", fake_start_guard)
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
     service.pending_update_guard_resume = pending
     shutdown = []
     service.set_shutdown_callback(shutdown.append)

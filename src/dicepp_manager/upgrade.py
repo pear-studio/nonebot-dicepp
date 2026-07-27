@@ -12,11 +12,12 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import stat
 import subprocess
-import re
+import tempfile
 import zipfile
 import xml.etree.ElementTree as ElementTree
 from contextlib import contextmanager
@@ -435,6 +436,7 @@ class WindowsVelopackUpgradeAdapter:
         manager_exit_timeout: float = 60.0,
         health_timeout: float = 120.0,
         rollback_package_fetcher: Callable[[str], tuple[Path, str]] | None = None,
+        guard_runtime_root: Path | None = None,
     ) -> None:
         if not guard_command or not install_command:
             raise ValueError("UpdateGuard and Velopack commands are required")
@@ -457,6 +459,21 @@ class WindowsVelopackUpgradeAdapter:
         self.manager_exit_timeout = manager_exit_timeout
         self.health_timeout = health_timeout
         self.guard_dir = layout.manager_state_dir / "update-guard"
+        default_guard_runtime_root = (
+            Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
+            / "DicePP-UpdateGuard"
+        )
+        instance_key = hashlib.sha256(
+            os.path.normcase(str(layout.root.resolve())).encode("utf-8")
+        ).hexdigest()[:16]
+        self.guard_runtime_dir = (
+            Path(guard_runtime_root or default_guard_runtime_root).resolve()
+            / instance_key
+        )
+        if self.guard_runtime_dir.is_relative_to(layout.root.resolve()):
+            raise ValueError(
+                "UpdateGuard runtime directory must be outside the install root"
+            )
 
     async def preflight(self, package: VerifiedUpgradePackage) -> dict[str, Any]:
         if package.platform != "windows":
@@ -599,19 +616,72 @@ class WindowsVelopackUpgradeAdapter:
             "requested_at": utc_now(),
         }
         _atomic_json(Path(staged["request"]), request)
-        process = await asyncio.create_subprocess_exec(
-            *self.guard_command,
-            "--request",
-            staged["request"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        process, guard_executable = self.start_guard(
+            Path(staged["request"])
         )
         return {
             "guard_pid": process.pid,
+            "guard_executable": str(guard_executable),
             "handoff_required": True,
             "request": staged["request"],
         }
+
+    def start_guard(
+        self, request_path: Path
+    ) -> tuple[subprocess.Popen, Path]:
+        """Start an independent Guard from outside the Velopack install root."""
+
+        guard_executable = self._prepare_external_guard()
+        guard_output = request_path.parent / "guard-output.log"
+        guard_environment = os.environ.copy()
+        guard_environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        with guard_output.open("ab", buffering=0) as output:
+            process = subprocess.Popen(
+                [
+                    str(guard_executable),
+                    *self.guard_command[1:],
+                    "--request",
+                    str(request_path),
+                ],
+                env=guard_environment,
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        return process, guard_executable
+
+    def _prepare_external_guard(self) -> Path:
+        source = Path(self.guard_command[0])
+        if (
+            not source.is_absolute()
+            or source.is_symlink()
+            or not source.is_file()
+        ):
+            raise UpgradeCompatibilityError(
+                "Stable UpdateGuard executable is unavailable"
+            )
+        source_digest = _sha256_file(source)
+        version_dir = self.guard_runtime_dir / source_digest
+        version_dir.mkdir(parents=True, exist_ok=True)
+        resolved_version_dir = version_dir.resolve(strict=True)
+        if (
+            version_dir.is_symlink()
+            or resolved_version_dir.is_relative_to(self.layout.root.resolve())
+        ):
+            raise UpgradeCompatibilityError(
+                "UpdateGuard runtime directory is unsafe"
+            )
+        target = resolved_version_dir / "DicePP-UpdateGuard.exe"
+        _atomic_copy(source, target)
+        if (
+            target.is_symlink()
+            or not target.is_file()
+            or _sha256_file(target) != source_digest
+        ):
+            raise UpgradeCompatibilityError(
+                "External UpdateGuard executable digest mismatch"
+            )
+        return target
 
     def validate_rollback_marker(
         self, detail: dict[str, Any]

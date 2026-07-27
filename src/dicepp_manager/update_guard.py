@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 from ctypes import wintypes
+import faulthandler
 import hashlib
 import json
 import os
@@ -31,10 +32,43 @@ from ._file_utils import _atomic_json, _read_json_object
 from .upgrade import _validate_process_identity
 
 _QUERY_IMAGE_BUFFER_SIZE = 32768
+_TRACE_FILENAME = "guard-trace.jsonl"
+_CRASH_FILENAME = "guard-crash.log"
 
 
 class UpdateGuardError(RuntimeError):
     pass
+
+
+def _append_guard_trace(
+    request_path: Path,
+    stage: str,
+    **detail: Any,
+) -> None:
+    """Best-effort durable trace for cross-process Windows diagnosis."""
+
+    payload = {
+        "format_version": 1,
+        "timestamp": _utc_now(),
+        "stage": stage,
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        **detail,
+    }
+    try:
+        with (request_path.parent / _TRACE_FILENAME).open(
+            "a",
+            encoding="utf-8",
+            newline="\n",
+        ) as handle:
+            handle.write(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (OSError, TypeError, ValueError):
+        # Diagnostics must never replace the guarded upgrade failure semantics.
+        pass
 
 
 class ProcessIdentityHandle(Protocol):
@@ -88,9 +122,22 @@ def run_guard(
     health_probe: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
+    _append_guard_trace(request_path, "run_guard_enter")
     request = _validate_request(_read_json_object(request_path))
+    _append_guard_trace(
+        request_path,
+        "request_validated",
+        transaction_id=request["transaction_id"],
+        source_version=request["source_version"],
+        target_version=request["target_version"],
+    )
     guard_marker = Path(request["guard_marker"])
     guard_identity = current_process_identity()
+    _append_guard_trace(
+        request_path,
+        "guard_identity_acquired",
+        identity=guard_identity,
+    )
     if guard_marker.is_file() and not guard_marker.is_symlink():
         existing_guard = _read_json_object(guard_marker)
         existing_identity = existing_guard.get("guard_identity")
@@ -103,9 +150,15 @@ def run_guard(
         ):
             raise UpdateGuardError("Another exact UpdateGuard is already running")
     _write_guard_marker(request, guard_identity, status="running")
+    _append_guard_trace(request_path, "guard_marker_running")
     identity = request["manager_identity"]
     runner = run_command or _run_command
     starter = start_command or _start_command
+    _append_guard_trace(
+        request_path,
+        "manager_exit_wait_started",
+        manager_identity=identity,
+    )
     if not _wait_known_process_exit(
         identity,
         timeout=float(request["manager_exit_timeout_seconds"]),
@@ -114,6 +167,7 @@ def run_guard(
         sleep=sleep,
     ):
         raise UpdateGuardError("Known Manager did not exit before guard timeout")
+    _append_guard_trace(request_path, "manager_exit_confirmed")
 
     install_command = list(request["install_command"])
     rollback_command = list(request["rollback_command"])
@@ -133,16 +187,28 @@ def run_guard(
             == request["source_version"]
         ):
             if existing_rollback.get("status") == "program_rollback_started":
+                _append_guard_trace(
+                    request_path,
+                    "durable_rollback_resume_started",
+                )
                 _verify_file_digest(
                     Path(request["rollback_package"]),
                     request["rollback_package_sha256"],
                 )
                 runner(rollback_command)
+                _append_guard_trace(
+                    request_path,
+                    "durable_rollback_apply_completed",
+                )
                 existing_rollback.update(
                     {"status": "program_rolled_back", "updated_at": _utc_now()}
                 )
                 _atomic_json(rollback_marker, existing_rollback)
                 starter(restart_command)
+                _append_guard_trace(
+                    request_path,
+                    "source_manager_restart_requested",
+                )
                 _write_guard_marker(
                     request,
                     guard_identity,
@@ -155,6 +221,10 @@ def run_guard(
                 # acknowledged before a crash.  Only the old Manager launch
                 # remains; never apply either package again.
                 starter(restart_command)
+                _append_guard_trace(
+                    request_path,
+                    "source_manager_restart_requested",
+                )
                 _write_guard_marker(
                     request,
                     guard_identity,
@@ -173,6 +243,7 @@ def run_guard(
     _verify_file_digest(
         Path(request["rollback_package"]), request["rollback_package_sha256"]
     )
+    _append_guard_trace(request_path, "package_digests_verified")
     try:
         persisted_health = None
         if health_marker.is_file() and not health_marker.is_symlink():
@@ -209,8 +280,16 @@ def run_guard(
             ):
                 started = candidate
         if started is None:
+            _append_guard_trace(request_path, "target_apply_started")
             runner(install_command)
-            starter(restart_command)
+            _append_guard_trace(request_path, "target_apply_completed")
+            restarted = starter(restart_command)
+            _append_guard_trace(
+                request_path,
+                "target_manager_restart_requested",
+                spawned_pid=getattr(restarted, "pid", None),
+            )
+            _append_guard_trace(request_path, "started_marker_wait_started")
             started = _wait_marker(
                 started_marker,
                 transaction_id=request["transaction_id"],
@@ -218,6 +297,11 @@ def run_guard(
                 statuses={"started", "failed"},
                 timeout=float(request["health_timeout_seconds"]),
                 sleep=sleep,
+            )
+            _append_guard_trace(
+                request_path,
+                "started_marker_received",
+                status=started.get("status"),
             )
         elif (
             started.get("status") == "started"
@@ -228,7 +312,17 @@ def run_guard(
             # target program, remove only the stale transaction marker, and
             # start a fresh target Manager without reapplying the package.
             started_marker.unlink()
-            starter(restart_command)
+            _append_guard_trace(
+                request_path,
+                "stale_started_marker_removed",
+            )
+            restarted = starter(restart_command)
+            _append_guard_trace(
+                request_path,
+                "target_manager_restart_requested",
+                spawned_pid=getattr(restarted, "pid", None),
+            )
+            _append_guard_trace(request_path, "started_marker_wait_started")
             started = _wait_marker(
                 started_marker,
                 transaction_id=request["transaction_id"],
@@ -237,11 +331,21 @@ def run_guard(
                 timeout=float(request["health_timeout_seconds"]),
                 sleep=sleep,
             )
+            _append_guard_trace(
+                request_path,
+                "started_marker_received",
+                status=started.get("status"),
+            )
         if started.get("status") != "started":
             raise UpdateGuardError(
                 str(started.get("error") or "Updated Manager rejected hand-off")
             )
         new_identity = _validate_process_identity(started["manager_identity"])
+        _append_guard_trace(
+            request_path,
+            "authenticated_health_wait_started",
+            manager_identity=new_identity,
+        )
         health = _wait_authenticated_health(
             request,
             expected_identity=new_identity,
@@ -249,6 +353,8 @@ def run_guard(
             timeout=float(request["health_timeout_seconds"]),
             sleep=sleep,
         )
+        _append_guard_trace(request_path, "authenticated_health_received")
+        _append_guard_trace(request_path, "health_marker_wait_started")
         marker = _wait_marker(
             health_marker,
             transaction_id=request["transaction_id"],
@@ -256,6 +362,11 @@ def run_guard(
             statuses={"healthy", "failed"},
             timeout=float(request["health_timeout_seconds"]),
             sleep=sleep,
+        )
+        _append_guard_trace(
+            request_path,
+            "health_marker_received",
+            status=marker.get("status"),
         )
         if marker.get("status") != "healthy":
             raise UpdateGuardError(
@@ -268,8 +379,15 @@ def run_guard(
         _write_guard_marker(
             request, guard_identity, status="exited", result=health
         )
+        _append_guard_trace(request_path, "guard_completed_healthy")
         return health
     except Exception as install_exc:
+        _append_guard_trace(
+            request_path,
+            "target_handoff_failed",
+            error_type=type(install_exc).__name__,
+            error=str(install_exc) or type(install_exc).__name__,
+        )
         try:
             started = _read_json_object(started_marker)
         except (OSError, ValueError, json.JSONDecodeError):
@@ -293,12 +411,15 @@ def run_guard(
             "updated_at": _utc_now(),
         }
         _atomic_json(rollback_marker, rollback)
+        _append_guard_trace(request_path, "rollback_marker_started")
         try:
             _verify_file_digest(
                 Path(request["rollback_package"]),
                 request["rollback_package_sha256"],
             )
+            _append_guard_trace(request_path, "rollback_apply_started")
             runner(rollback_command)
+            _append_guard_trace(request_path, "rollback_apply_completed")
         except Exception as rollback_exc:
             rollback.update(
                 {
@@ -309,18 +430,31 @@ def run_guard(
                 }
             )
             _atomic_json(rollback_marker, rollback)
+            _append_guard_trace(
+                request_path,
+                "rollback_failed",
+                error_type=type(rollback_exc).__name__,
+                error=str(rollback_exc) or type(rollback_exc).__name__,
+            )
             raise UpdateGuardError(rollback["rollback_error"]) from rollback_exc
         rollback.update(
             {"status": "program_rolled_back", "updated_at": _utc_now()}
         )
         _atomic_json(rollback_marker, rollback)
+        _append_guard_trace(request_path, "rollback_marker_completed")
         # The terminal marker describes the durable program-directory state,
         # so publish it before launching the old Manager.  A crash after this
         # point is restart-only recovery and must never reapply the package.
-        starter(restart_command)
+        restarted = starter(restart_command)
+        _append_guard_trace(
+            request_path,
+            "source_manager_restart_requested",
+            spawned_pid=getattr(restarted, "pid", None),
+        )
         _write_guard_marker(
             request, guard_identity, status="exited", result=rollback
         )
+        _append_guard_trace(request_path, "guard_completed_rollback")
         return rollback
 
 
@@ -795,12 +929,62 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.request is None:
         parser.error("--request is required")
+    request_path = args.request.resolve()
+    crash_handle = None
+    faulthandler_enabled_here = False
     try:
-        result = run_guard(args.request.resolve())
-    except (OSError, ValueError, UpdateGuardError) as exc:
-        print(f"UpdateGuard failed: {exc}", file=sys.stderr)
-        return 1
-    return 0 if result.get("status") in {"healthy", "program_rolled_back"} else 1
+        try:
+            crash_handle = (request_path.parent / _CRASH_FILENAME).open("ab", buffering=0)
+            if not faulthandler.is_enabled():
+                faulthandler.enable(file=crash_handle, all_threads=True)
+                faulthandler_enabled_here = True
+        except (OSError, RuntimeError, ValueError) as exc:
+            _append_guard_trace(
+                request_path,
+                "faulthandler_enable_failed",
+                error_type=type(exc).__name__,
+                error=str(exc) or type(exc).__name__,
+            )
+            if crash_handle is not None:
+                crash_handle.close()
+                crash_handle = None
+        _append_guard_trace(request_path, "main_enter")
+        try:
+            result = run_guard(request_path)
+        except (OSError, ValueError, UpdateGuardError) as exc:
+            _append_guard_trace(
+                request_path,
+                "main_expected_failure",
+                error_type=type(exc).__name__,
+                error=str(exc) or type(exc).__name__,
+            )
+            print(f"UpdateGuard failed: {exc}", file=sys.stderr)
+            return 1
+        except BaseException as exc:
+            _append_guard_trace(
+                request_path,
+                "main_unhandled_failure",
+                error_type=type(exc).__name__,
+                error=str(exc) or type(exc).__name__,
+            )
+            raise
+        exit_code = (
+            0
+            if result.get("status") in {"healthy", "program_rolled_back"}
+            else 1
+        )
+        _append_guard_trace(
+            request_path,
+            "main_exit",
+            result_status=result.get("status"),
+            exit_code=exit_code,
+        )
+        return exit_code
+    finally:
+        if faulthandler_enabled_here:
+            faulthandler.disable()
+        if crash_handle is not None:
+            crash_handle.close()
 
 
 if __name__ == "__main__":
