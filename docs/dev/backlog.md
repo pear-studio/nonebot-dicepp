@@ -30,6 +30,23 @@
     - 风险：低-中，只触下载路径，升级事务语义不变
     - 排期（用户已定）：RC14 两平台验收收官后实施，随后发 RC15（含 manager 变更，自动升级: no），两平台手工迁移实证后再发 v3.0.0
 
+### [B-260727-bf469b] 无绑定 bot 的实例无法通过升级/回退的控制心跳健康门
+- 创建: 2026-07-27
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - 实证（2026-07-27 rc14 Linux 验收）：无任何 OneBot 连接的实例（新装未配置 QQ、或升级窗口内 NapCat/QQ 离线）自动升级 100% 失败，报 Bot control heartbeat did not advance after restart
+    - 回退卡同一道门：容器实际已恢复旧镜像，回退仍被判 rollback_failed（连续两次失败尝试均为此模式），留下终态保护，UX 迷惑
+    - 机制：控制心跳由每个 QQ 账号的 DiceBot 经控制 WS 上报（dicebot.py:133-157），DiceBot 只在 OneBot 客户端连接后创建；无绑定 bot 时 Dashboard latest_heartbeat 恒 null；_hard_health 要求心跳较基线前进（archive_coordinator.py:730-739），基线为 null 时永不可能通过
+    - 反证：挂上 mock OneBot 客户端（绑定 bot 10001）后同一实例升级一次通过
+- 开发备忘:
+    - 已定方案 B（用户 2026-07-27 拍板）：基线捕获时若 manager status bots 为空（无绑定 bot），控制探针降级为 not_applicable，runtime + Dashboard 健康即为充分证据；有绑定 bot 但心跳断流时维持失败（真故障）
+    - 涉及：upgrade.py:1010-1011（基线捕获需带 bots 列表）、upgrade.py:1074-1077 与 :1554 附近（升级与回退健康门调用）、archive_coordinator.py:292/343/592/720-741（归档恢复路径同款门）
+    - 测试：manager 升级/回退健康门集成测试补两类用例——无绑定 bot 时升级/回退均跳过控制探针并成功；有绑定 bot 但无新鲜心跳时维持失败
+    - 验收备忘：未来验收标记字段必须用真实配置字段（如 dicehub.name），自定义键会被 bot ConfigLoader 按设计丢弃（loader.py:291-295）
+    - 排期：RC15，与 B-260727-bd8bb8（下载续传）同车
+
 ### [B-260726-7d886d] 统一 _discover_latest 与 _find_release_by_version 的分页逻辑（抽 _iter_release_entries 生成器）
 - 创建: 2026-07-26
 - 优先级: P2
