@@ -45,15 +45,20 @@ from plugins.DicePP.utils.logger import logger, restore_runtime_logging
 
 restore_runtime_logging()
 
+# OneBot 监听地址：默认只绑回环，避免 Windows 首启触发防火墙入站规则。
+# Docker 部署由 docker-compose.yml 显式设置 DICEPP_ONEBOT_HOST=0.0.0.0（跨容器连接要求）。
+_onebot_host = os.environ.get("DICEPP_ONEBOT_HOST", "").strip() or "127.0.0.1"
+
 # 初始化 NoneBot。DicePP 不依赖根目录 .env；这些是当前 OneBot 运行形态的默认值。
 nonebot.init(
     _env_file=("config/nonebot.env",),
-    host="0.0.0.0",
+    host=_onebot_host,
     port=8080,
     command_start={""},
     command_sep={""},
 )
 restore_runtime_logging()
+logger.info(f"OneBot 监听地址: {_onebot_host}:8080")
 
 # 显示启动信息
 @nonebot.get_driver().on_startup

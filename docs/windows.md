@@ -131,6 +131,8 @@ LLOneBot 官方入口：
 
 如果 DicePP 还没启动，LLOneBot 日志里出现连接失败或重连是正常的。等 DicePP 启动后，它会自动重连。
 
+DicePP 默认只监听本机回环地址（`127.0.0.1:8080`），同机的 LLOneBot 直接连接即可，不会触发 Windows 防火墙提示。如果 OneBot 客户端运行在另一台机器上，需要为 DicePP 设置环境变量 `DICEPP_ONEBOT_HOST=0.0.0.0` 使其监听全部网卡，并自行放行防火墙；LLOneBot 的 WebSocket URL 也要改成 DicePP 所在机器的实际 IP。
+
 ## 配置机器人账号
 
 推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回到网页管理面板填写主人、昵称等常用配置。

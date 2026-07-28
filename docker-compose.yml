@@ -33,7 +33,9 @@ services:
       # Dashboard 管理后端地址（bot 上报心跳/注册用）
       - DPP_ADMIN_HOST=dashboard
       - DPP_ADMIN_PORT=4090
-      # Bot HTTP 服务地址（dashboard 调用 bot 内部 API 用）
+      # OneBot 监听地址：跨容器连接（NapCat/LLOneBot 经 ws://dicepp:8080 连入）要求监听全部网卡，
+      # 覆盖 bot.py 的默认值 127.0.0.1
+      - DICEPP_ONEBOT_HOST=0.0.0.0
 
     # 数据持久化：
     # - config：配置目录（可写，运行时生成 bots/*.json）

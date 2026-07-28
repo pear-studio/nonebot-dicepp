@@ -121,16 +121,17 @@ API Key 放在 `config/user.json`：
 
 ## 常用环境变量
 
-| 变量 | 作用 |
-|------|------|
-| `DICE_MASTER` | 覆盖 master，多个值用逗号分隔 |
-| `DICE_ADMIN` | 覆盖 admin，多个值用逗号分隔 |
-| `DICE_NICKNAME` | 覆盖机器人昵称 |
-| `DICE_PERSONA` | 覆盖默认人设 |
-| `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 |
-| `DICEPP_DATA_DIR` | 兼容旧部署：只覆盖运行时 `data/` 目录；Bot 与 Dashboard 使用同一解析规则 |
+| 变量 | 作用 | 默认值 |
+|------|------|------|
+| `DICE_MASTER` | 覆盖 master，多个值用逗号分隔 | |
+| `DICE_ADMIN` | 覆盖 admin，多个值用逗号分隔 | |
+| `DICE_NICKNAME` | 覆盖机器人昵称 | |
+| `DICE_PERSONA` | 覆盖默认人设 | |
+| `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 | |
+| `DICEPP_DATA_DIR` | 兼容旧部署：只覆盖运行时 `data/` 目录；Bot 与 Dashboard 使用同一解析规则 | |
 | `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
 | `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
+| `DICEPP_ONEBOT_HOST` | OneBot 监听地址；远程 OneBot 客户端需显式设为 `0.0.0.0` | `127.0.0.1`（Compose 部署显式设为 `0.0.0.0`） |
 
 ### Manager 环境变量
 
