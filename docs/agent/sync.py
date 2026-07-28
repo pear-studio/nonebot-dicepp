@@ -627,6 +627,11 @@ def classify_target(target: str, env_arg: str | None) -> tuple[list[str], list[s
                 warnings.append(f"{target}: stale managed skill {name}")
             else:
                 warnings.append(f"{target}: unknown skill {name}")
+        for name in sorted(skills):
+            if matches_any(name, config.ignore_skills):
+                continue
+            if not path_entry_exists(spec.skills_dir / name):
+                warnings.append(f"{target}: missing managed skill {name}")
     else:
         warnings.append(f"{target}: missing skills dir {rel(spec.skills_dir)}")
 
@@ -689,6 +694,17 @@ def report_target(target: str, env_arg: str | None) -> None:
             print(f"  - {name}: {status}{suffix}")
     else:
         print(f"  <missing: {rel(spec.skills_dir)}>")
+    if spec.skills_dir.exists():
+        missing = [
+            name
+            for name in sorted(skills)
+            if not matches_any(name, config.ignore_skills)
+            and not path_entry_exists(spec.skills_dir / name)
+        ]
+        if missing:
+            print("missing managed skills:")
+            for name in missing:
+                print(f"  - {name}: {rel(skills[name].path)}")
 
 
 def print_help_text() -> None:
@@ -746,9 +762,11 @@ Targets:
 Commands:
   help      Show this self-description.
   report    Print the current effective environment, source skills, target files,
-            target skill status, ignored local skills, and previous sync state.
-  doctor    Check for missing rules, stale managed skills, broken links, unknown
-            target skills, ignored local skills, and environment mismatches.
+            target skill status, missing managed skills, ignored local skills,
+            and previous sync state.
+  doctor    Check for missing rules, missing or stale managed skills, broken
+            links, unknown target skills, ignored local skills, and environment
+            mismatches.
   apply     Generate rule files and synchronize managed skills for a target.
 
 Notes:
