@@ -3,20 +3,25 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 import subprocess
 import zipfile
 from pathlib import Path
+from types import MethodType, SimpleNamespace
 
 import pytest
 
 from dicepp_data import DATA_CATALOG, InstanceLayout
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
+from dicepp_manager.models import ManagerOperation
 from dicepp_manager.release import RELEASE_CONTRACT_VERSION, ReleaseManager
+from dicepp_manager.store import ManagerOperationStore
 from dicepp_manager.update_guard import UpdateGuardError, run_guard
 from dicepp_manager.upgrade import (
     LinuxBundleUpgradeAdapter,
     LINUX_STAGE_RESERVE_BYTES,
     UpgradeCompatibilityError,
+    UpgradeCoordinator,
     VerifiedUpgradePackage,
     WindowsVelopackUpgradeAdapter,
 )
@@ -1590,3 +1595,216 @@ async def test_windows_unavailable_rollback_material_requires_manual_update(
     assert not (tmp_path / "packages").exists()
     assert list(tmp_path.rglob("*.part")) == []
     assert not (layout.manager_state_dir / "update-guard").exists()
+
+
+def _guard_cache_adapter(tmp_path: Path) -> WindowsVelopackUpgradeAdapter:
+    instance_root = tmp_path / "instance"
+    instance_root.mkdir()
+    guard_source = instance_root / "DicePP-UpdateGuard.exe"
+    guard_source.write_bytes(b"guard-binary")
+    return WindowsVelopackUpgradeAdapter(
+        layout=InstanceLayout.from_root(instance_root),
+        guard_command=[str(guard_source)],
+        install_command=["Update.exe", "apply", "{package}"],
+        process_identity_loader=lambda: {},
+        guard_runtime_root=tmp_path / "external-guard",
+    )
+
+
+def _seed_guard_cache(
+    adapter: WindowsVelopackUpgradeAdapter, *digests: str
+) -> None:
+    for digest in digests:
+        version_dir = adapter.guard_runtime_dir / digest
+        version_dir.mkdir(parents=True)
+        (version_dir / "DicePP-UpdateGuard.exe").write_bytes(b"guard")
+
+
+def _prune_coordinator(platform_adapter, store) -> SimpleNamespace:
+    """Minimal coordinator stand-in wiring the real _journal write-back."""
+    coordinator = SimpleNamespace(
+        platform_adapter=platform_adapter, store=store
+    )
+    coordinator._journal = MethodType(UpgradeCoordinator._journal, coordinator)
+    return coordinator
+
+
+def test_windows_guard_cache_prune_keeps_current_digest(tmp_path: Path):
+    adapter = _guard_cache_adapter(tmp_path)
+    _seed_guard_cache(adapter, "a" * 64, "b" * 64, "c" * 64)
+
+    removed = adapter.prune_external_guard_cache("b" * 64)
+
+    assert sorted(removed) == ["a" * 64, "c" * 64]
+    assert [p.name for p in adapter.guard_runtime_dir.iterdir()] == ["b" * 64]
+    kept = adapter.guard_runtime_dir / ("b" * 64) / "DicePP-UpdateGuard.exe"
+    assert kept.read_bytes() == b"guard"
+
+
+def test_windows_guard_cache_prune_missing_dir_is_noop(tmp_path: Path):
+    adapter = _guard_cache_adapter(tmp_path)
+
+    assert adapter.prune_external_guard_cache("a" * 64) == []
+    assert not adapter.guard_runtime_dir.exists()
+
+
+@pytest.mark.parametrize("keep_digest", ["", "not-hex", "a" * 63, "A" * 64])
+def test_windows_guard_cache_prune_rejects_invalid_keep_digest(
+    tmp_path: Path, keep_digest: str
+):
+    adapter = _guard_cache_adapter(tmp_path)
+    _seed_guard_cache(adapter, "a" * 64)
+
+    with pytest.raises(ValueError, match="keep digest"):
+        adapter.prune_external_guard_cache(keep_digest)
+
+    assert (adapter.guard_runtime_dir / ("a" * 64)).is_dir()
+
+
+def test_windows_guard_cache_prune_unlinks_symlink_without_following(
+    tmp_path: Path,
+):
+    adapter = _guard_cache_adapter(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("safe", encoding="utf-8")
+    _seed_guard_cache(adapter, "a" * 64)
+    link = adapter.guard_runtime_dir / ("b" * 64)
+    link.symlink_to(outside, target_is_directory=True)
+
+    removed = adapter.prune_external_guard_cache("a" * 64)
+
+    assert removed == ["b" * 64]
+    assert not link.is_symlink()
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "safe"
+    assert (adapter.guard_runtime_dir / ("a" * 64)).is_dir()
+
+
+def test_guard_cache_prune_waits_for_recoverable_journals(tmp_path: Path):
+    adapter = _guard_cache_adapter(tmp_path)
+    keep = hashlib.sha256(b"guard-binary").hexdigest()
+    _seed_guard_cache(adapter, "a" * 64, keep)
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    store = ManagerOperationStore(layout.manager_db)
+    coordinator = _prune_coordinator(adapter, store)
+    operation = ManagerOperation.create_system("upgrade.install")
+    store.save(operation)
+    detail = {"transaction_id": "d" * 32}
+
+    store.write_journal(
+        "d" * 32,
+        kind="upgrade",
+        phase="healthy",
+        status="running",
+        detail=detail,
+    )
+    skipped = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, detail
+    )
+    assert skipped == {"guard_cache_prune_skipped": "recoverable_journals"}
+    assert (adapter.guard_runtime_dir / ("a" * 64)).is_dir()
+
+    store.write_journal(
+        "d" * 32,
+        kind="upgrade",
+        phase="committed",
+        status="committed",
+        detail=detail,
+    )
+    pruned = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, detail
+    )
+    assert pruned == {"guard_cache_pruned": ["a" * 64]}
+    assert [p.name for p in adapter.guard_runtime_dir.iterdir()] == [keep]
+    journal = store.get_journal("d" * 32)
+    assert journal["phase"] == "committed"
+    assert journal["status"] == "committed"
+    assert journal["detail"]["guard_cache_pruned"] == ["a" * 64]
+
+
+def test_guard_cache_prune_failure_degrades_to_warning(tmp_path: Path):
+    class FailingAdapter:
+        def stable_guard_digest(self):
+            raise OSError("locked")
+
+        def prune_external_guard_cache(self, keep_digest):
+            raise AssertionError("must not run after digest failure")
+
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    store = ManagerOperationStore(layout.manager_db)
+    coordinator = _prune_coordinator(FailingAdapter(), store)
+    operation = ManagerOperation.create_system("upgrade.install")
+    store.save(operation)
+
+    result = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, {"transaction_id": "e" * 32}
+    )
+
+    assert result == {"guard_cache_prune_error": "locked"}
+
+
+def test_guard_cache_prune_prune_error_degrades_to_warning(tmp_path: Path):
+    class FailingPruneAdapter:
+        def stable_guard_digest(self):
+            return "a" * 64
+
+        def prune_external_guard_cache(self, keep_digest):
+            raise OSError("access denied")
+
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    store = ManagerOperationStore(layout.manager_db)
+    coordinator = _prune_coordinator(FailingPruneAdapter(), store)
+    operation = ManagerOperation.create_system("upgrade.install")
+    store.save(operation)
+
+    result = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, {"transaction_id": "f" * 32}
+    )
+
+    assert result == {"guard_cache_prune_error": "access denied"}
+    journal = store.get_journal("f" * 32)
+    assert journal["detail"]["guard_cache_prune_error"] == "access denied"
+
+
+def test_guard_cache_prune_never_raises_on_store_failures(tmp_path: Path):
+    class ExplodingStore:
+        def list_recoverable_journals(self):
+            raise sqlite3.OperationalError("database is locked")
+
+        def write_journal(self, *args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+    adapter = _guard_cache_adapter(tmp_path)
+    coordinator = _prune_coordinator(adapter, ExplodingStore())
+    operation = SimpleNamespace(operation_id="op-1")
+
+    result = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, {"transaction_id": "g" * 32}
+    )
+
+    assert result == {"guard_cache_prune_error": "database is locked"}
+
+
+def test_guard_cache_prune_journal_writeback_failure_is_swallowed(
+    tmp_path: Path,
+):
+    adapter = _guard_cache_adapter(tmp_path)
+    keep = hashlib.sha256(b"guard-binary").hexdigest()
+    _seed_guard_cache(adapter, "a" * 64, keep)
+
+    class ReadonlyStore:
+        def list_recoverable_journals(self):
+            return []
+
+        def write_journal(self, *args, **kwargs):
+            raise sqlite3.OperationalError("readonly database")
+
+    coordinator = _prune_coordinator(adapter, ReadonlyStore())
+    operation = SimpleNamespace(operation_id="op-1")
+
+    result = UpgradeCoordinator._prune_external_guard_cache(
+        coordinator, operation, {"transaction_id": "h" * 32}
+    )
+
+    assert result == {"guard_cache_pruned": ["a" * 64]}
+    assert [p.name for p in adapter.guard_runtime_dir.iterdir()] == [keep]

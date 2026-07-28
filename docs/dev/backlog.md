@@ -14,20 +14,6 @@
 
 ## manager
 
-### [B-260727-4589da] %LOCALAPPDATA%\DicePP-UpdateGuard 旧版本 Guard 缓存目录无清理策略
-- 创建: 2026-07-27
-- 优先级: P2
-- 类型: feature
-- 改动量: S
-- 问题表现:
-    - UpdateGuard 外部化修复（76b28a4）每次升级把当前版本 Guard 复制到 %LOCALAPPDATA%\DicePP-UpdateGuard\<实例根摘要>\<Guard SHA-256>\，按摘要分目录隔离
-    - 旧摘要目录永久保留：每个版本每实例约遗留一个 onefile Guard（数 MB~十余 MB），随版本数线性累积
-    - 不影响正确性（preflight 校验稳定根与 bundled 摘要一致，外部目录按摘要寻址），属磁盘占用缓慢增长
-- 开发备忘:
-    - 清理方向：升级 commit 成功后（或 _prepare_external_guard 时）删除 guard_runtime_dir 下非当前摘要的旧版本目录
-    - 安全约束：不得清理进行中事务引用的目录——事务目录 markers 记录 guard_executable，清理前扫描 manager/state/update-guard/*/ 的活跃事务；或保守只在无 recoverable journal 时清理
-    - 影响面：src/dicepp_manager/upgrade.py（WindowsVelopackUpgradeAdapter）+ tests/integration/manager/test_upgrade_platforms.py
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

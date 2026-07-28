@@ -53,6 +53,7 @@ MAX_LINUX_TOTAL_UNCOMPRESSED_BYTES = 16 * 1024**3
 MAX_LINUX_MEMBER_COUNT = 10_000
 LINUX_STAGE_RESERVE_BYTES = 256 * 1024**2
 CONFIRMATION_TTL = timedelta(minutes=15)
+_GUARD_CACHE_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"succeeded", "failed", "rejected", "interrupted"}
 
 
@@ -139,6 +140,10 @@ class UpgradePlatformAdapter(Protocol):
         transaction_id: str,
     ) -> dict[str, Any]: ...
 
+    def stable_guard_digest(self) -> str | None: ...
+
+    def prune_external_guard_cache(self, keep_digest: str) -> list[str]: ...
+
 
 class UnsupportedUpgradeAdapter:
     supported = False
@@ -163,6 +168,12 @@ class UnsupportedUpgradeAdapter:
 
     async def commit(self, _package, **_kwargs) -> dict[str, Any]:
         raise UpgradeCompatibilityError(self.reason)
+
+    def stable_guard_digest(self) -> str | None:
+        return None
+
+    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
+        return []
 
 
 class LinuxUpgradeExecutor(Protocol):
@@ -302,6 +313,12 @@ class LinuxBundleUpgradeAdapter:
 
     async def cleanup(self, staged: dict[str, Any]) -> None:
         await asyncio.to_thread(self._cleanup_staged, staged)
+
+    def stable_guard_digest(self) -> str | None:
+        return None
+
+    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
+        return []
 
     def _cleanup_staged(self, staged: dict[str, Any]) -> None:
         raw = staged.get("stage_dir")
@@ -682,6 +699,45 @@ class WindowsVelopackUpgradeAdapter:
                 "External UpdateGuard executable digest mismatch"
             )
         return target
+
+    def stable_guard_digest(self) -> str | None:
+        """SHA-256 of the stable-root Guard, i.e. its runtime cache dir name."""
+        return _sha256_file(Path(self.guard_command[0]))
+
+    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
+        """Delete stale external Guard versions, keeping ``keep_digest``.
+
+        Only direct children of ``guard_runtime_dir`` are touched: symlinks
+        and Windows junctions are removed without following, and a real
+        directory is removed recursively only after its resolved path is
+        confirmed to stay inside ``guard_runtime_dir`` (a TOCTOU window
+        between the check and the removal remains, which is acceptable for
+        a per-user LOCALAPPDATA cache).  Returns the removed child names
+        for audit.
+        """
+        if not _GUARD_CACHE_DIGEST_RE.fullmatch(keep_digest):
+            raise ValueError(
+                "UpdateGuard cache keep digest must be a SHA-256 hex string"
+            )
+        runtime_dir = self.guard_runtime_dir
+        if not runtime_dir.is_dir():
+            return []
+        removed: list[str] = []
+        for child in runtime_dir.iterdir():
+            if child.name == keep_digest:
+                continue
+            if child.is_junction():
+                # A junction is not a symlink; remove only the reparse
+                # point itself, never the target's contents.
+                os.rmdir(child)
+            elif child.is_symlink() or not child.is_dir():
+                child.unlink()
+            else:
+                if not child.resolve().is_relative_to(runtime_dir):
+                    continue
+                shutil.rmtree(child)
+            removed.append(child.name)
+        return removed
 
     def validate_rollback_marker(
         self, detail: dict[str, Any]
@@ -1171,6 +1227,7 @@ class UpgradeCoordinator:
             )
             self.store.save(operation)
             self.store.retire_terminal_rollback_journals()
+            self._prune_external_guard_cache(operation, detail)
             return operation
         except Exception as exc:
             rollback = await self._rollback(
@@ -1409,6 +1466,7 @@ class UpgradeCoordinator:
                     )
                     self.store.save(operation)
                     self.store.retire_terminal_rollback_journals()
+                    self._prune_external_guard_cache(operation, detail)
                     # Commit, journal, and operation state are now durable.
                     # Later Guard refresh/cleanup may retry independently and
                     # must not keep ordinary runtime lifecycle work blocked.
@@ -1671,6 +1729,7 @@ class UpgradeCoordinator:
             )
             self.store.save(operation)
             self.store.retire_terminal_rollback_journals()
+            self._prune_external_guard_cache(operation, detail)
             self.archive._apply_retention_if_safe()
             self.service.set_startup_maintenance_gate(False)
             return {"action": "committed"}
@@ -2221,6 +2280,49 @@ class UpgradeCoordinator:
             operation_id=operation.operation_id,
             detail=detail,
         )
+
+    def _prune_external_guard_cache(
+        self, operation: ManagerOperation, detail: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Best-effort cleanup of stale external UpdateGuard versions.
+
+        Runs only once no journal still needs recovery; any failure degrades
+        to a journal-visible warning.  Never raises: a cleanup problem must
+        not affect the committed upgrade it runs after.
+        """
+        digest_loader = getattr(
+            self.platform_adapter, "stable_guard_digest", None
+        )
+        prune = getattr(
+            self.platform_adapter, "prune_external_guard_cache", None
+        )
+        if digest_loader is None or prune is None:
+            return {}
+        try:
+            if self.store.list_recoverable_journals():
+                result = {"guard_cache_prune_skipped": "recoverable_journals"}
+            else:
+                keep_digest = digest_loader()
+                if keep_digest is None:
+                    return {}
+                removed = prune(keep_digest)
+                result = {"guard_cache_pruned": removed} if removed else {}
+        except Exception as exc:
+            result = {
+                "guard_cache_prune_error": str(exc) or type(exc).__name__
+            }
+        if not result:
+            return {}
+        try:
+            self._journal(
+                operation,
+                {**detail, **result},
+                phase="committed",
+                status="committed",
+            )
+        except Exception:
+            pass
+        return result
 
     def _fault(self, phase: str) -> None:
         if self.fault_hook is not None:
