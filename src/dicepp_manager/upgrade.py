@@ -461,7 +461,7 @@ class WindowsVelopackUpgradeAdapter:
         self.guard_command = list(guard_command)
         self.install_command = list(install_command)
         self.restart_command = list(
-            restart_command or [str(layout.root / "DicePP.exe")]
+            restart_command or [str(layout.root / "DicePP.exe"), "--background"]
         )
         self.process_identity_loader = process_identity_loader
         self.version_loader = version_loader

@@ -12,7 +12,7 @@ VALUE_NAME = "DicePP"
 
 
 def autostart_command(executable: str | os.PathLike[str]) -> str:
-    return subprocess.list2cmdline([str(Path(executable).resolve()), "--manager-tray"])
+    return subprocess.list2cmdline([str(Path(executable).resolve()), "--background"])
 
 
 class WindowsAutostart:

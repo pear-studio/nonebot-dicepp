@@ -149,6 +149,140 @@ def test_velopack_current_keeps_mutable_instance_data_in_install_root(
     assert (tmp_path / "data" / "keep.txt").read_text(encoding="utf-8") == "keep"
 
 
+@pytest.mark.parametrize("flag", ["--background", "--manager-tray"])
+def test_launcher_cli_background_flags_select_unattended_mode(
+    monkeypatch,
+    flag: str,
+) -> None:
+    observed: dict[str, bool] = {}
+
+    def fake_run_windows_launcher(*, background: bool, fake_tray: bool) -> None:
+        observed.update(background=background, fake_tray=fake_tray)
+
+    monkeypatch.setattr(sys, "argv", ["DicePP.exe", flag])
+    monkeypatch.setattr(launcher, "run_windows_launcher", fake_run_windows_launcher)
+
+    launcher.main()
+
+    assert observed == {"background": True, "fake_tray": False}
+
+
+def test_background_launcher_logs_initialization_failure_and_exits_nonzero(
+    monkeypatch,
+    tmp_dashboard_paths: Path,
+) -> None:
+    def fail_log_rotation() -> None:
+        raise RuntimeError("runtime log rotation failed")
+
+    monkeypatch.setattr(sys, "argv", ["DicePP.exe", "--background"])
+    monkeypatch.setattr(launcher, "rotate_runtime_log", fail_log_rotation)
+
+    with pytest.raises(SystemExit) as exc_info:
+        launcher.main()
+
+    assert exc_info.value.code == 1
+    assert "fatal error: RuntimeError: runtime log rotation failed" in (
+        tmp_dashboard_paths / "data" / "logs" / "dicepp-runtime.log"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("normal_exit", [SystemExit(0), KeyboardInterrupt()])
+def test_background_launcher_preserves_normal_exit_signals(
+    monkeypatch,
+    normal_exit: BaseException,
+) -> None:
+    def exit_launcher(*, background: bool, fake_tray: bool) -> None:
+        assert background is True
+        assert fake_tray is False
+        raise normal_exit
+
+    monkeypatch.setattr(sys, "argv", ["DicePP.exe", "--background"])
+    monkeypatch.setattr(launcher, "run_windows_launcher", exit_launcher)
+
+    with pytest.raises(type(normal_exit)) as exc_info:
+        launcher.main()
+
+    if isinstance(normal_exit, SystemExit):
+        assert exc_info.value.code == 0
+
+
+def test_background_launcher_runs_tray_without_opening_browser(
+    monkeypatch,
+    tmp_dashboard_paths: Path,
+) -> None:
+    events: list[str] = []
+    client = FakeManagerClient(events)
+    browser_opens: list[str] = []
+    tray_runs: list[bool] = []
+
+    class FakeHandle:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.log_path = DashboardPaths.runtime_log_path()
+
+        def request_stop(self) -> None:
+            events.append(f"stop:{self.name}")
+
+        def join(self, *, timeout: float) -> bool:
+            events.append(f"join:{self.name}")
+            return True
+
+        def is_alive(self) -> bool:
+            return True
+
+    class FakeTray:
+        def run(self) -> None:
+            tray_runs.append(True)
+
+        def stop(self) -> None:
+            events.append("stop:tray")
+
+    manager_settings = SimpleNamespace(
+        host="127.0.0.1",
+        port=4091,
+        token_path=tmp_dashboard_paths / "manager" / "state" / "api-token",
+        layout=SimpleNamespace(
+            manager_token=tmp_dashboard_paths / "manager" / "state" / "api-token"
+        ),
+    )
+    monkeypatch.setattr(launcher, "rotate_runtime_log", lambda: DashboardPaths.runtime_log_path())
+    monkeypatch.setattr(launcher, "configure_file_logging", lambda _path: None)
+    monkeypatch.setattr(launcher, "_install_launcher_excepthook", lambda _path: None)
+    monkeypatch.setattr(launcher, "ManagerSettings", SimpleNamespace(from_env=lambda _root: manager_settings))
+    monkeypatch.setattr(
+        launcher,
+        "ManagerClientSettings",
+        SimpleNamespace(from_layout=lambda _layout: object()),
+    )
+    monkeypatch.setattr(launcher, "ManagerClient", lambda _settings: client)
+    monkeypatch.setattr(launcher, "ensure_api_token", lambda _path: "token")
+    monkeypatch.setattr(launcher, "create_manager_app", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(launcher, "_start_server", lambda *_args, **_kwargs: FakeHandle("manager"))
+    monkeypatch.setattr(
+        launcher,
+        "_start_dashboard_server",
+        lambda *_args, **_kwargs: FakeHandle("dashboard"),
+    )
+    monkeypatch.setattr(launcher, "_wait_for_manager_service", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher, "build_tray", lambda *_args, **_kwargs: FakeTray())
+    monkeypatch.setattr(launcher, "should_open_browser", lambda: True)
+    monkeypatch.setattr(
+        launcher.TrayController,
+        "open_dashboard",
+        lambda self: browser_opens.append(self._dashboard_url),
+    )
+
+    launcher.run_windows_launcher(background=True, fake_tray=True)
+
+    assert tray_runs == [True]
+    assert browser_opens == []
+    assert client.actions == [
+        (launcher.LAUNCHER_RUNTIME_KEY, "start"),
+        (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
+    ]
+    assert "background launch" in DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "relative",
     [
@@ -519,11 +653,22 @@ def test_start_server_cleans_non_daemon_thread_when_startup_fails(
     )
 
 
-@pytest.mark.parametrize("failure_stage", ["build_tray", "open_browser", "tray_run"])
-def test_launcher_initialization_failure_stops_runtime_and_all_servers(
+@pytest.mark.parametrize(
+    ("failure_stage", "expected_exception", "normal_exit"),
+    [
+        ("build_tray", RuntimeError, None),
+        ("open_browser", RuntimeError, None),
+        ("tray_run", RuntimeError, None),
+        ("tray_interrupt", KeyboardInterrupt, KeyboardInterrupt()),
+        ("tray_exit", SystemExit, SystemExit(0)),
+    ],
+)
+def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
     monkeypatch,
     tmp_dashboard_paths: Path,
     failure_stage: str,
+    expected_exception: type[BaseException],
+    normal_exit: BaseException | None,
 ) -> None:
     events: list[str] = []
     client = FakeManagerClient(events)
@@ -562,7 +707,12 @@ def test_launcher_initialization_failure_stops_runtime_and_all_servers(
     monkeypatch.setattr(launcher, "rotate_runtime_log", lambda: DashboardPaths.runtime_log_path())
     monkeypatch.setattr(launcher, "configure_file_logging", lambda _path: None)
     monkeypatch.setattr(launcher, "_install_launcher_excepthook", lambda _path: None)
-    monkeypatch.setattr(launcher, "_record_launcher_exception", lambda _path, _exc: None)
+    recorded: list[BaseException] = []
+    monkeypatch.setattr(
+        launcher,
+        "_record_launcher_exception",
+        lambda _path, exc: recorded.append(exc),
+    )
     monkeypatch.setattr(launcher, "ManagerSettings", SimpleNamespace(from_env=lambda _root: manager_settings))
     monkeypatch.setattr(
         launcher,
@@ -594,6 +744,8 @@ def test_launcher_initialization_failure_stops_runtime_and_all_servers(
         def run(self) -> None:
             if failure_stage == "tray_run":
                 raise RuntimeError("tray initialization failed")
+            if normal_exit is not None:
+                raise normal_exit
 
     if failure_stage == "build_tray":
         def fail_build(*_args, **_kwargs):
@@ -608,8 +760,12 @@ def test_launcher_initialization_failure_stops_runtime_and_all_servers(
 
         monkeypatch.setattr(launcher.TrayController, "open_dashboard", fail_browser)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(expected_exception) as exc_info:
         launcher.run_windows_launcher(fake_tray=True)
+
+    if normal_exit is not None:
+        assert exc_info.value is normal_exit
+        assert recorded == []
 
     terminal_events = [event for event in events if event.startswith("terminal:")]
     assert terminal_events
