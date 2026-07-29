@@ -1256,6 +1256,11 @@ class UpgradeCoordinator:
         allow_startup_recovery: bool = False,
     ) -> list[dict[str, Any]]:
         recovered: list[dict[str, Any]] = []
+        # The startup maintenance gate blocks user-submitted operations while
+        # recovery is pending; recovery itself raises that gate below and must
+        # stay exempt from it, otherwise it deadlocks against its own gate and
+        # misrecords the conflict as a rollback failure.
+        recovery_allowed = allow_startup_recovery
         for journal in self.store.list_recoverable_journals():
             if journal.get("kind") != UPGRADE_JOURNAL_KIND:
                 continue
@@ -1330,6 +1335,7 @@ class UpgradeCoordinator:
             )
             if guard_handoff:
                 self.service.set_startup_maintenance_gate(True)
+                recovery_allowed = True
             if (
                 isinstance(authoritative_rollback, dict)
                 and authoritative_rollback.get("status") == "program_rolled_back"
@@ -1339,7 +1345,7 @@ class UpgradeCoordinator:
                     None,
                     detail,
                     validated_rollback_marker=authoritative_rollback,
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 recovered.append(
                     {
@@ -1381,6 +1387,7 @@ class UpgradeCoordinator:
             )
             if preparing_handoff and prepare_windows_handoff_only:
                 self.service.set_startup_maintenance_gate(True)
+                recovery_allowed = True
                 try:
                     prepared = self._publish_started_marker(detail)
                 except BaseException:
@@ -1478,7 +1485,7 @@ class UpgradeCoordinator:
                     operation,
                     package,
                     detail,
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 recovered.append(
                     {
@@ -1492,7 +1499,7 @@ class UpgradeCoordinator:
                 cleanup_error = await self._cleanup_platform_staging(detail)
                 restart_error = await self.archive._best_effort_restart(
                     _string_list(detail.get("original_running")),
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 status = (
                     "rolled_back"
@@ -1529,7 +1536,7 @@ class UpgradeCoordinator:
                 operation,
                 package,
                 detail,
-                allow_startup_recovery=allow_startup_recovery,
+                allow_startup_recovery=recovery_allowed,
             )
             operation.transition(
                 "failed",

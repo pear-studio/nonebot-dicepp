@@ -1196,6 +1196,242 @@ async def test_post_switch_rollback_failed_journal_with_validated_guard_marker_s
     assert journal["status"] == "rolled_back"
 
 
+def _stage_guard_program_rolled_back(
+    layout,
+    data_file: Path,
+    service: ManagerService,
+    coordinator: UpgradeCoordinator,
+    *,
+    transaction_id: str,
+    journal_phase: str = "awaiting_update_guard",
+    journal_status: str = "interrupted",
+) -> Path:
+    """Persist an interrupted Windows hand-off journal whose UpdateGuard
+    rollback marker already reports program_rolled_back, plus the companion
+    request/guard markers the external Guard leaves behind."""
+    from dicepp_manager.archive import create_archive
+
+    pre, _manifest = create_archive(
+        "pre-upgrade guard recovery",
+        layout=layout,
+        profile="regular",
+        archive_kind="system",
+    )
+    data_file.write_text('{"value": "new data"}', encoding="utf-8")
+    marker_dir = layout.manager_state_dir / "update-guard" / transaction_id
+    marker_dir.mkdir(parents=True)
+    rollback_marker = marker_dir / "rollback.json"
+    manager_identity = {
+        "pid": 20,
+        "started_at": "new-start",
+        "executable": str((layout.root / "current" / "DicePP.exe").resolve()),
+    }
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "phase": "awaiting_update_guard",
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "program_switch_started",
+        "pre_upgrade_filename": pre["filename"],
+        "platform_current": {"source_version": "3.0.0"},
+        "platform_staged": {
+            "started_marker": str((marker_dir / "started.json").resolve()),
+            "health_marker": str((marker_dir / "health.json").resolve()),
+            "rollback_marker": str(rollback_marker.resolve()),
+            "source_version": "3.0.0",
+        },
+    }
+    rollback_marker.write_text(
+        json.dumps(
+            {
+                "format_version": 2,
+                "status": "program_rolled_back",
+                "transaction_id": transaction_id,
+                "target_version": "3.1.0",
+                "source_version": "3.0.0",
+                "manager_identity": manager_identity,
+                "updated_at": "2026-07-23T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    token = layout.manager_state_dir / "api-token"
+    token.write_text("secret", encoding="utf-8")
+    rollback_package = marker_dir / "DicePP-3.0.0-full.nupkg"
+    rollback_package.write_bytes(b"rollback")
+    target_package = layout.manager_packages_dir / "3.1.0" / "package.zip"
+    request = {
+        "format_version": 2,
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "source_version": "3.0.0",
+        "package": str(target_package.resolve()),
+        "package_sha256": hashlib.sha256(
+            target_package.read_bytes()
+        ).hexdigest(),
+        "rollback_package": str(rollback_package.resolve()),
+        "rollback_package_sha256": hashlib.sha256(
+            rollback_package.read_bytes()
+        ).hexdigest(),
+        "manager_identity": manager_identity,
+        "guard_marker": str((marker_dir / "guard.json").resolve()),
+        "started_marker": str((marker_dir / "started.json").resolve()),
+        "health_marker": str((marker_dir / "health.json").resolve()),
+        "rollback_marker": str(rollback_marker.resolve()),
+        "health_url": "http://127.0.0.1:4091/v1/health",
+        "auth_token_path": str(token.resolve()),
+        "install_command": ["Update.exe", "apply", "-p", "package"],
+        "rollback_command": ["Update.exe", "apply", "-p", "rollback"],
+        "restart_command": [str((layout.root / "DicePP.exe").resolve())],
+        "manager_exit_timeout_seconds": 1,
+        "health_timeout_seconds": 1,
+        "requested_at": "2026-07-23T00:00:00+00:00",
+    }
+    (marker_dir / "request.json").write_text(
+        json.dumps(request), encoding="utf-8"
+    )
+    (marker_dir / "guard.json").write_text(
+        json.dumps(
+            {
+                "format_version": 2,
+                "transaction_id": transaction_id,
+                "target_version": "3.1.0",
+                "status": "exited",
+                "result_status": "program_rolled_back",
+                "guard_identity": {
+                    "pid": 99,
+                    "started_at": "guard-start",
+                    "executable": str(
+                        (layout.root / "DicePP-UpdateGuard.exe").resolve()
+                    ),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    operation = coordinator.new_operation()
+    operation.transition("interrupted", detail=detail)
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase=journal_phase,
+        status=journal_status,
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+    return marker_dir
+
+
+def _windows_guard_adapter(layout):
+    return WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=["guard.exe"],
+        install_command=["Update.exe", "apply", "{package}"],
+        process_identity_loader=lambda: {
+            "pid": 10,
+            "started_at": "old-start",
+            "executable": str((layout.root / "DicePP.exe").resolve()),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_after_guard_rollback_is_exempt_from_own_gate(
+    tmp_path: Path,
+):
+    """First boot after the Guard applied the rollback package: the initial
+    startup recovery pass runs without allow_startup_recovery and raises the
+    startup maintenance gate itself.  The data-recovery rollback must stay
+    exempt from that gate instead of deadlocking against it."""
+    from dicepp_manager import factory as manager_factory
+
+    layout, data_file, runtime, service, coordinator, _ = _setup(tmp_path)
+    coordinator.platform_adapter = _windows_guard_adapter(layout)
+    transaction_id = "guard-startup-self-conflict"
+    marker_dir = _stage_guard_program_rolled_back(
+        layout, data_file, service, coordinator, transaction_id=transaction_id
+    )
+
+    recovered = await coordinator.recover(prepare_windows_handoff_only=True)
+
+    assert recovered[0]["action"] == "rolled_back"
+    assert recovered[0]["result"]["succeeded"] is True
+    assert recovered[0]["result"]["program"] == {
+        "already_restored_by_update_guard": True
+    }
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+    journal = service.store.get_journal(transaction_id)
+    assert journal is not None
+    assert journal["status"] == "rolled_back"
+    assert service._startup_maintenance_active is False
+
+    # With the journal terminal, the regular startup cleanup retires the
+    # Guard transaction markers instead of leaving them behind.
+    removed = manager_factory.cleanup_terminal_update_guard_transactions(
+        layout.root,
+        identity_loader=lambda _pid: None,
+        journal_loader=service.store.get_journal,
+    )
+    assert removed == [transaction_id]
+    assert not marker_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_reservation_opens_after_guard_rollback_recovery(
+    tmp_path: Path,
+):
+    """After startup recovery finalizes the Guard rollback, user-submitted
+    maintenance operations (upgrade confirm, lifecycle actions) are no
+    longer rejected with maintenance_conflict."""
+    layout, data_file, _runtime, service, coordinator, _ = _setup(tmp_path)
+    coordinator.platform_adapter = _windows_guard_adapter(layout)
+    transaction_id = "guard-recovery-unblocks-maintenance"
+    _stage_guard_program_rolled_back(
+        layout, data_file, service, coordinator, transaction_id=transaction_id
+    )
+
+    recovered = await coordinator.recover(prepare_windows_handoff_only=True)
+
+    assert recovered[0]["action"] == "rolled_back"
+    reservation = service.reserve_maintenance()
+    reservation.release()
+
+
+@pytest.mark.asyncio
+async def test_second_startup_self_heals_rollback_failed_guard_journal(
+    tmp_path: Path,
+):
+    """A rollback_failed journal left by the self-conflict stays recoverable
+    on the next Manager start: the validated program_rolled_back marker
+    exempts it from the terminal adjudication rule, and the retried data
+    recovery finalizes it without conflicting with the startup gate."""
+    layout, data_file, runtime, service, coordinator, _ = _setup(tmp_path)
+    coordinator.platform_adapter = _windows_guard_adapter(layout)
+    transaction_id = "guard-rollback-failed-second-boot"
+    _stage_guard_program_rolled_back(
+        layout,
+        data_file,
+        service,
+        coordinator,
+        transaction_id=transaction_id,
+        journal_phase="rollback_failed",
+        journal_status="rollback_failed",
+    )
+
+    recovered = await coordinator.recover(prepare_windows_handoff_only=True)
+
+    assert recovered[0]["action"] == "rolled_back"
+    assert recovered[0]["result"]["succeeded"] is True
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+    journal = service.store.get_journal(transaction_id)
+    assert journal is not None
+    assert journal["status"] == "rolled_back"
+    assert service._startup_maintenance_active is False
+
+
 @pytest.mark.asyncio
 async def test_guard_program_restore_keeps_gate_when_data_recovery_fails(
     tmp_path: Path,
