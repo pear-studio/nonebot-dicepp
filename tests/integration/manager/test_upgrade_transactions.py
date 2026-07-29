@@ -357,6 +357,125 @@ async def test_upgrade_rollback_health_gate_skips_control_probe_without_bound_bo
     assert runtime.state == "running"
 
 
+@pytest.mark.asyncio
+async def test_upgrade_health_gate_skips_control_probe_without_active_channel(
+    tmp_path: Path,
+):
+    """A configured bot whose OneBot client never connected still appears in
+    the bound-bot list, but with no fresh baseline heartbeat the gate must
+    skip the control probe instead of failing the upgrade."""
+    _layout, _data, runtime, service, coordinator, _platform = _setup(tmp_path)
+    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    result = await coordinator.run(operation, package)
+
+    assert result.status == "succeeded"
+    assert result.detail["control_gate"] == "skipped_no_active_control_channel"
+    assert result.detail["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_active_control_channel",
+    }
+    journal = service.store.get_journal(result.detail["transaction_id"])
+    assert journal["detail"]["control_gate"] == "skipped_no_active_control_channel"
+    assert runtime.actions == ["stop", "start"]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_health_gate_skips_control_probe_without_active_channel(
+    tmp_path: Path,
+):
+    """Bots are configured but the control channel is offline at both
+    baselines: the failed upgrade's rollback must skip the control probe
+    and report rollback_status=succeeded."""
+    _layout, data_file, runtime, _service, coordinator, _platform = _setup(
+        tmp_path, fault="migration"
+    )
+    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    assert raised.value.detail["rolled_back"] is True
+    assert raised.value.detail["rollback_status"] == "succeeded"
+    assert raised.value.detail["rollback_control_gate"] == (
+        "skipped_no_active_control_channel"
+    )
+    assert raised.value.detail["rollback_result"]["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_active_control_channel",
+    }
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
+    tmp_path: Path,
+):
+    """Baseline had an active control channel, so the upgrade gate is
+    enforced; when the client never reconnects after the switch, the
+    upgrade health gate fails and the rollback re-captures its baseline
+    with a stale heartbeat, skips the control probe, and succeeds instead
+    of being misreported as rollback_failed."""
+    _layout, data_file, runtime, _service, coordinator, adapter = _setup(tmp_path)
+    control_online = {"value": True}
+
+    def control_probe() -> dict:
+        if not control_online["value"]:
+            return {
+                "ok": False,
+                "status": "failed",
+                "heartbeat": "2026-07-23T00:00:01+00:00",
+                "heartbeat_age_seconds": 3600.0,
+            }
+        return {
+            "ok": True,
+            "status": "ok",
+            "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
+        }
+
+    coordinator.archive.control_probe = control_probe
+    original_switch = adapter.switch
+
+    async def switch(package, **kwargs):
+        control_online["value"] = False
+        return await original_switch(package, **kwargs)
+
+    adapter.switch = switch
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    assert "heartbeat did not advance" in raised.value.detail["error"]
+    assert raised.value.detail["control_gate"] == "enforced"
+    assert raised.value.detail["rolled_back"] is True
+    assert raised.value.detail["rollback_status"] == "succeeded"
+    assert raised.value.detail["rollback_control_gate"] == (
+        "skipped_no_active_control_channel"
+    )
+    assert raised.value.detail["rollback_result"]["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_active_control_channel",
+    }
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+
+
 def test_windows_verified_package_accepts_real_velopack_feed_shapes(
     tmp_path: Path,
 ):

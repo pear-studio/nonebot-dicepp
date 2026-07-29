@@ -32,7 +32,7 @@ from dicepp_meta import get_version
 from packaging.version import Version
 
 from .archive import ArchiveError, apply_archive, create_archive, estimate_archive
-from .archive_coordinator import ArchiveCoordinator
+from .archive_coordinator import CONTROL_GATE_ENFORCED, ArchiveCoordinator
 from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
@@ -1133,11 +1133,9 @@ class UpgradeCoordinator:
             preflight = await self.platform_adapter.preflight(package)
             detail["preflight"] = preflight
             self._phase(operation, detail, "pre_upgrade_archive", 15)
-            baseline, control_required = await self.archive._capture_control_baseline()
+            baseline, control_gate = await self.archive._capture_control_baseline()
             detail["control_heartbeat_baseline"] = baseline
-            detail["control_gate"] = (
-                "enforced" if control_required else "skipped_no_bound_bots"
-            )
+            detail["control_gate"] = control_gate
             with self._maintenance_context(maintenance_lease) as maintenance:
                 original, _ = await self.archive._quiesce(
                     maintenance,
@@ -1203,7 +1201,7 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     original,
                     control_baseline=detail.get("control_heartbeat_baseline"),
-                    control_required=control_required,
+                    control_gate=control_gate,
                 )
                 self._fault("health")
                 detail["health"] = health
@@ -1684,8 +1682,8 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     _string_list(detail.get("original_running")),
                     control_baseline=detail.get("control_heartbeat_baseline"),
-                    control_required=(
-                        detail.get("control_gate") != "skipped_no_bound_bots"
+                    control_gate=str(
+                        detail.get("control_gate") or CONTROL_GATE_ENFORCED
                     ),
                 )
             detail.update(
@@ -1943,6 +1941,11 @@ class UpgradeCoordinator:
                 "staging_cleanup_error": cleanup_error,
             }
         detail["rollback_status"] = "running"
+        rollback_baseline, rollback_control_gate = (
+            await self.archive._capture_control_baseline()
+        )
+        detail["rollback_control_heartbeat_baseline"] = rollback_baseline
+        detail["rollback_control_gate"] = rollback_control_gate
         self._journal(operation, detail, phase="rolling_back")
         try:
             with self._maintenance_context(
@@ -1983,9 +1986,8 @@ class UpgradeCoordinator:
                 await self.archive._restart(maintenance, original)
                 health = await self.archive._hard_health(
                     original,
-                    control_required=(
-                        detail.get("control_gate") != "skipped_no_bound_bots"
-                    ),
+                    control_baseline=rollback_baseline,
+                    control_gate=rollback_control_gate,
                 )
             result = {
                 "succeeded": True,

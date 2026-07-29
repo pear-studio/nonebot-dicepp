@@ -1257,6 +1257,81 @@ async def test_control_gate_decision_is_anchored_at_baseline_time(
     assert calls["count"] == 1
 
 
+def _stale_heartbeat_control_probe() -> dict:
+    """The Dashboard contract when the last control heartbeat went stale."""
+    return {
+        "ok": False,
+        "status": "failed",
+        "heartbeat": "2026-07-23T00:00:01+00:00",
+        "heartbeat_age_seconds": 3600.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_restore_health_gate_skips_control_probe_without_active_channel(
+    tmp_path: Path,
+) -> None:
+    """A configured bot whose OneBot client never connected still appears in
+    the bound-bot list, but with no fresh baseline heartbeat the gate must
+    skip the control probe instead of failing the restore."""
+    layout, _runtime, service, coordinator = _coordinator(tmp_path)
+    coordinator.control_probe = _stale_heartbeat_control_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+
+    operation = coordinator.new_operation("archive.restore")
+    await coordinator.restore(operation, filename=target["filename"])
+
+    assert operation.status == "succeeded"
+    assert json.loads(layout.config_user.read_text()) == {"value": "target"}
+    assert operation.detail["control_gate"] == "skipped_no_active_control_channel"
+    assert operation.detail["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_active_control_channel",
+    }
+    journal = service.store.get_journal(operation.detail["transaction_id"])
+    assert journal["detail"]["control_gate"] == "skipped_no_active_control_channel"
+
+
+@pytest.mark.asyncio
+async def test_restore_rollback_health_gate_skips_control_probe_without_active_channel(
+    tmp_path: Path,
+) -> None:
+    """Bots are configured but the control channel is offline at rollback
+    baseline time: the rollback must skip the control probe and succeed
+    instead of being misjudged as rollback_failed."""
+    armed = {"value": True}
+
+    def fault(phase: str) -> None:
+        if armed["value"] and phase == "health":
+            armed["value"] = False
+            raise OSError("injected health failure")
+
+    layout, runtime, _service, coordinator = _coordinator(
+        tmp_path, fault_hook=fault
+    )
+    coordinator.control_probe = _no_heartbeat_control_probe
+    _write(layout.config_user, '{"value": "target"}')
+    target, _ = create_archive(layout=layout)
+    _write(layout.config_user, '{"value": "before"}')
+
+    operation = coordinator.new_operation("archive.restore")
+    with pytest.raises(ArchiveTransactionError) as raised:
+        await coordinator.restore(operation, filename=target["filename"])
+
+    assert raised.value.detail["rolled_back"] is True
+    assert raised.value.detail["rollback_control_gate"] == (
+        "skipped_no_active_control_channel"
+    )
+    assert raised.value.detail["rollback"]["health"]["control"] == {
+        "status": "not_applicable",
+        "reason": "no_active_control_channel",
+    }
+    assert json.loads(layout.config_user.read_text()) == {"value": "before"}
+    assert runtime.state == "running"
+
+
 def test_list_treats_oversized_manifest_as_invalid_without_parsing_it(
     tmp_path: Path,
 ) -> None:

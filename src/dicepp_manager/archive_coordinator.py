@@ -34,6 +34,17 @@ from .service import MaintenanceReservation, ManagerService
 HealthProbe = Callable[[], bool | dict[str, Any] | Awaitable[bool | dict[str, Any]]]
 FaultHook = Callable[[str], None]
 
+CONTROL_GATE_ENFORCED = "enforced"
+CONTROL_GATE_SKIPPED_NO_BOUND_BOTS = "skipped_no_bound_bots"
+CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL = (
+    "skipped_no_active_control_channel"
+)
+
+_CONTROL_GATE_SKIP_REASONS = {
+    CONTROL_GATE_SKIPPED_NO_BOUND_BOTS: "no_bound_bots",
+    CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL: "no_active_control_channel",
+}
+
 
 class ArchiveTransactionError(ArchiveError):
     """Raised after a transaction has failed and compensation was attempted."""
@@ -288,11 +299,9 @@ class ArchiveCoordinator:
         }
         self._journal(transaction_id, operation, "preparing", detail)
         try:
-            baseline, control_required = await self._capture_control_baseline()
+            baseline, control_gate = await self._capture_control_baseline()
             detail["control_heartbeat_baseline"] = baseline
-            detail["control_gate"] = (
-                "enforced" if control_required else "skipped_no_bound_bots"
-            )
+            detail["control_gate"] = control_gate
             self._journal(transaction_id, operation, "preparing", detail)
             with self._maintenance_context(maintenance_lease) as maintenance:
                 def record_restore_state(running: list[str]) -> None:
@@ -342,7 +351,7 @@ class ArchiveCoordinator:
                 health = await self._hard_health(
                     original_running,
                     control_baseline=detail.get("control_heartbeat_baseline"),
-                    control_required=control_required,
+                    control_gate=control_gate,
                 )
 
                 detail["commit_point"] = "health_passed"
@@ -589,13 +598,11 @@ class ArchiveCoordinator:
             }
         self._journal(transaction_id, operation, "rolling_back", detail)
         try:
-            rollback_baseline, rollback_control_required = (
+            rollback_baseline, rollback_control_gate = (
                 await self._capture_control_baseline()
             )
             detail["rollback_control_heartbeat_baseline"] = rollback_baseline
-            detail["rollback_control_gate"] = (
-                "enforced" if rollback_control_required else "skipped_no_bound_bots"
-            )
+            detail["rollback_control_gate"] = rollback_control_gate
             with self._maintenance_context(
                 maintenance_lease,
                 timeout=1,
@@ -626,7 +633,7 @@ class ArchiveCoordinator:
                 health = await self._hard_health(
                     detail.get("original_running", []),
                     control_baseline=rollback_baseline,
-                    control_required=rollback_control_required,
+                    control_gate=rollback_control_gate,
                 )
             detail["rollback_health"] = health
             self._journal(
@@ -729,13 +736,14 @@ class ArchiveCoordinator:
         expected_running: list[str],
         *,
         control_baseline: str | None = None,
-        control_required: bool = True,
+        control_gate: str = CONTROL_GATE_ENFORCED,
     ) -> dict[str, Any]:
         self.store.ensure_schema()
         config = self._validate_config()
         runtime = await self._wait_runtime_healthy(expected_running)
         dashboard = await self._run_probe(self.dashboard_probe, "dashboard")
-        if expected_running and control_required:
+        control_skip_reason = _CONTROL_GATE_SKIP_REASONS.get(control_gate)
+        if expected_running and control_skip_reason is None:
             control = await self._run_probe(
                 self.control_probe,
                 "control",
@@ -746,9 +754,10 @@ class ArchiveCoordinator:
                 failure_message="Bot control heartbeat did not advance after restart",
             )
         elif expected_running:
-            # No bot was bound at baseline time, so no control heartbeat can
-            # ever arrive; requiring it to advance would always fail.
-            control = {"status": "not_applicable", "reason": "no_bound_bots"}
+            # No active control channel existed at baseline time, so no
+            # control heartbeat can ever advance; requiring it would always
+            # fail.
+            control = {"status": "not_applicable", "reason": control_skip_reason}
         else:
             control = {"status": "not_applicable"}
         # The runtime must still be healthy after the slower endpoint/control
@@ -819,18 +828,24 @@ class ArchiveCoordinator:
             await asyncio.sleep(self.health_interval)
         raise ArchiveError(last_error)
 
-    async def _capture_control_baseline(self) -> tuple[Any, bool]:
-        """Capture the control heartbeat baseline and the bound-bot state.
+    async def _capture_control_baseline(self) -> tuple[Any, str]:
+        """Capture the control heartbeat baseline and decide the health gate.
 
-        The bound-bot decision is anchored at baseline time: an instance
-        without any bound bot never reports a control heartbeat, so the
-        restart health gate must not require the heartbeat to advance.
+        The gate decision is anchored at baseline time: without any bound
+        bot, or without an active control channel (the baseline probe does
+        not report a fresh heartbeat), no control heartbeat can ever
+        advance across the restart, so the health gate must not require it
+        to advance.
         """
         baseline = await self._probe_once(self.control_probe)
         heartbeat = baseline.get("heartbeat") if isinstance(baseline, dict) else None
         status = await self.service.status()
         bots = status.get("bots") if isinstance(status, dict) else None
-        return heartbeat, bool(bots)
+        if not bots:
+            return heartbeat, CONTROL_GATE_SKIPPED_NO_BOUND_BOTS
+        if not isinstance(baseline, dict) or baseline.get("ok") is not True:
+            return heartbeat, CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
+        return heartbeat, CONTROL_GATE_ENFORCED
 
     async def _probe_once(self, probe: HealthProbe | None) -> dict[str, Any]:
         if probe is None:
