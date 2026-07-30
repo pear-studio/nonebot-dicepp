@@ -147,6 +147,20 @@ class InstanceLayout:
         return self.manager_state_dir / "api-token"
 
     @property
+    def manager_control_dir(self) -> Path:
+        """Return the Bot↔Manager credential boundary.
+
+        Dashboard deliberately does not mount this directory.  It is kept
+        separate from ``manager/state`` because Dashboard needs the latter's
+        HTTP API token but must never be able to read Bot control credentials.
+        """
+        return self.manager_dir / "control"
+
+    @property
+    def manager_control_token(self) -> Path:
+        return self.manager_control_dir / "control-token"
+
+    @property
     def manager_packages_dir(self) -> Path:
         return self.manager_dir / "packages"
 

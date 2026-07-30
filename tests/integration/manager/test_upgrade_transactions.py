@@ -206,7 +206,6 @@ def _setup(
     archive = ArchiveCoordinator(
         layout=layout,
         service=service,
-        dashboard_probe=lambda: {"ok": True, "status": "ok"},
         control_probe=lambda: {
             "ok": True,
             "status": "ok",
@@ -292,7 +291,7 @@ async def test_upgrade_commits_only_after_archive_migration_and_hard_health(
 
 
 def _no_heartbeat_control_probe() -> dict:
-    """The Dashboard contract when no bot ever connected the control channel."""
+    """The Manager control contract when no bot ever connected."""
     return {
         "ok": False,
         "status": "failed",
@@ -1845,9 +1844,10 @@ async def test_new_windows_version_health_failure_signals_guard_without_data_com
     await asyncio.sleep(0.3)
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
-    coordinator.archive.dashboard_probe = lambda: {
+    coordinator.archive.control_probe = lambda: {
         "ok": False,
         "status": "failed",
+        "message": "No Bot control heartbeat",
     }
     coordinator.archive.health_timeout = 0.01
     coordinator.archive.health_interval = 0.001

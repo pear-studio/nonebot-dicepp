@@ -130,16 +130,16 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
-        # 仪表盘控制通道（源码环境显式启用，Windows EXE 默认连接本机）
+        # Manager 控制通道（源码环境显式启用，Windows EXE 默认连接本机）
         self._control_channel = None
         try:
             from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
             from plugins.DicePP.module.dashboard_reporter.ws_client import (
                 ControlChannelClient,
-                resolve_dashboard_url,
+                resolve_manager_url,
             )
 
-            ws_url = resolve_dashboard_url()
+            ws_url = resolve_manager_url()
             if ws_url:
 
                 project_root = Paths.PROJECT_ROOT
@@ -147,12 +147,12 @@ class Bot:
 
                 self._control_channel = ControlChannelClient(
                     bot_id=self.account,
-                    dashboard_url=ws_url,
+                    manager_url=ws_url,
                     token=token,
                     on_reload=self.reload_config,
                 )
         except ImportError:
-            logger.warning("[Bot] Control channel unavailable, skipping dashboard connection")
+            logger.warning("[Bot] Control channel unavailable, skipping Manager connection")
         except Exception as exc:
             logger.warning(f"[Bot] Control channel init failed: {exc}")
 
@@ -630,12 +630,17 @@ class Bot:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
-        loop.run_until_complete(self.delay_init_command())
+        # This synchronous debug helper owns only a short-lived loop.  A
+        # persistent Manager control task would be orphaned when it returns;
+        # production async startup still enables the channel below.
+        loop.run_until_complete(self.delay_init_command(start_control_channel=False))
 
-    async def delay_init_command(self):
+    async def delay_init_command(self, *, start_control_channel: bool = True):
         """在载入本地化文本和配置等数据后调用"""
         async with self._delay_init_lock:
             if self._delay_init_done:
+                if start_control_channel and self._control_channel is not None:
+                    await self._control_channel.connect()
                 return
             try:
                 await self.db.connect()
@@ -723,8 +728,8 @@ class Bot:
 
             self._delay_init_done = True
 
-        # Connect dashboard control channel after init is fully done
-        if self._control_channel is not None:
+        # Connect Manager control channel after init is fully done
+        if start_control_channel and self._control_channel is not None:
             await self._control_channel.connect()
 
     # noinspection PyBroadException

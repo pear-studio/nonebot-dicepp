@@ -23,7 +23,8 @@ def _compatible_status() -> dict:
         "health": {
             "manager_api_version": MANAGER_API_VERSION,
             "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
-        }
+        },
+        "control": {"available": True, "protocol": "dicepp-control-v1"},
     }
 
 

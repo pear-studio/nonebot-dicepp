@@ -35,7 +35,7 @@ def _run_smoke_check() -> bool:
     ]
     missing = [str(path) for path in required_files if not path.is_file()]
     route_paths = {getattr(route, "path", None) for route in app.routes}
-    required_routes = {"/dashboard", "/api/auth/status", "/ws/control"}
+    required_routes = {"/dashboard", "/api/auth/status", "/api/bots/status"}
     missing_routes = sorted(required_routes - route_paths)
 
     if missing or missing_routes:

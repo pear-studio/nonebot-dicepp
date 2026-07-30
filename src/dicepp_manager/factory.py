@@ -4,20 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-import json
 import hashlib
 import shlex
 import shutil
 from pathlib import Path
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 
 from packaging.version import InvalidVersion, Version
 
 from .archive_coordinator import ArchiveCoordinator
 from .config import ManagerSettings
-from .deployment import DASHBOARD_DEFAULT_PORT
+from .control import ControlChannelService
 from .discovery import RuntimeUnitDiscovery
 from .docker_runtime import DockerRuntimeAdapter, DockerSocketRuntimeAdapter
 from .docker_upgrade import DockerSocketUpgradeExecutor
@@ -42,6 +39,7 @@ from .owner import ManagerOwnerLock
 from .runtime import RuntimeAdapter, UnavailableRuntimeAdapter
 from .service import ManagerService
 from .store import ManagerOperationStore
+from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
 
 
 def create_runtime_adapter(settings: ManagerSettings) -> RuntimeAdapter:
@@ -74,6 +72,7 @@ def create_runtime_adapter(settings: ManagerSettings) -> RuntimeAdapter:
 def create_manager_service(settings: ManagerSettings) -> ManagerService:
     for directory in (
         settings.layout.manager_state_dir,
+        settings.layout.manager_control_dir,
         settings.layout.manager_packages_dir,
         settings.layout.manager_backups_dir,
     ):
@@ -96,11 +95,20 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
             state_dir=settings.layout.manager_state_dir,
             owner_lock=owner,
         )
+        # Manager bootstraps the Bot-only credential before it advertises a
+        # healthy API.  Bot receives the same dedicated file through its
+        # minimal control mount; Dashboard never mounts this path.
+        ensure_token(settings.layout.root)
+        service.control_service = ControlChannelService(
+            project_root=settings.layout.root,
+            known_bot_ids=lambda: _configured_bot_ids(settings.layout),
+            heartbeat_timeout=settings.control_heartbeat_timeout,
+            reload_timeout=settings.control_reload_timeout,
+        )
         service.archive_coordinator = ArchiveCoordinator(
             layout=settings.layout,
             service=service,
-            dashboard_probe=lambda: _dashboard_probe(),
-            control_probe=lambda: _control_channel_probe(),
+            control_probe=service.control_service.probe,
         )
         service.release_manager = ReleaseManager(
             layout=settings.layout,
@@ -194,6 +202,18 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
     except BaseException:
         owner.release()
         raise
+
+
+def _configured_bot_ids(layout) -> set[str]:
+    """Discover configured Bot identities without consulting Dashboard state."""
+    directory = layout.config_bots_dir
+    if not directory.is_dir():
+        return set()
+    return {
+        path.stem
+        for path in directory.glob("*.json")
+        if path.is_file() and path.stem != "_template"
+    }
 
 
 def _prepare_stable_update_guard(instance_root: Path) -> None:
@@ -1031,106 +1051,3 @@ def cleanup_terminal_update_guard_transactions(
         shutil.rmtree(resolved)
         removed.append(transaction_dir.name)
     return removed
-
-
-def _dashboard_health_payload() -> tuple[str, int | None, dict]:
-    url = os.environ.get(
-        "DICEPP_DASHBOARD_HEALTH_URL",
-        f"http://127.0.0.1:{DASHBOARD_DEFAULT_PORT}/api/health",
-    )
-    request = urllib.request.Request(url, method="GET")
-    try:
-        with urllib.request.urlopen(request, timeout=3) as response:
-            status = response.status
-            raw = response.read(64 * 1024)
-    except urllib.error.HTTPError:
-        return url, None, {}
-    except (OSError, urllib.error.URLError, TimeoutError):
-        return url, None, {}
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        payload = {}
-    return url, status, payload if isinstance(payload, dict) else {}
-
-
-def _dashboard_probe() -> dict:
-    url, status, payload = _dashboard_health_payload()
-    valid = (
-        status == 200
-        and payload.get("status") == "ok"
-        and payload.get("component") == "dashboard"
-    )
-    return {
-        "ok": valid,
-        "status": "ok" if valid else "failed",
-        "http_status": status,
-        "url": url,
-    }
-
-
-def _parse_control_heartbeat(raw: str) -> datetime | None:
-    """Parse a Dashboard control heartbeat.
-
-    Current Dashboards persist ISO-8601 UTC strings; older versions wrote
-    bare epoch-second numbers, which are still accepted here so a stale
-    Dashboard does not block Manager health gates.
-    """
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        pass
-    else:
-        if parsed.tzinfo is None:
-            # Naive ISO heartbeats are UTC, matching the Dashboard-side
-            # _heartbeat_to_epoch contract.
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    try:
-        return datetime.fromtimestamp(float(raw), timezone.utc)
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
-def _control_channel_probe() -> dict:
-    url, status, payload = _dashboard_health_payload()
-    if (
-        status != 200
-        or payload.get("status") != "ok"
-        or payload.get("component") != "dashboard"
-    ):
-        return {
-            "ok": False,
-            "status": "failed",
-            "url": url,
-            "message": "Dashboard health is unavailable",
-        }
-    control = payload.get("control")
-    raw_heartbeat = (
-        control.get("latest_heartbeat") if isinstance(control, dict) else None
-    )
-    if not isinstance(raw_heartbeat, str) or not raw_heartbeat:
-        return {
-            "ok": False,
-            "status": "failed",
-            "url": url,
-            "message": "No Bot control heartbeat",
-        }
-    heartbeat = _parse_control_heartbeat(raw_heartbeat)
-    if heartbeat is None:
-        return {
-            "ok": False,
-            "status": "failed",
-            "url": url,
-            "message": "Invalid Bot control heartbeat",
-        }
-    age = (
-        datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)
-    ).total_seconds()
-    return {
-        "ok": age <= 120,
-        "status": "ok" if age <= 120 else "failed",
-        "url": url,
-        "heartbeat_age_seconds": age,
-        "heartbeat": heartbeat.astimezone(timezone.utc).isoformat(),
-    }

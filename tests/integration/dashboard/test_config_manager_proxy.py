@@ -62,6 +62,10 @@ class ConfigManagerClient:
         self.bot_configs[bot_id] = copy.deepcopy(config)
         return {"saved": True, "application": "deferred", "restart_required": True}
 
+    async def reload_bots(self, bot_id: str | None = None) -> list[dict]:
+        self.calls.append(("reload", bot_id, {}))
+        return []
+
 
 def _install(test_client: TestClient, client: ConfigManagerClient) -> None:
     test_client.app.state.manager_client = client
@@ -105,10 +109,14 @@ def test_config_write_routes_send_complete_candidates_to_manager(
     assert manager.calls == [
         ("get_user", None, {}),
         ("user", None, {"app": {"name": "after"}}),
+        ("reload", None, {}),
         ("get_user", None, {}),
         ("user", None, {"app": {}}),
+        ("reload", None, {}),
         ("user", None, {"update": {"check_interval_hours": 12.0}}),
+        ("reload", None, {}),
         ("bot", "test_bot", {"master": ["after"], "enabled": False}),
+        ("reload", "test_bot", {}),
     ]
     assert DashboardPaths.CONFIG_USER.read_bytes() == user_before
     assert bot_path.read_bytes() == bot_before

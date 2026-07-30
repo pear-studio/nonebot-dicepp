@@ -106,6 +106,9 @@ class ManagerService:
         self._startup_maintenance_active = False
         self._lock = threading.RLock()
         self.archive_coordinator = None
+        # Created by the composition root.  Keeping it on the Manager service
+        # makes the API, health gates and deployment factory share one owner.
+        self.control_service = None
         self.release_manager = None
         self.upgrade_coordinator = None
         self._shutdown_callback: Callable[[str], None] | None = None

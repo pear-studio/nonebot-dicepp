@@ -2,7 +2,7 @@
 WebSocket Control Channel client for DicePP Bot.
 
 Replaces the HTTP heartbeat loop with a persistent, bidirectional
-WebSocket to the Dashboard.  Handles authentication, status reporting,
+WebSocket to the Manager.  Handles authentication, status reporting,
 reload dispatching, ping/pong keepalive, and exponential-backoff
 reconnection.
 """
@@ -16,7 +16,6 @@ import aiohttp
 
 from dicepp_meta import get_version
 from plugins.DicePP.frozen import is_frozen
-from plugins.DicePP.utils.network import format_url_host
 from plugins.DicePP.module.dashboard_reporter.protocol import (
     auth as auth_msg,
     decode,
@@ -36,32 +35,37 @@ _RECONNECT_MAX = 60.0
 _RECONNECT_JITTER = 0.25
 
 
-def resolve_dashboard_url() -> Optional[str]:
-    """Resolve the local Dashboard URL for the current runtime.
+def resolve_manager_url() -> Optional[str]:
+    """Resolve Manager's Bot-only control endpoint.
 
-    Docker and source deployments opt in through ``DPP_ADMIN_HOST``.  The
-    Windows executable defaults to the Dashboard executable beside it so the
-    released ZIP works without manual environment configuration.
+    Source deployments must declare ``DICEPP_MANAGER_URL`` explicitly.  The
+    packaged Windows runtime defaults to its colocated Manager, never to
+    Dashboard.  HTTP(S) base URLs are converted to the corresponding WebSocket
+    scheme so the Dashboard and Bot can share one Manager address setting.
     """
-    host = os.environ.get("DPP_ADMIN_HOST")
-    if not host:
+    base_url = os.environ.get("DICEPP_MANAGER_URL")
+    if not base_url:
         if not is_frozen():
             return None
-        host = "127.0.0.1"
-
-    port = os.environ.get("DPP_ADMIN_PORT", "4090")
-    url_host = format_url_host(host)
-    return f"ws://{url_host}:{port}/ws/control"
+        base_url = "http://127.0.0.1:4091"
+    base_url = base_url.rstrip("/")
+    if base_url.startswith("http://"):
+        base_url = "ws://" + base_url.removeprefix("http://")
+    elif base_url.startswith("https://"):
+        base_url = "wss://" + base_url.removeprefix("https://")
+    elif not base_url.startswith(("ws://", "wss://")):
+        base_url = f"ws://{base_url}"
+    return f"{base_url}/v1/control/ws"
 
 
 class ControlChannelClient:
-    """Manages one WebSocket connection to the Dashboard per bot.
+    """Manages one WebSocket connection to Manager per bot.
 
     Usage::
 
         client = ControlChannelClient(
             bot_id="123456",
-            dashboard_url="ws://dashboard:4090/ws/control",
+            manager_url="ws://manager:4091/v1/control/ws",
             token="token-from-data-dicepp-db",
             on_reload=bot.reload_config,
         )
@@ -74,12 +78,12 @@ class ControlChannelClient:
         self,
         *,
         bot_id: str,
-        dashboard_url: str,
+        manager_url: str,
         token: str,
         on_reload: Callable[[], object],
     ) -> None:
         self._bot_id = bot_id
-        self._dashboard_url = dashboard_url
+        self._manager_url = manager_url
         self._token = token
         self._on_reload = on_reload
 
@@ -104,22 +108,50 @@ class ControlChannelClient:
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Stop the control channel and close the WebSocket."""
+        """Stop the control channel without awaiting work from another loop."""
         self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        # Cancel all background tasks
-        for t in list(self._tasks):
-            t.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-        if self._ws and not self._ws.closed:
-            await self._ws.close()
+        current_loop = asyncio.get_running_loop()
+        main_task, self._task = self._task, None
+        background_tasks = list(self._tasks)
+        self._tasks.clear()
+
+        local_tasks: list[asyncio.Task] = []
+        for task in [main_task, *background_tasks]:
+            if task is None or task.done():
+                continue
+            if task.get_loop() is current_loop:
+                task.cancel()
+                local_tasks.append(task)
+            else:
+                self._cancel_foreign_task(task)
+
+        # A WebSocket response is loop-bound too.  Its owning _run task
+        # closes it on cancellation; only close it directly when it belongs
+        # to this loop, where the await is safe and graceful.
+        ws, self._ws = self._ws, None
+        ws_loop = getattr(ws, "_loop", None) if ws is not None else None
+        if ws is not None and not ws.closed and (ws_loop is None or ws_loop is current_loop):
+            await ws.close()
+
+        if local_tasks:
+            await asyncio.gather(*local_tasks, return_exceptions=True)
+
+    @staticmethod
+    def _cancel_foreign_task(task: asyncio.Task) -> None:
+        """Request cancellation in a task's owning loop without awaiting it."""
+        owner_loop = task.get_loop()
+        if owner_loop.is_closed():
+            return
+        try:
+            if owner_loop.is_running():
+                owner_loop.call_soon_threadsafe(task.cancel)
+            else:
+                # The loop owner may resume later (for example a launcher
+                # shutdown sequence).  Do not drive or await it here.
+                task.cancel()
+        except RuntimeError:
+            # The owner loop can close between the state check and scheduling.
+            pass
 
     # ── internals ─────────────────────────────────────────────────────────
 
@@ -172,7 +204,7 @@ class ControlChannelClient:
         """Single connection lifecycle: auth → message loop."""
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(
-                self._dashboard_url,
+                self._manager_url,
                 heartbeat=None,  # we do our own ping/pong
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as ws:

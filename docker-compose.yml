@@ -21,6 +21,11 @@ services:
     # 网络：使用外部 dice-net 网络与协议适配器（NapCat/LLOneBot）通信
     networks:
       - dice-net
+      - manager-net
+
+    depends_on:
+      manager:
+        condition: service_healthy
 
     # 端口：内部通信，无需暴露到宿主机
     # 协议适配器通过 ws://dicepp:8080/onebot/v11/ws 连接
@@ -30,9 +35,8 @@ services:
     # 环境变量
     environment:
       - TZ=Asia/Shanghai
-      # Dashboard 管理后端地址（bot 上报心跳/注册用）
-      - DPP_ADMIN_HOST=dashboard
-      - DPP_ADMIN_PORT=4090
+      # Manager 是唯一 Bot 控制端；Dashboard 不承载控制 WebSocket。
+      - DICEPP_MANAGER_URL=http://manager:4091
       # OneBot 监听地址：跨容器连接（NapCat/LLOneBot 经 ws://dicepp:8080 连入）要求监听全部网卡，
       # 覆盖 bot.py 的默认值 127.0.0.1
       - DICEPP_ONEBOT_HOST=0.0.0.0
@@ -45,6 +49,8 @@ services:
       - ./config:/app/config
       - ./data:/app/data
       - ./content:/app/content
+      # Bot 与 Manager 仅共享控制凭据目录；Dashboard 不挂载它。
+      - ./manager/control:/app/manager/control:ro
 
     # 日志配置：自动轮转
     logging:
@@ -67,8 +73,11 @@ services:
     restart: unless-stopped
 
     networks:
-      - dice-net
       - manager-net
+
+    depends_on:
+      manager:
+        condition: service_healthy
 
     ports:
       - "4090:4090"
@@ -119,10 +128,6 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "dicepp_manager"]
 
-    depends_on:
-      dashboard:
-        condition: service_healthy
-
     networks:
       - manager-net
 
@@ -131,6 +136,13 @@ services:
       - "127.0.0.1:4091:4091"
     expose:
       - "4091"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib, urllib.request; token=pathlib.Path('/app/manager/state/api-token').read_text().strip(); request=urllib.request.Request('http://127.0.0.1:4091/v1/health', headers={'Authorization': 'Bearer '+token}); assert urllib.request.urlopen(request, timeout=3).status == 200"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
 
     environment:
       - TZ=Asia/Shanghai
@@ -141,7 +153,6 @@ services:
       - DICEPP_MANAGER_RUNTIME_UNIT_ID=dicepp-runtime
       - DICEPP_MANAGER_DOCKER_COMMAND=unix:///var/run/docker.sock
       - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
-      - DICEPP_DASHBOARD_HEALTH_URL=http://dashboard:4090/api/health
 
     volumes:
       # Manager 是维护操作、归档与后续升级的唯一写入者。

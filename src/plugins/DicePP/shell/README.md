@@ -102,7 +102,7 @@ DICEPP_PROJECT_ROOT=.dicepp-shell/combat_test uv run python -m dashboard
 
 # 终端 2：连接该 Dashboard
 uv run dicepp-shell serve combat_test \
-  --dashboard http://127.0.0.1:4090
+  --manager http://127.0.0.1:4091
 ```
 
 PowerShell 中先执行

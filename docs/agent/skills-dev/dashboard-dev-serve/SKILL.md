@@ -1,30 +1,31 @@
 ---
 name: dashboard-dev-serve
-description: 用当前 dev 源码在 5090 端口起一个 Dashboard 实例(默认仅本地 127.0.0.1,--expose 才绑 0.0.0.0),联动 dicepp-shell serve 常驻 Bot Runtime,做 Dashboard 开发联调验收。需要可视化 Dashboard 状态、调试控制通道、验证 Bot↔Dashboard 通信、测试 Dashboard 面板与真实 Bot 生命周期联动,或要在不碰生产 docker 栈的前提下用 --expose 临时把 Dashboard 暴露给外网查看时使用。
+description: 用当前 dev 源码在 5090 端口起一个 Dashboard、在本机 4091 起 Manager，并联动 dicepp-shell serve 常驻 Bot Runtime 做 Dashboard 开发联调验收。用于可视化 Dashboard 状态、调试 Bot↔Manager 控制通道、测试 Dashboard 面板与真实 Bot 生命周期联动，或临时用 --expose 暴露 Dashboard。
 license: MIT
 metadata:
   author: DicePP
-  version: "1.0"
+  version: "1.1"
 ---
 
 # Dashboard Dev Serve
 
-用当前 dev 源码起一个测试 Dashboard(默认 `127.0.0.1:5090`,`--expose` 才绑 `0.0.0.0`),联动 `dicepp-shell serve` 常驻 Bot Runtime。全部走源码 + uv,不碰生产 docker compose,数据写入独立的 `dashboard-dev` shell workspace。
+用当前 dev 源码起一个测试 Dashboard(默认 `127.0.0.1:5090`,`--expose` 才绑 `0.0.0.0`)、本机 Manager(`127.0.0.1:4091`)，联动 `dicepp-shell serve` 常驻 Bot Runtime。全部走源码 + uv,不碰生产 docker compose,数据写入独立的 `dashboard-dev` shell workspace。
 
 封装脚本:`docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py`
 
 ## 何时用
 
 - Dashboard 前端/后端开发需要真实 Bot 生命周期联动(非 mock)
-- 调试控制通道(ws /ws/control)、Bot 心跳上报、Dashboard 面板状态
-- 验收本 worktree 的 `dicepp-shell serve + --dashboard` 链路
+- 调试 Manager `/v1/control/ws`、Bot 心跳上报、Dashboard 面板状态
+- 验收本 worktree 的 `dicepp-shell serve + --manager` 链路
 - 用 `--expose` 临时把 Dashboard 暴露到局域网(5090)给远端查看,用完即停
 
 ## 端口与隔离约束(强制)
 
 - **固定端口 5090,默认绑 `127.0.0.1`(仅本地);`--expose` 才绑 `0.0.0.0` 供局域网访问**。绝不用 `4090`——那是生产 docker dashboard 容器的宿主映射端口,会冲突。
 - **固定 workspace `dashboard-dev`**(走 `.dicepp-shell/dashboard-dev/`),**不挂生产 `./config ./data ./content`**。生产 docker compose 挂的是宿主机当前目录那三个目录,本技能完全不碰。
-- **Bot→Dashboard 走 `127.0.0.1:5090`**(测试 Bot 不在容器里,走宿主机栈)。生产 Bot 走容器名 `dashboard:4090`(容器间通信),两者不混用。`serve --dashboard http://127.0.0.1:5090` 会自动把 `DPP_ADMIN_HOST/PORT` 注入,Bot 启动时 `resolve_dashboard_url` 自动读到。
+- **Bot→Manager 走 `127.0.0.1:4091`**(测试 Bot 不在容器里,走宿主机栈)。生产 Bot 走容器名 `manager:4091`(容器间通信),两者不混用。`serve --manager http://127.0.0.1:4091` 会设置 `DICEPP_MANAGER_URL`; Bot 启动时将它解析为 Manager 的 `/v1/control/ws`。
+- Dashboard 仍在 `127.0.0.1:5090` 提供 UI；它经 `DICEPP_MANAGER_URL=http://127.0.0.1:4091` 和 Manager API token 调用 Manager，不承载 Bot 控制 WebSocket。
 
 ## 外网暴露风险声明
 
@@ -33,21 +34,22 @@ metadata:
 ## 基本流程
 
 脚本在项目根目录运行,会:
-1. 预检 5090 端口(被自身以外的进程占用则报错不硬抢)
+1. 预检 5090(Dashboard) 和 4091(Manager) 端口(被自身以外的进程占用则报错不硬抢)
 2. `dicepp-shell init dashboard-dev`(建/复用独立 workspace)
-3. 后台起 Dashboard(`uv run python -m dashboard`,env: `DASHBOARD_HOST`=`127.0.0.1`(默认,`--expose` 时为 `0.0.0.0`)、`DASHBOARD_PORT=5090`、`DICEPP_PROJECT_ROOT=<workspace>`)
-4. 轮询 `http://127.0.0.1:5090/api/auth/status` 直到 Dashboard ready(Dashboard 先就绪,Bot 才能立即连上控制通道)
-5. 后台起 Bot Runtime(`uv run dicepp-shell serve dashboard-dev --dashboard http://127.0.0.1:5090 --tick`,默认开 `--tick` 跑真实 persona/scheduler 后台流程),等其发布 `runtime.json`
-6. 打印访问地址;Dashboard 进程 PID 记到 `<workspace>/dashboard/data/.dev-pids.json`(serve 端由 dicepp-shell 自身的 lease/`runtime.json` 管理,不额外记 PID)
+3. 后台起 Manager(`uv run python -m dicepp_manager`,env: `DICEPP_MANAGER_HOST=127.0.0.1`、`DICEPP_MANAGER_PORT=4091`、`DICEPP_PROJECT_ROOT=<workspace>`)，轮询带 Bearer token 的 `/v1/health`
+4. 后台起 Dashboard(`uv run python -m dashboard`,env: `DASHBOARD_HOST`=`127.0.0.1`(默认,`--expose` 时为 `0.0.0.0`)、`DASHBOARD_PORT=5090`、`DICEPP_PROJECT_ROOT=<workspace>`、`DICEPP_MANAGER_URL=http://127.0.0.1:4091`)
+5. 轮询 `http://127.0.0.1:5090/api/auth/status` 直到 Dashboard ready
+6. 后台起 Bot Runtime(`uv run dicepp-shell serve dashboard-dev --manager http://127.0.0.1:4091 --tick`,默认开 `--tick` 跑真实 persona/scheduler 后台流程),等其发布 `runtime.json`
+7. 打印访问地址;Dashboard 与 Manager 进程 PID 记到 `<workspace>/dashboard/data/.dev-pids.json`(serve 端由 dicepp-shell 自身的 lease/`runtime.json` 管理,不额外记 PID)
 
 ```bash
 # 启动(默认 --tick)
 python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py start
 
-# 查看状态(两个进程 + 5090 是否存活)
+# 查看状态(Manager、Dashboard、Bot serve 与 5090/4091 是否存活)
 python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py status
 
-# 停止(先 stop serve 再 stop dashboard,清理 PID 文件)
+# 停止(先 stop serve、再 Dashboard、最后 Manager,清理 PID 文件)
 python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 ```
 
@@ -75,6 +77,6 @@ python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 
 ## 典型联调场景
 
-- **Dashboard 面板看真 Bot**:起完后浏览器开 `http://<本机 IP>:5090`,登录后能看到 Bot 注册(`shell_dashboard-dev`)、心跳、状态。发消息用 `dicepp-shell send dashboard-dev --user u1 --msg ".r 1d20"`。
-- **控制通道调试**:在 Dashboard 改配置→点 reload,Bot 的 `_control_channel` 收 reload 指令并按指令断开重连。
+- **Dashboard 面板看真 Bot**:起完后浏览器开 `http://<本机 IP>:5090`,登录后能看到 Manager 转发的 Bot 注册(`shell_dashboard-dev`)、心跳、状态。发消息用 `dicepp-shell send dashboard-dev --user u1 --msg ".r 1d20"`。
+- **控制通道调试**:在 Dashboard 改配置→Manager `/v1/control/reload`→Bot 的 `_control_channel` 收 reload 指令并返回结果。
 - **验收 shell serve 链路**: `tests/system/process/shell/test_shell_serve_runtime.py` 是这套机制的自动化系统测试,此技能是手动联调版的封装。

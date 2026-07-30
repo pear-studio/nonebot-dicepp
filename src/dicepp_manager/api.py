@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from dicepp_meta import get_version
@@ -28,6 +28,7 @@ from .archive import (
 from .archive_coordinator import ArchiveCoordinator, ArchiveTransactionError
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
+from .control import ControlChannelService
 from .config_validation import (
     ConfigurationValidationError,
     read_config_object,
@@ -126,11 +127,28 @@ def create_manager_app(
     api_token: str | None = None,
 ) -> FastAPI:
     manager_service = service or create_manager_service(settings)
+    if manager_service.control_service is None:
+        manager_service.control_service = ControlChannelService(
+            project_root=settings.layout.root,
+            known_bot_ids=lambda: {
+                path.stem
+                for path in settings.layout.config_bots_dir.glob("*.json")
+                if path.is_file() and path.stem != "_template"
+            },
+            heartbeat_timeout=settings.control_heartbeat_timeout,
+            reload_timeout=settings.control_reload_timeout,
+        )
+    control_service = manager_service.control_service
     if manager_service.archive_coordinator is None:
         manager_service.archive_coordinator = ArchiveCoordinator(
             layout=settings.layout,
             service=manager_service,
+            control_probe=control_service.probe,
         )
+    else:
+        # A test or embedding may provide its own coordinator; its control
+        # health gate must still inspect the Manager-owned session service.
+        manager_service.archive_coordinator.control_probe = control_service.probe
     archive_coordinator = manager_service.archive_coordinator
     if manager_service.release_manager is None:
         manager_service.release_manager = ReleaseManager(
@@ -281,6 +299,7 @@ def create_manager_app(
                 await asyncio.gather(*critical_tasks, return_exceptions=True)
             if handoff_task is not None:
                 await asyncio.gather(handoff_task, return_exceptions=True)
+            await control_service.close()
             manager_service.close()
 
     app = FastAPI(title="DicePP Manager", version="2", lifespan=lifespan)
@@ -288,6 +307,7 @@ def create_manager_app(
     app.state.operation_tasks = tasks
     app.state.critical_operation_tasks = critical_tasks
     app.state.release_tasks = release_tasks
+    app.state.control_service = control_service
 
     manager_bearer = HTTPBearer(
         auto_error=False,
@@ -321,7 +341,28 @@ def create_manager_app(
 
     @app.get("/v1/status", dependencies=auth)
     async def status():
-        return {"ok": True, **(await manager_service.status())}
+        return {
+            "ok": True,
+            **(await manager_service.status()),
+            "control": control_service.capability(),
+        }
+
+    @app.websocket("/v1/control/ws")
+    async def control_websocket(ws: WebSocket):
+        """Bot-only v1 control endpoint; Dashboard never accepts this traffic."""
+        await control_service.websocket_endpoint(ws)
+
+    @app.get("/v1/control/bots", dependencies=auth)
+    async def control_bots():
+        return {"ok": True, "bots": control_service.bot_statuses()}
+
+    @app.post("/v1/control/reload", dependencies=auth)
+    async def control_reload(request: Request):
+        body = await _json_body(request)
+        bot_id = body.get("bot_id")
+        if bot_id is not None and (not isinstance(bot_id, str) or not bot_id):
+            raise HTTPException(status_code=400, detail="bot_id must be a non-empty string")
+        return {"ok": True, "results": await control_service.reload(bot_id)}
 
     @app.get("/v1/health", dependencies=auth)
     async def health():

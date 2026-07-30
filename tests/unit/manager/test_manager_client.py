@@ -23,7 +23,8 @@ def _compatible_status() -> dict:
         "health": {
             "manager_api_version": MANAGER_API_VERSION,
             "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
-        }
+        },
+        "control": {"available": True, "protocol": "dicepp-control-v1"},
     }
 
 
@@ -53,6 +54,8 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         lambda: client.operate("unit/id", "start/now"),
         lambda: client.logs("unit/id", 20),
         lambda: client.runtime_logs(20),
+        lambda: client.control_bots(),
+        lambda: client.reload_bots("bot/id"),
         lambda: client.release_status(),
         lambda: client.check_releases(),
         lambda: client.download_release("portable"),
@@ -78,6 +81,25 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         "POST",
         "/v1/runtime-units/unit%2Fid%20with%20space/start%2Fnow",
     )
+
+
+@pytest.mark.asyncio
+async def test_control_client_refuses_legacy_manager_without_control_capability(monkeypatch) -> None:
+    client = _client()
+
+    async def request(method: str, path: str, **_kwargs):
+        assert (method, path) == ("GET", "/v1/status")
+        return {
+            "health": {
+                "manager_api_version": MANAGER_API_VERSION,
+                "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+            }
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+
+    with pytest.raises(ManagerIncompatible, match="control channel capability"):
+        await client.control_bots()
 
 
 @pytest.mark.asyncio

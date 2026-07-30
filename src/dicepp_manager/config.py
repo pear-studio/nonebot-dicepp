@@ -45,6 +45,8 @@ class ManagerSettings:
     process_stop_timeout: float = 2.0
     docker_command: str = "unix:///var/run/docker.sock"
     docker_timeout: float = 30.0
+    control_heartbeat_timeout: float = 120.0
+    control_reload_timeout: float = 5.0
     token_path: Path | None = None
     release_scheduler_enabled: bool = True
     github_api: str = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
@@ -66,6 +68,12 @@ class ManagerSettings:
             process_stop_timeout=_float_env("DICEPP_MANAGER_PROCESS_STOP_TIMEOUT", 2.0),
             docker_command=os.environ.get("DICEPP_MANAGER_DOCKER_COMMAND", "unix:///var/run/docker.sock"),
             docker_timeout=_float_env("DICEPP_MANAGER_DOCKER_TIMEOUT", 30.0),
+            control_heartbeat_timeout=_float_env(
+                "DICEPP_MANAGER_CONTROL_HEARTBEAT_TIMEOUT", 120.0
+            ),
+            control_reload_timeout=_float_env(
+                "DICEPP_MANAGER_CONTROL_RELOAD_TIMEOUT", 5.0
+            ),
             token_path=Path(os.environ.get("DICEPP_MANAGER_TOKEN_FILE", str(layout.manager_token))),
             release_scheduler_enabled=_bool_env(
                 "DICEPP_MANAGER_RELEASE_SCHEDULER",

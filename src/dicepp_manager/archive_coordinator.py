@@ -60,7 +60,6 @@ class ArchiveCoordinator:
         *,
         layout: InstanceLayout,
         service: ManagerService,
-        dashboard_probe: HealthProbe | None = None,
         control_probe: HealthProbe | None = None,
         fault_hook: FaultHook | None = None,
         health_timeout: float = 20.0,
@@ -70,7 +69,6 @@ class ArchiveCoordinator:
         self.layout = layout
         self.service = service
         self.store = service.store
-        self.dashboard_probe = dashboard_probe
         self.control_probe = control_probe
         self.fault_hook = fault_hook
         self.health_timeout = health_timeout
@@ -761,13 +759,12 @@ class ArchiveCoordinator:
         else:
             control = {"status": "not_applicable"}
         # The runtime must still be healthy after the slower endpoint/control
-        # probes, not merely at the beginning of the health window.
+        # merely at the beginning of the health window.
         runtime = await self._wait_runtime_healthy(expected_running)
         return {
             "manager_store": "ok",
             "config": config,
             "schema": "ok",
-            "dashboard": dashboard,
             "runtime_units": runtime,
             "control": control,
             "warnings": [

@@ -84,7 +84,7 @@ uv run python bot.py
 
 ```bash
 uv run dicepp-shell init dashboard-dev
-uv run dicepp-shell serve dashboard-dev --dashboard http://127.0.0.1:4090
+uv run dicepp-shell serve dashboard-dev --manager http://127.0.0.1:4091
 ```
 
 该入口只监听本机，用于指令 E2E、Dashboard 控制通道和真实 Bot 生命周期

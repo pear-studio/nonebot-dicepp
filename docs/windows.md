@@ -181,11 +181,14 @@ data/logs/dicepp-runtime.log
 
 升级或迁移前，建议先在网页管理面板中创建存档。
 
-Manager 自身的 token、operation 和维护状态保存在：
+Manager 的 HTTP API token、operation 和维护状态保存在：
 
 ```text
 manager/state/
 ```
+
+Bot↔Manager 控制凭据单独位于 `manager/control/control-token`，与 HTTP API token
+完全独立，且不会写入 `data/dicepp.db`。
 
 网页管理面板通过本机 Manager API 执行运行控制。若 Manager 不可用，面板会明确显示运行管理不受支持，不会直接接管子进程。
 

@@ -451,7 +451,7 @@
                 <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
                 <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
                 <template x-for="item in reloadResult" :key="item.bot_id">
-                  <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
+                  <div data-testid="config-reload-result" class="text-sm mb-1" :class="reloadResultClass(item)" x-text="`${item.bot_id}: ${reloadResultMessage(item)}`"></div>
                 </template>
                 <div x-show="!reloadResult || reloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
               </div>
@@ -2377,6 +2377,19 @@ function app() {
       } finally {
         this.saving = false;
       }
+    },
+
+    reloadResultMessage(item) {
+      if (item?.status === 'ok') return '成功';
+      if (item?.status === 'offline') return '离线，将在下次启动时加载';
+      if (item?.status === 'timeout') return '超时，请稍后重试';
+      return item?.error || '失败';
+    },
+
+    reloadResultClass(item) {
+      if (item?.status === 'ok') return 'text-green-600';
+      if (item?.status === 'offline') return 'text-amber-600';
+      return 'text-red-600';
     },
 
     // ── Persona Tab ──

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import socket
-import sqlite3
 import subprocess
 import sys
 import time
@@ -70,8 +69,32 @@ def _wait_for_url(url: str, process: subprocess.Popen[str], timeout: float) -> N
     pytest.fail(f"Timed out waiting for {url}")
 
 
+def _wait_for_manager(manager: subprocess.Popen[str], root: Path, port: int) -> None:
+    """Wait for a token-authenticated Manager API before starting the Bot."""
+    token_path = root / "manager" / "state" / "api-token"
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if manager.poll() is not None:
+            output = manager.stdout.read() if manager.stdout else ""
+            pytest.fail(f"Manager exited during startup:\n{output}")
+        if token_path.is_file():
+            token = token_path.read_text(encoding="utf-8").strip()
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/health",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=1) as response:
+                    if response.status == 200:
+                        return
+            except OSError:
+                pass
+        time.sleep(0.05)
+    pytest.fail("Manager did not become ready")
+
+
 @pytest.mark.timeout(60)
-def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
+def test_serve_routes_cli_messages_and_registers_real_bot_with_manager(
     tmp_path: Path,
 ):
     registry_root = tmp_path / "shell-registry"
@@ -82,18 +105,19 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
 
     _cli(env, "init", "e2e", "--group", "group-e2e")
     session_dir = registry_root / ".dicepp-shell" / "e2e"
-    dashboard_port = _find_free_port()
-    dashboard_env = env.copy()
-    dashboard_env["DICEPP_PROJECT_ROOT"] = str(session_dir)
-    dashboard_env["DICEPP_APP_DIR"] = str(session_dir)
-    dashboard_env["DASHBOARD_HOST"] = "127.0.0.1"
-    dashboard_env["DASHBOARD_PORT"] = str(dashboard_port)
-    dashboard_env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
-    dashboard = subprocess.Popen(
-        [sys.executable, "-m", "tests.support.dashboard_server"],
+    manager_port = _find_free_port()
+    manager_env = env.copy()
+    manager_env["DICEPP_PROJECT_ROOT"] = str(session_dir)
+    manager_env["DICEPP_APP_DIR"] = str(session_dir)
+    manager_env["DICEPP_MANAGER_HOST"] = "127.0.0.1"
+    manager_env["DICEPP_MANAGER_PORT"] = str(manager_port)
+    manager_env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
+    manager_env["DICEPP_MANAGER_RELEASE_SCHEDULER"] = "false"
+    env["DICEPP_MANAGER_URL"] = f"http://127.0.0.1:{manager_port}"
+    manager = subprocess.Popen(
+        [sys.executable, "-m", "dicepp_manager"],
         cwd=PROJECT_ROOT,
-        env=_hermetic_env(dashboard_env),
-        stdin=subprocess.PIPE,
+        env=_hermetic_env(manager_env),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -101,11 +125,7 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
     )
     process: subprocess.Popen[str] | None = None
     try:
-        _wait_for_url(
-            f"http://127.0.0.1:{dashboard_port}/api/auth/status",
-            dashboard,
-            timeout=15,
-        )
+        _wait_for_manager(manager, session_dir, manager_port)
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -116,8 +136,8 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
                 "--port",
                 "0",
                 "--json",
-                "--dashboard",
-                f"http://127.0.0.1:{dashboard_port}",
+                "--manager",
+                f"http://127.0.0.1:{manager_port}",
             ],
             cwd=PROJECT_ROOT,
             env=_hermetic_env(env),
@@ -157,7 +177,7 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
         assert status["running"] is True
         assert status["ready"] is True
         assert status["bot_id"] == "shell_e2e"
-        assert status["dashboard_control_enabled"] is True
+        assert status["manager_control_enabled"] is True
 
         # Hermeticity: the serve subprocess must have loaded *this* worktree's code
         py_check = subprocess.run(
@@ -171,22 +191,31 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
             f"Subprocess loaded shell from {loaded}, expected under {PROJECT_ROOT}"
         )
 
-        dashboard_db = session_dir / "dashboard" / "data" / "dashboard.db"
+        token_path = session_dir / "manager" / "state" / "api-token"
         deadline = time.monotonic() + 10
         registered = None
         while time.monotonic() < deadline:
-            if dashboard_db.exists():
-                with sqlite3.connect(dashboard_db) as connection:
-                    registered = connection.execute(
-                        "SELECT bot_id, version FROM bots_meta WHERE bot_id = ?",
-                        ("shell_e2e",),
-                    ).fetchone()
-                if registered is not None:
-                    break
+            if token_path.is_file():
+                token = token_path.read_text(encoding="utf-8").strip()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{manager_port}/v1/control/bots",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                try:
+                    with urllib.request.urlopen(request, timeout=1) as response:
+                        rows = json.loads(response.read().decode("utf-8"))["bots"]
+                    registered = next(
+                        (row for row in rows if row["bot_id"] == "shell_e2e"),
+                        None,
+                    )
+                    if registered is not None and registered["online"]:
+                        break
+                except OSError:
+                    pass
             time.sleep(0.05)
-        assert registered is not None, "Real Shell Bot never registered with Dashboard"
-        assert registered[0] == "shell_e2e"
-        assert registered[1]
+        assert registered is not None, "Real Shell Bot never registered with Manager"
+        assert registered["bot_id"] == "shell_e2e"
+        assert registered["version"]
 
         database = session_dir / "data" / "bots" / "shell_e2e" / "bot_data.db"
         assert database.is_file()
@@ -216,9 +245,8 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
                     ),
                 )
         finally:
-            assert dashboard.stdin is not None
             stop_server_process(
-                dashboard,
-                name="Dashboard e2e server",
-                request_stop=dashboard.stdin.close,
+                manager,
+                name="Manager e2e server",
+                request_stop=manager.terminate,
             )

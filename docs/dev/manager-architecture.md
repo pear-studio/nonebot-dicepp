@@ -12,7 +12,7 @@ Manager 是 DicePP 标准 Windows 与 Linux 部署的一部分，负责实例运
 |---|---|---|
 | Manager | RuntimeUnit 生命周期、维护锁、持久 operation、归档/恢复事务、兼容更新 | Dashboard 用户界面、机器人业务逻辑 |
 | Dashboard | 用户鉴权、状态展示、提交和查询 Manager operation | Docker/子进程控制、归档文件写入 |
-| Bot Runtime | QQ Bot 业务与本地控制心跳 | 自身部署生命周期 |
+| Bot Runtime | QQ Bot 业务与到 Manager 的本地控制心跳 | 自身部署生命周期 |
 
 Linux 标准 Compose 包含 `bot`、`dashboard`、`manager` 三个服务。Manager 的 API 仅在 Compose 内部网络暴露，只有 Manager 挂载 Docker Socket。Windows 的 `DicePP.exe` 是托盘 Manager：它启动并监控 Bot Runtime 和 Dashboard，可为当前用户设置登录后启动，但不是 Windows Service。
 
@@ -67,7 +67,7 @@ io.dicepp.deployment-schema=2
 
 容器名、Compose 服务名或用户输入都不能单独授权控制。Windows Process Adapter 只管理由托盘 Manager 创建的子进程，退出 Manager 时只会有序关闭它所持有的 Bot 和 Dashboard，不扫描或终止同名的其他进程。
 
-Manager 默认监听本机 `127.0.0.1:4091`；Compose 中监听 `0.0.0.0:4091` 但不映射宿主机端口。首次启动会在 `<instance>/manager/state/api-token` 创建随机 token，Dashboard 只读该文件并以 Bearer token 调用 API。token 不得写入 Compose 环境变量、业务配置或日志。当前标准兼容元数据为 Manager API `2`、operation schema `2`、deployment schema `2`；不匹配时应明确报告不受支持，而不是猜测旧拓扑。
+Manager 默认监听本机 `127.0.0.1:4091`；Compose 中监听 `0.0.0.0:4091` 但不映射宿主机端口。首次启动会在 `<instance>/manager/state/api-token` 创建随机 HTTP API token，Dashboard 只读该文件并以 Bearer token 调用 API。Bot WebSocket 使用另一枚 `<instance>/manager/control/control-token`；只有 Bot 与 Manager 挂载该目录，Dashboard 不挂载、也不兼容读取旧 `data/dicepp.db` token。两枚 token 都不得写入 Compose 环境变量、业务配置或日志。当前标准兼容元数据为 Manager API `3`、operation schema `2`、deployment schema `2`；不匹配时应明确报告不受支持，而不是猜测旧拓扑。
 
 每项操作都会持久化到 `<instance>/manager/state/manager.db`。Dashboard 以 operation ID 提交和查询操作，因此刷新、重启或短暂断线不会丢失已提交的结果。实例级维护锁排他保护会停写的数据：冲突维护操作必须等待或被拒绝，不能并发修改同一批资产。
 
@@ -97,14 +97,16 @@ format v1 仍以保守兼容方式读取：它被视为 `regular`，并按旧 ma
 3. 写入持久 journal，以 `data_switch_started` 记录数据切换边界；
 4. 通过临时文件、`fsync` 和原子替换写入，再执行精确删除；
 5. 运行目标程序支持的 `SchemaTarget` forward migration；
-6. 重启原先运行的单元，并检查 Manager store、配置、schema、独立 Dashboard `/api/health`、RuntimeUnit 存活和新于启动基线的 Bot 控制心跳；
+6. 重启原先运行的单元，并检查 Manager store、配置、schema、RuntimeUnit 存活和新于启动基线的 Bot 控制心跳；
 7. 健康通过后写入 `health_passed` 并完成提交。
 
 任一步失败都会自动应用 pre-restore、再次检查 schema 和本地健康，并恢复原运行状态。Manager 重启或断电恢复时，未开始切换的事务清理临时状态；已经开始切换但尚未提交的事务自动回退；已写入健康标记的事务完成收尾。回退失败会保留 journal 和安全归档，等待后续恢复重试。NapCat、QQ、GitHub、LLM 等外部依赖只形成 warning，不触发这一本地数据回退。
 
 回退在破坏阶段开始后被判定失败的事务是终态的（terminal rollback adjudication rule，升级与归档恢复两侧共用同一规则）：Manager 重启不会重放破坏性回退，只重复上报需要人工恢复，journal 保留在可恢复集合中以持续保护目标版本包与安全归档。终态 journal 在任一恢复性操作成功时自动退役——成功恢复归档（典型为 pre-upgrade 归档）或成功完成一次升级 commit——状态移出可恢复集合并保留 operation 历史作证据，目标版本包与安全归档的保护随之解除（归档转为普通归档走正常保留策略，不立即删除），Manager 重启不再重复上报。退役之前仍需人工介入：按目标平台的部署指南完成手工恢复，再通过一次归档恢复或升级让系统回到受管健康状态。
 
-Bot 控制心跳契约：Dashboard 将 Bot 控制心跳以 ISO-8601 UTC 字符串写入 `bots_meta.last_heartbeat`；旧版本写入的是裸 epoch 秒数字，Manager 探针两种格式都接受（naive ISO 一律按 UTC 解释）。`/api/health` 的 `control.latest_heartbeat` 对外暴露 ISO-8601，`/api/bots/status` 对前端仍暴露 epoch 秒。旧 Manager 执行升级、新 Dashboard 写入 ISO 的方向天然兼容（旧探针本就按 ISO 解析）；反向由 Manager 对遗留 epoch 行的容忍覆盖。
+Bot 控制通道契约：Manager 是唯一的 `/v1/control/ws` 服务端，使用 `<instance>/manager/control/control-token` 认证；这枚 token 与 Manager HTTP API 的 `api-token` 完全独立，Dashboard 没有该路径的挂载权限。连接、单 bot 会话替换、ping/pong、状态心跳和 reload 请求/结果都保持 `dicepp-control-v1` 包络；同一 Bot 的 reload 在 Manager 串行，已被替换的会话不能上报状态或完成请求。Manager 内存中持有 Bot 的版本和最新心跳，并通过 `/v1/control/bots`、`/v1/control/reload` 提供认证 HTTP 调用；Dashboard 的状态 REST/SSE 和保存后的热重载只代理这些调用，不再持有 Bot WebSocket 或写入控制状态到 `dashboard.db`。
+
+控制迁移的混版本语义是明确失败而非回退：新 Dashboard 调用不具备 `control` capability 的旧 Manager 会报告“需先升级 Manager”；新 Manager 不再提供 Dashboard `/ws/control` 兼容端点，因此旧 Bot 会保持离线并在日志中重连，直到它被升级为 Manager URL。标准 Compose 以 Manager 为启动前提，Manager 本身不依赖 Dashboard。该拓扑变更和 Manager 自身发布均属于自动升级拒绝范围，必须在已有归档可恢复的前提下完成手工部署迁移；不要尝试让旧 Dashboard 直接接管控制通道。
 
 手动归档不会被自动删除。`system` 安全归档默认只保留最近 5 份，活跃或失败事务引用的归档受保护。浏览器可从 Manager 导出已验证的 ZIP，也可向 Manager 导入 ZIP；导入会先流式校验并原子加入列表，绝不会自动恢复，仍需要预览和确认。
 

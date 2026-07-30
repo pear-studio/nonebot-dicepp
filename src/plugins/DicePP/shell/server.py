@@ -94,7 +94,7 @@ def create_shell_app(
             "session": session_name,
             "bot_id": bot.account if bot is not None else bot_id_for_session(session_name),
             "tick": runner.tick,
-            "dashboard_control_enabled": runner.dashboard_control_enabled,
+            "manager_control_enabled": runner.manager_control_enabled,
             "mode": jobs.mode,
             "active_job": jobs.active_job,
         }
@@ -173,7 +173,7 @@ def serve_session(
     host: str = "127.0.0.1",
     port: int = 0,
     tick: bool = False,
-    dashboard_url: str = "",
+    manager_url: str = "",
     json_output: bool = False,
 ) -> None:
     """Run a long-running Shell Runtime session.
@@ -181,14 +181,14 @@ def serve_session(
     Process-terminal entry point: uvicorn blocks until the server exits.
     BotRunner._activate_workspace redirects Paths, env vars, and loguru sinks
     to the session workspace — one-way, since this process never outlives the
-    server.  Env changes for dashboard integration (DPP_ADMIN_HOST/PORT via
-    _configure_dashboard) are likewise one-way.
+    server.  Env changes for Manager control integration (DICEPP_MANAGER_URL
+    via _configure_manager) are likewise one-way.
     """
     _validate_loopback_host(host)
     if not 0 <= port <= 65535:
         raise ValueError("Port must be between 0 and 65535")
-    if dashboard_url:
-        _configure_dashboard(dashboard_url)
+    if manager_url:
+        _configure_manager(manager_url)
 
     runner = BotRunner(session_dir, tick=tick)
     lease = SessionRuntimeLease(session_dir)
@@ -279,10 +279,9 @@ def _bind_socket(host: str, port: int) -> socket.socket:
         raise
 
 
-def _configure_dashboard(value: str) -> None:
+def _configure_manager(value: str) -> None:
     candidate = value if "://" in value else f"http://{value}"
     parsed = urlparse(candidate)
     if parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
-        raise ValueError("Shell Dashboard integration only accepts a local address")
-    os.environ["DPP_ADMIN_HOST"] = parsed.hostname or "127.0.0.1"
-    os.environ["DPP_ADMIN_PORT"] = str(parsed.port or 4090)
+        raise ValueError("Shell Manager integration only accepts a local address")
+    os.environ["DICEPP_MANAGER_URL"] = candidate.rstrip("/")
