@@ -14,14 +14,6 @@
 
 ## dev
 
-### [B-260730-67a90e] Windows 并行系统测试服务启动偶发超时
-- 创建: 2026-07-30
-- 优先级: P2
-- 类型: bug
-- 改动量: M
-- 问题表现: Windows 上 uv run pytest 的 xdist 完整回归连续两次在不同系统服务启动用例失败：Dashboard/Manager 本地 HTTP 服务 15 秒内未就绪；相同用例以 -n0 串行重跑均通过。失败位置漂移，未见 TokenSecurityError 或固定端口占用，说明当前并行启动存在时序或资源竞争。
-- 开发备忘: 先建立低成本的重复并行反馈环并捕获子进程 stderr、端口和资源使用；确认是否需要为共享浏览器、Manager 或端口资源标记串行执行，或调整启动就绪等待。影响面：pytest xdist 配置、tests/system/browser、tests/system/process 及 dashboard/manager 测试辅助。不要通过无界延长全局 timeout 掩盖问题。
-
 ### [B-260728-82b7c7] release 流水线产物命名不统一且存在重复构建
 - 创建: 2026-07-28
 - 优先级: P2

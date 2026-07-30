@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.cookiejar
+import http.client
 import json
 import os
 import socket
@@ -40,7 +41,7 @@ def _wait_for_server(url: str, process: subprocess.Popen[str]) -> None:
             with urllib.request.urlopen(url, timeout=1) as response:
                 if response.status == 200:
                     return
-        except OSError:
+        except (OSError, http.client.HTTPException):
             time.sleep(0.05)
     raise AssertionError(f"Dashboard helper did not start at {url}")
 
