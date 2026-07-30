@@ -439,8 +439,23 @@ def test_manager_api_requires_its_own_token_and_polls_persisted_operation(tmp_pa
     app = create_manager_app(settings, service=_service(tmp_path, adapter), api_token="manager-secret")
 
     with TestClient(app) as client:
-        assert client.get("/v1/status").status_code == 401
+        unauthorized = client.get("/v1/status")
+        assert unauthorized.status_code == 401
+        assert unauthorized.headers["www-authenticate"] == "Bearer"
+        assert unauthorized.json() == {
+            "ok": False,
+            "message": "Invalid Manager API token",
+        }
         assert client.get("/v1/health").status_code == 401
+        schema = client.get("/openapi.json").json()
+        assert schema["components"]["securitySchemes"]["ManagerBearerAuth"] == {
+            "type": "http",
+            "description": "Private local Manager API token.",
+            "scheme": "bearer",
+        }
+        assert schema["paths"]["/v1/status"]["get"]["security"] == [
+            {"ManagerBearerAuth": []}
+        ]
         headers = {"Authorization": "Bearer manager-secret"}
         status = client.get("/v1/status", headers=headers)
         assert status.status_code == 200

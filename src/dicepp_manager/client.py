@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Iterator
 
-from .auth import read_api_token
+from .auth import TokenSecurityError, read_api_token
 from .config import ManagerClientSettings
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_API_VERSION
 
@@ -29,6 +29,17 @@ class ManagerUnavailable(ManagerClientError):
 
 class ManagerIncompatible(ManagerClientError):
     pass
+
+
+def _read_manager_token(token_path) -> str:
+    """Map every local credential failure to the stable Manager boundary."""
+    try:
+        return read_api_token(token_path)
+    except (OSError, TokenSecurityError, ValueError) as exc:
+        raise ManagerUnavailable(
+            "Manager credentials are unavailable",
+            status_code=503,
+        ) from exc
 
 
 class ArchiveDownload:
@@ -185,10 +196,7 @@ class ManagerClient:
 
     async def open_archive_download(self, filename: str) -> ArchiveDownload:
         await self._ensure_compatible()
-        try:
-            token = read_api_token(self.settings.token_path)
-        except (OSError, ValueError) as exc:
-            raise ManagerUnavailable(str(exc), status_code=503) from exc
+        token = _read_manager_token(self.settings.token_path)
         segment = urllib.parse.quote(filename, safe="")
         return await asyncio.to_thread(
             self._open_archive_download_sync,
@@ -198,10 +206,7 @@ class ManagerClient:
 
     async def import_archive(self, filename: str, source) -> dict:
         await self._ensure_compatible()
-        try:
-            token = read_api_token(self.settings.token_path)
-        except (OSError, ValueError) as exc:
-            raise ManagerUnavailable(str(exc), status_code=503) from exc
+        token = _read_manager_token(self.settings.token_path)
         return await asyncio.to_thread(self._upload_sync, filename, source, token)
 
     async def release_status(self) -> dict:
@@ -253,10 +258,7 @@ class ManagerClient:
         *,
         json_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        try:
-            token = read_api_token(self.settings.token_path)
-        except (OSError, ValueError) as exc:
-            raise ManagerUnavailable(str(exc), status_code=503) from exc
+        token = _read_manager_token(self.settings.token_path)
         return await asyncio.to_thread(
             self._request_sync,
             method,
@@ -309,10 +311,7 @@ class ManagerClient:
         return payload
 
     async def _request_bytes(self, method: str, path: str) -> bytes:
-        try:
-            token = read_api_token(self.settings.token_path)
-        except (OSError, ValueError) as exc:
-            raise ManagerUnavailable(str(exc), status_code=503) from exc
+        token = _read_manager_token(self.settings.token_path)
         return await asyncio.to_thread(self._request_bytes_sync, method, path, token)
 
     def _request_bytes_sync(self, method: str, path: str, token: str) -> bytes:

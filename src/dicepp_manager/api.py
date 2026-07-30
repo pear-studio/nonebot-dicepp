@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from dicepp_meta import get_version
 
 from .archive import (
@@ -259,16 +260,35 @@ def create_manager_app(
     app.state.critical_operation_tasks = critical_tasks
     app.state.release_tasks = release_tasks
 
-    async def require_manager_auth(authorization: str | None = Header(None)) -> None:
-        scheme, _, supplied = (authorization or "").partition(" ")
-        if scheme.lower() != "bearer" or not token_matches(expected_token, supplied):
-            raise HTTPException(status_code=401, detail="Invalid Manager API token")
+    manager_bearer = HTTPBearer(
+        auto_error=False,
+        scheme_name="ManagerBearerAuth",
+        description="Private local Manager API token.",
+    )
+
+    async def require_manager_auth(
+        credentials: HTTPAuthorizationCredentials | None = Depends(manager_bearer),
+    ) -> None:
+        if (
+            credentials is None
+            or credentials.scheme.lower() != "bearer"
+            or not token_matches(expected_token, credentials.credentials)
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Manager API token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
     auth = [Depends(require_manager_auth)]
 
     @app.exception_handler(HTTPException)
     async def http_error(_request, exc: HTTPException):
-        return JSONResponse(status_code=exc.status_code, content={"ok": False, "message": str(exc.detail)})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"ok": False, "message": str(exc.detail)},
+            headers=exc.headers,
+        )
 
     @app.get("/v1/status", dependencies=auth)
     async def status():
