@@ -28,6 +28,12 @@ from .archive import (
 from .archive_coordinator import ArchiveCoordinator, ArchiveTransactionError
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
+from .config_validation import (
+    ConfigurationValidationError,
+    read_config_object,
+    validate_bot_candidate,
+    validate_user_candidate,
+)
 from .factory import (
     cleanup_terminal_update_guard_transactions,
     create_manager_service,
@@ -64,6 +70,29 @@ def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
             "ok": False,
             "message": str(exc),
             "code": "maintenance_conflict",
+        },
+    )
+
+
+def _invalid_configuration_response(exc: ConfigurationValidationError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "ok": False,
+            "code": "invalid_configuration",
+            "message": "Configuration validation failed",
+            "errors": exc.errors,
+        },
+    )
+
+
+def _stored_configuration_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={
+            "ok": False,
+            "code": "stored_configuration_invalid",
+            "message": "Stored configuration is unreadable",
         },
     )
 
@@ -552,15 +581,45 @@ def create_manager_app(
         task.add_done_callback(tasks.discard)
         return {"ok": True, "operation": manager_operation.to_dict()}
 
+    @app.get("/v1/config/user", dependencies=auth)
+    async def config_user_get():
+        try:
+            config = read_config_object(settings.layout.config_user)
+        except ConfigurationValidationError:
+            return _stored_configuration_response()
+        return {"ok": True, "config": config}
+
     @app.put("/v1/config/user", dependencies=auth)
     async def config_user_save(request: Request):
         body = await _json_body(request)
         try:
             with manager_service.maintenance():
+                validate_user_candidate(settings.layout, body)
                 _write_managed_config(settings.layout.config_user, body)
         except MaintenanceConflict as exc:
             return _maintenance_conflict_response(exc)
-        return {"ok": True, "saved": True}
+        except ConfigurationValidationError as exc:
+            return _invalid_configuration_response(exc)
+        return {
+            "ok": True,
+            "saved": True,
+            "application": "deferred",
+            "restart_required": True,
+        }
+
+    @app.get("/v1/config/bots/{bot_id}", dependencies=auth)
+    async def config_bot_get(bot_id: str):
+        try:
+            path = settings.layout.bot_config_path(bot_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Bot configuration not found")
+        try:
+            config = read_config_object(path, missing_is_empty=False)
+        except ConfigurationValidationError:
+            return _stored_configuration_response()
+        return {"ok": True, "config": config}
 
     @app.put("/v1/config/bots/{bot_id}", dependencies=auth)
     async def config_bot_save(bot_id: str, request: Request):
@@ -571,10 +630,18 @@ def create_manager_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             with manager_service.maintenance():
+                validate_bot_candidate(settings.layout, bot_id, body)
                 _write_managed_config(path, body)
         except MaintenanceConflict as exc:
             return _maintenance_conflict_response(exc)
-        return {"ok": True, "saved": True}
+        except ConfigurationValidationError as exc:
+            return _invalid_configuration_response(exc)
+        return {
+            "ok": True,
+            "saved": True,
+            "application": "deferred",
+            "restart_required": True,
+        }
 
     @app.get("/v1/archives", dependencies=auth)
     async def archives_list():

@@ -129,8 +129,14 @@ def test_manager_is_the_config_writer_and_conflicts_with_maintenance(tmp_path: P
                 json={"update": {"discovery_enabled": True}},
             )
 
-    assert saved_user.json() == {"ok": True, "saved": True}
-    assert saved_bot.json() == {"ok": True, "saved": True}
+    expected_saved = {
+        "ok": True,
+        "saved": True,
+        "application": "deferred",
+        "restart_required": True,
+    }
+    assert saved_user.json() == expected_saved
+    assert saved_bot.json() == expected_saved
     assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
         "update": {"discovery_enabled": False}
     }
@@ -157,13 +163,23 @@ async def test_manager_client_saves_config_through_stable_manager_routes(tmp_pat
                     "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
                 }
             }
+        if path == "/v1/config/user" and method == "GET":
+            return {"config": {"user": True}}
+        if path == "/v1/config/bots/10001" and method == "GET":
+            return {"config": {"bot": True}}
         return {"saved": True}
 
     monkeypatch.setattr(client, "_request", request)
 
+    assert await client.get_user_config() == {"user": True}
+    assert await client.get_bot_config("10001") == {"bot": True}
     assert await client.save_user_config({"user": True}) == {"saved": True}
     assert await client.save_bot_config("10001", {"bot": True}) == {"saved": True}
     assert calls == [
+        ("GET", "/v1/status", None),
+        ("GET", "/v1/config/user", None),
+        ("GET", "/v1/status", None),
+        ("GET", "/v1/config/bots/10001", None),
         ("GET", "/v1/status", None),
         ("PUT", "/v1/config/user", {"user": True}),
         ("GET", "/v1/status", None),

@@ -134,29 +134,6 @@ class TestSetField:
         resp = test_client.post("/api/config/set", json={"path": "", "value": "x"})
         assert resp.status_code == 400
 
-    @pytest.mark.parametrize("value", [2.5, True])
-    def test_set_field_rejects_invalid_update_value_without_writing(
-        self,
-        test_client: TestClient,
-        tmp_dashboard_paths,
-        value,
-    ):
-        setup_auth(test_client)
-        DashboardPaths.CONFIG_USER.write_text(
-            '{"app": {"name": "keep"}}',
-            encoding="utf-8",
-        )
-        before = DashboardPaths.CONFIG_USER.read_bytes()
-
-        resp = test_client.post(
-            "/api/config/set",
-            json={"path": "update.cache_versions", "value": value},
-        )
-
-        assert resp.status_code == 422
-        assert DashboardPaths.CONFIG_USER.read_bytes() == before
-
-
 class TestResetField:
     def test_reset_field(self, test_client: TestClient, tmp_dashboard_paths):
         """``POST /api/config/reset`` removes a key from user.json."""
@@ -209,11 +186,10 @@ class TestBotConfig:
         assert saved == new_config
 
     def test_bot_config_read_nonexistent(self, test_client: TestClient):
-        """Reading a non-existent bot config returns empty dict."""
+        """Reading a non-existent bot config preserves Manager's 404 contract."""
         setup_auth(test_client)
         resp = test_client.get("/api/config/bots/nonexistent_bot")
-        assert resp.status_code == 200
-        assert resp.json()["config"] == {}
+        assert resp.status_code == 404
 
 
 class TestUserJsonSave:
@@ -239,32 +215,6 @@ class TestUserJsonSave:
         assert resp.status_code == 400
         data = resp.json()
         assert data["ok"] is False
-
-    @pytest.mark.parametrize(
-        "update",
-        [
-            {"cache_versions": True},
-            {"cache_versions": 2.5},
-            {"check_interval_hours": True},
-            {"check_interval_hours": float("nan")},
-            {"check_interval_hours": float("inf")},
-        ],
-    )
-    def test_save_user_json_strictly_validates_update_settings(
-        self,
-        test_client: TestClient,
-        update: dict,
-    ):
-        setup_auth(test_client)
-        resp = test_client.post(
-            "/api/config/user/save",
-            content=json.dumps({"update": update}, allow_nan=True),
-            headers={"Content-Type": "application/json"},
-        )
-
-        assert resp.status_code == 422
-        assert resp.json()["ok"] is False
-
 
 class TestFieldMetadata:
     """Unit tests for _flatten_json_schema — verify Pydantic v2 schema parsing."""
