@@ -20,6 +20,16 @@ class TokenSecurityError(RuntimeError):
 _WINDOWS_ACL_TIMEOUT_SECONDS = 15
 _MAX_TOKEN_BYTES = 4096
 _TOKEN_PUBLICATION_TIMEOUT_SECONDS = 15
+_WINDOWS_ACL_STAGE_PREFIX = b"DICEPP_TOKEN_ACL_STAGE="
+_WINDOWS_ACL_STAGES = frozenset(
+    {
+        b"owner-allowlist",
+        b"dacl-apply",
+        b"post-owner",
+        b"inheritance",
+        b"ace-verification",
+    }
+)
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
     stat,
     "FILE_ATTRIBUTE_REPARSE_POINT",
@@ -29,64 +39,115 @@ _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
 
 _WINDOWS_ACL_SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
-$path = [Environment]::GetEnvironmentVariable('DICEPP_MANAGER_TOKEN_ACL_PATH', 'Process')
-if ([string]::IsNullOrWhiteSpace($path)) {
-    throw 'Manager API token path is missing'
+function Stop-TokenAclStage([string]$stage) {
+    [Console]::Error.WriteLine("DICEPP_TOKEN_ACL_STAGE=$stage")
+    exit 1
 }
-$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-if ($null -eq $identity.User) {
-    throw 'Unable to determine the current Windows user SID'
-}
-$system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-$administrators = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-$trustedOwnerSids = @($identity.User.Value, $system.Value, $administrators.Value)
-$existingAcl = [System.IO.File]::GetAccessControl($path)
-$owner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-# Windows service and elevated-hosted-runner accounts can create files owned by
-# LOCAL SYSTEM or BUILTIN\Administrators. Both principals are explicit full
-# control trustees below, so accepting either preserves the same trust boundary.
-if ($trustedOwnerSids -notcontains $owner.Value) {
-    throw 'Manager API token must be owned by a trusted Windows principal'
-}
-$acl = New-Object System.Security.AccessControl.FileSecurity
-$acl.SetAccessRuleProtection($true, $false)
-$allow = [System.Security.AccessControl.AccessControlType]::Allow
-$none = [System.Security.AccessControl.InheritanceFlags]::None
-$noPropagation = [System.Security.AccessControl.PropagationFlags]::None
-$modify = [System.Security.AccessControl.FileSystemRights]::Modify
-$fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity.User, $modify, $none, $noPropagation, $allow)))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, $fullControl, $none, $noPropagation, $allow)))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($administrators, $fullControl, $none, $noPropagation, $allow)))
-[System.IO.File]::SetAccessControl($path, $acl)
-$verifiedAcl = [System.IO.File]::GetAccessControl($path)
-$verifiedOwner = $verifiedAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-if ($trustedOwnerSids -notcontains $verifiedOwner.Value) {
-    throw 'Manager API token owner verification failed'
-}
-if (-not $verifiedAcl.AreAccessRulesProtected) {
-    throw 'Manager API token inheritance verification failed'
-}
-$expectedRules = @{
-    $identity.User.Value = [int]($modify -bor [System.Security.AccessControl.FileSystemRights]::Synchronize)
-    $system.Value = [int]$fullControl
-    $administrators.Value = [int]$fullControl
-}
-$observedRules = @{}
-foreach ($rule in $verifiedAcl.Access) {
-    $ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-    if ($rule.IsInherited -or $rule.AccessControlType -ne $allow -or -not $expectedRules.ContainsKey($ruleSid)) {
-        throw 'Manager API token access rule verification failed'
+
+try {
+    $path = [Environment]::GetEnvironmentVariable('DICEPP_MANAGER_TOKEN_ACL_PATH', 'Process')
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        Stop-TokenAclStage 'owner-allowlist'
     }
-    if ($observedRules.ContainsKey($ruleSid) -or [int]$rule.FileSystemRights -ne $expectedRules[$ruleSid]) {
-        throw 'Manager API token access rule verification failed'
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    if ($null -eq $identity.User) {
+        Stop-TokenAclStage 'owner-allowlist'
     }
-    $observedRules[$ruleSid] = $true
+    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+    $administrators = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $trustedOwnerSids = @($identity.User.Value, $system.Value, $administrators.Value)
+    $existingAcl = [System.IO.File]::GetAccessControl($path)
+    $owner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    # Windows service and elevated-hosted-runner accounts can create files owned by
+    # LOCAL SYSTEM or BUILTIN\Administrators. Both principals are explicit full
+    # control trustees below, so accepting either preserves the same trust boundary.
+    if ($trustedOwnerSids -notcontains $owner.Value) {
+        Stop-TokenAclStage 'owner-allowlist'
+    }
+} catch {
+    Stop-TokenAclStage 'owner-allowlist'
 }
-if ($observedRules.Count -ne $expectedRules.Count) {
-    throw 'Manager API token access rule verification failed'
+
+try {
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    $none = [System.Security.AccessControl.InheritanceFlags]::None
+    $noPropagation = [System.Security.AccessControl.PropagationFlags]::None
+    $modify = [System.Security.AccessControl.FileSystemRights]::Modify
+    $fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity.User, $modify, $none, $noPropagation, $allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, $fullControl, $none, $noPropagation, $allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($administrators, $fullControl, $none, $noPropagation, $allow)))
+    [System.IO.File]::SetAccessControl($path, $acl)
+} catch {
+    Stop-TokenAclStage 'dacl-apply'
+}
+
+try {
+    $verifiedAcl = [System.IO.File]::GetAccessControl($path)
+    $verifiedOwner = $verifiedAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($trustedOwnerSids -notcontains $verifiedOwner.Value) {
+        Stop-TokenAclStage 'post-owner'
+    }
+} catch {
+    Stop-TokenAclStage 'post-owner'
+}
+
+try {
+    if (-not $verifiedAcl.AreAccessRulesProtected) {
+        Stop-TokenAclStage 'inheritance'
+    }
+} catch {
+    Stop-TokenAclStage 'inheritance'
+}
+
+try {
+    $expectedRules = @{
+        $identity.User.Value = [int]($modify -bor [System.Security.AccessControl.FileSystemRights]::Synchronize)
+        $system.Value = [int]$fullControl
+        $administrators.Value = [int]$fullControl
+    }
+    $observedRules = @{}
+    foreach ($rule in $verifiedAcl.Access) {
+        $ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+        if ($rule.IsInherited -or $rule.AccessControlType -ne $allow -or -not $expectedRules.ContainsKey($ruleSid)) {
+            Stop-TokenAclStage 'ace-verification'
+        }
+        if ($observedRules.ContainsKey($ruleSid) -or [int]$rule.FileSystemRights -ne $expectedRules[$ruleSid]) {
+            Stop-TokenAclStage 'ace-verification'
+        }
+        $observedRules[$ruleSid] = $true
+    }
+    if ($observedRules.Count -ne $expectedRules.Count) {
+        Stop-TokenAclStage 'ace-verification'
+    }
+} catch {
+    Stop-TokenAclStage 'ace-verification'
 }
 """.strip()
+
+
+def _windows_acl_stage_from_output(*outputs: bytes | str | None) -> str | None:
+    """Return only an allowlisted stage marker from PowerShell output."""
+    for output in outputs:
+        if isinstance(output, str):
+            output = output.encode("ascii", errors="ignore")
+        if not isinstance(output, bytes):
+            continue
+        for line in output.splitlines():
+            if not line.startswith(_WINDOWS_ACL_STAGE_PREFIX):
+                continue
+            stage = line[len(_WINDOWS_ACL_STAGE_PREFIX) :]
+            if stage in _WINDOWS_ACL_STAGES:
+                return stage.decode("ascii")
+    return None
+
+
+def _windows_acl_error(stage: str) -> TokenSecurityError:
+    return TokenSecurityError(
+        f"Could not apply Windows ACL to Manager API token ({stage})"
+    )
 
 
 def _windows_directory(api_name: str) -> Path:
@@ -446,17 +507,25 @@ def _secure_token_file_windows(token_path: Path) -> None:
                 _WINDOWS_ACL_SCRIPT,
             ],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=_windows_acl_environment(token_path),
             timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
             shell=False,
             **_windows_hidden_subprocess_options(),
         )
+    except subprocess.TimeoutExpired:
+        raise _windows_acl_error("powershell-process-timeout") from None
     except Exception:
-        raise TokenSecurityError("Could not apply Windows ACL to Manager API token") from None
+        raise _windows_acl_error("powershell-process-failure") from None
     if result.returncode != 0:
-        raise TokenSecurityError("Could not apply Windows ACL to Manager API token")
+        stage = _windows_acl_stage_from_output(
+            getattr(result, "stderr", None),
+            getattr(result, "stdout", None),
+        )
+        if stage is None:
+            stage = f"powershell-return-code-{result.returncode}"
+        raise _windows_acl_error(stage)
 
 
 def _secure_token_file(token_path: Path) -> None:

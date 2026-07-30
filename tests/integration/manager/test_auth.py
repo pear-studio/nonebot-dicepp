@@ -223,8 +223,10 @@ def test_windows_acl_hardening_replaces_inherited_permissions(monkeypatch, tmp_p
     assert "FileSystemRights]::Modify" in script
     assert command[-1] == script
     assert kwargs["check"] is False
-    assert kwargs["stdout"] is subprocess.DEVNULL
-    assert kwargs["stderr"] is subprocess.DEVNULL
+    assert "Stop-TokenAclStage" in script
+    assert "DICEPP_TOKEN_ACL_STAGE=$stage" in script
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.PIPE
     assert kwargs["env"] == expected_environment
     assert kwargs["timeout"] == manager_auth._WINDOWS_ACL_TIMEOUT_SECONDS
     assert kwargs["shell"] is False
@@ -232,7 +234,21 @@ def test_windows_acl_hardening_replaces_inherited_permissions(monkeypatch, tmp_p
     assert kwargs["startupinfo"] is hidden_options["startupinfo"]
 
 
-def test_windows_acl_hardening_fails_closed(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "owner-allowlist",
+        "dacl-apply",
+        "post-owner",
+        "inheritance",
+        "ace-verification",
+    ],
+)
+def test_windows_acl_hardening_reports_only_allowlisted_stage(
+    monkeypatch,
+    tmp_path,
+    stage,
+):
     monkeypatch.setattr(
         manager_auth,
         "_windows_powershell_path",
@@ -258,16 +274,62 @@ def test_windows_acl_hardening_fails_closed(monkeypatch, tmp_path):
         "run",
         lambda *_args, **_kwargs: SimpleNamespace(
             returncode=1,
-            stdout="",
-            stderr="access denied",
+            stdout=b"a token must never appear in an error",
+            stderr=(
+                f"DICEPP_TOKEN_ACL_STAGE={stage}\n"
+                "a path must never appear in an error"
+            ).encode(),
         ),
     )
 
-    with pytest.raises(
-        manager_auth.TokenSecurityError,
-        match="^Could not apply Windows ACL to Manager API token$",
-    ):
+    with pytest.raises(manager_auth.TokenSecurityError) as error:
         manager_auth._secure_token_file_windows(tmp_path / "api-token")
+
+    assert str(error.value) == (
+        f"Could not apply Windows ACL to Manager API token ({stage})"
+    )
+
+
+def test_windows_acl_hardening_falls_back_to_return_code_without_output(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        manager_auth,
+        "_windows_powershell_path",
+        lambda: Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+    )
+    monkeypatch.setattr(
+        manager_auth,
+        "_windows_acl_environment",
+        lambda _path: {"DICEPP_MANAGER_TOKEN_ACL_PATH": str(_path)},
+    )
+    monkeypatch.setattr(
+        manager_auth,
+        "_windows_hidden_subprocess_options",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        manager_auth,
+        "_require_windows_regular_token_file",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        manager_auth.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=17,
+            stdout=b"DICEPP_TOKEN_ACL_STAGE=not-an-allowlisted-stage",
+            stderr=b"the token, path, and raw ACL must not be exposed",
+        ),
+    )
+
+    with pytest.raises(manager_auth.TokenSecurityError) as error:
+        manager_auth._secure_token_file_windows(tmp_path / "api-token")
+
+    assert str(error.value) == (
+        "Could not apply Windows ACL to Manager API token (powershell-return-code-17)"
+    )
 
 
 def test_windows_acl_hardening_timeout_fails_closed_without_output(monkeypatch, tmp_path):
@@ -299,11 +361,12 @@ def test_windows_acl_hardening_timeout_fails_closed_without_output(monkeypatch, 
         ),
     )
 
-    with pytest.raises(
-        manager_auth.TokenSecurityError,
-        match="^Could not apply Windows ACL to Manager API token$",
-    ):
+    with pytest.raises(manager_auth.TokenSecurityError) as error:
         manager_auth._secure_token_file_windows(tmp_path / "api-token")
+
+    assert str(error.value) == (
+        "Could not apply Windows ACL to Manager API token (powershell-process-timeout)"
+    )
 
 
 def test_windows_acl_hardening_unexpected_subprocess_failure_fails_closed(
@@ -338,11 +401,28 @@ def test_windows_acl_hardening_unexpected_subprocess_failure_fails_closed(
         ),
     )
 
-    with pytest.raises(
-        manager_auth.TokenSecurityError,
-        match="^Could not apply Windows ACL to Manager API token$",
-    ):
+    with pytest.raises(manager_auth.TokenSecurityError) as error:
         manager_auth._secure_token_file_windows(tmp_path / "api-token")
+
+    assert str(error.value) == (
+        "Could not apply Windows ACL to Manager API token (powershell-process-failure)"
+    )
+
+
+def test_windows_acl_stage_parser_rejects_unknown_or_embedded_output():
+    assert (
+        manager_auth._windows_acl_stage_from_output(
+            b"untrusted output\nDICEPP_TOKEN_ACL_STAGE=inheritance\nsecret token"
+        )
+        == "inheritance"
+    )
+    assert (
+        manager_auth._windows_acl_stage_from_output(
+            b"DICEPP_TOKEN_ACL_STAGE=owner-allowlist:C:\\sensitive-path",
+            b"DICEPP_TOKEN_ACL_STAGE=not-a-stage",
+        )
+        is None
+    )
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows reparse-point policy")
