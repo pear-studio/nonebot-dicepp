@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import sqlite3
+import stat
 import subprocess
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from types import MethodType, SimpleNamespace
 
 import pytest
 
+import dicepp_manager.upgrade as manager_upgrade
 from dicepp_data import DATA_CATALOG, InstanceLayout
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
 from dicepp_manager.models import ManagerOperation
@@ -1817,6 +1819,49 @@ def test_windows_guard_cache_prune_unlinks_symlink_without_following(
     assert not link.is_symlink()
     assert (outside / "keep.txt").read_text(encoding="utf-8") == "safe"
     assert (adapter.guard_runtime_dir / ("a" * 64)).is_dir()
+
+
+def test_windows_guard_cache_prune_removes_directory_reparse_without_recursing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Older Python versions must identify junctions without Path.is_junction."""
+    adapter = _guard_cache_adapter(tmp_path)
+    _seed_guard_cache(adapter, "a" * 64)
+    reparse_dir = adapter.guard_runtime_dir / ("b" * 64)
+    reparse_dir.mkdir()
+    (reparse_dir / "must-not-be-recursed").write_text("safe", encoding="utf-8")
+    original_lstat = manager_upgrade.os.lstat
+
+    def lstat(path):
+        if Path(path) == reparse_dir:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o755,
+                st_file_attributes=(
+                    manager_upgrade._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    | manager_upgrade._WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+                ),
+            )
+        return original_lstat(path)
+
+    removed_directories: list[Path] = []
+    monkeypatch.setattr(manager_upgrade.os, "lstat", lstat)
+    monkeypatch.setattr(
+        manager_upgrade.os,
+        "rmdir",
+        lambda path: removed_directories.append(Path(path)),
+    )
+    monkeypatch.setattr(
+        manager_upgrade.shutil,
+        "rmtree",
+        lambda _path: pytest.fail("a directory reparse point must not recurse"),
+    )
+
+    removed = adapter.prune_external_guard_cache("a" * 64)
+
+    assert removed == ["b" * 64]
+    assert removed_directories == [reparse_dir]
+    assert (reparse_dir / "must-not-be-recursed").read_text(encoding="utf-8") == "safe"
 
 
 def test_guard_cache_prune_waits_for_recoverable_journals(tmp_path: Path):

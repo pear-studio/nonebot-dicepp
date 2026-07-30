@@ -459,7 +459,8 @@ def _secure_token_file(token_path: Path) -> None:
         _secure_token_file_posix(token_path)
 
 
-def _write_new_token(token_path: Path, token: str) -> None:
+def _prepare_new_token(token_path: Path, token: str) -> Path:
+    """Write a private token to a hardened staging file in its final directory."""
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{token_path.name}.",
         suffix=".tmp",
@@ -467,7 +468,6 @@ def _write_new_token(token_path: Path, token: str) -> None:
         text=True,
     )
     temporary = Path(temporary_name)
-    replaced = False
     try:
         # Harden the empty temporary file before its secret is written.  On
         # Windows this removes any directory-inherited read permissions.
@@ -485,12 +485,22 @@ def _write_new_token(token_path: Path, token: str) -> None:
             handle.write(token + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        return temporary
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _write_new_token(token_path: Path, token: str) -> None:
+    temporary = _prepare_new_token(token_path, token)
+    replaced = False
+    try:
         os.replace(temporary, token_path)
         replaced = True
         _secure_token_file(token_path)
     except Exception:
-        if descriptor >= 0:
-            os.close(descriptor)
         if not replaced:
             temporary.unlink(missing_ok=True)
         # The temporary file is hardened before the token is written, so an
@@ -500,39 +510,97 @@ def _write_new_token(token_path: Path, token: str) -> None:
         raise
 
 
-def ensure_api_token(path: str | os.PathLike[str]) -> str:
+def _create_new_token_exclusively(token_path: Path, token: str) -> bool:
+    """Publish a staged token only when no peer has created one first.
+
+    ``os.link`` is an atomic create-if-absent operation on both supported
+    platforms.  It lets two independently started Bot/Manager processes
+    converge on one control credential without ever replacing a peer's token.
+    The staging inode was secured before its secret was written, and the
+    destination is verified again after publication.
+    """
+    temporary = _prepare_new_token(token_path, token)
+    published = False
+    try:
+        try:
+            os.link(temporary, token_path)
+        except FileExistsError:
+            return False
+        except OSError as exc:
+            raise TokenSecurityError(
+                "Could not atomically create private token"
+            ) from exc
+        published = True
+        temporary.unlink()
+        _secure_token_file(token_path)
+        return True
+    finally:
+        if not published:
+            temporary.unlink(missing_ok=True)
+
+
+def ensure_private_token(
+    path: str | os.PathLike[str],
+    *,
+    token_bytes: int = 48,
+    min_length: int = 32,
+    exclusive_create: bool = False,
+) -> str:
+    """Read or create a private token using the platform-safe file policy.
+
+    Callers that share a credential across independently launched processes
+    set ``exclusive_create`` so startup order cannot make them return different
+    newly generated tokens.
+    """
     token_path = Path(path)
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    if os.name != "nt":
-        token = _read_secured_token_posix(token_path)
-        if token is not None and len(token) >= 32:
+    while True:
+        existing_token = False
+        if os.name != "nt":
+            token = _read_secured_token_posix(token_path)
+            if token is not None and len(token) >= min_length:
+                return token
+            existing_token = token is not None
+        elif _windows_regular_token_exists(token_path):
+            _secure_token_file(token_path)
+            try:
+                token = _read_token_windows(token_path)
+            except FileNotFoundError as exc:
+                raise TokenSecurityError("Manager API token is unavailable") from exc
+            if len(token) >= min_length:
+                return token
+            existing_token = True
+
+        if exclusive_create and existing_token:
+            raise TokenSecurityError("Private token is invalid")
+
+        token = secrets.token_urlsafe(token_bytes)
+        if not exclusive_create:
+            _write_new_token(token_path, token)
             return token
-        token = secrets.token_urlsafe(48)
-        _write_new_token(token_path, token)
-        return token
-    if _windows_regular_token_exists(token_path):
-        _secure_token_file(token_path)
-        try:
-            token = _read_token_windows(token_path)
-        except FileNotFoundError as exc:
-            raise TokenSecurityError("Manager API token is unavailable") from exc
-        if len(token) >= 32:
+        if _create_new_token_exclusively(token_path, token):
             return token
-    token = secrets.token_urlsafe(48)
-    _write_new_token(token_path, token)
-    return token
 
 
-def read_api_token(path: str | os.PathLike[str]) -> str:
+def read_private_token(path: str | os.PathLike[str]) -> str:
+    """Read a private token through the platform-safe no-follow reader."""
     try:
         token_path = Path(path)
-        token = (
+        return (
             _read_token_windows(token_path)
             if os.name == "nt"
             else _read_token_posix_readonly(token_path)
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError("Manager API token is unavailable") from exc
+
+
+def ensure_api_token(path: str | os.PathLike[str]) -> str:
+    return ensure_private_token(path)
+
+
+def read_api_token(path: str | os.PathLike[str]) -> str:
+    token = read_private_token(path)
     if not token:
         raise ValueError("Manager API token is empty")
     return token

@@ -99,10 +99,6 @@ jobs:
             docker rm -f dicepp-dashboard-smoke
             exit 1
           fi
-          docker cp scripts/smoke_dashboard_control_channel.py \
-            dicepp-dashboard-smoke:/tmp/smoke_dashboard_control_channel.py
-          docker exec dicepp-dashboard-smoke \
-            python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-smoke
 
       - name: Login to GHCR

@@ -297,6 +297,28 @@ def _canonicalize_model_dict(
     return canonical
 
 
+def canonicalize_config_layer(
+    raw: Dict[str, Any],
+    *,
+    fill_missing_defaults: bool,
+    path: Path | None = None,
+) -> Dict[str, Any]:
+    """Return one runtime config layer's canonical form without writing files.
+
+    This is the validation half of :class:`ConfigLoader`'s layer handling.
+    Callers that need to check a prospective configuration (such as the
+    Manager API) can use it with the same in-memory legacy migration but
+    without file persistence.  It preserves the runtime rule that unknown
+    critical-looking fields are rejected rather than silently ignored.
+    """
+    return _canonicalize_model_dict(
+        BotConfig,
+        _migrate_legacy_log_web_config(raw),
+        path=path if path is not None else Path("<in-memory configuration>"),
+        fill_missing_defaults=fill_missing_defaults,
+    )
+
+
 def _canonicalize_field_value(
     annotation: Any,
     value: Any,
@@ -510,8 +532,7 @@ class ConfigLoader:
     ) -> Dict[str, Any]:
         if not can_rewrite:
             return raw
-        canonical = _canonicalize_model_dict(
-            BotConfig,
+        canonical = canonicalize_config_layer(
             raw,
             path=path,
             fill_missing_defaults=fill_missing_defaults,

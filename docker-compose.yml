@@ -100,8 +100,9 @@ services:
       - ./config:/app/config:ro
       # 运行时数据：只读
       - ./data:/app/data:ro
-      # 内容资源：只读
-      - ./content:/app/content:ro
+      # 同一用户内容工作区：仅认证后的 Persona 角色卡路由可直接写入。
+      # 不提供通用内容写入接口，也不经 Manager 代理。
+      - ./content:/app/content:rw
       # Dashboard 运行时数据（可写，例如 session key）
       - ./dashboard/data:/app/dashboard/data
       # Manager 生成的内部 API token；Dashboard 只能读取

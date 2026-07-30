@@ -161,13 +161,22 @@ def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
     assert "4091" in services["manager"]["expose"]
     assert "/var/run/docker.sock:/var/run/docker.sock" in services["manager"]["volumes"]
     assert "./docker-compose.yml:/app/docker-compose.yml:ro" in services["manager"]["volumes"]
-    assert not any("docker.sock" in volume for volume in services["dashboard"]["volumes"])
+    dashboard_volumes = services["dashboard"]["volumes"]
+    assert "./config:/app/config:ro" in dashboard_volumes
+    assert "./data:/app/data:ro" in dashboard_volumes
+    assert "./content:/app/content:rw" in dashboard_volumes
+    assert "./manager/state:/app/manager/state:ro" in dashboard_volumes
+    assert not any("docker.sock" in volume for volume in dashboard_volumes)
     assert "manager-net" in services["manager"]["networks"]
     assert "manager-net" in services["dashboard"]["networks"]
     assert "manager-net" in services["bot"]["networks"]
     assert "./manager/control:/app/manager/control:ro" in services["bot"]["volumes"]
     assert not any(
-        "manager/control" in volume for volume in services["dashboard"]["volumes"]
+        "manager/control" in volume for volume in dashboard_volumes
+    )
+    assert not any(
+        "manager/state" in volume and not volume.endswith(":ro")
+        for volume in dashboard_volumes
     )
     assert "depends_on" not in services["manager"]
     assert services["dashboard"]["depends_on"]["manager"]["condition"] == "service_healthy"

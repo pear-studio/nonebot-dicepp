@@ -117,6 +117,20 @@ def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
     )
 
 
+def test_dashboard_image_smokes_only_dashboard_health_not_the_manager_control_channel():
+    ci_smoke = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Dashboard image"
+    )["run"]
+    release_smoke = _workflow_step(
+        RELEASE_WORKFLOW, "build-docker", "Smoke test Dashboard image"
+    )["run"]
+
+    for script in (ci_smoke, release_smoke):
+        assert "/api/auth/status" in script
+        assert "smoke_dashboard_control_channel" not in script
+        assert "/ws/control" not in script
+
+
 def test_release_bot_image_smoke_preflights_local_tag_without_network():
     image = "ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
     build = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Build image (local only)")

@@ -83,7 +83,7 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 |---|---|---|
 | `bot` | 承载一个可以包含多个 QQ 账号的 RuntimeUnit | 不映射；在 `dice-net` 暴露 `8080` |
 | `dashboard` | 用户登录、配置和操作界面 | `4090` |
-| `manager` | RuntimeUnit 生命周期、operation 和维护操作 | 不映射；只在内部网络暴露 `4091` |
+| `manager` | RuntimeUnit 生命周期、operation 和维护操作 | `127.0.0.1:4091`（仅本机，不向公网暴露） |
 
 `bot` 服务由 Compose 显式设置 `DICEPP_ONEBOT_HOST=0.0.0.0`，监听全部网卡——NapCat/LLOneBot 作为独立容器经 `ws://dicepp:8080/onebot/v11/ws` 跨容器连入，这是硬性要求，行为与既往版本一致。（未设置该环境变量的非 Docker 场景，如 Windows 桌面版，默认只监听 `127.0.0.1`。）
 
@@ -99,15 +99,16 @@ service、volume 和 network 拓扑；它不会修改或替换该文件。
 ~/dicepp/
 ├─ config/            # DicePP 配置
 ├─ data/              # 运行数据
-├─ content/           # 用户内容
+├─ content/           # 同一用户工作区（Bot 读取；Dashboard Persona 角色卡和本机 Agent 可直接编辑）
 ├─ dashboard/data/    # Dashboard 账号与会话
 └─ manager/
    ├─ state/          # token、operation store、维护状态
+   ├─ control/        # 仅 Bot 与 Manager 共享的控制凭据
    ├─ packages/       # 后续版本下载缓存
    └─ backups/        # 用户归档与事务安全归档
 ```
 
-Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
+Manager 对 `config/`、`data/` 和 `manager/` 读写；`content/` 是同一用户的共享工作区，Bot 读取，Dashboard 的认证 Persona 角色卡路由和同机 Agent 可直接编辑。Dashboard 对 `config/`、`data/` 只读，只读获取 Manager API token，不挂载 `manager/control`、可写 Manager state 或 Docker Socket。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
 
 ## 从 GitHub Release 使用 Linux 发布包
 

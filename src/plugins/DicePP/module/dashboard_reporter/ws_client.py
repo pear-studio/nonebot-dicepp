@@ -143,12 +143,10 @@ class ControlChannelClient:
         if owner_loop.is_closed():
             return
         try:
-            if owner_loop.is_running():
-                owner_loop.call_soon_threadsafe(task.cancel)
-            else:
-                # The loop owner may resume later (for example a launcher
-                # shutdown sequence).  Do not drive or await it here.
-                task.cancel()
+            # Even when the owner loop is temporarily stopped, a Task belongs
+            # to that loop until it closes.  Queue cancellation there so the
+            # owner can process it when its shutdown sequence resumes.
+            owner_loop.call_soon_threadsafe(task.cancel)
         except RuntimeError:
             # The owner loop can close between the state check and scheduling.
             pass
