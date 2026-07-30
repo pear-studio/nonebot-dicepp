@@ -739,7 +739,6 @@ class ArchiveCoordinator:
         self.store.ensure_schema()
         config = self._validate_config()
         runtime = await self._wait_runtime_healthy(expected_running)
-        dashboard = await self._run_probe(self.dashboard_probe, "dashboard")
         control_skip_reason = _CONTROL_GATE_SKIP_REASONS.get(control_gate)
         if expected_running and control_skip_reason is None:
             control = await self._run_probe(
