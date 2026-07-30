@@ -11,7 +11,7 @@ import dicepp_manager.auth as manager_auth
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
-def test_windows_token_acl_allows_only_current_user_system_and_administrators(
+def test_windows_token_acl_removes_inheritance_and_allows_only_trusted_sids(
     tmp_path,
 ):
     token_path = tmp_path / "manager" / "state" / "api-token"
@@ -50,7 +50,7 @@ $acl.Access | ForEach-Object {
     assert token_path.read_text(encoding="utf-8").strip() == token
     assert lines[0].startswith("CURRENT|")
     current_sid = lines[0].split("|", maxsplit=1)[1]
-    assert lines[1] == f"OWNER|{current_sid}"
+    owner_sid = lines[1].split("|", maxsplit=1)[1]
     assert lines[2] == "PROTECTED|True"
     rules = {
         sid: (rights, access_type, inherited)
@@ -58,8 +58,17 @@ $acl.Access | ForEach-Object {
             line.split("|", maxsplit=4) for line in lines[3:]
         )
     }
-    assert set(rules) == {current_sid, "S-1-5-18", "S-1-5-32-544"}
-    assert rules["S-1-5-18"] == ("FullControl", "Allow", "False")
-    assert rules["S-1-5-32-544"] == ("FullControl", "Allow", "False")
-    assert "Modify" in rules[current_sid][0]
-    assert rules[current_sid][1:] == ("Allow", "False")
+    system_sid = "S-1-5-18"
+    administrators_sid = "S-1-5-32-544"
+    trusted_sids = {current_sid, system_sid, administrators_sid}
+    expected_rules = {
+        current_sid: ("Modify", "Allow", "False"),
+        system_sid: ("FullControl", "Allow", "False"),
+        administrators_sid: ("FullControl", "Allow", "False"),
+    }
+
+    assert owner_sid in trusted_sids
+    assert set(rules) == set(expected_rules)
+    for sid, (right, access_type, inherited) in expected_rules.items():
+        assert right in rules[sid][0]
+        assert rules[sid][1:] == (access_type, inherited)

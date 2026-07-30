@@ -37,10 +37,16 @@ $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 if ($null -eq $identity.User) {
     throw 'Unable to determine the current Windows user SID'
 }
+$system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+$administrators = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+$trustedOwnerSids = @($identity.User.Value, $system.Value, $administrators.Value)
 $existingAcl = [System.IO.File]::GetAccessControl($path)
 $owner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-if (-not $owner.Equals($identity.User)) {
-    throw 'Manager API token must be owned by the current Windows user'
+# Windows service and elevated-hosted-runner accounts can create files owned by
+# LOCAL SYSTEM or BUILTIN\Administrators. Both principals are explicit full
+# control trustees below, so accepting either preserves the same trust boundary.
+if ($trustedOwnerSids -notcontains $owner.Value) {
+    throw 'Manager API token must be owned by a trusted Windows principal'
 }
 $acl = New-Object System.Security.AccessControl.FileSecurity
 $acl.SetAccessRuleProtection($true, $false)
@@ -49,15 +55,13 @@ $none = [System.Security.AccessControl.InheritanceFlags]::None
 $noPropagation = [System.Security.AccessControl.PropagationFlags]::None
 $modify = [System.Security.AccessControl.FileSystemRights]::Modify
 $fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
-$system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-$administrators = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity.User, $modify, $none, $noPropagation, $allow)))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, $fullControl, $none, $noPropagation, $allow)))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($administrators, $fullControl, $none, $noPropagation, $allow)))
 [System.IO.File]::SetAccessControl($path, $acl)
 $verifiedAcl = [System.IO.File]::GetAccessControl($path)
 $verifiedOwner = $verifiedAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-if (-not $verifiedOwner.Equals($identity.User)) {
+if ($trustedOwnerSids -notcontains $verifiedOwner.Value) {
     throw 'Manager API token owner verification failed'
 }
 if (-not $verifiedAcl.AreAccessRulesProtected) {

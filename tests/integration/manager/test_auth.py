@@ -215,9 +215,12 @@ def test_windows_acl_hardening_replaces_inherited_permissions(monkeypatch, tmp_p
     script = command[4]
     assert "$acl.SetAccessRuleProtection($true, $false)" in script
     assert "$existingAcl.GetOwner" in script
-    assert "FileSystemRights]::Modify" in script
+    assert "$trustedOwnerSids" in script
+    assert "$trustedOwnerSids -notcontains $owner.Value" in script
+    assert "$trustedOwnerSids -notcontains $verifiedOwner.Value" in script
     assert "S-1-5-18" in script
     assert "S-1-5-32-544" in script
+    assert "FileSystemRights]::Modify" in script
     assert command[-1] == script
     assert kwargs["check"] is False
     assert kwargs["stdout"] is subprocess.DEVNULL
