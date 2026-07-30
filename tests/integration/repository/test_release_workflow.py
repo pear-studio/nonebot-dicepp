@@ -117,18 +117,41 @@ def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
     )
 
 
-def test_dashboard_image_smokes_only_dashboard_health_not_the_manager_control_channel():
+def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_channel():
     ci_smoke = _workflow_step(
         TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Dashboard image"
     )["run"]
     release_smoke = _workflow_step(
         RELEASE_WORKFLOW, "build-docker", "Smoke test Dashboard image"
     )["run"]
+    ci_manager_smoke = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Manager image"
+    )["run"]
+    release_manager_smoke = _workflow_step(
+        RELEASE_WORKFLOW, "build-docker", "Smoke test Manager image"
+    )["run"]
 
     for script in (ci_smoke, release_smoke):
         assert "/api/auth/status" in script
         assert "smoke_dashboard_control_channel" not in script
         assert "/ws/control" not in script
+
+    for script in (ci_manager_smoke, release_manager_smoke):
+        assert "python -m dicepp_manager" in script
+        assert "dicepp-manager-smoke" in script
+        assert "DICEPP_MANAGER_RELEASE_SCHEDULER=false" in script
+        assert "/app/manager/state/api-token" in script
+        assert "Authorization: Bearer $token" in script
+        assert "http://127.0.0.1:4091/v1/health" in script
+        assert "smoke_dashboard_control_channel" not in script
+        assert "/ws/control" not in script
+
+    ci_cleanup = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Clean up image smoke resources"
+    )["run"]
+    assert "dicepp-manager-smoke" in ci_cleanup
+    assert "docker volume rm -f dicepp-manager-smoke" in ci_cleanup
+    assert "trap cleanup EXIT" in release_manager_smoke
 
 
 def test_release_bot_image_smoke_preflights_local_tag_without_network():

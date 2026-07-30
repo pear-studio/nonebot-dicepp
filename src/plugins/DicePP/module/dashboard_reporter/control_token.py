@@ -13,7 +13,6 @@ from dicepp_manager.auth import (
     read_private_token,
 )
 
-
 def _layout_for(project_root: Path) -> InstanceLayout:
     return InstanceLayout.from_root(Path(project_root).expanduser().resolve())
 
@@ -24,9 +23,22 @@ def token_path(project_root: Path) -> Path:
 
 
 def ensure_token(project_root: Path) -> str:
-    """Read or atomically bootstrap the dedicated, private control credential."""
+    """Read a safe existing token before performing Manager-side recovery.
+
+    A Bot consumes the Manager-owned file through a read-only bind mount.  Its
+    normal path must therefore not use the securing writer merely to read an
+    already-safe token.  Missing or unsafe tokens still take the owner path so
+    source-mode simultaneous Bot/Manager startup converges on one credential.
+    """
+    path = token_path(project_root)
+    try:
+        token = read_private_token(path)
+    except (FileNotFoundError, TokenSecurityError):
+        token = None
+    if token:
+        return token
     return ensure_private_token(
-        token_path(project_root),
+        path,
         token_bytes=32,
         min_length=1,
         exclusive_create=True,

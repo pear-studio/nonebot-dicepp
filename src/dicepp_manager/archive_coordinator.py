@@ -850,7 +850,10 @@ class ArchiveCoordinator:
                 "status": "warning",
                 "message": "health probe is not configured",
             }
-        result = await asyncio.to_thread(probe)
+        if inspect.iscoroutinefunction(probe):
+            result = await probe()
+        else:
+            result = await asyncio.to_thread(probe)
         if inspect.isawaitable(result):
             result = await result
         if isinstance(result, dict):

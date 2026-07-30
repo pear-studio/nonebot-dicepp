@@ -58,6 +58,10 @@ class ControlChannelService:
         self.reload_timeout = reload_timeout
         self.ping_interval = ping_interval
         self._states: dict[str, _BotState] = {}
+        # Sync archive probes run in a worker so they must never traverse the
+        # event-loop-owned session map.  This scalar is updated by the loop
+        # whenever a current session reports a heartbeat.
+        self._latest_heartbeat: float | None = None
         self._pending_reload: dict[str, asyncio.Future[dict]] = {}
         self._reload_locks: dict[str, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
@@ -96,18 +100,13 @@ class ControlChannelService:
 
     def probe(self) -> dict:
         """Provide the archive/upgrade hard-health view without Dashboard I/O."""
-        heartbeats = [
-            state.last_heartbeat
-            for state in self._states.values()
-            if state.last_heartbeat is not None
-        ]
-        if not heartbeats:
+        latest = self._latest_heartbeat
+        if latest is None:
             return {
                 "ok": False,
                 "status": "failed",
                 "message": "No Bot control heartbeat",
             }
-        latest = max(heartbeats)
         age = max(0.0, time.time() - latest)
         return {
             "ok": age <= self.heartbeat_timeout,
@@ -266,7 +265,10 @@ class ControlChannelService:
             state = self._states.get(bot_id)
             if state is None or state.websocket is not ws:
                 return
-            state.last_heartbeat = time.time()
+            heartbeat = time.time()
+            state.last_heartbeat = heartbeat
+            if self._latest_heartbeat is None or heartbeat > self._latest_heartbeat:
+                self._latest_heartbeat = heartbeat
             if isinstance(version, str):
                 state.version = version
 

@@ -63,10 +63,15 @@ class ControlChannelClient:
 
     Usage::
 
+        from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+
+        token = ensure_token(project_root)
         client = ControlChannelClient(
             bot_id="123456",
             manager_url="ws://manager:4091/v1/control/ws",
-            token="token-from-data-dicepp-db",
+            # This is manager/control/control-token, not the Manager HTTP
+            # api-token or the legacy data/dicepp.db value.
+            token=token,
             on_reload=bot.reload_config,
         )
         await client.connect()

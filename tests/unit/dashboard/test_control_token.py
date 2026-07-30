@@ -1,11 +1,13 @@
 """Dedicated Bot↔Manager credential boundary tests."""
 
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import os
 import stat
 
 import pytest
 from dicepp_data import InstanceLayout
+import dicepp_manager.auth as manager_auth
 from dicepp_manager.auth import TokenSecurityError
 from plugins.DicePP.core.data.schema import DicePPDatabase
 from plugins.DicePP.module.dashboard_reporter.control_token import (
@@ -36,6 +38,26 @@ def test_control_token_bootstrap_converges_for_bot_and_manager_start_race(tmp_pa
     assert read_token(tmp_path) == tokens[0]
 
 
+def test_control_token_bootstrap_converges_without_hardlink_support(
+    monkeypatch,
+    tmp_path,
+):
+    """An O_EXCL fallback must preserve one token for concurrent starters."""
+    monkeypatch.setattr(
+        manager_auth.os,
+        "link",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(errno.EOPNOTSUPP, "hardlinks are unsupported")
+        ),
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        tokens = list(executor.map(lambda _index: ensure_token(tmp_path), range(8)))
+
+    assert len(set(tokens)) == 1
+    assert read_token(tmp_path) == tokens[0]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode policy")
 def test_control_token_hardens_existing_file_for_deployment_user(tmp_path):
     path = token_path(tmp_path)
@@ -48,6 +70,32 @@ def test_control_token_hardens_existing_file_for_deployment_user(tmp_path):
     assert ensure_token(tmp_path) == "control-token"
 
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor policy")
+def test_control_token_reads_safe_existing_file_without_write_access(
+    monkeypatch,
+    tmp_path,
+):
+    """A Bot consumer must not chmod or create inside its read-only mount."""
+    token = ensure_token(tmp_path)
+    original_open = manager_auth.os.open
+
+    def readonly_open(path, flags, *args, **kwargs):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
+            raise OSError(errno.EROFS, "read-only file system", str(path))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(manager_auth.os, "open", readonly_open)
+    monkeypatch.setattr(
+        manager_auth.os,
+        "fchmod",
+        lambda *_args: (_ for _ in ()).throw(
+            OSError(errno.EROFS, "read-only file system")
+        ),
+    )
+
+    assert ensure_token(tmp_path) == token
 
 
 def test_control_token_rejects_symlink_without_reading_target(tmp_path):

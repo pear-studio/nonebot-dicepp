@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import errno
 import os
 import secrets
 import stat
@@ -10,6 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from filelock import FileLock, Timeout as FileLockTimeout
 
 class TokenSecurityError(RuntimeError):
     """The Manager API token cannot be kept private on this host."""
@@ -17,6 +19,7 @@ class TokenSecurityError(RuntimeError):
 
 _WINDOWS_ACL_TIMEOUT_SECONDS = 15
 _MAX_TOKEN_BYTES = 4096
+_TOKEN_PUBLICATION_TIMEOUT_SECONDS = 15
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
     stat,
     "FILE_ATTRIBUTE_REPARSE_POINT",
@@ -527,6 +530,8 @@ def _create_new_token_exclusively(token_path: Path, token: str) -> bool:
         except FileExistsError:
             return False
         except OSError as exc:
+            if _hardlinks_unsupported(exc):
+                return _publish_staged_token_with_lock(token_path, temporary)
             raise TokenSecurityError(
                 "Could not atomically create private token"
             ) from exc
@@ -537,6 +542,69 @@ def _create_new_token_exclusively(token_path: Path, token: str) -> bool:
     finally:
         if not published:
             temporary.unlink(missing_ok=True)
+
+
+def _hardlinks_unsupported(exc: OSError) -> bool:
+    """Return whether this filesystem cannot publish a token via hardlink."""
+    unsupported_errnos = {errno.EOPNOTSUPP, errno.ENOTSUP}
+    return (
+        exc.errno in unsupported_errnos
+        or getattr(exc, "winerror", None) == 50  # ERROR_NOT_SUPPORTED
+    )
+
+
+def _token_publication_lock_path(token_path: Path) -> Path:
+    """Return the lock that serializes no-hardlink token publication."""
+    return token_path.with_name(f".{token_path.name}.publish.lock")
+
+
+def _regular_token_exists_without_following(token_path: Path) -> bool:
+    """Check whether a final token already exists without accepting links."""
+    try:
+        metadata = os.lstat(token_path)
+    except FileExistsError:
+        # ``lstat`` does not normally use this, but keep the publication
+        # decision fail-closed on platforms that surface it this way.
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise TokenSecurityError(
+            "Private token is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or getattr(metadata, "st_file_attributes", 0)
+        & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise TokenSecurityError("Private token must be a regular file")
+    return True
+
+
+def _publish_staged_token_with_lock(token_path: Path, temporary: Path) -> bool:
+    """Publish a complete staged token when hardlinks are unsupported.
+
+    An OS-backed lock elects one publisher.  That publisher writes and fsyncs
+    the secret in a hardened temporary file *before* replacing the final path;
+    other processes wait for the lock and then re-read the fully published
+    token.  No consumer can observe a non-empty prefix at ``token_path``.
+    """
+    lock = FileLock(str(_token_publication_lock_path(token_path)))
+    try:
+        lock.acquire(timeout=_TOKEN_PUBLICATION_TIMEOUT_SECONDS)
+    except FileLockTimeout as exc:
+        raise TokenSecurityError(
+            "Timed out waiting for private token publication"
+        ) from exc
+
+    try:
+        if _regular_token_exists_without_following(token_path):
+            return False
+        os.replace(temporary, token_path)
+        _secure_token_file(token_path)
+        return True
+    finally:
+        lock.release()
 
 
 def ensure_private_token(
