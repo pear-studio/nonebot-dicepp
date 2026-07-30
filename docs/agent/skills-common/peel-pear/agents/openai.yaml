@@ -1,0 +1,6 @@
+interface:
+  display_name: "Peel Pear"
+  short_description: "逐步补齐用户看懂当前讨论和参与决策所需的背景、概念与上下文"
+  default_prompt: "使用 $peel-pear 帮我从最基础的一层逐步看懂当前讨论。"
+policy:
+  allow_implicit_invocation: false
