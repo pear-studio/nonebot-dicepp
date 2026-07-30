@@ -195,7 +195,7 @@ jobs:
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
           DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
-          uv run pytest tests/system/package/windows/test_windows_package_playwright.py --tb=short -q
+          uv run pytest tests/system/package/windows/test_windows_package_playwright.py -n0 --tb=short -q
       - name: Package artifact
         shell: pwsh
         run: |
