@@ -7,27 +7,25 @@ import errno
 import os
 import secrets
 import stat
-import subprocess
 import tempfile
 from pathlib import Path
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
+
 class TokenSecurityError(RuntimeError):
     """The Manager API token cannot be kept private on this host."""
 
 
-_WINDOWS_ACL_TIMEOUT_SECONDS = 15
 _MAX_TOKEN_BYTES = 4096
 _TOKEN_PUBLICATION_TIMEOUT_SECONDS = 15
-_WINDOWS_ACL_STAGE_PREFIX = b"DICEPP_TOKEN_ACL_STAGE="
 _WINDOWS_ACL_STAGES = frozenset(
     {
-        b"owner-allowlist",
-        b"dacl-apply",
-        b"post-owner",
-        b"inheritance",
-        b"ace-verification",
+        "owner-allowlist",
+        "dacl-apply",
+        "post-owner",
+        "inheritance",
+        "ace-verification",
     }
 )
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
@@ -37,160 +35,20 @@ _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
 )
 
 
-_WINDOWS_ACL_SCRIPT = r"""
-$ErrorActionPreference = 'Stop'
-function Stop-TokenAclStage([string]$stage) {
-    [Console]::Error.WriteLine("DICEPP_TOKEN_ACL_STAGE=$stage")
-    exit 1
-}
+class _WindowsAclStageError(RuntimeError):
+    """A fixed, non-sensitive reason why Windows ACL hardening failed."""
 
-try {
-    $path = [Environment]::GetEnvironmentVariable('DICEPP_MANAGER_TOKEN_ACL_PATH', 'Process')
-    if ([string]::IsNullOrWhiteSpace($path)) {
-        Stop-TokenAclStage 'owner-allowlist'
-    }
-    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-    if ($null -eq $identity.User) {
-        Stop-TokenAclStage 'owner-allowlist'
-    }
-    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-    $administrators = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-    $trustedOwnerSids = @($identity.User.Value, $system.Value, $administrators.Value)
-    $existingAcl = [System.IO.File]::GetAccessControl($path)
-    $owner = $existingAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-    # Windows service and elevated-hosted-runner accounts can create files owned by
-    # LOCAL SYSTEM or BUILTIN\Administrators. Both principals are explicit full
-    # control trustees below, so accepting either preserves the same trust boundary.
-    if ($trustedOwnerSids -notcontains $owner.Value) {
-        Stop-TokenAclStage 'owner-allowlist'
-    }
-} catch {
-    Stop-TokenAclStage 'owner-allowlist'
-}
-
-try {
-    $acl = New-Object System.Security.AccessControl.FileSecurity
-    $acl.SetAccessRuleProtection($true, $false)
-    $allow = [System.Security.AccessControl.AccessControlType]::Allow
-    $none = [System.Security.AccessControl.InheritanceFlags]::None
-    $noPropagation = [System.Security.AccessControl.PropagationFlags]::None
-    $modify = [System.Security.AccessControl.FileSystemRights]::Modify
-    $fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($identity.User, $modify, $none, $noPropagation, $allow)))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, $fullControl, $none, $noPropagation, $allow)))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($administrators, $fullControl, $none, $noPropagation, $allow)))
-    [System.IO.File]::SetAccessControl($path, $acl)
-} catch {
-    Stop-TokenAclStage 'dacl-apply'
-}
-
-try {
-    $verifiedAcl = [System.IO.File]::GetAccessControl($path)
-    $verifiedOwner = $verifiedAcl.GetOwner([System.Security.Principal.SecurityIdentifier])
-    if ($trustedOwnerSids -notcontains $verifiedOwner.Value) {
-        Stop-TokenAclStage 'post-owner'
-    }
-} catch {
-    Stop-TokenAclStage 'post-owner'
-}
-
-try {
-    if (-not $verifiedAcl.AreAccessRulesProtected) {
-        Stop-TokenAclStage 'inheritance'
-    }
-} catch {
-    Stop-TokenAclStage 'inheritance'
-}
-
-try {
-    $expectedRules = @{
-        $identity.User.Value = [int]($modify -bor [System.Security.AccessControl.FileSystemRights]::Synchronize)
-        $system.Value = [int]$fullControl
-        $administrators.Value = [int]$fullControl
-    }
-    $observedRules = @{}
-    foreach ($rule in $verifiedAcl.Access) {
-        $ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-        if ($rule.IsInherited -or $rule.AccessControlType -ne $allow -or -not $expectedRules.ContainsKey($ruleSid)) {
-            Stop-TokenAclStage 'ace-verification'
-        }
-        if ($observedRules.ContainsKey($ruleSid) -or [int]$rule.FileSystemRights -ne $expectedRules[$ruleSid]) {
-            Stop-TokenAclStage 'ace-verification'
-        }
-        $observedRules[$ruleSid] = $true
-    }
-    if ($observedRules.Count -ne $expectedRules.Count) {
-        Stop-TokenAclStage 'ace-verification'
-    }
-} catch {
-    Stop-TokenAclStage 'ace-verification'
-}
-""".strip()
-
-
-def _windows_acl_stage_from_output(*outputs: bytes | str | None) -> str | None:
-    """Return only an allowlisted stage marker from PowerShell output."""
-    for output in outputs:
-        if isinstance(output, str):
-            output = output.encode("ascii", errors="ignore")
-        if not isinstance(output, bytes):
-            continue
-        for line in output.splitlines():
-            if not line.startswith(_WINDOWS_ACL_STAGE_PREFIX):
-                continue
-            stage = line[len(_WINDOWS_ACL_STAGE_PREFIX) :]
-            if stage in _WINDOWS_ACL_STAGES:
-                return stage.decode("ascii")
-    return None
+    def __init__(self, stage: str) -> None:
+        self.stage = stage
+        super().__init__(stage)
 
 
 def _windows_acl_error(stage: str) -> TokenSecurityError:
+    if stage not in _WINDOWS_ACL_STAGES:
+        stage = "dacl-apply"
     return TokenSecurityError(
         f"Could not apply Windows ACL to Manager API token ({stage})"
     )
-
-
-def _windows_directory(api_name: str) -> Path:
-    """Return a trusted Windows directory without consulting environment vars."""
-    import ctypes
-
-    buffer = ctypes.create_unicode_buffer(32768)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    length = getattr(kernel32, api_name)(buffer, len(buffer))
-    if length == 0 or length >= len(buffer):
-        raise TokenSecurityError("Windows system directory is unavailable")
-    return Path(buffer.value)
-
-
-def _windows_powershell_path() -> Path:
-    candidate = (
-        _windows_directory("GetSystemDirectoryW")
-        / "WindowsPowerShell"
-        / "v1.0"
-        / "powershell.exe"
-    )
-    if not candidate.is_file():
-        raise TokenSecurityError("Windows PowerShell system executable is unavailable")
-    return candidate
-
-
-def _windows_acl_environment(token_path: Path) -> dict[str, str]:
-    windows_directory = _windows_directory("GetWindowsDirectoryW")
-    return {
-        "SystemRoot": str(windows_directory),
-        "WINDIR": str(windows_directory),
-        "DICEPP_MANAGER_TOKEN_ACL_PATH": str(token_path),
-    }
-
-
-def _windows_hidden_subprocess_options() -> dict[str, object]:
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = subprocess.SW_HIDE
-    return {
-        "creationflags": subprocess.CREATE_NO_WINDOW,
-        "startupinfo": startupinfo,
-    }
 
 
 def _windows_regular_token_exists(token_path: Path) -> bool:
@@ -321,10 +179,8 @@ def _read_token_windows(token_path: Path) -> str:
         information = FileInformation()
         if not get_file_information(handle, ctypes.byref(information)):
             raise TokenSecurityError("Manager API token is unavailable")
-        if (
-            get_file_type(handle) != file_type_disk
-            or information.file_attributes
-            & (_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT | file_attribute_directory)
+        if get_file_type(handle) != file_type_disk or information.file_attributes & (
+            _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT | file_attribute_directory
         ):
             raise TokenSecurityError("Manager API token must be a regular file")
         try:
@@ -494,38 +350,381 @@ def _read_token_posix_readonly(token_path: Path) -> str:
         os.close(parent_descriptor)
 
 
+def _secure_token_file_windows_native(token_path: Path) -> None:
+    """Apply and verify the token ACL through the Win32 security APIs."""
+    import ctypes
+    from ctypes import wintypes
+
+    dword = wintypes.DWORD
+    psid = ctypes.c_void_p
+    pacl = ctypes.c_void_p
+    security_descriptor = ctypes.c_void_p
+
+    class SidAndAttributes(ctypes.Structure):
+        _fields_ = [("Sid", psid), ("Attributes", dword)]
+
+    class TokenUser(ctypes.Structure):
+        _fields_ = [("User", SidAndAttributes)]
+
+    class Trustee(ctypes.Structure):
+        _fields_ = [
+            ("pMultipleTrustee", ctypes.c_void_p),
+            ("MultipleTrusteeOperation", ctypes.c_uint),
+            ("TrusteeForm", ctypes.c_uint),
+            ("TrusteeType", ctypes.c_uint),
+            ("ptstrName", ctypes.c_void_p),
+        ]
+
+    class ExplicitAccess(ctypes.Structure):
+        _fields_ = [
+            ("grfAccessPermissions", dword),
+            ("grfAccessMode", ctypes.c_uint),
+            ("grfInheritance", dword),
+            ("Trustee", Trustee),
+        ]
+
+    class AclSizeInformation(ctypes.Structure):
+        _fields_ = [
+            ("AceCount", dword),
+            ("AclBytesInUse", dword),
+            ("AclBytesFree", dword),
+        ]
+
+    class AceHeader(ctypes.Structure):
+        _fields_ = [
+            ("AceType", ctypes.c_ubyte),
+            ("AceFlags", ctypes.c_ubyte),
+            ("AceSize", ctypes.c_ushort),
+        ]
+
+    class AccessAllowedAce(ctypes.Structure):
+        _fields_ = [
+            ("Header", AceHeader),
+            ("Mask", dword),
+            ("SidStart", dword),
+        ]
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        dword,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        dword,
+        ctypes.POINTER(dword),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.ConvertStringSidToSidW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(psid),
+    ]
+    advapi32.ConvertStringSidToSidW.restype = wintypes.BOOL
+    advapi32.EqualSid.argtypes = [psid, psid]
+    advapi32.EqualSid.restype = wintypes.BOOL
+    advapi32.GetLengthSid.argtypes = [psid]
+    advapi32.GetLengthSid.restype = dword
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_uint,
+        dword,
+        ctypes.POINTER(psid),
+        ctypes.c_void_p,
+        ctypes.POINTER(pacl),
+        ctypes.c_void_p,
+        ctypes.POINTER(security_descriptor),
+    ]
+    advapi32.GetNamedSecurityInfoW.restype = dword
+    advapi32.SetEntriesInAclW.argtypes = [
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        pacl,
+        ctypes.POINTER(pacl),
+    ]
+    advapi32.SetEntriesInAclW.restype = dword
+    advapi32.SetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR,
+        ctypes.c_uint,
+        dword,
+        psid,
+        psid,
+        pacl,
+        pacl,
+    ]
+    advapi32.SetNamedSecurityInfoW.restype = dword
+    advapi32.GetSecurityDescriptorControl.argtypes = [
+        security_descriptor,
+        ctypes.POINTER(ctypes.c_ushort),
+        ctypes.POINTER(dword),
+    ]
+    advapi32.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    advapi32.GetAclInformation.argtypes = [
+        pacl,
+        ctypes.c_void_p,
+        dword,
+        ctypes.c_uint,
+    ]
+    advapi32.GetAclInformation.restype = wintypes.BOOL
+    advapi32.GetAce.argtypes = [pacl, dword, ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.GetAce.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+    token_query = 0x0008
+    token_user_information = 1
+    se_file_object = 1
+    owner_security_information = 0x00000001
+    dacl_security_information = 0x00000004
+    protected_dacl_security_information = 0x80000000
+    se_dacl_protected = 0x1000
+    set_access = 2
+    no_inheritance = 0
+    trustee_is_sid = 0
+    trustee_is_unknown = 0
+    acl_size_information = 2
+    access_allowed_ace_type = 0
+    modify_with_synchronize = 0x001301BF
+    full_control = 0x001F01FF
+
+    def fail(stage: str) -> None:
+        raise _WindowsAclStageError(stage)
+
+    def free_local(pointer: ctypes.c_void_p | None) -> None:
+        if pointer:
+            kernel32.LocalFree(pointer)
+
+    def same_sid(left: ctypes.c_void_p, right: ctypes.c_void_p) -> bool:
+        return bool(advapi32.EqualSid(left, right))
+
+    def read_security(stage: str):
+        owner = psid()
+        dacl = pacl()
+        descriptor = security_descriptor()
+        result = advapi32.GetNamedSecurityInfoW(
+            str(token_path),
+            se_file_object,
+            owner_security_information | dacl_security_information,
+            ctypes.byref(owner),
+            None,
+            ctypes.byref(dacl),
+            None,
+            ctypes.byref(descriptor),
+        )
+        if result != 0 or not descriptor:
+            fail(stage)
+        return owner, dacl, descriptor
+
+    def sid_from_text(value: str) -> ctypes.c_void_p:
+        sid = psid()
+        if not advapi32.ConvertStringSidToSidW(value, ctypes.byref(sid)):
+            fail("owner-allowlist")
+        return sid
+
+    token_handle = wintypes.HANDLE()
+    try:
+        if not advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(),
+            token_query,
+            ctypes.byref(token_handle),
+        ):
+            fail("owner-allowlist")
+        required_size = dword()
+        advapi32.GetTokenInformation(
+            token_handle,
+            token_user_information,
+            None,
+            0,
+            ctypes.byref(required_size),
+        )
+        if required_size.value == 0:
+            fail("owner-allowlist")
+        token_information = ctypes.create_string_buffer(required_size.value)
+        if not advapi32.GetTokenInformation(
+            token_handle,
+            token_user_information,
+            token_information,
+            required_size,
+            ctypes.byref(required_size),
+        ):
+            fail("owner-allowlist")
+        current_sid = ctypes.cast(
+            token_information,
+            ctypes.POINTER(TokenUser),
+        ).contents.User.Sid
+    except _WindowsAclStageError:
+        raise
+    except Exception:
+        fail("owner-allowlist")
+    finally:
+        if token_handle:
+            kernel32.CloseHandle(token_handle)
+
+    system_sid = psid()
+    administrators_sid = psid()
+    try:
+        system_sid = sid_from_text("S-1-5-18")
+        administrators_sid = sid_from_text("S-1-5-32-544")
+        trusted_owner_sids = (current_sid, system_sid, administrators_sid)
+        try:
+            owner, _dacl, descriptor = read_security("owner-allowlist")
+            try:
+                if not owner or not any(
+                    same_sid(owner, trusted) for trusted in trusted_owner_sids
+                ):
+                    fail("owner-allowlist")
+            finally:
+                free_local(descriptor)
+        except _WindowsAclStageError:
+            raise
+        except Exception:
+            fail("owner-allowlist")
+
+        rules: list[tuple[ctypes.c_void_p, int]] = []
+        for principal, rights in (
+            (current_sid, modify_with_synchronize),
+            (system_sid, full_control),
+            (administrators_sid, full_control),
+        ):
+            for index, (known_principal, known_rights) in enumerate(rules):
+                if same_sid(principal, known_principal):
+                    rules[index] = (known_principal, known_rights | rights)
+                    break
+            else:
+                rules.append((principal, rights))
+
+        new_dacl = pacl()
+        try:
+            entries = (ExplicitAccess * len(rules))()
+            for index, (principal, rights) in enumerate(rules):
+                entry = entries[index]
+                entry.grfAccessPermissions = rights
+                entry.grfAccessMode = set_access
+                entry.grfInheritance = no_inheritance
+                entry.Trustee.TrusteeForm = trustee_is_sid
+                entry.Trustee.TrusteeType = trustee_is_unknown
+                entry.Trustee.ptstrName = principal
+            if (
+                advapi32.SetEntriesInAclW(
+                    len(entries),
+                    entries,
+                    None,
+                    ctypes.byref(new_dacl),
+                )
+                != 0
+            ):
+                fail("dacl-apply")
+            if (
+                advapi32.SetNamedSecurityInfoW(
+                    str(token_path),
+                    se_file_object,
+                    dacl_security_information | protected_dacl_security_information,
+                    None,
+                    None,
+                    new_dacl,
+                    None,
+                )
+                != 0
+            ):
+                fail("dacl-apply")
+        except _WindowsAclStageError:
+            raise
+        except Exception:
+            fail("dacl-apply")
+        finally:
+            free_local(new_dacl)
+
+        descriptor = None
+        try:
+            owner, dacl, descriptor = read_security("post-owner")
+            if not owner or not any(
+                same_sid(owner, trusted) for trusted in trusted_owner_sids
+            ):
+                fail("post-owner")
+
+            control = ctypes.c_ushort()
+            revision = dword()
+            if (
+                not advapi32.GetSecurityDescriptorControl(
+                    descriptor,
+                    ctypes.byref(control),
+                    ctypes.byref(revision),
+                )
+                or not control.value & se_dacl_protected
+            ):
+                fail("inheritance")
+
+            if not dacl:
+                fail("ace-verification")
+            information = AclSizeInformation()
+            if not advapi32.GetAclInformation(
+                dacl,
+                ctypes.byref(information),
+                ctypes.sizeof(information),
+                acl_size_information,
+            ) or information.AceCount != len(rules):
+                fail("ace-verification")
+            seen = [False] * len(rules)
+            for index in range(information.AceCount):
+                raw_ace = ctypes.c_void_p()
+                if (
+                    not advapi32.GetAce(dacl, index, ctypes.byref(raw_ace))
+                    or not raw_ace
+                ):
+                    fail("ace-verification")
+                ace = ctypes.cast(raw_ace, ctypes.POINTER(AccessAllowedAce)).contents
+                if (
+                    ace.Header.AceType != access_allowed_ace_type
+                    or ace.Header.AceFlags != 0
+                    or ace.Header.AceSize < ctypes.sizeof(AccessAllowedAce)
+                ):
+                    fail("ace-verification")
+                ace_sid = psid(raw_ace.value + AccessAllowedAce.SidStart.offset)
+                sid_length = advapi32.GetLengthSid(ace_sid)
+                if (
+                    sid_length == 0
+                    or AccessAllowedAce.SidStart.offset + sid_length
+                    > ace.Header.AceSize
+                ):
+                    fail("ace-verification")
+                for rule_index, (principal, rights) in enumerate(rules):
+                    if same_sid(ace_sid, principal):
+                        if seen[rule_index] or ace.Mask != rights:
+                            fail("ace-verification")
+                        seen[rule_index] = True
+                        break
+                else:
+                    fail("ace-verification")
+            if not all(seen):
+                fail("ace-verification")
+        except _WindowsAclStageError:
+            raise
+        except Exception:
+            fail("ace-verification")
+        finally:
+            free_local(descriptor)
+    finally:
+        free_local(system_sid)
+        free_local(administrators_sid)
+
+
 def _secure_token_file_windows(token_path: Path) -> None:
     """Replace the token ACL with an explicit local-user allowlist."""
     _require_windows_regular_token_file(token_path)
     try:
-        result = subprocess.run(
-            [
-                str(_windows_powershell_path()),
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                _WINDOWS_ACL_SCRIPT,
-            ],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=_windows_acl_environment(token_path),
-            timeout=_WINDOWS_ACL_TIMEOUT_SECONDS,
-            shell=False,
-            **_windows_hidden_subprocess_options(),
-        )
-    except subprocess.TimeoutExpired:
-        raise _windows_acl_error("powershell-process-timeout") from None
+        _secure_token_file_windows_native(token_path)
+    except _WindowsAclStageError as exc:
+        raise _windows_acl_error(exc.stage) from None
     except Exception:
-        raise _windows_acl_error("powershell-process-failure") from None
-    if result.returncode != 0:
-        stage = _windows_acl_stage_from_output(
-            getattr(result, "stderr", None),
-            getattr(result, "stdout", None),
-        )
-        if stage is None:
-            stage = f"powershell-return-code-{result.returncode}"
-        raise _windows_acl_error(stage)
+        raise _windows_acl_error("dacl-apply") from None
 
 
 def _secure_token_file(token_path: Path) -> None:
@@ -642,9 +841,7 @@ def _regular_token_exists_without_following(token_path: Path) -> bool:
     except FileNotFoundError:
         return False
     except OSError as exc:
-        raise TokenSecurityError(
-            "Private token is unavailable"
-        ) from exc
+        raise TokenSecurityError("Private token is unavailable") from exc
     if (
         not stat.S_ISREG(metadata.st_mode)
         or getattr(metadata, "st_file_attributes", 0)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -26,13 +27,20 @@ Write-Output ("OWNER|{0}" -f $acl.GetOwner([System.Security.Principal.SecurityId
 Write-Output ("PROTECTED|{0}" -f $acl.AreAccessRulesProtected)
 $acl.Access | ForEach-Object {
     $sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-    Write-Output ("RULE|{0}|{1}|{2}|{3}" -f $sid, $_.FileSystemRights, $_.AccessControlType, $_.IsInherited)
+    Write-Output ("RULE|{0}|{1}|{2}|{3}" -f $sid, [int]$_.FileSystemRights, $_.AccessControlType, $_.IsInherited)
 }
 """.strip()
 
+    windows_directory = Path(os.environ["SystemRoot"])
     result = subprocess.run(
         [
-            str(manager_auth._windows_powershell_path()),
+            str(
+                windows_directory
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "powershell.exe"
+            ),
             "-NoProfile",
             "-NonInteractive",
             "-Command",
@@ -41,8 +49,12 @@ $acl.Access | ForEach-Object {
         check=True,
         capture_output=True,
         text=True,
-        timeout=manager_auth._WINDOWS_ACL_TIMEOUT_SECONDS,
-        env=manager_auth._windows_acl_environment(token_path),
+        timeout=15,
+        env={
+            "SystemRoot": str(windows_directory),
+            "WINDIR": str(windows_directory),
+            "DICEPP_MANAGER_TOKEN_ACL_PATH": str(token_path),
+        },
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
@@ -52,23 +64,30 @@ $acl.Access | ForEach-Object {
     current_sid = lines[0].split("|", maxsplit=1)[1]
     owner_sid = lines[1].split("|", maxsplit=1)[1]
     assert lines[2] == "PROTECTED|True"
+    rule_lines = lines[3:]
     rules = {
-        sid: (rights, access_type, inherited)
+        sid: (int(rights), access_type, inherited)
         for _prefix, sid, rights, access_type, inherited in (
-            line.split("|", maxsplit=4) for line in lines[3:]
+            line.split("|", maxsplit=4) for line in rule_lines
         )
     }
     system_sid = "S-1-5-18"
     administrators_sid = "S-1-5-32-544"
     trusted_sids = {current_sid, system_sid, administrators_sid}
+    modify_with_synchronize = 0x001301BF
+    full_control = 0x001F01FF
+    current_mask = (
+        full_control
+        if current_sid in {system_sid, administrators_sid}
+        else modify_with_synchronize
+    )
     expected_rules = {
-        current_sid: ("Modify", "Allow", "False"),
-        system_sid: ("FullControl", "Allow", "False"),
-        administrators_sid: ("FullControl", "Allow", "False"),
+        current_sid: (current_mask, "Allow", "False"),
+        system_sid: (full_control, "Allow", "False"),
+        administrators_sid: (full_control, "Allow", "False"),
     }
 
     assert owner_sid in trusted_sids
+    assert len(rule_lines) == len(expected_rules)
     assert set(rules) == set(expected_rules)
-    for sid, (right, access_type, inherited) in expected_rules.items():
-        assert right in rules[sid][0]
-        assert rules[sid][1:] == (access_type, inherited)
+    assert rules == expected_rules
