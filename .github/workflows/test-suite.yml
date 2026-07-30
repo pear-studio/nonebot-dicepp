@@ -45,6 +45,15 @@ jobs:
     needs: quick
     steps:
       - uses: actions/checkout@v4
+      - name: Seed stale Python build artifacts in Docker context
+        run: |
+          mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
+          cat > src/dicepp.egg-info/PKG-INFO <<'EOF'
+          Metadata-Version: 2.1
+          Name: dicepp
+          Version: 0.0.0-stale
+          EOF
+          touch src/plugins/DicePP/__pycache__/stale.cpython-313.pyc
       - name: Validate Docker Compose
         run: |
           docker compose config --quiet
@@ -53,6 +62,16 @@ jobs:
           docker build -f Dockerfile.dashboard -t dicepp-dashboard:ci .
       - name: Smoke test Dashboard image
         run: |
+          expected="$(sed -n 's/^version = "\\\(.*\\\)"$/\\1/p' pyproject.toml)"
+          actual="$(docker run --rm --network=none dicepp-dashboard:ci python -m dashboard --version)"
+          if [ "$actual" != "DicePP Dashboard v$expected" ]; then
+            echo "Dashboard version mismatch: expected 'DicePP Dashboard v$expected', got '$actual'"
+            exit 1
+          fi
+          docker run --rm --network=none dicepp-dashboard:ci sh -ec '
+            test ! -e /app/src/dicepp.egg-info
+            test ! -d /app/src/plugins/DicePP/__pycache__
+          '
           docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 dicepp-dashboard:ci
           ready=false
           for i in $(seq 1 30); do
@@ -68,6 +87,12 @@ jobs:
           fi
       - name: Smoke test Manager image
         run: |
+          docker run --rm --network=none dicepp-dashboard:ci python -c '
+          import tomllib
+          from importlib.metadata import version
+          expected = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          assert version("dicepp") == expected
+          '
           SMOKE_VOLUME=dicepp-manager-smoke
           docker volume create "$SMOKE_VOLUME"
           docker run -d --name dicepp-manager-smoke -p 127.0.0.1:4091:4091 \
@@ -102,11 +127,30 @@ jobs:
     needs: quick
     steps:
       - uses: actions/checkout@v4
+      - name: Seed stale Python build artifacts in Docker context
+        run: |
+          mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
+          cat > src/dicepp.egg-info/PKG-INFO <<'EOF'
+          Metadata-Version: 2.1
+          Name: dicepp
+          Version: 0.0.0-stale
+          EOF
+          touch src/plugins/DicePP/__pycache__/stale.cpython-313.pyc
       - name: Build Runtime image
         run: |
           docker build -f Dockerfile -t dicepp-runtime:ci .
       - name: Smoke test Runtime image
         run: |
+          expected="$(sed -n 's/^version = "\\\(.*\\\)"$/\\1/p' pyproject.toml)"
+          actual="$(docker run --rm --network=none dicepp-runtime:ci python bot.py --version)"
+          if [ "$actual" != "DicePP v$expected" ]; then
+            echo "Runtime version mismatch: expected 'DicePP v$expected', got '$actual'"
+            exit 1
+          fi
+          docker run --rm --network=none dicepp-runtime:ci sh -ec '
+            test ! -e /app/src/dicepp.egg-info
+            test ! -d /app/src/plugins/DicePP/__pycache__
+          '
           docker run --rm --network=none dicepp-runtime:ci python bot.py --smoke-check
 
   windows-package:

@@ -14,21 +14,6 @@
 
 ## dev
 
-### [B-260730-16b609] Docker 构建排除嵌套 egg-info 与 Python 缓存
-- 创建: 2026-07-30
-- 优先级: P2
-- 类型: bug
-- 改动量: M
-- 问题表现:
-    - Linux 真实 Compose 验收在带本地遗留 `src/dicepp.egg-info` 的工作区构建镜像时，`.dockerignore` 的 `*.egg-info` 未匹配嵌套目录。
-    - 旧 `PKG-INFO`（3.0.0rc14）进入 bot、Manager、Dashboard 镜像；以 `/app/src` 运行时 `importlib.metadata.version("dicepp")` 优先读取旧元数据，Bot 心跳上报 3.0.0rc14，而安装包实际为 3.0.0rc16。
-    - 干净 CI checkout 不复现，因此本地 Docker 构建会出现版本上报失真；`__pycache__` 等顶层忽略模式也可能有同类问题。
-- 开发备忘:
-    - 先确认 Docker ignore 模式对嵌套路径的匹配语义，并复现 `src/dicepp.egg-info` 被纳入镜像的最小场景。
-    - 评估以 `**/*.egg-info`、`**/__pycache__` 等规则覆盖嵌套副产物，并保持必要的打包输入未被误排除。
-    - 为 Docker build context 或镜像内版本解析补最小回归测试；影响面：`.dockerignore`、Dockerfile/Dockerfile.dashboard、版本元数据读取与镜像测试。
-    - 风险：过宽模式可能排除构建所需文件，需同时验证 Bot、Manager、Dashboard 三类镜像。
-
 ### [B-260730-67a90e] Windows 并行系统测试服务启动偶发超时
 - 创建: 2026-07-30
 - 优先级: P2
