@@ -14,6 +14,21 @@
 
 ## dev
 
+### [B-260730-16b609] Docker 构建排除嵌套 egg-info 与 Python 缓存
+- 创建: 2026-07-30
+- 优先级: P2
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - Linux 真实 Compose 验收在带本地遗留 `src/dicepp.egg-info` 的工作区构建镜像时，`.dockerignore` 的 `*.egg-info` 未匹配嵌套目录。
+    - 旧 `PKG-INFO`（3.0.0rc14）进入 bot、Manager、Dashboard 镜像；以 `/app/src` 运行时 `importlib.metadata.version("dicepp")` 优先读取旧元数据，Bot 心跳上报 3.0.0rc14，而安装包实际为 3.0.0rc16。
+    - 干净 CI checkout 不复现，因此本地 Docker 构建会出现版本上报失真；`__pycache__` 等顶层忽略模式也可能有同类问题。
+- 开发备忘:
+    - 先确认 Docker ignore 模式对嵌套路径的匹配语义，并复现 `src/dicepp.egg-info` 被纳入镜像的最小场景。
+    - 评估以 `**/*.egg-info`、`**/__pycache__` 等规则覆盖嵌套副产物，并保持必要的打包输入未被误排除。
+    - 为 Docker build context 或镜像内版本解析补最小回归测试；影响面：`.dockerignore`、Dockerfile/Dockerfile.dashboard、版本元数据读取与镜像测试。
+    - 风险：过宽模式可能排除构建所需文件，需同时验证 Bot、Manager、Dashboard 三类镜像。
+
 ### [B-260730-67a90e] Windows 并行系统测试服务启动偶发超时
 - 创建: 2026-07-30
 - 优先级: P2
@@ -29,6 +44,23 @@
 - 改动量: M
 - 问题表现: release 全流程约 10-11 分钟, 其中 quality gate 与 release 各完整构建一遍镜像和 PyInstaller EXE(规格相同, 串行相接, 合计约 4-5 分钟重复); 产物命名三种版本格式混用: Portable/Setup/linux zip 用 tag 格式(v3.0.0rc16, workflow 重命名), nupkg 和 releases/assets feed 用 Velopack SemVer2(3.0.0-rc.16, 原样保留), dicepp-release.json 内 version 又是去 v 的 3.0.0rc16; publish 阶段 docker save ~1.2GB + zstd -19 重压缩约 1 分多钟。
 - 开发备忘: 调查于 2026-07-28(基于 rc15 run 30355233453 / rc16 run 30373296372 实测)。关键位置: .github/workflows/test-suite.yml:111-113 与 release.yml:177-181 的重复 PyInstaller; release.yml:258-264 只重命名 Portable/Setup 不重命名 nupkg; 版本派生逻辑散在 generate_release_manifest.py(velopack_version/velopack_channel)与各 job 的 Extract version info。方向: gate 产物经 artifact 复用或 release 触发时跳过重复 job; 版本派生收进单一脚本统一输出; build-push-action 配 GHA 缓存; zstd 降档或多线程。优化时注意 nupkg/feed 命名是 Velopack 更新 contract 的一部分, 改名需确认 Manager 侧消费兼容。
+
+## manager
+
+### [B-260730-99b20d] 明确归档对未迁移 SQLite 数据库的处理策略
+- 创建: 2026-07-30
+- 优先级: P2
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - Linux 真实 Compose 验收创建归档时，data 下 27 个遗留 shell/test bot 数据库及 `data/dicepp.db` 不含 `schema_metadata`，导致创建失败并报 `New archive verification failed`。
+    - 临时移走这些未迁移数据库后，创建与恢复均通过；已迁移的生产数据不受影响。
+    - 当前错误会列出问题文件，可定位，但用户无法从行为本身判断未纳管数据库是应被严格拒绝、应跳过，还是需要先执行迁移。
+- 开发备忘:
+    - 先确认归档完整性契约：未纳管或未迁移 SQLite 数据库应失败、跳过还是纳入专门迁移流程。
+    - 若维持失败，改进错误分类与迁移指引；若跳过，记录跳过清单并评估恢复完整性与数据丢失风险。
+    - 为每种已确认策略补 archive create/restore 回归测试；影响面：`src/dicepp_manager/archive.py`、数据库 schema lifecycle、Manager archive API 与测试。
+    - 风险：放宽校验可能产生表面成功但不可恢复的归档，不能仅为通过遗留测试数据而静默跳过。
 
 ## persona
 
