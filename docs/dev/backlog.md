@@ -22,24 +22,6 @@
 - 问题表现: release 全流程约 10-11 分钟, 其中 quality gate 与 release 各完整构建一遍镜像和 PyInstaller EXE(规格相同, 串行相接, 合计约 4-5 分钟重复); 产物命名三种版本格式混用: Portable/Setup/linux zip 用 tag 格式(v3.0.0rc16, workflow 重命名), nupkg 和 releases/assets feed 用 Velopack SemVer2(3.0.0-rc.16, 原样保留), dicepp-release.json 内 version 又是去 v 的 3.0.0rc16; publish 阶段 docker save ~1.2GB + zstd -19 重压缩约 1 分多钟。
 - 开发备忘: 调查于 2026-07-28(基于 rc15 run 30355233453 / rc16 run 30373296372 实测)。关键位置: .github/workflows/test-suite.yml:111-113 与 release.yml:177-181 的重复 PyInstaller; release.yml:258-264 只重命名 Portable/Setup 不重命名 nupkg; 版本派生逻辑散在 generate_release_manifest.py(velopack_version/velopack_channel)与各 job 的 Extract version info。方向: gate 产物经 artifact 复用或 release 触发时跳过重复 job; 版本派生收进单一脚本统一输出; build-push-action 配 GHA 缓存; zstd 降档或多线程。优化时注意 nupkg/feed 命名是 Velopack 更新 contract 的一部分, 改名需确认 Manager 侧消费兼容。
 
-### [B-260729-4cb6ec] Manager 配置读取与统一校验
-- 创建: 2026-07-29
-- 优先级: P1
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-    - Manager 当前只有 PUT /v1/config/user 和 PUT /v1/config/bots/{bot_id}，没有对应 GET，Agent 无法只通过 Manager 完成配置读取与修改闭环。
-    - Dashboard 在自身进程中读取和校验配置，Manager 的 PUT 主要接收任意对象后原子写入；Agent 直接调用时可能绕过 Dashboard 的完整校验。
-    - 配置模型、默认值和错误信息若分别存在于 Dashboard 与 Manager，会形成两套规则并随代码演进产生漂移。
-    - Manager 保存配置后不负责现有 Dashboard WebSocket 热重载，Agent 容易误以为保存已经让 Runtime 即时生效。
-- 开发备忘:
-    - 增加用户配置和单 Bot 配置的 GET 接口，并用类型化响应明确配置来源、保存结果和应用状态。
-    - 将配置解析、默认值补全和完整校验收敛到 Manager 可复用层；Dashboard 和 Agent 均复用同一套规则，避免复制校验逻辑。
-    - PUT 必须先完成校验，再使用现有原子写入机制保存；校验失败不得产生部分修改，并返回稳定的字段级错误。
-    - 在 Bot 控制通道迁移前，Dashboard 保存后继续使用现有热重载；Agent 保存后如果要求立即应用，应显式调用 Runtime 重启，响应中明确 deferred/restart-required 状态。
-    - 当前同一用户通常不会同时操作 Dashboard 和 Agent，暂不增加 revision、ETag、锁服务或复杂冲突合并。
-    - 影响面包括 Manager 配置 API、配置模型/校验、Dashboard 配置读写客户端以及契约和回归测试；应先盘点现有 Dashboard 特有校验，避免迁移时丢失语义。
-
 ### [B-260729-817c43] Bot 控制通道由 Dashboard 迁移到 Manager
 - 创建: 2026-07-29
 - 优先级: P1
