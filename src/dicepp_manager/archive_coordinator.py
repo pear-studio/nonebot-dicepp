@@ -292,6 +292,10 @@ class ArchiveCoordinator:
             "transaction_id": transaction_id,
             "target_filename": filename,
             "profile": profile,
+            "opaque_sqlite": plan.get(
+                "opaque_sqlite",
+                {"count": 0, "files": []},
+            ),
             "original_running": [],
             "commit_point": "not_started",
         }
@@ -313,7 +317,7 @@ class ArchiveCoordinator:
                 self._journal(transaction_id, operation, "quiesced", detail)
                 self._fault("quiesce")
 
-                pre, _manifest = await asyncio.to_thread(
+                pre, _pre_manifest = await asyncio.to_thread(
                     create_archive,
                     description or f"pre-restore {filename}",
                     layout=self.layout,
@@ -337,10 +341,18 @@ class ArchiveCoordinator:
                     raise ArchiveError(
                         str(result["failed_entries"][0].get("error") or "Archive apply failed")
                     )
+                plan = result["plan"]
+                detail["opaque_sqlite"] = plan.get(
+                    "opaque_sqlite",
+                    {"count": 0, "files": []},
+                )
 
                 self._journal(transaction_id, operation, "migrating", detail)
                 self._fault("migration")
-                migrations = await asyncio.to_thread(self._migrate_and_validate_schema)
+                migrations = await asyncio.to_thread(
+                    self._migrate_and_validate_schema,
+                    set(detail["opaque_sqlite"]["files"]),
+                )
 
                 self._fault("restart")
                 await self._restart(maintenance, original_running)
@@ -619,7 +631,15 @@ class ArchiveCoordinator:
                             or "Rollback apply failed"
                         )
                     )
-                migrations = await asyncio.to_thread(self._migrate_and_validate_schema)
+                rollback_opaque_sqlite = rollback_result["plan"].get(
+                    "opaque_sqlite",
+                    {"count": 0, "files": []},
+                )
+                detail["pre_restore_opaque_sqlite"] = rollback_opaque_sqlite
+                migrations = await asyncio.to_thread(
+                    self._migrate_and_validate_schema,
+                    set(rollback_opaque_sqlite["files"]),
+                )
                 await self._restart(
                     maintenance,
                     [
@@ -704,10 +724,16 @@ class ArchiveCoordinator:
             return str(exc) or type(exc).__name__
         return None
 
-    def _migrate_and_validate_schema(self) -> list[dict[str, Any]]:
+    def _migrate_and_validate_schema(
+        self,
+        skip_paths: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         targets = _schema_targets()
         applied: list[dict[str, Any]] = []
+        skipped = skip_paths or set()
         for match in DATA_CATALOG.collect(self.layout, "full"):
+            if match.logical_path in skipped:
+                continue
             asset = DATA_CATALOG.find_for_logical_path(match.logical_path)
             if asset is None or asset.schema is None:
                 continue

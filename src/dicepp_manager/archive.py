@@ -31,8 +31,9 @@ from dicepp_data import (
 
 from dicepp_meta import get_version as get_dicepp_version
 
-ARCHIVE_FORMAT_VERSION = 2
+ARCHIVE_FORMAT_VERSION = 3
 LEGACY_ARCHIVE_FORMAT_VERSION = 1
+STRUCTURED_ARCHIVE_FORMAT_VERSIONS = {2, ARCHIVE_FORMAT_VERSION}
 MANIFEST_NAME = "manifest.json"
 CHECKSUM_ALGORITHM = "sha256"
 SUPPORTED_PROFILES = {ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL}
@@ -76,6 +77,14 @@ class ArchivePayload:
 
     path: Path
     arcname: str
+
+
+@dataclass(frozen=True)
+class SQLiteSchemaInspection:
+    """Result of checking one catalogued SQLite payload."""
+
+    opaque: bool = False
+    problem: str | None = None
 
 
 class ArchiveError(Exception):
@@ -231,6 +240,7 @@ def _build_manifest(
     profile: str,
     archive_kind: str,
     files: list[dict],
+    opaque_sqlite_files: list[str],
 ) -> dict:
     grouped: dict[str, list[dict]] = {}
     checksums: dict[str, str] = {}
@@ -263,6 +273,12 @@ def _build_manifest(
         "profile": profile,
         "archive_kind": archive_kind,
         "sensitive": any(asset["sensitive"] for asset in assets),
+        "compatibility": {
+            "opaque_sqlite": {
+                "count": len(opaque_sqlite_files),
+                "files": sorted(opaque_sqlite_files),
+            },
+        },
         "catalog": {
             "digest": DATA_CATALOG.digest,
             "description": DATA_CATALOG.to_dict(),
@@ -359,6 +375,7 @@ def create_archive(
     tmp = target.with_name(f"{target.name}.inprogress")
     _checkpoint_managed_sqlite_assets(layout, profile)
     payloads = collect_archive_payloads(layout, profile)
+    opaque_sqlite_files = _inspect_source_sqlite_payloads(payloads, profile=profile)
     file_records: list[dict] = []
     manifest: dict | None = None
 
@@ -395,6 +412,7 @@ def create_archive(
                 profile=profile,
                 archive_kind=archive_kind,
                 files=file_records,
+                opaque_sqlite_files=opaque_sqlite_files,
             )
             archive.writestr(
                 MANIFEST_NAME,
@@ -546,6 +564,7 @@ def archive_summary(path: Path) -> dict:
                 return summary
             manifest = _read_manifest_from_open_archive(archive)
             profile = _manifest_profile(manifest)
+            opaque_sqlite_count = _manifest_opaque_sqlite_count(manifest)
     except (OSError, ArchiveError, KeyError, json.JSONDecodeError, zipfile.BadZipFile):
         return summary
 
@@ -558,6 +577,7 @@ def archive_summary(path: Path) -> dict:
         summary["profile"] = profile
         summary["archive_kind"] = manifest.get("archive_kind", "manual")
         summary["sensitive"] = bool(manifest.get("sensitive"))
+        summary["opaque_sqlite_count"] = opaque_sqlite_count
         checksum = manifest.get("checksum")
         files = checksum.get("files") if isinstance(checksum, dict) else None
         summary["file_count"] = len(files) if isinstance(files, dict) else 0
@@ -585,6 +605,7 @@ def _archive_summary_from_manifest(
         "profile": _manifest_profile(manifest),
         "archive_kind": manifest.get("archive_kind", "manual"),
         "sensitive": bool(manifest.get("sensitive")),
+        "opaque_sqlite_count": _manifest_opaque_sqlite_count(manifest),
         "file_count": len(files) if isinstance(files, dict) else 0,
     }
 
@@ -630,9 +651,12 @@ def read_archive_detail(
 
 def _validate_manifest_for_verify(manifest: dict) -> dict[str, str]:
     format_version = manifest.get("format_version")
-    if format_version not in {LEGACY_ARCHIVE_FORMAT_VERSION, ARCHIVE_FORMAT_VERSION}:
+    if format_version not in {
+        LEGACY_ARCHIVE_FORMAT_VERSION,
+        *STRUCTURED_ARCHIVE_FORMAT_VERSIONS,
+    }:
         raise ArchiveInvalidError("Unsupported archive format version")
-    if format_version == ARCHIVE_FORMAT_VERSION:
+    if format_version in STRUCTURED_ARCHIVE_FORMAT_VERSIONS:
         profile = manifest.get("profile")
         _validate_profile(profile)
         catalog = manifest.get("catalog")
@@ -641,6 +665,14 @@ def _validate_manifest_for_verify(manifest: dict) -> dict[str, str]:
         files_v2 = manifest.get("files")
         if not isinstance(files_v2, list):
             raise ArchiveInvalidError("Archive manifest files must be an array")
+        opaque_sqlite_files = _manifest_opaque_sqlite_files(manifest)
+        if (
+            format_version == ARCHIVE_FORMAT_VERSION
+            and opaque_sqlite_files is None
+        ):
+            raise ArchiveInvalidError(
+                "Archive manifest opaque SQLite declaration is missing"
+            )
     checksum = manifest.get("checksum")
     if not isinstance(checksum, dict):
         raise ArchiveInvalidError("Archive manifest checksum must be an object")
@@ -650,6 +682,48 @@ def _validate_manifest_for_verify(manifest: dict) -> dict[str, str]:
     if not isinstance(files, dict):
         raise ArchiveInvalidError("Archive manifest checksum.files must be an object")
     return files
+
+
+def _manifest_opaque_sqlite_files(manifest: dict) -> list[str] | None:
+    compatibility = manifest.get("compatibility")
+    if compatibility is None:
+        return None
+    if not isinstance(compatibility, dict):
+        raise ArchiveInvalidError("Archive manifest compatibility must be an object")
+    opaque = compatibility.get("opaque_sqlite")
+    if opaque is None:
+        return None
+    if not isinstance(opaque, dict):
+        raise ArchiveInvalidError(
+            "Archive manifest compatibility.opaque_sqlite must be an object"
+        )
+    count = opaque.get("count")
+    files = opaque.get("files")
+    if (
+        not isinstance(count, int)
+        or count < 0
+        or not isinstance(files, list)
+        or any(
+            not isinstance(path, str) or not _is_safe_manifest_arcname(path)
+            for path in files
+        )
+        or len(set(files)) != len(files)
+        or count != len(files)
+    ):
+        raise ArchiveInvalidError("Archive manifest opaque SQLite declaration is invalid")
+    return sorted(files)
+
+
+def _manifest_opaque_sqlite_count(manifest: dict) -> int | None:
+    files = _manifest_opaque_sqlite_files(manifest)
+    if (
+        manifest.get("format_version") == ARCHIVE_FORMAT_VERSION
+        and files is None
+    ):
+        raise ArchiveInvalidError(
+            "Archive manifest opaque SQLite declaration is missing"
+        )
+    return len(files) if files is not None else None
 
 
 def _is_safe_manifest_arcname(arcname: str) -> bool:
@@ -787,10 +861,11 @@ def _verify_open_archive(
     problems: list[str] = _validate_zip_structure(archive)
     warnings: list[str] = []
     restorable_files: list[str] = []
+    opaque_sqlite_files: list[str] = []
     profile = _manifest_profile(manifest)
     manifest_asset_map: dict[str, dict] = {}
 
-    if manifest.get("format_version") == ARCHIVE_FORMAT_VERSION:
+    if manifest.get("format_version") in STRUCTURED_ARCHIVE_FORMAT_VERSIONS:
         archive_version = manifest.get("dicepp_version")
         current_version = get_dicepp_version()
         parsed_archive_version: Version | None = None
@@ -938,7 +1013,10 @@ def _verify_open_archive(
             owner = DATA_CATALOG.find_for_logical_path(arcname, profile=profile)
             if owner is not None and owner.schema is not None:
                 declared_schema = None
-                if manifest.get("format_version") == ARCHIVE_FORMAT_VERSION:
+                if (
+                    manifest.get("format_version")
+                    in STRUCTURED_ARCHIVE_FORMAT_VERSIONS
+                ):
                     record = record_map.get(arcname)
                     asset_id = record.get("asset_id") if isinstance(record, dict) else None
                     asset_record = (
@@ -951,17 +1029,22 @@ def _verify_open_archive(
                         if isinstance(asset_record, dict)
                         else None
                     )
-                schema_problem = _sqlite_schema_problem(
+                schema_inspection = _inspect_archived_sqlite_schema(
                     archive,
                     arcname,
                     expected_name=owner.schema.name,
                     maximum_version=owner.schema.latest_version,
                     declared_schema=declared_schema,
                 )
-                if schema_problem is not None:
-                    problems.append(schema_problem)
+                if schema_inspection.problem is not None:
+                    problems.append(schema_inspection.problem)
                     continue
-            if manifest.get("format_version") == ARCHIVE_FORMAT_VERSION:
+                if schema_inspection.opaque:
+                    opaque_sqlite_files.append(arcname)
+            if (
+                manifest.get("format_version")
+                in STRUCTURED_ARCHIVE_FORMAT_VERSIONS
+            ):
                 record = record_map.get(arcname)
                 try:
                     info = archive.getinfo(arcname)
@@ -986,18 +1069,42 @@ def _verify_open_archive(
     except zipfile.BadZipFile as exc:
         raise ArchiveInvalidError("Archive zip cannot be read") from exc
 
+    opaque_sqlite_files.sort()
+    declared_opaque_files = (
+        _manifest_opaque_sqlite_files(manifest)
+        if manifest.get("format_version") in STRUCTURED_ARCHIVE_FORMAT_VERSIONS
+        else None
+    )
+    if (
+        declared_opaque_files is not None
+        and declared_opaque_files != opaque_sqlite_files
+    ):
+        problems.append(
+            "Archive manifest opaque SQLite declaration does not match payloads"
+        )
+    if opaque_sqlite_files:
+        warnings.append(
+            f"{len(opaque_sqlite_files)} SQLite database(s) without "
+            "schema_metadata were preserved as opaque files"
+        )
+    archive_summary_data["opaque_sqlite_count"] = len(opaque_sqlite_files)
+
     return {
         "archive": archive_summary_data,
         "manifest": manifest,
         "verified": not problems,
         "problems": problems,
         "warnings": warnings,
+        "opaque_sqlite": {
+            "count": len(opaque_sqlite_files),
+            "files": opaque_sqlite_files,
+        },
         "restorable_files": sorted(restorable_files),
         "profile": profile,
         "sensitive": bool(manifest.get("sensitive")),
         "declared_asset_ids": (
             sorted(seen_asset_ids)
-            if manifest.get("format_version") == ARCHIVE_FORMAT_VERSION
+            if manifest.get("format_version") in STRUCTURED_ARCHIVE_FORMAT_VERSIONS
             else sorted(_legacy_declared_asset_ids(manifest))
         ),
     }
@@ -1045,6 +1152,7 @@ def _structure_failure_verification(
         "verified": False,
         "problems": problems,
         "warnings": [],
+        "opaque_sqlite": {"count": 0, "files": []},
         "restorable_files": [],
         "profile": ARCHIVE_PROFILE_REGULAR,
         "sensitive": False,
@@ -1052,14 +1160,14 @@ def _structure_failure_verification(
     }
 
 
-def _sqlite_schema_problem(
+def _inspect_archived_sqlite_schema(
     archive: zipfile.ZipFile,
     arcname: str,
     *,
     expected_name: str,
     maximum_version: int,
     declared_schema: dict | None,
-) -> str | None:
+) -> SQLiteSchemaInspection:
     """Cross-check archived SQLite metadata without extracting into the instance."""
     temporary_path: str | None = None
     try:
@@ -1077,53 +1185,159 @@ def _sqlite_schema_problem(
                         break
                     remaining -= len(chunk)
                     if remaining < 0:
-                        return f"SQLite payload exceeds limit: {arcname}"
+                        return SQLiteSchemaInspection(
+                            problem=f"SQLite payload exceeds limit: {arcname}"
+                        )
                     temporary.write(chunk)
             temporary.flush()
             os.fsync(temporary.fileno())
-        try:
-            connection = sqlite3.connect(
-                f"file:{Path(temporary_path).as_posix()}?mode=ro",
-                uri=True,
-            )
-            try:
-                rows = connection.execute(
-                    "SELECT key, value FROM schema_metadata"
-                ).fetchall()
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            return f"SQLite schema metadata cannot be read: {arcname}: {exc}"
-        metadata = {str(key): str(value) for key, value in rows}
-        if metadata.get("target_name") != expected_name:
-            return (
-                f"SQLite schema identity mismatch: {arcname}; "
-                f"expected {expected_name}"
-            )
-        if declared_schema is not None and declared_schema.get("name") != metadata.get(
-            "target_name"
-        ):
-            return f"SQLite schema does not match manifest declaration: {arcname}"
-        try:
-            current_version = int(metadata["current_version"])
-        except (KeyError, ValueError):
-            return f"SQLite schema version is missing: {arcname}"
-        if current_version > maximum_version:
-            return (
-                f"Archive schema is newer than this DicePP version: "
-                f"{arcname}@{current_version}"
-            )
-        if declared_schema is not None:
-            declared_version = declared_schema.get("latest_version")
-            if not isinstance(declared_version, int) or current_version > declared_version:
-                return f"SQLite schema is newer than manifest declaration: {arcname}"
-        return None
+        return _inspect_sqlite_schema_path(
+            Path(temporary_path),
+            display_path=arcname,
+            expected_name=expected_name,
+            maximum_version=maximum_version,
+            declared_schema=declared_schema,
+        )
     finally:
         if temporary_path is not None:
             try:
                 Path(temporary_path).unlink()
             except OSError:
                 pass
+
+
+def _inspect_source_sqlite_payloads(
+    payloads: list[ArchivePayload],
+    *,
+    profile: str,
+) -> list[str]:
+    opaque_files: list[str] = []
+    for payload in payloads:
+        asset = DATA_CATALOG.find_for_logical_path(payload.arcname, profile=profile)
+        if asset is None or asset.schema is None:
+            continue
+        inspection = _inspect_sqlite_schema_path(
+            payload.path,
+            display_path=payload.arcname,
+            expected_name=asset.schema.name,
+            maximum_version=asset.schema.latest_version,
+            declared_schema=asset.schema.to_dict(),
+            check_integrity=False,
+        )
+        if inspection.problem is not None:
+            raise ArchiveError(inspection.problem)
+        if inspection.opaque:
+            opaque_files.append(payload.arcname)
+    return sorted(opaque_files)
+
+
+def _inspect_sqlite_schema_path(
+    path: Path,
+    *,
+    display_path: str,
+    expected_name: str,
+    maximum_version: int,
+    declared_schema: dict | None,
+    check_integrity: bool = True,
+) -> SQLiteSchemaInspection:
+    try:
+        connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro",
+            uri=True,
+        )
+        try:
+            try:
+                rows = connection.execute(
+                    "SELECT key, value FROM schema_metadata"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if str(exc) == "no such table: schema_metadata":
+                    if check_integrity:
+                        integrity_rows = connection.execute(
+                            "PRAGMA quick_check"
+                        ).fetchall()
+                        if integrity_rows != [("ok",)]:
+                            return SQLiteSchemaInspection(
+                                problem=(
+                                    "SQLite integrity check failed: "
+                                    f"{display_path}"
+                                )
+                            )
+                    return SQLiteSchemaInspection(opaque=True)
+                raise
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return SQLiteSchemaInspection(
+            problem=(
+                f"SQLite schema metadata cannot be read: {display_path}: {exc}"
+            )
+        )
+    metadata = {str(key): str(value) for key, value in rows}
+    required_metadata = {
+        "application",
+        "target_name",
+        "current_version",
+        "created_at",
+        "updated_at",
+    }
+    missing_metadata = sorted(required_metadata - set(metadata))
+    if missing_metadata:
+        return SQLiteSchemaInspection(
+            problem=(
+                f"SQLite schema metadata is incomplete: {display_path}; "
+                f"missing {', '.join(missing_metadata)}"
+            )
+        )
+    if metadata["application"] != "dicepp":
+        return SQLiteSchemaInspection(
+            problem=(
+                f"SQLite schema application mismatch: {display_path}; "
+                "expected dicepp"
+            )
+        )
+    if metadata.get("target_name") != expected_name:
+        return SQLiteSchemaInspection(
+            problem=(
+                f"SQLite schema identity mismatch: {display_path}; "
+                f"expected {expected_name}"
+            )
+        )
+    if declared_schema is not None and declared_schema.get("name") != metadata.get(
+        "target_name"
+    ):
+        return SQLiteSchemaInspection(
+            problem=(
+                f"SQLite schema does not match manifest declaration: {display_path}"
+            )
+        )
+    try:
+        current_version = int(metadata["current_version"])
+    except ValueError:
+        return SQLiteSchemaInspection(
+            problem=f"SQLite schema version is invalid: {display_path}"
+        )
+    if current_version < 1:
+        return SQLiteSchemaInspection(
+            problem=f"SQLite schema version is invalid: {display_path}"
+        )
+    if current_version > maximum_version:
+        return SQLiteSchemaInspection(
+            problem=(
+                "Archive schema is newer than this DicePP version: "
+                f"{display_path}@{current_version}"
+            )
+        )
+    if declared_schema is not None:
+        declared_version = declared_schema.get("latest_version")
+        if not isinstance(declared_version, int) or current_version > declared_version:
+            return SQLiteSchemaInspection(
+                problem=(
+                    "SQLite schema is newer than manifest declaration: "
+                    f"{display_path}"
+                )
+            )
+    return SQLiteSchemaInspection()
 
 
 def _data_root(layout: InstanceLayout) -> Path:
@@ -1493,6 +1707,10 @@ def _plan_open_archive_restore(
         "entries": entries,
         "problems": problems,
         "warnings": warnings,
+        "opaque_sqlite": verification.get(
+            "opaque_sqlite",
+            {"count": 0, "files": []},
+        ),
         "profile": profile,
         "create": [entry for entry in entries if entry["action"] == "create"],
         "overwrite": [entry for entry in entries if entry["action"] == "overwrite"],
