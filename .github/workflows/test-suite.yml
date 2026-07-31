@@ -80,9 +80,8 @@ jobs:
     name: Dashboard Image
     runs-on: ubuntu-latest
     needs: quick
-    permissions:
-      contents: read
-      packages: write
+    # 不声明 permissions: 继承调用方授予 (普通 CI 仅 contents:read, release quality-gate 额外授予 packages:write).
+    # 显式声明 packages:write 会让普通 CI 在嵌套作业权限校验阶段直接 startup failure.
     outputs:
       candidate_ref: ${{ steps.publish-candidate.outputs.candidate_ref }}
       candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}
@@ -227,9 +226,8 @@ jobs:
     name: Runtime Image
     runs-on: ubuntu-latest
     needs: quick
-    permissions:
-      contents: read
-      packages: write
+    # 不声明 permissions: 继承调用方授予 (普通 CI 仅 contents:read, release quality-gate 额外授予 packages:write).
+    # 显式声明 packages:write 会让普通 CI 在嵌套作业权限校验阶段直接 startup failure.
     outputs:
       candidate_ref: ${{ steps.publish-candidate.outputs.candidate_ref }}
       candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}

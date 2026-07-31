@@ -367,7 +367,10 @@ def test_release_gate_publishes_only_images_that_passed_the_image_smokes():
         )
 
         assert names.index(last_smoke) < names.index(publish["name"])
-        assert job["permissions"] == {"contents": "read", "packages": "write"}
+        # 镜像作业不得显式声明 permissions: 普通 CI 调用方只授予 contents:read,
+        # 嵌套作业声明 packages:write 会触发 GitHub 启动校验失败; release 路径
+        # 由 quality-gate 调用方授予 packages:write, 被调用作业继承即可.
+        assert "permissions" not in job
         assert login["if"] == "inputs.release_tag != ''"
         assert login["with"]["password"] == "${{ github.token }}"
         assert publish["if"] == "inputs.release_tag != ''"
