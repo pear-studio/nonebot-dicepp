@@ -156,6 +156,8 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: astral-sh/setup-uv@v4
+
       - name: Download tested Windows candidate
         uses: actions/download-artifact@v4
         with:
@@ -201,9 +203,8 @@ jobs:
           }
           Move-Item $portable[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
           Move-Item $setup[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe"
-          python -m pip install --disable-pip-version-check "packaging==24.2"
           $env:PYTHONPATH = "src"
-          python scripts/build/generate_velopack_bundle.py `
+          uv run --frozen python scripts/build/generate_velopack_bundle.py `
             --version "${{ needs.release-metadata.outputs.version }}" `
             --velopack-version "${{ needs.release-metadata.outputs.velopack_version }}" `
             --channel "${{ needs.release-metadata.outputs.channel }}" `
