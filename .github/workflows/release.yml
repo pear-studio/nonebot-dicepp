@@ -21,30 +21,45 @@ permissions:
   packages: write     # 推送 GHCR 镜像
 
 jobs:
+  release-metadata:
+    name: Resolve Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit_sha: ${{ steps.release.outputs.commit_sha }}
+      is_prerelease: ${{ steps.release.outputs.is_prerelease }}
+      channel: ${{ steps.release.outputs.channel }}
+      velopack_version: ${{ steps.release.outputs.velopack_version }}
+      velopack_channel: ${{ steps.release.outputs.velopack_channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Derive and validate release metadata
+        id: release
+        run: |
+          python scripts/build/release_build_metadata.py derive \
+            --ref "$GITHUB_REF" \
+            --commit-sha "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
   quality-gate:
     name: Quality Gate
+    needs: release-metadata
     uses: ./.github/workflows/test-suite.yml
+    with:
+      release_tag: ${{ needs.release-metadata.outputs.tag }}
+      release_version: ${{ needs.release-metadata.outputs.version }}
+      release_commit_sha: ${{ needs.release-metadata.outputs.commit_sha }}
 
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: quality-gate
+    needs: [release-metadata, quality-gate]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Extract version info
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
 
       - name: Build image (local only)
         uses: docker/build-push-action@v5
@@ -53,15 +68,15 @@ jobs:
           push: false
           load: true
           tags: |
-            ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+            ghcr.io/pear-studio/nonebot-dicepp:${{ needs.release-metadata.outputs.tag }}
           build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
+            DICEPP_IMAGE_TAG=${{ needs.release-metadata.outputs.tag }}
+            GIT_SHA=${{ needs.release-metadata.outputs.commit_sha }}
 
       - name: Smoke test image
         run: |
-          IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
-          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
+          IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${{ needs.release-metadata.outputs.tag }}"
+          EXPECTED="DicePP v${{ needs.release-metadata.outputs.version }}"
           ACTUAL="$(docker run --rm --network=none "$IMAGE" python bot.py --version)"
           if [ "$ACTUAL" != "$EXPECTED" ]; then
             echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
@@ -77,15 +92,15 @@ jobs:
           push: false
           load: true
           tags: |
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+            ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }}
           build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
+            DICEPP_IMAGE_TAG=${{ needs.release-metadata.outputs.tag }}
+            GIT_SHA=${{ needs.release-metadata.outputs.commit_sha }}
 
       - name: Smoke test Dashboard image
         run: |
           docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 \
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+            ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }}
           ready=false
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
@@ -104,7 +119,7 @@ jobs:
       - name: Smoke test Manager image
         run: |
           SMOKE_VOLUME=dicepp-manager-smoke
-          IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}"
+          IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }}"
           cleanup() {
             docker rm -f dicepp-manager-smoke 2>/dev/null || true
             docker volume rm -f "$SMOKE_VOLUME" 2>/dev/null || true
@@ -141,13 +156,13 @@ jobs:
 
       - name: Push images
         run: |
-          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
+          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ needs.release-metadata.outputs.tag }}
+          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }}
+          if [ "${{ needs.release-metadata.outputs.is_prerelease }}" = "false" ]; then
+            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ needs.release-metadata.outputs.tag }} \
               ghcr.io/pear-studio/nonebot-dicepp:latest
             docker push ghcr.io/pear-studio/nonebot-dicepp:latest
-            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }} \
+            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }} \
               ghcr.io/pear-studio/dicepp-dashboard:latest
             docker push ghcr.io/pear-studio/dicepp-dashboard:latest
           else
@@ -155,64 +170,66 @@ jobs:
           fi
 
   windows-build:
-    name: Windows EXE
+    name: Package Windows Candidate
     runs-on: windows-latest
-    needs: quality-gate
+    needs: [release-metadata, quality-gate]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Extract version info
-        id: version
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - uses: astral-sh/setup-uv@v4
+      - name: Download tested Windows candidate
+        uses: actions/download-artifact@v4
         with:
-          version: "latest"
+          name: dicepp-windows-candidate
+          path: dist
 
-      - name: Install dependencies
-        run: uv sync --frozen --group dev
-
-      - name: Compute Velopack version and channel
-        id: velopack
-        shell: bash
-        run: |
-          CHANNEL=stable
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
-            CHANNEL=prerelease
-          fi
-          VELOPACK_VERSION="$(PYTHONPATH=src uv run --frozen python -c \
-            "from scripts.build.generate_release_manifest import velopack_version; print(velopack_version('${{ steps.version.outputs.version }}'))")"
-          VELOPACK_CHANNEL="$(PYTHONPATH=src uv run --frozen python -c \
-            "from scripts.build.generate_release_manifest import velopack_channel; print(velopack_channel('${CHANNEL}', 'amd64'))")"
-          echo "version=${VELOPACK_VERSION}" >> $GITHUB_OUTPUT
-          echo "channel=${VELOPACK_CHANNEL}" >> $GITHUB_OUTPUT
-
-      - name: Build Windows executables with PyInstaller
-        run: |
-          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/update_guard.spec --clean --noconfirm
-
-      - name: Assemble Windows directory
+      - name: Validate tested Windows candidate
         shell: pwsh
         run: |
-          ./scripts/build/assemble_windows_package.ps1
+          python scripts/build/release_build_metadata.py validate-windows-candidate `
+            --path dist/windows-candidate.json `
+            --tag "${{ needs.release-metadata.outputs.tag }}" `
+            --version "${{ needs.release-metadata.outputs.version }}" `
+            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}"
 
-      - name: Smoke test
+          $requiredExecutables = @(
+            "dist/DicePP/DicePP.exe",
+            "dist/DicePP/DicePP-Runtime.exe",
+            "dist/DicePP/DicePP-UpdateGuard.exe"
+          )
+          foreach ($path in $requiredExecutables) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Tested Windows candidate is incomplete: $path"
+            }
+          }
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk --version 1.2.0
+          vpk pack `
+            --packId DicePP `
+            --packVersion "${{ needs.release-metadata.outputs.velopack_version }}" `
+            --packDir dist/DicePP `
+            --mainExe DicePP.exe `
+            --channel "${{ needs.release-metadata.outputs.velopack_channel }}"
+
+          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
+          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
+          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
+          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
+            throw "Velopack output set is incomplete or ambiguous"
+          }
+          Move-Item $portable[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
+          Move-Item $setup[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe"
+          Copy-Item $full[0].FullName .
+          Copy-Item "Releases/releases.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
+          Copy-Item "Releases/assets.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
+
+      - name: Smoke test final Windows Portable
         shell: pwsh
         run: |
           function Invoke-PackagedExe {
@@ -252,43 +269,65 @@ jobs:
             }
           }
 
-          $expected = "DicePP v${{ steps.version.outputs.version }}"
-          $actual = Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--version")
-          if ($actual -ne $expected) {
-            throw "Version mismatch: expected '$expected', got '$actual'"
-          }
-          Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--smoke-check") | Out-Null
+          $portablePath = "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "dicepp-portable-$([guid]::NewGuid())"
+          try {
+            Expand-Archive -LiteralPath $portablePath -DestinationPath $extractRoot
+            $runtimeMatches = @(
+              Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "DicePP-Runtime.exe"
+            )
+            if ($runtimeMatches.Count -ne 1) {
+              throw "Portable must contain exactly one DicePP-Runtime.exe"
+            }
+            $programRoot = $runtimeMatches[0].Directory.FullName
+            $runtime = Join-Path $programRoot "DicePP-Runtime.exe"
+            $dashboard = Join-Path $programRoot "DicePP.exe"
+            $updateGuard = Join-Path $programRoot "DicePP-UpdateGuard.exe"
 
-          $dashboardExpected = "DicePP Dashboard v${{ steps.version.outputs.version }}"
-          $dashboardActual = Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")
-          if ($dashboardActual -ne $dashboardExpected) {
-            throw "Dashboard version mismatch: expected '$dashboardExpected', got '$dashboardActual'"
-          }
-          Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
-          Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" @("--smoke-check") | Out-Null
+            $expectedRuntime = "DicePP v${{ needs.release-metadata.outputs.version }}"
+            $actualRuntime = Invoke-PackagedExe $runtime @("--version")
+            if ($actualRuntime -ne $expectedRuntime) {
+              throw "Portable Runtime version mismatch: expected '$expectedRuntime', got '$actualRuntime'"
+            }
+            Invoke-PackagedExe $runtime @("--smoke-check") | Out-Null
 
-      - name: Package artifact
+            $expectedDashboard = "DicePP Dashboard v${{ needs.release-metadata.outputs.version }}"
+            $actualDashboard = Invoke-PackagedExe $dashboard @("--version")
+            if ($actualDashboard -ne $expectedDashboard) {
+              throw "Portable Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
+            }
+            Invoke-PackagedExe $dashboard @("--smoke-check") | Out-Null
+
+            $expectedGuard = "${{ needs.release-metadata.outputs.version }}"
+            $actualGuard = Invoke-PackagedExe $updateGuard @("--version")
+            if ($actualGuard -ne $expectedGuard) {
+              throw "Portable UpdateGuard version mismatch: expected '$expectedGuard', got '$actualGuard'"
+            }
+            Invoke-PackagedExe $updateGuard @("--smoke-check") | Out-Null
+          } finally {
+            if (Test-Path -LiteralPath $extractRoot) {
+              Remove-Item -LiteralPath $extractRoot -Recurse -Force
+            }
+          }
+
+      - name: Validate final Windows asset set
         shell: pwsh
         run: |
-          dotnet tool install -g vpk --version 1.2.0
-          vpk pack `
-            --packId DicePP `
-            --packVersion "${{ steps.velopack.outputs.version }}" `
-            --packDir dist/DicePP `
-            --mainExe DicePP.exe `
-            --channel "${{ steps.velopack.outputs.channel }}"
-
-          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
-          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
-          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
-          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
-            throw "Velopack output set is incomplete or ambiguous"
+          $expected = @(
+            "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip",
+            "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe",
+            "releases.${{ needs.release-metadata.outputs.velopack_channel }}.json",
+            "assets.${{ needs.release-metadata.outputs.velopack_channel }}.json"
+          )
+          foreach ($path in $expected) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing Windows release asset: $path"
+            }
           }
-          Move-Item $portable[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip"
-          Move-Item $setup[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe"
-          Copy-Item $full[0].FullName .
-          Copy-Item "Releases/releases.${{ steps.velopack.outputs.channel }}.json" .
-          Copy-Item "Releases/assets.${{ steps.velopack.outputs.channel }}.json" .
+          $full = @(Get-ChildItem -Path . -Filter "*-full.nupkg" -File)
+          if ($full.Count -ne 1) {
+            throw "Expected exactly one full Velopack package, found $($full.Count)"
+          }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -299,12 +338,13 @@ jobs:
             *-full.nupkg
             releases.win-*.json
             assets.win-*.json
+          if-no-files-found: error
           retention-days: 7
 
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [build-docker, windows-build]
+    needs: [release-metadata, build-docker, windows-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -320,31 +360,17 @@ jobs:
         with:
           name: dicepp-windows
 
-      - name: Extract version info
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Pull published images from GHCR
         run: |
-          docker pull ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker pull ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          docker pull ghcr.io/pear-studio/nonebot-dicepp:${{ needs.release-metadata.outputs.tag }}
+          docker pull ghcr.io/pear-studio/dicepp-dashboard:${{ needs.release-metadata.outputs.tag }}
 
       - name: Package Linux amd64 release bundle
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zip zstd
 
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG="${{ needs.release-metadata.outputs.tag }}"
           BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
           DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
           BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${BOT_IMAGE}")"
@@ -418,32 +444,28 @@ jobs:
 
       - name: Generate release machine contract
         run: |
-          CHANNEL=stable
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
-            CHANNEL=prerelease
-          fi
           FULL_NUPKG="$(find . -maxdepth 1 -name '*-full.nupkg' -print -quit)"
           RELEASES_JSON="$(find . -maxdepth 1 -name 'releases.win-*.json' -print -quit)"
           ASSETS_JSON="$(find . -maxdepth 1 -name 'assets.win-*.json' -print -quit)"
           PYTHONPATH=src uv run --frozen python scripts/build/generate_release_manifest.py \
-            --version "${{ steps.version.outputs.version }}" \
-            --channel "${CHANNEL}" \
-            --release-notes "docs/releases/${{ steps.version.outputs.tag }}.md" \
-            --artifact "windows:amd64:portable:DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip" \
-            --artifact "windows:amd64:setup:DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe" \
+            --version "${{ needs.release-metadata.outputs.version }}" \
+            --channel "${{ needs.release-metadata.outputs.channel }}" \
+            --release-notes "docs/releases/${{ needs.release-metadata.outputs.tag }}.md" \
+            --artifact "windows:amd64:portable:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip" \
+            --artifact "windows:amd64:setup:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe" \
             --artifact "windows:amd64:velopack-full:${FULL_NUPKG}" \
             --artifact "windows:amd64:velopack-releases:${RELEASES_JSON}" \
             --artifact "windows:amd64:velopack-assets:${ASSETS_JSON}" \
-            --artifact "linux:amd64:linux-bundle:DicePP-${{ steps.version.outputs.tag }}-linux-amd64.zip"
+            --artifact "linux:amd64:linux-bundle:DicePP-${{ needs.release-metadata.outputs.tag }}-linux-amd64.zip"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG="${{ needs.release-metadata.outputs.tag }}"
           RELEASE_MD="docs/releases/${TAG}.md"
           RELEASE_FLAGS=()
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+          if [ "${{ needs.release-metadata.outputs.is_prerelease }}" = "true" ]; then
             RELEASE_FLAGS+=(--prerelease)
           fi
 

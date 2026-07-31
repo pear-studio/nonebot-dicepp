@@ -79,10 +79,15 @@ def test_windows_release_uses_velpack_and_normalizes_public_names():
 
     assert "vpk pack" in script
     assert "--mainExe DicePP.exe" in script
+    assert "${{ needs.release-metadata.outputs.velopack_version }}" in script
+    assert "${{ needs.release-metadata.outputs.velopack_channel }}" in script
     assert "win64-Portable.zip" in script
     assert "win64-Setup.exe" in script
     assert "*-full.nupkg" in script
-    assert "releases.${{ steps.velopack.outputs.channel }}.json" in script
+    assert (
+        "releases.${{ needs.release-metadata.outputs.velopack_channel }}.json"
+        in script
+    )
     assert "dotnet tool install -g vpk --version 1.2.0" in script
 
 
@@ -178,7 +183,10 @@ def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_
 
 
 def test_release_bot_image_smoke_preflights_local_tag_without_network():
-    image = "ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
+    image = (
+        "ghcr.io/pear-studio/nonebot-dicepp:"
+        "${{ needs.release-metadata.outputs.tag }}"
+    )
     build = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Build image (local only)")
     smoke = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Smoke test image")
     script = smoke["run"]
@@ -207,19 +215,21 @@ def test_windows_package_only_keeps_localized_usage_readme():
 
 def test_windows_packages_a_standalone_update_guard():
     script = WINDOWS_PACKAGE_SCRIPT.read_text(encoding="utf-8")
-    release_build = _workflow_step(
-        RELEASE_WORKFLOW,
-        "windows-build",
-        "Build Windows executables with PyInstaller",
-    )["run"]
     ci_build = _workflow_step(
         TEST_SUITE_WORKFLOW,
         "windows-package",
         "Build Windows executables",
     )["run"]
 
-    assert "pyinstaller scripts/build/update_guard.spec" in release_build
     assert "pyinstaller scripts/build/update_guard.spec" in ci_build
+    all_build_scripts = "\n".join(
+        step.get("run", "")
+        for workflow in (RELEASE_WORKFLOW, TEST_SUITE_WORKFLOW)
+        for job in yaml.safe_load(workflow.read_text(encoding="utf-8"))["jobs"].values()
+        for step in job.get("steps", [])
+    )
+    for spec in ("dicepp.spec", "dashboard.spec", "update_guard.spec"):
+        assert all_build_scripts.count(f"pyinstaller scripts/build/{spec}") == 1
     assert '$UpdateGuardSource = "dist/DicePP-UpdateGuard.exe"' in script
     assert 'Destination (Join-Path $DistDir "DicePP-UpdateGuard.exe")' in script
 
@@ -244,21 +254,144 @@ def test_windows_package_smoke_waits_for_windowed_dashboard_launcher():
     assert "(& dist/DicePP/DicePP.exe --version)" not in script
 
 
-def test_release_windows_smoke_waits_for_windowed_dashboard_launcher():
-    step = _workflow_step(RELEASE_WORKFLOW, "windows-build", "Smoke test")
-    script = step["run"]
+def test_release_packages_the_exact_windows_candidate_tested_by_the_gate():
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
 
-    assert step["shell"] == "pwsh"
-    assert "Start-Process" in script
-    assert "-Wait" in script
-    assert "-RedirectStandardOutput" in script
-    assert "$null -eq $out" in script
-    assert "$null -eq $err" in script
-    assert "(Get-Content $stdout -Raw -ErrorAction SilentlyContinue).Trim()" not in script
-    assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")' in script
-    assert 'Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check")' in script
+    metadata = release["jobs"]["release-metadata"]
+    gate = release["jobs"]["quality-gate"]
+    gate_windows = suite["jobs"]["windows-package"]
+
+    assert metadata["outputs"] == {
+        key: f"${{{{ steps.release.outputs.{key} }}}}"
+        for key in (
+            "tag",
+            "version",
+            "commit_sha",
+            "is_prerelease",
+            "channel",
+            "velopack_version",
+            "velopack_channel",
+        )
+    }
+    assert gate["needs"] == "release-metadata"
+    assert gate["with"] == {
+        "release_tag": "${{ needs.release-metadata.outputs.tag }}",
+        "release_version": "${{ needs.release-metadata.outputs.version }}",
+        "release_commit_sha": "${{ needs.release-metadata.outputs.commit_sha }}",
+    }
+    setup_python = next(
+        step
+        for step in gate_windows["steps"]
+        if step.get("uses") == "actions/setup-python@v5"
+    )
+    assert setup_python["with"]["python-version"] == "3.11"
+
+    record = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Record release candidate provenance",
+    )
+    upload = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Upload release-ready Windows candidate",
+    )
+    download = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Download tested Windows candidate",
+    )
+    validate = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Validate tested Windows candidate",
+    )
+
+    assert record["if"] == "inputs.release_tag != ''"
+    assert record["shell"] == "pwsh"
+    assert "$actualCommit = (git rev-parse HEAD).Trim()" in record["run"]
+    assert "uv run --frozen python" in record["run"]
+    assert "--expected-commit-sha \"${{ inputs.release_commit_sha }}\"" in record["run"]
+    assert '--actual-commit-sha "$actualCommit"' in record["run"]
+    assert "${{ github.sha }}" not in record["run"]
+    assert upload["with"]["name"] == "dicepp-windows-candidate"
+    assert set(upload["with"]["path"].splitlines()) == {
+        "dist/DicePP",
+        "dist/windows-candidate.json",
+    }
+    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["if-no-files-found"] == "error"
+    assert download["with"] == {
+        "name": "dicepp-windows-candidate",
+        "path": "dist",
+    }
+    for field in ("tag", "version", "commit_sha"):
+        assert f"${{{{ needs.release-metadata.outputs.{field} }}}}" in validate["run"]
+
+
+def test_release_jobs_consume_one_validated_metadata_derivation():
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    job_names = ("build-docker", "windows-build", "publish")
+    step_names = [
+        step.get("name")
+        for job in release["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    scripts = "\n".join(
+        step.get("run", "")
+        for job in release["jobs"].values()
+        for step in job.get("steps", [])
+    )
+
+    assert step_names.count("Derive and validate release metadata") == 1
+    assert "Extract version info" not in step_names
+    assert "Compute Velopack version and channel" not in step_names
+    assert "${GITHUB_REF#refs/tags/}" not in scripts
+    for job_name in job_names:
+        assert "release-metadata" in release["jobs"][job_name]["needs"]
+
+
+def test_windows_release_requires_complete_velopack_asset_set():
+    validate = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Validate final Windows asset set",
+    )["run"]
+
+    assert "win64-Portable.zip" in validate
+    assert "win64-Setup.exe" in validate
+    velopack_channel = "${{ needs.release-metadata.outputs.velopack_channel }}"
+    assert f"releases.{velopack_channel}.json" in validate
+    assert f"assets.{velopack_channel}.json" in validate
+    assert '"*-full.nupkg"' in validate
+    assert "$full.Count -ne 1" in validate
+
+
+def test_windows_release_smokes_executables_from_the_final_portable():
+    job = _workflow_job(RELEASE_WORKFLOW, "windows-build")
+    step_names = [step.get("name") for step in job["steps"]]
+    smoke = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Smoke test final Windows Portable",
+    )
+    script = smoke["run"]
+
+    assert step_names.index("Package artifact") < step_names.index(smoke["name"])
+    assert "Expand-Archive -LiteralPath $portablePath" in script
     assert (
-        'Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" '
-        '@("--smoke-check")'
+        'Get-ChildItem -LiteralPath $extractRoot -Recurse -File '
+        '-Filter "DicePP-Runtime.exe"'
     ) in script
-    assert "./dist/DicePP/DicePP.exe --version" not in script
+    assert "$programRoot = $runtimeMatches[0].Directory.FullName" in script
+    assert "dist/DicePP" not in script
+
+    for executable in ("$runtime", "$dashboard", "$updateGuard"):
+        assert f'Invoke-PackagedExe {executable} @("--version")' in script
+        assert f'Invoke-PackagedExe {executable} @("--smoke-check")' in script
+
+    assert "Start-Process" in script
+    assert "-WindowStyle Hidden" in script
+    assert "-RedirectStandardOutput" in script
+    assert "-RedirectStandardError" in script

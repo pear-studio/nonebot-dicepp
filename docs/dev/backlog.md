@@ -14,23 +14,6 @@
 
 ## dev
 
-### [B-260728-82b7c7] 集中发布元数据并复用已验收的 Windows 构建
-- 创建: 2026-07-28
-- 优先级: P2
-- 类型: refactor
-- 改动量: L
-- 问题表现:
-  - rc16 release run 30373296372 全流程耗时 10 分 22 秒；Quality Gate / Windows Package 先用 Python 3.12 构建三个 PyInstaller EXE，构建步骤耗时 2 分 32 秒并完成命令行、Dashboard UI smoke，随后上传 `dicepp-windows-ci`
-  - Gate 通过后 Windows EXE job 不消费上述已验收目录，改用 Python 3.11 再次 checkout、安装依赖和构建相同三个 EXE；第二次 PyInstaller 耗时 2 分 17 秒
-  - tag、PEP 440 version、prerelease/channel、Velopack SemVer2/channel 分别在多个 job 和 `generate_release_manifest.py` 中派生；三种输出格式有各自协议用途，但分散实现容易出现不一致
-  - 重复构建既增加约 4 分 49 秒 Windows runner 构建时间，也不能保证最终 Velopack 输入目录与完成 UI 验收的目录字节一致
-- 开发备忘:
-  - 将版本派生收进单一脚本或 metadata job，一次输出 public tag、PEP 440 version、release channel、Velopack SemVer2 version/channel；保持 `v3.0.0rcN`、`3.0.0rcN`、`3.0.0-rc.N` 各自协议表示，不强行统一外部格式
-  - Windows Gate 与 Release 统一使用 Python 3.11；把 Gate 上传的 onedir 定义为 release-ready candidate，并记录来源 commit、版本和必要摘要
-  - `windows-build` 下载并校验同一次 workflow 的 candidate，只执行 Velopack 打包和最终产物级检查，不再运行 PyInstaller；Setup、Portable 和当前更新资产的对外契约在本条内保持不变
-  - 验收需证明 PyInstaller 在 release run 中只执行一次，Portable 解压后版本/smoke 正常，Setup/nupkg/feed 集合完整，现有 Windows 自动升级与回滚回归通过
-  - 关键位置: `.github/workflows/test-suite.yml`、`.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`scripts/build/assemble_windows_package.ps1`
-
 ### [B-260731-c386c9] Docker 候选镜像按 digest 晋升并统一 Linux 发布身份
 - 创建: 2026-07-31
 - 优先级: P2

@@ -8,6 +8,22 @@ name: Test Suite
 
 on:
   workflow_call:
+    inputs:
+      release_tag:
+        description: Release tag for a publishable Windows candidate
+        required: false
+        type: string
+        default: ""
+      release_version:
+        description: PEP 440 release version for the Windows candidate
+        required: false
+        type: string
+        default: ""
+      release_commit_sha:
+        description: Full source commit for the Windows candidate
+        required: false
+        type: string
+        default: ""
 
 jobs:
   quick:
@@ -161,7 +177,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
@@ -240,15 +256,42 @@ jobs:
           DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
           uv run pytest tests/system/package/windows/test_windows_package_playwright.py -n0 --tb=short -q
+      - name: Record release candidate provenance
+        if: inputs.release_tag != ''
+        shell: pwsh
+        run: |
+          $actualCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -notmatch '^[0-9a-f]{40}$') {
+            throw "Unable to resolve the checked-out commit"
+          }
+          uv run --frozen python scripts/build/release_build_metadata.py write-windows-candidate `
+            --output dist/windows-candidate.json `
+            --tag "${{ inputs.release_tag }}" `
+            --version "${{ inputs.release_version }}" `
+            --expected-commit-sha "${{ inputs.release_commit_sha }}" `
+            --actual-commit-sha "$actualCommit"
       - name: Package artifact
+        if: inputs.release_tag == ''
         shell: pwsh
         run: |
           Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64.zip
       - uses: actions/upload-artifact@v4
+        if: inputs.release_tag == ''
         with:
           name: dicepp-windows-ci
           path: DicePP-ci-win64.zip
           retention-days: 3
+      - name: Upload release-ready Windows candidate
+        if: inputs.release_tag != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicepp-windows-candidate
+          path: |
+            dist/DicePP
+            dist/windows-candidate.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   full:
     name: Full Offline Regression
