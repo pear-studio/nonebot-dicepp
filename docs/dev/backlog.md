@@ -14,25 +14,6 @@
 
 ## dev
 
-### [B-260731-c386c9] Docker 候选镜像按 digest 晋升并统一 Linux 发布身份
-- 创建: 2026-07-31
-- 优先级: P2
-- 类型: refactor
-- 改动量: L
-- 问题表现:
-  - rc16 的 Quality Gate 分别构建并 smoke Runtime Image（28 秒）和 Dashboard/Manager Image（36 秒），job 结束后本地镜像随临时 runner 丢弃
-  - Gate 通过后 `build-docker` 在新 runner 上再次构建两个带正式标签的镜像；实际构建约 28 秒、GHCR 推送约 83 秒，测试对象与最终发布对象不是同一不可变镜像身份
-  - `publish` 随后重新从 GHCR 拉取两个镜像，执行 `docker save` 和 `zstd -19` 制作 Linux 离线包；rc16 的整个 Linux 打包步骤约 80 秒
-  - 当前流程只能分别验证“CI 镜像能运行”和“Release 镜像做过基础 smoke”，不能直接证明 GHCR 正式 tag、Linux 离线包和完整 Gate 验收指向相同 Image ID
-- 开发备忘:
-  - 以集中派生的 release metadata 构建 Bot 与 Dashboard/Manager 两个最终 candidate 镜像，各镜像在一次 release 流程中只构建一次；Dashboard 和 Manager 继续复用同一控制面镜像
-  - 对 candidate 本地执行 Runtime、Dashboard、Manager smoke，通过后使用 commit/run 作用域的候选 tag 保存，并记录不可变 digest/Image ID
-  - 所有源码、Windows 和镜像 Gate 通过后，只给相同 manifest/digest 增加正式版本 tag；稳定版再增加 `latest`，不得重新 build
-  - Linux 离线包必须从相同候选 digest/Image ID 生成，`dicepp-package.json`、GHCR 正式 tag 和 `docker load` 后的镜像身份三方一致
-  - 在真实双镜像 archive 上记录 `zstd -19/-12/-10` 的耗时和体积；只有体积增幅与发布关键路径收益均可接受时才调整默认等级，不预设必须降档
-  - 设计候选 tag 的失败清理/保留策略；验收需覆盖 Gate 失败不产生正式 tag、稳定版/预发布 latest 行为、离线包加载与 Compose `--pull never` 启动
-  - 关键位置: `.github/workflows/test-suite.yml`、`.github/workflows/release.yml`、`scripts/build/generate_linux_package_manifest.py`
-
 ### [B-260731-a4e8ea] 硬切 Velopack 单 bundle Windows 更新契约
 - 创建: 2026-07-31
 - 优先级: P2
