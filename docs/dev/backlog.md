@@ -14,13 +14,60 @@
 
 ## dev
 
-### [B-260728-82b7c7] release 流水线产物命名不统一且存在重复构建
+### [B-260728-82b7c7] 集中发布元数据并复用已验收的 Windows 构建
 - 创建: 2026-07-28
 - 优先级: P2
 - 类型: refactor
-- 改动量: M
-- 问题表现: release 全流程约 10-11 分钟, 其中 quality gate 与 release 各完整构建一遍镜像和 PyInstaller EXE(规格相同, 串行相接, 合计约 4-5 分钟重复); 产物命名三种版本格式混用: Portable/Setup/linux zip 用 tag 格式(v3.0.0rc16, workflow 重命名), nupkg 和 releases/assets feed 用 Velopack SemVer2(3.0.0-rc.16, 原样保留), dicepp-release.json 内 version 又是去 v 的 3.0.0rc16; publish 阶段 docker save ~1.2GB + zstd -19 重压缩约 1 分多钟。
-- 开发备忘: 调查于 2026-07-28(基于 rc15 run 30355233453 / rc16 run 30373296372 实测)。关键位置: .github/workflows/test-suite.yml:111-113 与 release.yml:177-181 的重复 PyInstaller; release.yml:258-264 只重命名 Portable/Setup 不重命名 nupkg; 版本派生逻辑散在 generate_release_manifest.py(velopack_version/velopack_channel)与各 job 的 Extract version info。方向: gate 产物经 artifact 复用或 release 触发时跳过重复 job; 版本派生收进单一脚本统一输出; build-push-action 配 GHA 缓存; zstd 降档或多线程。优化时注意 nupkg/feed 命名是 Velopack 更新 contract 的一部分, 改名需确认 Manager 侧消费兼容。
+- 改动量: L
+- 问题表现:
+  - rc16 release run 30373296372 全流程耗时 10 分 22 秒；Quality Gate / Windows Package 先用 Python 3.12 构建三个 PyInstaller EXE，构建步骤耗时 2 分 32 秒并完成命令行、Dashboard UI smoke，随后上传 `dicepp-windows-ci`
+  - Gate 通过后 Windows EXE job 不消费上述已验收目录，改用 Python 3.11 再次 checkout、安装依赖和构建相同三个 EXE；第二次 PyInstaller 耗时 2 分 17 秒
+  - tag、PEP 440 version、prerelease/channel、Velopack SemVer2/channel 分别在多个 job 和 `generate_release_manifest.py` 中派生；三种输出格式有各自协议用途，但分散实现容易出现不一致
+  - 重复构建既增加约 4 分 49 秒 Windows runner 构建时间，也不能保证最终 Velopack 输入目录与完成 UI 验收的目录字节一致
+- 开发备忘:
+  - 将版本派生收进单一脚本或 metadata job，一次输出 public tag、PEP 440 version、release channel、Velopack SemVer2 version/channel；保持 `v3.0.0rcN`、`3.0.0rcN`、`3.0.0-rc.N` 各自协议表示，不强行统一外部格式
+  - Windows Gate 与 Release 统一使用 Python 3.11；把 Gate 上传的 onedir 定义为 release-ready candidate，并记录来源 commit、版本和必要摘要
+  - `windows-build` 下载并校验同一次 workflow 的 candidate，只执行 Velopack 打包和最终产物级检查，不再运行 PyInstaller；Setup、Portable 和当前更新资产的对外契约在本条内保持不变
+  - 验收需证明 PyInstaller 在 release run 中只执行一次，Portable 解压后版本/smoke 正常，Setup/nupkg/feed 集合完整，现有 Windows 自动升级与回滚回归通过
+  - 关键位置: `.github/workflows/test-suite.yml`、`.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`scripts/build/assemble_windows_package.ps1`
+
+### [B-260731-c386c9] Docker 候选镜像按 digest 晋升并统一 Linux 发布身份
+- 创建: 2026-07-31
+- 优先级: P2
+- 类型: refactor
+- 改动量: L
+- 问题表现:
+  - rc16 的 Quality Gate 分别构建并 smoke Runtime Image（28 秒）和 Dashboard/Manager Image（36 秒），job 结束后本地镜像随临时 runner 丢弃
+  - Gate 通过后 `build-docker` 在新 runner 上再次构建两个带正式标签的镜像；实际构建约 28 秒、GHCR 推送约 83 秒，测试对象与最终发布对象不是同一不可变镜像身份
+  - `publish` 随后重新从 GHCR 拉取两个镜像，执行 `docker save` 和 `zstd -19` 制作 Linux 离线包；rc16 的整个 Linux 打包步骤约 80 秒
+  - 当前流程只能分别验证“CI 镜像能运行”和“Release 镜像做过基础 smoke”，不能直接证明 GHCR 正式 tag、Linux 离线包和完整 Gate 验收指向相同 Image ID
+- 开发备忘:
+  - 以集中派生的 release metadata 构建 Bot 与 Dashboard/Manager 两个最终 candidate 镜像，各镜像在一次 release 流程中只构建一次；Dashboard 和 Manager 继续复用同一控制面镜像
+  - 对 candidate 本地执行 Runtime、Dashboard、Manager smoke，通过后使用 commit/run 作用域的候选 tag 保存，并记录不可变 digest/Image ID
+  - 所有源码、Windows 和镜像 Gate 通过后，只给相同 manifest/digest 增加正式版本 tag；稳定版再增加 `latest`，不得重新 build
+  - Linux 离线包必须从相同候选 digest/Image ID 生成，`dicepp-package.json`、GHCR 正式 tag 和 `docker load` 后的镜像身份三方一致
+  - 在真实双镜像 archive 上记录 `zstd -19/-12/-10` 的耗时和体积；只有体积增幅与发布关键路径收益均可接受时才调整默认等级，不预设必须降档
+  - 设计候选 tag 的失败清理/保留策略；验收需覆盖 Gate 失败不产生正式 tag、稳定版/预发布 latest 行为、离线包加载与 Compose `--pull never` 启动
+  - 关键位置: `.github/workflows/test-suite.yml`、`.github/workflows/release.yml`、`scripts/build/generate_linux_package_manifest.py`
+
+### [B-260731-a4e8ea] 硬切 Velopack 单 bundle Windows 更新契约
+- 创建: 2026-07-31
+- 优先级: P2
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+  - rc16 GitHub Release 的 8 个 assets 中，full nupkg、`releases.win-x64-prerelease.json`、`assets.win-x64-prerelease.json` 是 Manager/Velopack 机器组件，却与三个用户发行包并列展示，容易让普通用户误以为需要手动下载
+  - rc16 `assets.win-x64-prerelease.json` 仍引用 Velopack 原始的 `DicePP-win-x64-prerelease-Setup.exe` / `Portable.zip`，但 Release 实际上传的是带 `v3.0.0rc16` 的重命名文件，feed 与公开 assets 不自洽
+  - 当前 Manager 自行通过 `dicepp-release.json` 发现版本，并调用 `Update.exe apply -p <full.nupkg>` 安装；Velopack 官方说明 `assets.json` 仅供部署命令使用可删除，`releases.json` 用于 `UpdateManager` 发现版本，这两项都不是 DicePP 当前安装路径的必要输入
+  - v3 尚未正式发布，无需为现有 RC 的旧三文件更新契约保留自动升级兼容；旧 RC 到硬切版本允许要求手动安装
+- 开发备忘:
+  - 直接升级 Windows release contract，使用单一机器资产 `velopack.win-x64.zip`；文件名不带 `DicePP-vX.Y.Z` 用户发行包前缀，也不重复写 version/channel
+  - bundle 仅包含 `manifest.json` 与 Velopack full nupkg；内层 manifest 严格声明格式版本、DicePP/Velopack 版本、channel、平台、架构、nupkg 文件名、size 和 SHA-256，外层 `dicepp-release.json` 再校验整个 bundle
+  - Manager 改为下载、安全解压和校验 bundle，再把经过版本/摘要验证的 nupkg 交给 UpdateGuard/`Update.exe apply -p`；回滚包获取和本地 packages 维护同步改用 bundle 契约
+  - 删除旧的独立 full nupkg、`releases.json`、`assets.json` 发布、下载及校验路径，不实现双格式读取；使用新的 release contract version 让旧 Manager 明确拒绝而不是误解析
+  - 安全验收覆盖路径穿越、绝对路径、符号链接/重解析点、重复成员、额外成员、压缩炸弹边界、nupkg 版本/摘要冲突、下载中断、升级失败回滚；发布验收覆盖硬切后相邻版本自动升级和回滚
+  - 最终 GitHub Release assets 固定为三个 `DicePP-vX.Y.Z-*` 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、`docker-compose.yml`
+  - 关键位置: `.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`src/dicepp_manager/release.py`、`src/dicepp_manager/upgrade.py`、相关 release/upgrade tests 与发布文档
 
 ## persona
 
