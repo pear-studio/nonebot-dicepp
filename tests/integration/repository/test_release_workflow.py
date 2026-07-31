@@ -35,13 +35,19 @@ def _create_release_script() -> str:
     return _workflow_step(RELEASE_WORKFLOW, "publish", "Create GitHub Release")["run"]
 
 
-def test_create_release_uploads_only_user_facing_assets():
+def test_create_release_uploads_the_exact_six_asset_contract():
     script = _create_release_script()
 
-    assert "ASSETS=(docker-compose.yml dicepp-release.json)" in script
-    assert "ZIP_ASSETS=(DicePP-*-win64-Portable.zip DicePP-*-win64-Setup.exe" in script
-    assert 'ASSETS+=("${ZIP_ASSETS[@]}")' in script
-    assert "LINUX_IMAGE_ASSETS=(DicePP-*-linux-amd64.zip)" in script
+    for asset in (
+        "DicePP-${TAG}-win64-Setup.exe",
+        "DicePP-${TAG}-win64-Portable.zip",
+        "DicePP-${TAG}-linux-amd64.zip",
+        "velopack.win-x64.zip",
+        "dicepp-release.json",
+        "docker-compose.yml",
+    ):
+        assert f'"{asset}"' in script
+    assert 'for asset in "${ASSETS[@]}"' in script
     assert 'ASSETS+=("$RELEASE_MD")' not in script
     assert "DicePP-*-linux-amd64-images.tar.zst" not in script
     assert "ASSETS+=(docs/linux.md)" not in script
@@ -227,10 +233,10 @@ def test_windows_release_uses_velpack_and_normalizes_public_names():
     assert "win64-Portable.zip" in script
     assert "win64-Setup.exe" in script
     assert "*-full.nupkg" in script
-    assert (
-        "releases.${{ needs.release-metadata.outputs.velopack_channel }}.json"
-        in script
-    )
+    assert "generate_velopack_bundle.py" in script
+    assert '--output "velopack.win-x64.zip"' in script
+    assert "releases." not in script
+    assert "assets." not in script
     assert "dotnet tool install -g vpk --version 1.2.0" in script
 
 
@@ -245,6 +251,7 @@ def test_release_manifest_is_generated_after_all_platform_artifacts():
     assert "--change-scope" not in script
     assert "windows:amd64:portable:" in script
     assert "windows:amd64:setup:" in script
+    assert "windows:amd64:velopack-bundle:velopack.win-x64.zip" in script
     assert "linux:amd64:linux-bundle:" in script
 
 
@@ -474,11 +481,12 @@ def test_release_promotes_candidate_manifest_digests_without_rebuilding():
     assert '${{ needs.release-metadata.outputs.is_prerelease }}' in script
 
 
-def test_create_release_does_not_pass_empty_zip_argument():
+def test_create_release_fails_before_publishing_if_any_fixed_asset_is_missing():
     script = _create_release_script()
 
-    assert "nullglob" in script
-    assert "$ZIP" not in script
+    assert 'if [ ! -f "$asset" ]' in script
+    assert 'echo "Missing final release asset: $asset"' in script
+    assert "nullglob" not in script
 
 
 def test_windows_package_only_keeps_localized_usage_readme():
@@ -628,7 +636,7 @@ def test_release_jobs_consume_one_validated_metadata_derivation():
         assert "release-metadata" in release["jobs"][job_name]["needs"]
 
 
-def test_windows_release_requires_complete_velopack_asset_set():
+def test_windows_release_requires_single_velopack_bundle_asset():
     validate = _workflow_step(
         RELEASE_WORKFLOW,
         "windows-build",
@@ -637,11 +645,7 @@ def test_windows_release_requires_complete_velopack_asset_set():
 
     assert "win64-Portable.zip" in validate
     assert "win64-Setup.exe" in validate
-    velopack_channel = "${{ needs.release-metadata.outputs.velopack_channel }}"
-    assert f"releases.{velopack_channel}.json" in validate
-    assert f"assets.{velopack_channel}.json" in validate
-    assert '"*-full.nupkg"' in validate
-    assert "$full.Count -ne 1" in validate
+    assert "velopack.win-x64.zip" in validate
 
 
 def test_windows_release_smokes_executables_from_the_final_portable():

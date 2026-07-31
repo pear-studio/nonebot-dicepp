@@ -28,7 +28,7 @@ metadata:
   文档，用于国内或离线环境通过 `docker load` 导入镜像；兼容版本的 Manager
   自动安装也只使用该本地 image archive，不依赖 `docker pull`。
 - Windows onedir 必须包含独立 `DicePP-UpdateGuard.exe`，再由 Velopack 包装
-  Portable、Setup 和更新 full package/feed。UpdateGuard 是更新事务产物，
+  Portable、Setup 和单一 `velopack.win-x64.zip` 更新 bundle。UpdateGuard 是更新事务产物，
   不是用户需要单独下载的 Release asset。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
@@ -52,7 +52,7 @@ metadata:
 
 - 镜像: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
 - Windows: `DicePP-vX.Y.Z-win64-Portable.zip`、独立
-  `DicePP-vX.Y.Z-win64-Setup.exe` 和 Velopack feed
+  `DicePP-vX.Y.Z-win64-Setup.exe` 和 `velopack.win-x64.zip`
 - 数据变更: no
 - 配置变更: no
 - 变更范围: runtime, dashboard, deployment

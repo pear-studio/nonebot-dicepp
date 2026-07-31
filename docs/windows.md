@@ -200,9 +200,10 @@ Bot↔Manager 控制凭据单独位于 `manager/control/control-token`，与 HTT
 ## 版本更新与旧版迁移
 
 Dashboard 的“版本更新”页可以按 stable 或 opt-in prerelease 频道检查 GitHub
-Release，并下载与当前 win64 架构、频道相符的自动升级材料（Velopack full package
-和 release feed）到 `manager/packages/`。下载会校验 Release machine contract、
-asset digest 和 SHA-256。Portable 和 Setup 是首次安装或手工迁移入口，不是兼容后续
+Release，并下载固定机器资产 `velopack.win-x64.zip` 到 `manager/packages/`。
+下载会校验外层 Release machine contract、bundle digest 和 SHA-256，再安全解包，
+按内层 `manifest.json` 复核版本、频道、平台、架构和唯一 full nupkg 的身份。
+Portable 和 Setup 是首次安装或手工迁移入口，不是兼容后续
 自动更新的替代路径。检查和下载不会改变当前版本；只有已校验且兼容的版本才会显示
 安装按钮，安装仍需再次确认。
 
@@ -210,8 +211,8 @@ asset digest 和 SHA-256。Portable 和 Setup 是首次安装或手工迁移入�
 Velopack 切换版本化程序目录。版本目录外的 `DicePP-UpdateGuard.exe` 观察本次
 升级的健康标记；新版本只有在 migration、Dashboard、Bot RuntimeUnit 和本地
 控制通道都健康后才提交。程序切换、migration、启动或硬性健康检查失败/超时，
-UpdateGuard 会在切换前校验并保留当前版本的 Velopack full package；失败时通过
-`Update.exe apply -p <旧版 full package>` 降级，不直接删除或复制 `current/`。
+UpdateGuard 会在切换前从当前版本 bundle 校验并提取 full nupkg；失败时通过
+`Update.exe apply -p <旧版 full nupkg>` 降级，不直接删除或复制 `current/`。
 旧 Manager 随后恢复 pre-upgrade 数据。started、health 和 rollback marker 都绑定
 事务、目标版本与真实 Manager 进程身份；只有本地 Manager API 已监听且带 token
 的 `/v1/health` 验证通过，才会提交程序升级。
@@ -231,9 +232,9 @@ Dashboard 会继续展示持久化事务进度。若轮询超时，页面只表�
 不会取消升级。
 
 Portable 和 Setup 只是两个独立的首次安装入口，Setup 不依赖 Portable ZIP；
-后续兼容更新都使用同一 Velopack full package/feed 和回退协议。实例
+后续兼容更新都使用同一 Velopack bundle 和回退协议。实例
 `config/`、`data/`、`content/`、`dashboard/data/`、`manager/` 始终留在稳定
-DicePP 根目录，不跟随 `current/` 切换。发布包缺少 Velopack feed/full package
+DicePP 根目录，不跟随 `current/` 切换。发布包缺少 Velopack bundle
 或 UpdateGuard、需要升级 Manager 本身，或者当前目录不是受支持的安装布局时，
 自动安装会在修改程序和数据前拒绝。
 

@@ -25,6 +25,18 @@ def _artifact(filename: str, body: bytes, purpose: str = "linux-bundle") -> dict
 
 
 def _manifest(artifacts: list[dict], *, version="3.1.0", channel="stable") -> dict:
+    artifacts = list(artifacts)
+    if not any(item.get("purpose") == "velopack-bundle" for item in artifacts):
+        artifacts.append(
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": "velopack.win-x64.zip",
+                "purpose": "velopack-bundle",
+                "size": 1,
+                "sha256": "2" * 64,
+            }
+        )
     return {
         "contract_version": RELEASE_CONTRACT_VERSION,
         "version": version,
@@ -94,4 +106,45 @@ def test_manifest_rejects_oversized_linux_bundle_before_download() -> None:
     payload["artifacts"][0]["size"] = 16 * 1024**3 + 1
 
     with pytest.raises(ReleaseContractError, match="size limit"):
+        validate_release_manifest(payload)
+
+
+def test_contract_v2_hard_cut_rejects_v1_and_standalone_windows_package() -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["contract_version"] = 1
+    with pytest.raises(ReleaseContractError, match="contract version"):
+        validate_release_manifest(payload)
+
+    standalone = _manifest(
+        [
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": "DicePP-3.1.0-full.nupkg",
+                "purpose": "velopack-full",
+                "size": 1,
+                "sha256": "1" * 64,
+            }
+        ]
+    )
+    with pytest.raises(
+        ReleaseContractError,
+        match="Windows release artifact purpose",
+    ):
+        validate_release_manifest(standalone)
+
+
+def test_contract_v2_rejects_manifest_without_windows_bundle() -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["artifacts"] = [
+        item
+        for item in payload["artifacts"]
+        if item["purpose"] != "velopack-bundle"
+    ]
+
+    with pytest.raises(ReleaseContractError, match="Windows Velopack bundle"):
         validate_release_manifest(payload)

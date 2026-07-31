@@ -13,6 +13,7 @@ from types import MethodType, SimpleNamespace
 import pytest
 
 import dicepp_manager.upgrade as manager_upgrade
+import dicepp_manager._path_security as path_security
 from dicepp_data import DATA_CATALOG, InstanceLayout
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
 from dicepp_manager.models import ManagerOperation
@@ -97,21 +98,64 @@ def _record(path: str, payload: bytes) -> dict:
     }
 
 
+def _bundle_bytes(
+    version: str,
+    nupkg_body: bytes | None = None,
+) -> tuple[bytes, bytes, dict]:
+    nupkg_body = nupkg_body or _nupkg_bytes(version)
+    nupkg_name = f"DicePP-{version}-full.nupkg"
+    inner = {
+        "format_version": 1,
+        "dicepp_version": version,
+        "velopack_version": version,
+        "channel": "stable",
+        "platform": "windows",
+        "arch": "amd64",
+        "nupkg": {
+            "filename": nupkg_name,
+            "size": len(nupkg_body),
+            "sha256": hashlib.sha256(nupkg_body).hexdigest(),
+        },
+    }
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("manifest.json", json.dumps(inner))
+        archive.writestr(nupkg_name, nupkg_body)
+    return output.getvalue(), nupkg_body, inner
+
+
 def _write_full_nupkg(root: Path, version: str, name: str | None = None) -> Path:
-    package = root / "packages" / (name or f"DicePP-{version}-full.nupkg")
-    package.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(package, "w") as archive:
-        archive.writestr(
-            "DicePP.nuspec",
-            f"<package><metadata><version>{version}</version></metadata></package>",
-        )
-        archive.writestr("lib/net8.0/DicePP.exe", f"program-{version}")
-    return package
+    del name
+    bundle = root / "packages" / "velopack.win-x64.zip"
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    bundle.write_bytes(_bundle_bytes(version)[0])
+    (bundle.parent / "velopack.win-x64.verified.json").write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "dicepp_version": version,
+                "channel": "stable",
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": bundle.name,
+                "size": bundle.stat().st_size,
+                "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bundle
 
 
 def _windows_package(tmp_path: Path, version: str = "3.1.0"):
-    path = tmp_path / f"DicePP-{version}-full.nupkg"
-    path.write_bytes(b"target full package")
+    version_dir = tmp_path / "manager" / "packages" / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    path = version_dir / f"DicePP-{version}-full.nupkg"
+    nupkg = _nupkg_bytes(version)
+    path.write_bytes(nupkg)
+    bundle_body, _payload, inner = _bundle_bytes(version, nupkg)
+    bundle_path = version_dir / "velopack.win-x64.zip"
+    bundle_path.write_bytes(bundle_body)
     return VerifiedUpgradePackage(
         version=version,
         platform="windows",
@@ -119,11 +163,16 @@ def _windows_package(tmp_path: Path, version: str = "3.1.0"):
         path=path,
         metadata_path=tmp_path / "verified-release.json",
         artifact={
-            "purpose": "velopack-full",
-            "filename": path.name,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "platform": "windows",
+            "arch": "amd64",
+            "purpose": "velopack-bundle",
+            "filename": bundle_path.name,
+            "size": len(bundle_body),
+            "sha256": hashlib.sha256(bundle_body).hexdigest(),
         },
-        release={},
+        release={"channel": "stable"},
+        bundle_path=bundle_path,
+        bundle_manifest=inner,
     )
 
 
@@ -556,7 +605,7 @@ async def test_windows_guard_markers_are_scoped_to_one_transaction(tmp_path: Pat
         },
         version_loader=lambda: "3.0.0",
     )
-    package, _ = _linux_package(tmp_path)
+    package = _windows_package(tmp_path)
 
     first = await adapter.stage(package, "tx-one")
     second = await adapter.stage(package, "tx-two")
@@ -715,7 +764,7 @@ async def test_windows_guard_spawn_persists_child_output_without_creation_flags(
         instance_root / "manager" / "state" / "update-guard" / "tx"
     )
     transaction_dir.mkdir(parents=True)
-    package = _windows_package(tmp_path)
+    package = _windows_package(instance_root)
     rollback_package = tmp_path / "rollback.nupkg"
     rollback_package.write_bytes(b"rollback")
     guard_source = instance_root / "DicePP-UpdateGuard.exe"
@@ -806,7 +855,7 @@ def test_windows_guard_runtime_must_be_outside_install_root(
 
 
 @pytest.mark.asyncio
-async def test_windows_preflight_rejects_noop_and_requires_old_full_package(
+async def test_windows_preflight_rejects_noop_and_requires_rollback_bundle(
     tmp_path: Path,
 ):
     layout = _windows_adapter_layout(tmp_path)
@@ -824,12 +873,12 @@ async def test_windows_preflight_rejects_noop_and_requires_old_full_package(
     )
 
     # A no-op target is rejected up front, before any rollback material
-    # resolution (which may download the current-version full package).
+    # resolution (which may download the current-version bundle).
     with pytest.raises(UpgradeCompatibilityError, match="already installed"):
         await adapter.preflight(_windows_package(tmp_path))
 
-    # A real target still requires the current-version full package.
-    with pytest.raises(UpgradeCompatibilityError, match="full package"):
+    # A real target still requires the current-version bundle.
+    with pytest.raises(UpgradeCompatibilityError, match="bundle"):
         await adapter.preflight(_windows_package(tmp_path, "3.2.0"))
 
 
@@ -1440,6 +1489,9 @@ def _make_nupkg(path: Path, version: str) -> Path:
 
 
 def _verified_nupkg_package(path: Path, version: str) -> VerifiedUpgradePackage:
+    bundle_body, _payload, inner = _bundle_bytes(version, path.read_bytes())
+    bundle_path = path.parent / "velopack.win-x64.zip"
+    bundle_path.write_bytes(bundle_body)
     return VerifiedUpgradePackage(
         version=version,
         platform="windows",
@@ -1447,31 +1499,30 @@ def _verified_nupkg_package(path: Path, version: str) -> VerifiedUpgradePackage:
         path=path,
         metadata_path=path.parent / "verified-release.json",
         artifact={
-            "purpose": "velopack-full",
-            "filename": path.name,
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "platform": "windows",
+            "arch": "amd64",
+            "purpose": "velopack-bundle",
+            "filename": bundle_path.name,
+            "size": len(bundle_body),
+            "sha256": hashlib.sha256(bundle_body).hexdigest(),
         },
-        release={},
+        release={"channel": "stable"},
+        bundle_path=bundle_path,
+        bundle_manifest=inner,
     )
 
 
 def _current_release_routes(version: str, nupkg_body: bytes) -> dict:
-    feeds = {
-        f"releases.win-x64-stable.json": (b'{"Assets":[]}', "velopack-releases"),
-        f"assets.win-x64-stable.json": (b"[]", "velopack-assets"),
-    }
-    bodies = {f"DicePP-{version}-full.nupkg": (nupkg_body, "velopack-full")}
-    bodies.update(feeds)
+    bundle_body, _payload, _inner = _bundle_bytes(version, nupkg_body)
     artifacts = [
         {
             "platform": "windows",
             "arch": "amd64",
-            "filename": filename,
-            "purpose": purpose,
-            "size": len(body),
-            "sha256": hashlib.sha256(body).hexdigest(),
+            "filename": "velopack.win-x64.zip",
+            "purpose": "velopack-bundle",
+            "size": len(bundle_body),
+            "sha256": hashlib.sha256(bundle_body).hexdigest(),
         }
-        for filename, (body, purpose) in bodies.items()
     ]
     manifest = {
         "contract_version": RELEASE_CONTRACT_VERSION,
@@ -1521,8 +1572,8 @@ def _current_release_routes(version: str, nupkg_body: bytes) -> dict:
             _Response(json.dumps([release]).encode())
         ],
         "https://downloads/manifest": [_Response(manifest_bytes)],
-        "https://downloads/velopack-full": [
-            _Response(nupkg_body, headers={"ETag": '"full"'})
+        "https://downloads/velopack-bundle": [
+            _Response(bundle_body, headers={"ETag": '"bundle"'})
         ],
     }
 
@@ -1558,12 +1609,12 @@ def _rollback_adapter(
         },
         version_loader=lambda: version,
         bundled_guard_path=tmp_path / "DicePP-UpdateGuard.exe",
-        rollback_package_fetcher=fetcher,
+        rollback_bundle_fetcher=fetcher,
     )
 
 
 @pytest.mark.asyncio
-async def test_windows_first_upgrade_fetches_rollback_package_from_release(
+async def test_windows_first_upgrade_fetches_rollback_bundle_from_release(
     tmp_path: Path,
 ):
     """Portable first install has no packages/ directory: the rollback
@@ -1577,7 +1628,7 @@ async def test_windows_first_upgrade_fetches_rollback_package_from_release(
         tmp_path,
         layout,
         version="3.0.0",
-        fetcher=manager.fetch_rollback_package,
+        fetcher=manager.fetch_rollback_bundle,
     )
     package = _windows_package(tmp_path, "3.1.0")
     assert not (tmp_path / "packages").exists()
@@ -1585,14 +1636,15 @@ async def test_windows_first_upgrade_fetches_rollback_package_from_release(
     preflight = await adapter.preflight(package)
     staged = await adapter.stage(package, "f" * 32)
 
-    digest = hashlib.sha256(nupkg_body).hexdigest()
-    assert preflight["rollback_package_sha256"] == digest
-    downloaded = Path(preflight["rollback_package"])
+    nupkg_digest = hashlib.sha256(nupkg_body).hexdigest()
+    downloaded = Path(preflight["rollback_bundle"])
     assert downloaded.is_file()
-    assert downloaded.read_bytes() == nupkg_body
+    assert preflight["rollback_bundle_sha256"] == hashlib.sha256(
+        downloaded.read_bytes()
+    ).hexdigest()
     assert Path(staged["rollback_package"]).read_bytes() == nupkg_body
-    assert staged["rollback_package_sha256"] == digest
-    assert "https://downloads/velopack-full" in transport.requests
+    assert staged["rollback_package_sha256"] == nupkg_digest
+    assert "https://downloads/velopack-bundle" in transport.requests
 
 
 @pytest.mark.asyncio
@@ -1641,9 +1693,9 @@ async def test_windows_commit_maintains_packages_dir_for_next_upgrade(
 
     assert "packages_maintenance_error" not in result
     packages_dir = tmp_path / "packages"
-    remaining = list(packages_dir.glob("*-full.nupkg"))
-    assert [item.name for item in remaining] == ["DicePP-3.1.0-full.nupkg"]
-    assert remaining[0].read_bytes() == target.read_bytes()
+    remaining = packages_dir / "velopack.win-x64.zip"
+    assert remaining.is_file()
+    assert remaining.read_bytes() == package.bundle_path.read_bytes()
 
     def forbidden_fetch(_version: str):
         pytest.fail("rollback material must come from packages/, not the Release")
@@ -1653,7 +1705,7 @@ async def test_windows_commit_maintains_packages_dir_for_next_upgrade(
     )
     preflight = await second.preflight(_windows_package(tmp_path, "3.2.0"))
 
-    assert Path(preflight["rollback_package"]).resolve() == remaining[0].resolve()
+    assert Path(preflight["rollback_bundle"]).resolve() == remaining.resolve()
 
 
 @pytest.mark.asyncio
@@ -1727,7 +1779,7 @@ async def test_windows_unavailable_rollback_material_requires_manual_update(
         tmp_path,
         layout,
         version="3.0.0",
-        fetcher=manager.fetch_rollback_package,
+        fetcher=manager.fetch_rollback_bundle,
     )
 
     with pytest.raises(UpgradeCompatibilityError, match="manual"):
@@ -1736,6 +1788,40 @@ async def test_windows_unavailable_rollback_material_requires_manual_update(
     assert not (tmp_path / "packages").exists()
     assert list(tmp_path.rglob("*.part")) == []
     assert not (layout.manager_state_dir / "update-guard").exists()
+
+
+@pytest.mark.asyncio
+async def test_windows_rollback_rejects_root_packages_reparse_attribute(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    layout = _windows_adapter_layout(tmp_path)
+    packages = tmp_path / "packages"
+    packages.mkdir()
+    original = path_security.path_attributes_no_follow
+
+    def reparse_attributes(path: Path) -> int:
+        attributes = original(path)
+        if Path(path) == packages:
+            return attributes | 0x0400
+        return attributes
+
+    monkeypatch.setattr(
+        path_security,
+        "path_attributes_no_follow",
+        reparse_attributes,
+    )
+    adapter = _rollback_adapter(
+        tmp_path,
+        layout,
+        version="3.0.0",
+        fetcher=lambda _version: pytest.fail(
+            "Unsafe local cache must fail closed before remote fallback"
+        ),
+    )
+
+    with pytest.raises(UpgradeCompatibilityError, match="unsafe|reparse"):
+        await adapter.preflight(_windows_package(tmp_path, "3.1.0"))
 
 
 def _guard_cache_adapter(tmp_path: Path) -> WindowsVelopackUpgradeAdapter:

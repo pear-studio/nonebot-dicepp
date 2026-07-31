@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
 
+import dicepp_manager.upgrade as upgrade_module
 from dicepp_data import InstanceLayout
 from dicepp_manager.archive_coordinator import ArchiveCoordinator
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
@@ -14,6 +17,7 @@ from dicepp_manager.models import RuntimeLogs, RuntimeUnit, RuntimeUnitStatus
 from dicepp_manager.service import ManagerService, OperationFailed
 from dicepp_manager.store import ManagerOperationStore
 from dicepp_manager.upgrade import (
+    UpgradeCompatibilityError,
     UpgradeConfirmationError,
     UpgradeCoordinator,
     UpgradeTransactionError,
@@ -188,7 +192,8 @@ def _setup(
                 "compatibility": compatibility,
                 "artifact": artifact,
                 "verified_path": package_path.name,
-                "companions": [],
+                "bundle_manifest": None,
+                "payload_verified_path": None,
                 "completed_at": "2026-07-23T00:00:00+00:00",
             }
         ),
@@ -475,41 +480,55 @@ async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
     assert runtime.state == "running"
 
 
-def test_windows_verified_package_accepts_real_velopack_feed_shapes(
+def test_windows_verified_package_accepts_single_velopack_bundle(
     tmp_path: Path,
 ):
-    """Real Velopack feeds: releases is a JSON object, assets a bare array."""
     _layout, _data, _runtime, _service, coordinator, _ = _setup(tmp_path)
     version_dir = _layout.manager_packages_dir / "3.1.0"
     for stale in version_dir.iterdir():
         stale.unlink()
-    bodies = {
-        "DicePP-3.1.0-full.nupkg": b"full nupkg",
-        "releases.win-x64-stable.json": b'{"Assets":[{"Version":"3.1.0"}]}',
-        "assets.win-x64-stable.json": (
-            b'[{"RelativeFileName":"DicePP-3.1.0-full.nupkg"}]'
-        ),
-    }
-    purposes = {
-        "DicePP-3.1.0-full.nupkg": "velopack-full",
-        "releases.win-x64-stable.json": "velopack-releases",
-        "assets.win-x64-stable.json": "velopack-assets",
-    }
-    artifacts = []
-    for filename, body in bodies.items():
-        (version_dir / filename).write_bytes(body)
-        artifacts.append(
-            {
-                "platform": "windows",
-                "arch": "amd64",
-                "filename": filename,
-                "purpose": purposes[filename],
-                "size": len(body),
-                "sha256": hashlib.sha256(body).hexdigest(),
-            }
+    nupkg_stream = io.BytesIO()
+    with zipfile.ZipFile(nupkg_stream, "w") as archive:
+        archive.writestr(
+            "DicePP.nuspec",
+            "<package><metadata><version>3.1.0</version></metadata></package>",
         )
+    nupkg = nupkg_stream.getvalue()
+    nupkg_name = "DicePP-3.1.0-full.nupkg"
+    inner = {
+        "format_version": 1,
+        "dicepp_version": "3.1.0",
+        "velopack_version": "3.1.0",
+        "channel": "stable",
+        "platform": "windows",
+        "arch": "amd64",
+        "nupkg": {
+            "filename": nupkg_name,
+            "size": len(nupkg),
+            "sha256": hashlib.sha256(nupkg).hexdigest(),
+        },
+    }
+    bundle_stream = io.BytesIO()
+    with zipfile.ZipFile(bundle_stream, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(inner))
+        archive.writestr(nupkg_name, nupkg)
+    bundle = bundle_stream.getvalue()
+    generation = "1" * 32
+    bundle_name = f"velopack-{generation}.win-x64.zip"
+    payload_name = f"payload-{generation}.nupkg"
+    (version_dir / bundle_name).write_bytes(bundle)
+    (version_dir / payload_name).write_bytes(nupkg)
+    artifact = {
+        "platform": "windows",
+        "arch": "amd64",
+        "filename": "velopack.win-x64.zip",
+        "purpose": "velopack-bundle",
+        "size": len(bundle),
+        "sha256": hashlib.sha256(bundle).hexdigest(),
+    }
     available = coordinator.release_manager.value["available"]
-    available["artifacts"] = artifacts
+    available["channel"] = "stable"
+    available["artifacts"] = [artifact]
     (version_dir / "verified-release.json").write_text(
         json.dumps(
             {
@@ -517,15 +536,11 @@ def test_windows_verified_package_accepts_real_velopack_feed_shapes(
                 "channel": "stable",
                 "change_scope": available["change_scope"],
                 "compatibility": available["compatibility"],
-                "artifact": artifacts[0],
-                "verified_path": artifacts[0]["filename"],
-                "companions": [
-                    {
-                        "artifact": artifact,
-                        "verified_path": artifact["filename"],
-                    }
-                    for artifact in artifacts[1:]
-                ],
+                "artifact": artifact,
+                "generation": generation,
+                "verified_path": bundle_name,
+                "bundle_manifest": inner,
+                "payload_verified_path": payload_name,
                 "completed_at": "2026-07-23T00:00:00+00:00",
             }
         ),
@@ -535,7 +550,71 @@ def test_windows_verified_package_accepts_real_velopack_feed_shapes(
     package = coordinator._verified_package("3.1.0")
 
     assert package.version == "3.1.0"
-    assert package.artifact["purpose"] == "velopack-full"
+    assert package.artifact["purpose"] == "velopack-bundle"
+    assert package.path.name == payload_name
+
+
+@pytest.mark.parametrize(
+    ("verified_path", "payload_path"),
+    [
+        (r"C:\outside\bundle.zip", "payload-" + "1" * 32 + ".nupkg"),
+        (r"\\server\share\bundle.zip", "payload-" + "1" * 32 + ".nupkg"),
+        ("../bundle.zip", "payload-" + "1" * 32 + ".nupkg"),
+        (
+            "velopack-" + "1" * 32 + ".win-x64.zip",
+            r"\\server\share\payload.nupkg",
+        ),
+    ],
+)
+def test_windows_metadata_paths_are_rejected_before_any_candidate_path_io(
+    monkeypatch,
+    tmp_path: Path,
+    verified_path: str,
+    payload_path: str,
+) -> None:
+    _layout, _data, _runtime, _service, coordinator, _ = _setup(tmp_path)
+    available = coordinator.release_manager.value["available"]
+    artifact = {
+        "platform": "windows",
+        "arch": "amd64",
+        "filename": "velopack.win-x64.zip",
+        "purpose": "velopack-bundle",
+        "size": 1,
+        "sha256": "1" * 64,
+    }
+    available["artifacts"] = [artifact]
+    metadata = {
+        "version": "3.1.0",
+        "channel": "stable",
+        "change_scope": available["change_scope"],
+        "compatibility": available["compatibility"],
+        "artifact": artifact,
+        "generation": "1" * 32,
+        "verified_path": verified_path,
+        "bundle_manifest": {},
+        "payload_verified_path": payload_path,
+    }
+    monkeypatch.setattr(
+        upgrade_module,
+        "_read_json_object",
+        lambda _path: metadata,
+    )
+
+    def unexpected_io(*_args, **_kwargs):
+        pytest.fail("untrusted candidate path reached filesystem I/O")
+
+    monkeypatch.setattr(
+        upgrade_module,
+        "assert_contained_no_reparse",
+        unexpected_io,
+    )
+    monkeypatch.setattr(Path, "is_file", unexpected_io)
+    monkeypatch.setattr(Path, "stat", unexpected_io)
+    monkeypatch.setattr(Path, "resolve", unexpected_io)
+    monkeypatch.setattr(Path, "open", unexpected_io)
+
+    with pytest.raises(UpgradeCompatibilityError, match="unsafe|inconsistent"):
+        coordinator._verified_package("3.1.0")
 
 
 @pytest.mark.asyncio

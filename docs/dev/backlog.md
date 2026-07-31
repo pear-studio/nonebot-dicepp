@@ -12,27 +12,6 @@
 
 ---
 
-## dev
-
-### [B-260731-a4e8ea] 硬切 Velopack 单 bundle Windows 更新契约
-- 创建: 2026-07-31
-- 优先级: P2
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-  - rc16 GitHub Release 的 8 个 assets 中，full nupkg、`releases.win-x64-prerelease.json`、`assets.win-x64-prerelease.json` 是 Manager/Velopack 机器组件，却与三个用户发行包并列展示，容易让普通用户误以为需要手动下载
-  - rc16 `assets.win-x64-prerelease.json` 仍引用 Velopack 原始的 `DicePP-win-x64-prerelease-Setup.exe` / `Portable.zip`，但 Release 实际上传的是带 `v3.0.0rc16` 的重命名文件，feed 与公开 assets 不自洽
-  - 当前 Manager 自行通过 `dicepp-release.json` 发现版本，并调用 `Update.exe apply -p <full.nupkg>` 安装；Velopack 官方说明 `assets.json` 仅供部署命令使用可删除，`releases.json` 用于 `UpdateManager` 发现版本，这两项都不是 DicePP 当前安装路径的必要输入
-  - v3 尚未正式发布，无需为现有 RC 的旧三文件更新契约保留自动升级兼容；旧 RC 到硬切版本允许要求手动安装
-- 开发备忘:
-  - 直接升级 Windows release contract，使用单一机器资产 `velopack.win-x64.zip`；文件名不带 `DicePP-vX.Y.Z` 用户发行包前缀，也不重复写 version/channel
-  - bundle 仅包含 `manifest.json` 与 Velopack full nupkg；内层 manifest 严格声明格式版本、DicePP/Velopack 版本、channel、平台、架构、nupkg 文件名、size 和 SHA-256，外层 `dicepp-release.json` 再校验整个 bundle
-  - Manager 改为下载、安全解压和校验 bundle，再把经过版本/摘要验证的 nupkg 交给 UpdateGuard/`Update.exe apply -p`；回滚包获取和本地 packages 维护同步改用 bundle 契约
-  - 删除旧的独立 full nupkg、`releases.json`、`assets.json` 发布、下载及校验路径，不实现双格式读取；使用新的 release contract version 让旧 Manager 明确拒绝而不是误解析
-  - 安全验收覆盖路径穿越、绝对路径、符号链接/重解析点、重复成员、额外成员、压缩炸弹边界、nupkg 版本/摘要冲突、下载中断、升级失败回滚；发布验收覆盖硬切后相邻版本自动升级和回滚
-  - 最终 GitHub Release assets 固定为三个 `DicePP-vX.Y.Z-*` 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、`docker-compose.yml`
-  - 关键位置: `.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`src/dicepp_manager/release.py`、`src/dicepp_manager/upgrade.py`、相关 release/upgrade tests 与发布文档
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

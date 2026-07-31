@@ -6,6 +6,7 @@
 #       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
 #       DicePP-<tag>-win64-Portable.zip / DicePP-<tag>-win64-Setup.exe
 #       DicePP-<tag>-linux-amd64.zip
+#       velopack.win-x64.zip（Manager/UpdateGuard machine bundle）
 #       dicepp-release.json（Manager machine contract）
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
 #       docker-compose.yml、Windows 安装产物和 Linux 发布包作为 release assets
@@ -200,9 +201,14 @@ jobs:
           }
           Move-Item $portable[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
           Move-Item $setup[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe"
-          Copy-Item $full[0].FullName .
-          Copy-Item "Releases/releases.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
-          Copy-Item "Releases/assets.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
+          python -m pip install --disable-pip-version-check "packaging==24.2"
+          $env:PYTHONPATH = "src"
+          python scripts/build/generate_velopack_bundle.py `
+            --version "${{ needs.release-metadata.outputs.version }}" `
+            --velopack-version "${{ needs.release-metadata.outputs.velopack_version }}" `
+            --channel "${{ needs.release-metadata.outputs.channel }}" `
+            --nupkg $full[0].FullName `
+            --output "velopack.win-x64.zip"
 
       - name: Smoke test final Windows Portable
         shell: pwsh
@@ -291,28 +297,20 @@ jobs:
           $expected = @(
             "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip",
             "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe",
-            "releases.${{ needs.release-metadata.outputs.velopack_channel }}.json",
-            "assets.${{ needs.release-metadata.outputs.velopack_channel }}.json"
+            "velopack.win-x64.zip"
           )
           foreach ($path in $expected) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
               throw "Missing Windows release asset: $path"
             }
           }
-          $full = @(Get-ChildItem -Path . -Filter "*-full.nupkg" -File)
-          if ($full.Count -ne 1) {
-            throw "Expected exactly one full Velopack package, found $($full.Count)"
-          }
-
       - uses: actions/upload-artifact@v4
         with:
           name: dicepp-windows
           path: |
             DicePP-*-win64-Portable.zip
             DicePP-*-win64-Setup.exe
-            *-full.nupkg
-            releases.win-*.json
-            assets.win-*.json
+            velopack.win-x64.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -614,18 +612,13 @@ jobs:
 
       - name: Generate release machine contract
         run: |
-          FULL_NUPKG="$(find . -maxdepth 1 -name '*-full.nupkg' -print -quit)"
-          RELEASES_JSON="$(find . -maxdepth 1 -name 'releases.win-*.json' -print -quit)"
-          ASSETS_JSON="$(find . -maxdepth 1 -name 'assets.win-*.json' -print -quit)"
           PYTHONPATH=src uv run --frozen python scripts/build/generate_release_manifest.py \
             --version "${{ needs.release-metadata.outputs.version }}" \
             --channel "${{ needs.release-metadata.outputs.channel }}" \
             --release-notes "docs/releases/${{ needs.release-metadata.outputs.tag }}.md" \
             --artifact "windows:amd64:portable:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip" \
             --artifact "windows:amd64:setup:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe" \
-            --artifact "windows:amd64:velopack-full:${FULL_NUPKG}" \
-            --artifact "windows:amd64:velopack-releases:${RELEASES_JSON}" \
-            --artifact "windows:amd64:velopack-assets:${ASSETS_JSON}" \
+            --artifact "windows:amd64:velopack-bundle:velopack.win-x64.zip" \
             --artifact "linux:amd64:linux-bundle:DicePP-${{ needs.release-metadata.outputs.tag }}-linux-amd64.zip"
 
       - name: Create GitHub Release
@@ -639,25 +632,20 @@ jobs:
             RELEASE_FLAGS+=(--prerelease)
           fi
 
-          ASSETS=(docker-compose.yml dicepp-release.json)
-
-          shopt -s nullglob
-          ZIP_ASSETS=(DicePP-*-win64-Portable.zip DicePP-*-win64-Setup.exe *-full.nupkg releases.win-*.json assets.win-*.json)
-          shopt -u nullglob
-          if [ "${#ZIP_ASSETS[@]}" -gt 0 ]; then
-            ASSETS+=("${ZIP_ASSETS[@]}")
-          else
-            echo "::warning::Windows zip asset 不存在，跳过上传"
-          fi
-
-          shopt -s nullglob
-          LINUX_IMAGE_ASSETS=(DicePP-*-linux-amd64.zip)
-          shopt -u nullglob
-          if [ "${#LINUX_IMAGE_ASSETS[@]}" -gt 0 ]; then
-            ASSETS+=("${LINUX_IMAGE_ASSETS[@]}")
-          else
-            echo "::warning::Linux 发布包不存在，跳过上传"
-          fi
+          ASSETS=(
+            "DicePP-${TAG}-win64-Setup.exe"
+            "DicePP-${TAG}-win64-Portable.zip"
+            "DicePP-${TAG}-linux-amd64.zip"
+            "velopack.win-x64.zip"
+            "dicepp-release.json"
+            "docker-compose.yml"
+          )
+          for asset in "${ASSETS[@]}"; do
+            if [ ! -f "$asset" ]; then
+              echo "Missing final release asset: $asset"
+              exit 1
+            fi
+          done
 
           if [ -f "$RELEASE_MD" ]; then
             gh release create "$TAG" "${RELEASE_FLAGS[@]}" \

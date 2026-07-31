@@ -157,8 +157,8 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
                     auth_token_path=(
                         settings.token_path or settings.layout.manager_token
                     ),
-                    rollback_package_fetcher=(
-                        service.release_manager.fetch_rollback_package
+                    rollback_bundle_fetcher=(
+                        service.release_manager.fetch_rollback_bundle
                     ),
                 )
             else:

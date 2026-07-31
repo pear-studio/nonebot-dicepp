@@ -6,7 +6,9 @@ import io
 import json
 import threading
 import urllib.error
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,7 +75,59 @@ def _artifact(filename: str, body: bytes, purpose: str = "linux-bundle") -> dict
     }
 
 
+def _velopack_bundle(version: str = "3.1.0") -> tuple[bytes, bytes, dict]:
+    nupkg_stream = io.BytesIO()
+    with zipfile.ZipFile(nupkg_stream, "w") as archive:
+        archive.writestr(
+            "DicePP.nuspec",
+            f"<package><metadata><version>{version}</version></metadata></package>",
+        )
+    nupkg = nupkg_stream.getvalue()
+    nupkg_name = f"DicePP-{version}-full.nupkg"
+    inner = {
+        "format_version": 1,
+        "dicepp_version": version,
+        "velopack_version": version,
+        "channel": "stable",
+        "platform": "windows",
+        "arch": "amd64",
+        "nupkg": {
+            "filename": nupkg_name,
+            "size": len(nupkg),
+            "sha256": hashlib.sha256(nupkg).hexdigest(),
+        },
+    }
+    bundle_stream = io.BytesIO()
+    with zipfile.ZipFile(bundle_stream, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("manifest.json", json.dumps(inner))
+        archive.writestr(nupkg_name, nupkg)
+    return bundle_stream.getvalue(), nupkg, inner
+
+
+def _velopack_artifact(body: bytes) -> dict:
+    return {
+        "platform": "windows",
+        "arch": "amd64",
+        "filename": "velopack.win-x64.zip",
+        "purpose": "velopack-bundle",
+        "size": len(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
+    }
+
+
 def _manifest(artifacts: list[dict], *, version="3.1.0", channel="stable") -> dict:
+    artifacts = list(artifacts)
+    if not any(item.get("purpose") == "velopack-bundle" for item in artifacts):
+        artifacts.append(
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": "velopack.win-x64.zip",
+                "purpose": "velopack-bundle",
+                "size": 1,
+                "sha256": "2" * 64,
+            }
+        )
     return {
         "contract_version": RELEASE_CONTRACT_VERSION,
         "version": version,
@@ -305,7 +359,7 @@ def test_discovery_requires_exact_platform_and_architecture(tmp_path: Path) -> N
         layout=InstanceLayout.from_root(tmp_path),
         transport=transport,
         github_api="https://api",
-        target=("windows", "amd64"),
+        target=("windows", "arm64"),
         current_version_loader=lambda: "3.0.0",
     )
 
@@ -511,10 +565,10 @@ def test_discovery_cancellation_stops_pagination(tmp_path: Path) -> None:
     assert [url for url, _headers in transport.requests] == [page1]
 
 
-def test_rollback_package_search_traverses_release_pages(tmp_path: Path) -> None:
-    body = b"rollback package body"
+def test_rollback_bundle_search_traverses_release_pages(tmp_path: Path) -> None:
+    body, _nupkg, _inner = _velopack_bundle("3.0.0")
     manifest = _manifest(
-        [_artifact("rollback.nupkg", body, purpose="velopack-full")],
+        [_velopack_artifact(body)],
         version="3.0.0",
     )
     release = _release(manifest, body)
@@ -538,11 +592,11 @@ def test_rollback_package_search_traverses_release_pages(tmp_path: Path) -> None
         layout=InstanceLayout.from_root(tmp_path),
         transport=transport,
         github_api="https://api",
-        target=("linux", "amd64"),
+        target=("windows", "amd64"),
         current_version_loader=lambda: "3.0.0",
     )
 
-    path, sha256 = manager.fetch_rollback_package("3.0.0")
+    path, sha256 = manager.fetch_rollback_bundle("3.0.0")
 
     assert sha256 == hashlib.sha256(body).hexdigest()
     assert path.read_bytes() == body
@@ -586,37 +640,14 @@ def test_download_persists_verified_package_metadata_without_installing(
     assert metadata["verified_path"] == "DicePP-v3.1.0-linux-amd64.zip"
 
 
-def test_windows_velopack_download_also_verifies_both_feed_assets(
+def test_windows_velopack_download_verifies_bundle_and_materializes_payload(
     tmp_path: Path,
 ) -> None:
-    bodies = {
-        "velopack-full": b"full nupkg",
-        # Real Velopack output: the releases feed is a JSON object while
-        # the assets feed is a bare JSON array.
-        "velopack-releases": b'{"Assets":[]}',
-        "velopack-assets": b"[]",
+    body, nupkg, inner = _velopack_bundle()
+    artifact = {
+        **_velopack_artifact(body),
+        "download_url": "https://downloads/velopack-bundle",
     }
-    artifacts = []
-    routes = {}
-    for purpose, body in bodies.items():
-        filename = {
-            "velopack-full": "DicePP-3.1.0-full.nupkg",
-            "velopack-releases": "releases.win-x64-stable.json",
-            "velopack-assets": "assets.win-x64-stable.json",
-        }[purpose]
-        url = f"https://downloads/{purpose}"
-        artifacts.append(
-            {
-                "platform": "windows",
-                "arch": "amd64",
-                "filename": filename,
-                "purpose": purpose,
-                "size": len(body),
-                "sha256": hashlib.sha256(body).hexdigest(),
-                "download_url": url,
-            }
-        )
-        routes[url] = [Response(body, headers={"ETag": f'"{purpose}"'})]
     compatibility = {
         "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
         "minimum_manager_version": MANAGER_VERSION,
@@ -627,7 +658,13 @@ def test_windows_velopack_download_also_verifies_both_feed_assets(
     }
     manager = ReleaseManager(
         layout=InstanceLayout.from_root(tmp_path),
-        transport=Transport(routes),
+        transport=Transport(
+            {
+                "https://downloads/velopack-bundle": [
+                    Response(body, headers={"ETag": '"bundle"'})
+                ]
+            }
+        ),
         target=("windows", "amd64"),
     )
     with manager._lock:
@@ -640,26 +677,591 @@ def test_windows_velopack_download_also_verifies_both_feed_assets(
             "compatibility": compatibility,
             "release_url": "https://example/release",
             "published_at": "2026-07-23T00:00:00Z",
-            "artifacts": artifacts,
+            "artifacts": [artifact],
         }
 
-    result = manager.download(purpose="velopack-full")
+    result = manager.download(purpose="velopack-bundle")
 
     assert result["download"]["status"] == "verified"
     version_dir = manager.layout.manager_packages_dir / "3.1.0"
     metadata = json.loads(
         (version_dir / "verified-release.json").read_text(encoding="utf-8")
     )
-    assert metadata["artifact"]["purpose"] == "velopack-full"
-    assert {
-        item["artifact"]["purpose"] for item in metadata["companions"]
-    } == {"velopack-releases", "velopack-assets"}
+    assert metadata["artifact"]["purpose"] == "velopack-bundle"
+    assert metadata["bundle_manifest"] == inner
+    generation = metadata["generation"]
+    assert metadata["verified_path"] == f"velopack-{generation}.win-x64.zip"
+    assert metadata["payload_verified_path"] == f"payload-{generation}.nupkg"
+    assert (
+        version_dir / metadata["payload_verified_path"]
+    ).read_bytes() == nupkg
     assert set(result["packages"][0]["files"]) == {
-        "DicePP-3.1.0-full.nupkg",
-        "releases.win-x64-stable.json",
-        "assets.win-x64-stable.json",
+        metadata["verified_path"],
+        metadata["payload_verified_path"],
         "verified-release.json",
     }
+
+
+@pytest.mark.parametrize("mutation", ["replaced", "missing", "reparse"])
+def test_windows_metadata_is_not_published_if_materialized_payload_changes(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    body, _nupkg, _inner = _velopack_bundle()
+    artifact = _velopack_artifact(body)
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    target = (
+        version_dir / "velopack-11111111111111111111111111111111.win-x64.zip"
+    )
+    target.write_bytes(body)
+    manager = ReleaseManager(layout=layout, target=("windows", "amd64"))
+    release = {
+        "version": "3.1.0",
+        "channel": "stable",
+        "change_scope": ["runtime"],
+        "compatibility": {
+            "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+            "minimum_manager_version": MANAGER_VERSION,
+            "catalog_version": 1,
+            "catalog_digest": "1" * 64,
+            "automatic_upgrade": True,
+            "problems": [],
+        },
+    }
+    payload, inner = manager._materialize_velopack_bundle(
+        release,
+        artifact,
+        target,
+    )
+    outside = tmp_path / "outside.nupkg"
+    if mutation == "missing":
+        payload.unlink()
+    elif mutation == "replaced":
+        payload.write_bytes(b"replacement")
+    else:
+        payload.unlink()
+        outside.write_bytes(b"outside")
+        try:
+            payload.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"File links are unavailable: {exc}")
+
+    with pytest.raises((ReleaseDownloadError, OSError)):
+        manager._write_verified_metadata(
+            release,
+            artifact,
+            target,
+            payload_path=payload,
+            bundle_manifest=inner,
+            completed_at="2026-07-31T00:00:00+00:00",
+        )
+
+    assert not (version_dir / "verified-release.json").exists()
+    assert not target.exists()
+    if mutation == "reparse":
+        assert outside.read_bytes() == b"outside"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["bundle", "payload", "rebind", "metadata"],
+)
+def test_failed_windows_generation_preserves_previously_verified_generation(
+    monkeypatch,
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    body, nupkg, _inner = _velopack_bundle()
+    artifact = _velopack_artifact(body)
+    layout = InstanceLayout.from_root(tmp_path)
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    manager = ReleaseManager(layout=layout, target=("windows", "amd64"))
+    release = {
+        "version": "3.1.0",
+        "channel": "stable",
+        "change_scope": ["runtime"],
+        "compatibility": {
+            "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+            "minimum_manager_version": MANAGER_VERSION,
+            "catalog_version": 1,
+            "catalog_digest": "1" * 64,
+            "automatic_upgrade": True,
+            "problems": [],
+        },
+    }
+
+    old_token = "1" * 32
+    old_bundle = version_dir / f"velopack-{old_token}.win-x64.zip"
+    old_bundle.write_bytes(body)
+    old_payload, old_inner = manager._materialize_velopack_bundle(
+        release,
+        artifact,
+        old_bundle,
+    )
+    metadata_path = manager._write_verified_metadata(
+        release,
+        artifact,
+        old_bundle,
+        payload_path=old_payload,
+        bundle_manifest=old_inner,
+        completed_at="2026-07-31T00:00:00+00:00",
+    )
+    old_metadata = metadata_path.read_bytes()
+
+    new_token = "2" * 32
+    new_bundle = version_dir / f"velopack-{new_token}.win-x64.zip"
+    new_bundle.write_bytes(body)
+    new_payload, new_inner = manager._materialize_velopack_bundle(
+        release,
+        artifact,
+        new_bundle,
+    )
+    if failure == "bundle":
+        new_bundle.write_bytes(b"invalid bundle")
+    elif failure == "payload":
+        new_payload.write_bytes(b"invalid payload")
+    elif failure == "rebind":
+        original_validate = release_module._validate_regular_path
+        calls = 0
+
+        def report_changed_identity(path, trusted_parent, *, allow_missing):
+            nonlocal calls
+            result = original_validate(
+                path,
+                trusted_parent,
+                allow_missing=allow_missing,
+            )
+            if path == new_payload and result is not None:
+                calls += 1
+                if calls == 2:
+                    return SimpleNamespace(
+                        st_mode=result.st_mode,
+                        st_nlink=result.st_nlink,
+                        st_dev=result.st_dev,
+                        st_ino=result.st_ino + 1,
+                    )
+            return result
+
+        monkeypatch.setattr(
+            release_module,
+            "_validate_regular_path",
+            report_changed_identity,
+        )
+    else:
+        monkeypatch.setattr(
+            release_module,
+            "_atomic_publish_json",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("injected metadata failure")
+            ),
+        )
+
+    with pytest.raises((ReleaseDownloadError, OSError)):
+        manager._write_verified_metadata(
+            release,
+            artifact,
+            new_bundle,
+            payload_path=new_payload,
+            bundle_manifest=new_inner,
+            completed_at="2026-07-31T01:00:00+00:00",
+        )
+
+    assert metadata_path.read_bytes() == old_metadata
+    assert old_bundle.read_bytes() == body
+    assert old_payload.read_bytes() == nupkg
+    assert not new_bundle.exists()
+    assert not new_payload.exists()
+
+
+def test_windows_generation_handles_reject_replacement_until_metadata_switch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    if release_module.os.name != "nt":
+        pytest.skip("Windows file-share semantics")
+    body, _nupkg, _inner = _velopack_bundle()
+    artifact = _velopack_artifact(body)
+    layout = InstanceLayout.from_root(tmp_path)
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    manager = ReleaseManager(layout=layout, target=("windows", "amd64"))
+    release = {
+        "version": "3.1.0",
+        "channel": "stable",
+        "change_scope": ["runtime"],
+        "compatibility": {
+            "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+            "minimum_manager_version": MANAGER_VERSION,
+            "catalog_version": 1,
+            "catalog_digest": "1" * 64,
+            "automatic_upgrade": True,
+            "problems": [],
+        },
+    }
+    token = "3" * 32
+    target = version_dir / f"velopack-{token}.win-x64.zip"
+    target.write_bytes(body)
+    payload, inner = manager._materialize_velopack_bundle(
+        release,
+        artifact,
+        target,
+    )
+    replacement = version_dir / "replacement.zip"
+    replacement.write_bytes(body)
+    original_validate = release_module.validate_velopack_bundle
+    attempts = []
+
+    def attempt_replacement(path, **kwargs):
+        with pytest.raises(OSError):
+            replacement.replace(path)
+        attempts.append("bundle")
+        with pytest.raises(OSError):
+            payload.write_bytes(b"replacement")
+        attempts.append("payload")
+        return original_validate(path, **kwargs)
+
+    monkeypatch.setattr(
+        release_module,
+        "validate_velopack_bundle",
+        attempt_replacement,
+    )
+
+    metadata_path = manager._write_verified_metadata(
+        release,
+        artifact,
+        target,
+        payload_path=payload,
+        bundle_manifest=inner,
+        completed_at="2026-07-31T00:00:00+00:00",
+    )
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert attempts == ["bundle", "payload"]
+    assert metadata["generation"] == token
+    assert metadata["verified_path"] == target.name
+    assert metadata["payload_verified_path"] == payload.name
+    assert target.read_bytes() == body
+    assert replacement.read_bytes() == body
+
+
+def test_repeated_windows_download_replaces_one_complete_generation(
+    tmp_path: Path,
+) -> None:
+    body, _nupkg, _inner = _velopack_bundle()
+    artifact = {
+        **_velopack_artifact(body),
+        "download_url": "https://downloads/velopack-bundle",
+    }
+    compatibility = {
+        "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+        "minimum_manager_version": MANAGER_VERSION,
+        "catalog_version": 1,
+        "catalog_digest": "1" * 64,
+        "automatic_upgrade": True,
+        "problems": [],
+    }
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(
+            {
+                "https://downloads/velopack-bundle": [
+                    Response(body, headers={"ETag": '"one"'}),
+                    Response(body, headers={"ETag": '"two"'}),
+                ]
+            }
+        ),
+        target=("windows", "amd64"),
+    )
+    with manager._lock:
+        manager._latest_channel = "stable"
+        manager._latest = {
+            "version": "3.1.0",
+            "channel": "stable",
+            "change_scope": ["runtime"],
+            "compatible": True,
+            "compatibility": compatibility,
+            "release_url": "https://example/release",
+            "published_at": "2026-07-23T00:00:00Z",
+            "artifacts": [artifact],
+        }
+
+    manager.download(purpose="velopack-bundle")
+    manager.download(purpose="velopack-bundle")
+
+    version_dir = manager.layout.manager_packages_dir / "3.1.0"
+    metadata = json.loads(
+        (version_dir / "verified-release.json").read_text(encoding="utf-8")
+    )
+    assert sorted(path.name for path in version_dir.iterdir()) == sorted(
+        [
+            "verified-release.json",
+            metadata["verified_path"],
+            metadata["payload_verified_path"],
+        ]
+    )
+    assert metadata["verified_path"] == (
+        f"velopack-{metadata['generation']}.win-x64.zip"
+    )
+    assert metadata["payload_verified_path"] == (
+        f"payload-{metadata['generation']}.nupkg"
+    )
+
+
+def test_next_windows_download_removes_only_unpublished_managed_orphans(
+    tmp_path: Path,
+) -> None:
+    body, _nupkg, _inner = _velopack_bundle()
+    artifact = {
+        **_velopack_artifact(body),
+        "download_url": "https://downloads/velopack-bundle",
+    }
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    orphan_names = {
+        f"velopack-{'1' * 32}.win-x64.zip",
+        f"payload-{'1' * 32}.nupkg",
+        f"velopack-{'2' * 32}.win-x64.zip",
+        f"payload-{'3' * 32}.nupkg",
+    }
+    for name in orphan_names:
+        (version_dir / name).write_bytes(b"crash orphan")
+    decoys = {
+        f"velopack-{'4' * 31}.win-x64.zip",
+        f"payload-{'5' * 32}.nupkg.backup",
+        "operator-note.txt",
+    }
+    for name in decoys:
+        (version_dir / name).write_bytes(b"must remain")
+    outside = tmp_path / "outside.zip"
+    outside.write_bytes(b"outside target must remain")
+    reparse_name = f"velopack-{'6' * 32}.win-x64.zip"
+    reparse = version_dir / reparse_name
+    try:
+        reparse.symlink_to(outside)
+    except OSError:
+        reparse = None
+    compatibility = {
+        "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
+        "minimum_manager_version": MANAGER_VERSION,
+        "catalog_version": 1,
+        "catalog_digest": "1" * 64,
+        "automatic_upgrade": True,
+        "problems": [],
+    }
+    manager = ReleaseManager(
+        layout=layout,
+        transport=Transport(
+            {
+                "https://downloads/velopack-bundle": [
+                    Response(body, headers={"ETag": '"bundle"'})
+                ]
+            }
+        ),
+        target=("windows", "amd64"),
+    )
+    with manager._lock:
+        manager._latest_channel = "stable"
+        manager._latest = {
+            "version": "3.1.0",
+            "channel": "stable",
+            "change_scope": ["runtime"],
+            "compatible": True,
+            "compatibility": compatibility,
+            "release_url": "https://example/release",
+            "published_at": "2026-07-23T00:00:00Z",
+            "artifacts": [artifact],
+        }
+
+    manager.download(purpose="velopack-bundle")
+
+    metadata = json.loads(
+        (version_dir / "verified-release.json").read_text(encoding="utf-8")
+    )
+    remaining = {path.name for path in version_dir.iterdir()}
+    assert not orphan_names & remaining
+    assert decoys <= remaining
+    assert metadata["verified_path"] in remaining
+    assert metadata["payload_verified_path"] in remaining
+    if reparse is not None:
+        assert reparse_name not in remaining
+    assert outside.read_bytes() == b"outside target must remain"
+    packages_guard = release_module._capture_trusted_directory(
+        layout.manager_packages_dir,
+        root=layout.root,
+    )
+    version_guard = release_module._capture_trusted_directory(
+        version_dir,
+        root=layout.root,
+        parent=packages_guard,
+    )
+    release_module._cleanup_velopack_orphans(
+        version_guard,
+        in_progress_generation="f" * 32,
+    )
+    assert (version_dir / metadata["verified_path"]).is_file()
+    assert (version_dir / metadata["payload_verified_path"]).is_file()
+
+
+@pytest.mark.parametrize(
+    "metadata_state",
+    [
+        "writer",
+        "malformed",
+        "invalid-utf8",
+        "array",
+        "scalar",
+        "oversized",
+        "reparse",
+    ],
+)
+def test_orphan_cleanup_fails_closed_when_generation_metadata_is_unreadable(
+    tmp_path: Path,
+    metadata_state: str,
+) -> None:
+    if metadata_state == "writer" and release_module.os.name != "nt":
+        pytest.skip("Windows sharing-conflict semantics")
+    layout = InstanceLayout.from_root(tmp_path / "instance")
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    current_token = "1" * 32
+    current_bundle = version_dir / f"velopack-{current_token}.win-x64.zip"
+    current_payload = version_dir / f"payload-{current_token}.nupkg"
+    current_bundle.write_bytes(b"current bundle")
+    current_payload.write_bytes(b"current payload")
+    orphan = version_dir / f"velopack-{'2' * 32}.win-x64.zip"
+    orphan.write_bytes(b"must remain while metadata is unknown")
+    metadata = version_dir / "verified-release.json"
+    valid_metadata = {
+        "generation": current_token,
+        "verified_path": current_bundle.name,
+        "payload_verified_path": current_payload.name,
+    }
+    outside = tmp_path / "outside-metadata.json"
+    if metadata_state == "malformed":
+        metadata.write_bytes(b"{")
+    elif metadata_state == "invalid-utf8":
+        metadata.write_bytes(b"\xff")
+    elif metadata_state == "array":
+        metadata.write_bytes(b"[]")
+    elif metadata_state == "scalar":
+        metadata.write_bytes(b"42")
+    elif metadata_state == "oversized":
+        metadata.write_bytes(b" " * (release_module.MAX_RELEASE_JSON_BYTES + 1))
+    elif metadata_state == "reparse":
+        outside.write_text(json.dumps(valid_metadata), encoding="utf-8")
+        try:
+            metadata.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"File links are unavailable: {exc}")
+    else:
+        metadata.write_text(json.dumps(valid_metadata), encoding="utf-8")
+    packages_guard = release_module._capture_trusted_directory(
+        layout.manager_packages_dir,
+        root=layout.root,
+    )
+    version_guard = release_module._capture_trusted_directory(
+        version_dir,
+        root=layout.root,
+        parent=packages_guard,
+    )
+
+    if metadata_state == "writer":
+        with metadata.open("r+b"):
+            release_module._cleanup_velopack_orphans(
+                version_guard,
+                in_progress_generation="f" * 32,
+            )
+    else:
+        release_module._cleanup_velopack_orphans(
+            version_guard,
+            in_progress_generation="f" * 32,
+        )
+
+    assert current_bundle.read_bytes() == b"current bundle"
+    assert current_payload.read_bytes() == b"current payload"
+    assert orphan.read_bytes() == b"must remain while metadata is unknown"
+    assert release_module.os.path.lexists(metadata)
+    if metadata_state == "reparse":
+        assert outside.read_text(encoding="utf-8") == json.dumps(valid_metadata)
+
+
+def test_orphan_cleanup_runs_when_generation_metadata_is_confirmed_missing(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    orphan = version_dir / f"payload-{'2' * 32}.nupkg"
+    orphan.write_bytes(b"crash orphan")
+    packages_guard = release_module._capture_trusted_directory(
+        layout.manager_packages_dir,
+        root=layout.root,
+    )
+    version_guard = release_module._capture_trusted_directory(
+        version_dir,
+        root=layout.root,
+        parent=packages_guard,
+    )
+
+    release_module._cleanup_velopack_orphans(
+        version_guard,
+        in_progress_generation="f" * 32,
+    )
+
+    assert not orphan.exists()
+
+
+@pytest.mark.parametrize(
+    "metadata_body",
+    [
+        pytest.param(
+            lambda: b" " * (release_module.MAX_RELEASE_JSON_BYTES + 1),
+            id="oversized",
+        ),
+        pytest.param(lambda: b"[]", id="array"),
+        pytest.param(lambda: b"null", id="scalar"),
+        pytest.param(lambda: b"\xff", id="invalid-utf8"),
+        pytest.param(lambda: b"{", id="invalid-json"),
+    ],
+)
+def test_unparseable_generation_metadata_does_not_block_artifact_download(
+    tmp_path: Path,
+    metadata_body,
+) -> None:
+    body, _nupkg, _inner = _velopack_bundle()
+    artifact = {
+        **_velopack_artifact(body),
+        "download_url": "https://downloads/velopack-bundle",
+    }
+    layout = InstanceLayout.from_root(tmp_path)
+    version_dir = layout.manager_packages_dir / "3.1.0"
+    version_dir.mkdir(parents=True)
+    metadata = version_dir / "verified-release.json"
+    original_metadata = metadata_body()
+    metadata.write_bytes(original_metadata)
+    orphan = version_dir / f"payload-{'2' * 32}.nupkg"
+    orphan.write_bytes(b"must remain")
+    manager = ReleaseManager(
+        layout=layout,
+        transport=Transport(
+            {
+                "https://downloads/velopack-bundle": [
+                    Response(body, headers={"ETag": '"bundle"'})
+                ]
+            }
+        ),
+        target=("windows", "amd64"),
+    )
+
+    target = manager._download_artifact("3.1.0", artifact)
+
+    assert target.read_bytes() == body
+    assert metadata.read_bytes() == original_metadata
+    assert orphan.read_bytes() == b"must remain"
 
 
 def test_verified_state_is_persisted_only_after_package_and_metadata(

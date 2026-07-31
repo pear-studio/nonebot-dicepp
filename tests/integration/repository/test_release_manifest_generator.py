@@ -10,8 +10,10 @@ from scripts.build.release_metadata import ReleaseMetadata
 def test_generator_hashes_real_artifacts_and_emits_valid_contract(tmp_path) -> None:
     linux = tmp_path / "DicePP-v3.1.0-linux-amd64.zip"
     windows = tmp_path / "DicePP-v3.1.0-win64-Portable.zip"
+    velopack = tmp_path / "velopack.win-x64.zip"
     linux.write_bytes(b"linux package")
     windows.write_bytes(b"windows package")
+    velopack.write_bytes(b"velopack bundle")
 
     manifest = build_manifest(
         version="v3.1.0",
@@ -19,6 +21,9 @@ def test_generator_hashes_real_artifacts_and_emits_valid_contract(tmp_path) -> N
         artifacts=[
             artifact_record(f"linux:amd64:linux-bundle:{linux}"),
             artifact_record(f"windows:amd64:portable:{windows}"),
+            artifact_record(
+                f"windows:amd64:velopack-bundle:{velopack}"
+            ),
         ],
         metadata=ReleaseMetadata(
             version="3.1.0",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from scripts.build.validate_linux_bundle_candidate import (
     ExpectedImage,
     validate_linux_bundle_candidate,
 )
+from tests.support.processes import run_completed_process
 
 
 BOT = ExpectedImage(
@@ -226,12 +226,9 @@ def test_bundle_candidate_rejects_equal_size_archive_digest_change(tmp_path):
 def test_validator_cli_prints_exactly_the_resolved_declared_archive(tmp_path):
     package, manifest, archive = _write_bundle(tmp_path)
 
-    result = subprocess.run(
+    result = run_completed_process(
         _validator_command(package, manifest),
         cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
     )
 
     assert result.returncode == 0
@@ -246,12 +243,9 @@ def test_validator_cli_failure_never_prints_an_archive_path(tmp_path):
         lambda payload: payload["images"].reverse(),
     )
 
-    result = subprocess.run(
+    result = run_completed_process(
         _validator_command(package, manifest),
         cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
     )
 
     assert result.returncode != 0

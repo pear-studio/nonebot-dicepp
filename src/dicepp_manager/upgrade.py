@@ -19,7 +19,6 @@ import stat
 import subprocess
 import tempfile
 import zipfile
-import xml.etree.ElementTree as ElementTree
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -36,10 +35,24 @@ from .archive_coordinator import CONTROL_GATE_ENFORCED, ArchiveCoordinator
 from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
+from ._path_security import (
+    UnsafePathError,
+    assert_contained_no_reparse,
+    assert_directory_no_reparse,
+    is_reparse_point,
+    open_regular_binary_no_follow,
+)
 from .release import (
     MAX_LINUX_BUNDLE_BYTES,
     ReleaseDownloadError,
     ReleaseManager,
+)
+from .velopack_bundle import (
+    VELOPACK_BUNDLE_NAME,
+    ValidatedVelopackBundle,
+    VelopackBundleError,
+    extract_verified_nupkg,
+    validate_velopack_bundle,
 )
 from .service import MaintenanceReservation, ManagerService
 
@@ -59,6 +72,8 @@ _WINDOWS_FILE_ATTRIBUTE_DIRECTORY = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
     stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400
 )
+_LOCAL_VELOPACK_IDENTITY_NAME = "velopack.win-x64.verified.json"
+_VELOPACK_GENERATION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _is_directory_reparse_point(path: Path) -> bool:
@@ -110,6 +125,8 @@ class VerifiedUpgradePackage:
     metadata_path: Path
     artifact: dict[str, Any]
     release: dict[str, Any]
+    bundle_path: Path | None = None
+    bundle_manifest: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -474,7 +491,7 @@ class WindowsVelopackUpgradeAdapter:
         auth_token_path: Path | None = None,
         manager_exit_timeout: float = 60.0,
         health_timeout: float = 120.0,
-        rollback_package_fetcher: Callable[[str], tuple[Path, str]] | None = None,
+        rollback_bundle_fetcher: Callable[[str], tuple[Path, str]] | None = None,
         guard_runtime_root: Path | None = None,
     ) -> None:
         if not guard_command or not install_command:
@@ -487,8 +504,10 @@ class WindowsVelopackUpgradeAdapter:
         )
         self.process_identity_loader = process_identity_loader
         self.version_loader = version_loader
-        self.rollback_package_fetcher = rollback_package_fetcher
-        self._fetched_rollback: dict[str, tuple[Path, str]] = {}
+        self.rollback_bundle_fetcher = rollback_bundle_fetcher
+        self._fetched_rollback: dict[
+            str, tuple[Path, str, ValidatedVelopackBundle]
+        ] = {}
         self.bundled_guard_path = bundled_guard_path or (
             Path(os.environ.get("DICEPP_APP_DIR", str(layout.root)))
             / "DicePP-UpdateGuard.exe"
@@ -514,21 +533,74 @@ class WindowsVelopackUpgradeAdapter:
                 "UpdateGuard runtime directory must be outside the install root"
             )
 
+    def _validate_target_package(
+        self,
+        package: VerifiedUpgradePackage,
+    ) -> ValidatedVelopackBundle:
+        if (
+            package.platform != "windows"
+            or package.arch != "amd64"
+            or package.artifact.get("platform") != "windows"
+            or package.artifact.get("arch") != "amd64"
+            or package.artifact.get("purpose") != "velopack-bundle"
+            or package.artifact.get("filename") != VELOPACK_BUNDLE_NAME
+            or package.bundle_path is None
+            or package.bundle_manifest is None
+        ):
+            raise UpgradeCompatibilityError(
+                "Windows automatic updates require the verified Velopack bundle"
+            )
+        try:
+            packages_root = assert_contained_no_reparse(
+                self.layout.manager_packages_dir,
+                root=self.layout.root,
+                allow_missing=False,
+            )
+            assert_directory_no_reparse(packages_root)
+            assert_contained_no_reparse(
+                package.bundle_path,
+                root=packages_root,
+                allow_missing=False,
+            )
+            assert_contained_no_reparse(
+                package.path,
+                root=packages_root,
+                allow_missing=False,
+            )
+            validated = validate_velopack_bundle(
+                package.bundle_path,
+                expected_dicepp_version=package.version,
+                expected_channel=package.release.get("channel"),
+                expected_size=package.artifact.get("size"),
+                expected_sha256=package.artifact.get("sha256"),
+            )
+        except (OSError, UnsafePathError, VelopackBundleError) as exc:
+            raise UpgradeCompatibilityError(
+                f"Windows Velopack bundle is invalid: {exc}"
+            ) from exc
+        if (
+            validated.manifest != package.bundle_manifest
+            or package.path.is_symlink()
+            or not package.path.is_file()
+            or package.path.stat().st_size != validated.nupkg_size
+            or _sha256_file(package.path) != validated.nupkg_sha256
+        ):
+            raise UpgradeCompatibilityError(
+                "Verified Velopack payload no longer matches its bundle"
+            )
+        return validated
+
     async def preflight(self, package: VerifiedUpgradePackage) -> dict[str, Any]:
         if package.platform != "windows":
             raise UpgradeCompatibilityError("Windows adapter received another platform")
+        self._validate_target_package(package)
         identity = _validate_process_identity(self.process_identity_loader())
-        if package.artifact.get("purpose") != "velopack-full":
-            raise UpgradeCompatibilityError(
-                "Windows automatic updates require a Velopack full package; "
-                "Portable and Setup are first-install artifacts"
-            )
         if Version(self._current_version()) == Version(package.version):
             raise UpgradeCompatibilityError(
                 "Windows automatic update target is already installed"
             )
-        source_version, rollback_package, rollback_digest = (
-            await self._current_full_package()
+        source_version, rollback_bundle, rollback_digest, _validated = (
+            await self._current_rollback_bundle()
         )
         update_exe = Path(self.install_command[0])
         stable_guard = Path(self.guard_command[0])
@@ -562,44 +634,52 @@ class WindowsVelopackUpgradeAdapter:
             "status": "ok",
             "process_identity": identity,
             "source_version": source_version,
-            "rollback_package": str(rollback_package),
-            "rollback_package_sha256": rollback_digest,
+            "rollback_bundle": str(rollback_bundle),
+            "rollback_bundle_sha256": rollback_digest,
         }
 
     async def capture_current(self, package) -> dict[str, Any]:
+        self._validate_target_package(package)
         if Version(self._current_version()) == Version(package.version):
             raise UpgradeCompatibilityError(
                 "Windows automatic update target is already installed"
             )
-        source_version, rollback_package, rollback_digest = (
-            await self._current_full_package()
+        source_version, rollback_bundle, rollback_digest, _validated = (
+            await self._current_rollback_bundle()
         )
         return {
             "process_identity": _validate_process_identity(
                 self.process_identity_loader()
             ),
             "source_version": source_version,
-            "rollback_package": str(rollback_package),
-            "rollback_package_sha256": rollback_digest,
+            "rollback_bundle": str(rollback_bundle),
+            "rollback_bundle_sha256": rollback_digest,
         }
 
     async def stage(
         self, package: VerifiedUpgradePackage, transaction_id: str
     ) -> dict[str, Any]:
+        self._validate_target_package(package)
         # Resolve the rollback material before creating the transaction
         # directory: the resolution may download from the Release, and a
         # failure there must not leave an orphan guard_dir/<uuid>/ behind.
-        source_version, rollback_source, rollback_digest = (
-            await self._current_full_package()
+        source_version, rollback_bundle, rollback_bundle_digest, validated = (
+            await self._current_rollback_bundle()
         )
         transaction_dir = self.guard_dir / transaction_id
-        transaction_dir.mkdir(parents=True, exist_ok=False)
-        rollback_package = transaction_dir / rollback_source.name
-        _atomic_copy(rollback_source, rollback_package)
-        if _sha256_file(rollback_package) != rollback_digest:
+        try:
+            transaction_dir.mkdir(parents=True, exist_ok=False)
+            payload_dir = transaction_dir / "rollback-payload"
+            payload_dir.mkdir()
+            rollback_package = extract_verified_nupkg(validated, payload_dir)
+        except Exception as exc:
+            if transaction_dir.is_dir() and not transaction_dir.is_symlink():
+                shutil.rmtree(transaction_dir)
+            if isinstance(exc, UpgradeCompatibilityError):
+                raise
             raise UpgradeCompatibilityError(
-                "Preserved rollback package digest mismatch"
-            )
+                f"Could not stage the verified rollback bundle: {exc}"
+            ) from exc
         return {
             "package": str(package.path),
             "request": str(transaction_dir / "request.json"),
@@ -609,7 +689,9 @@ class WindowsVelopackUpgradeAdapter:
             "rollback_marker": str(transaction_dir / "rollback.json"),
             "source_version": source_version,
             "rollback_package": str(rollback_package),
-            "rollback_package_sha256": rollback_digest,
+            "rollback_package_sha256": validated.nupkg_sha256,
+            "rollback_bundle": str(rollback_bundle),
+            "rollback_bundle_sha256": rollback_bundle_digest,
             "transaction_id": transaction_id,
         }
 
@@ -627,7 +709,9 @@ class WindowsVelopackUpgradeAdapter:
             "target_version": package.version,
             "source_version": current["source_version"],
             "package": str(package.path),
-            "package_sha256": package.artifact["sha256"],
+            "package_sha256": self._validate_target_package(
+                package
+            ).nupkg_sha256,
             "rollback_package": staged["rollback_package"],
             "rollback_package_sha256": staged["rollback_package_sha256"],
             "manager_identity": current["process_identity"],
@@ -808,57 +892,149 @@ class WindowsVelopackUpgradeAdapter:
             )
         return current_version
 
-    def _local_full_packages(self, current_version: str) -> list[Path]:
+    def _local_rollback_bundle(
+        self,
+        current_version: str,
+    ) -> tuple[Path, ValidatedVelopackBundle] | None:
         packages_dir = self.layout.root / "packages"
-        matches: list[Path] = []
-        if packages_dir.is_dir() and not packages_dir.is_symlink():
-            for candidate in packages_dir.glob("*-full.nupkg"):
-                if (
-                    candidate.is_file()
-                    and not candidate.is_symlink()
-                    and _nupkg_version(candidate) == current_version
-                ):
-                    matches.append(candidate.resolve())
-        return matches
+        try:
+            assert_contained_no_reparse(
+                packages_dir,
+                root=self.layout.root,
+                allow_missing=True,
+            )
+        except (OSError, UnsafePathError) as exc:
+            raise UpgradeCompatibilityError(
+                f"Velopack bundle cache is unsafe: {exc}"
+            ) from exc
+        if not packages_dir.exists():
+            return None
+        try:
+            assert_directory_no_reparse(packages_dir)
+        except (OSError, UnsafePathError) as exc:
+            raise UpgradeCompatibilityError(
+                f"Velopack bundle cache is not a regular directory: {exc}"
+            ) from exc
+        candidate = packages_dir / VELOPACK_BUNDLE_NAME
+        if not os.path.lexists(candidate):
+            return None
+        try:
+            assert_contained_no_reparse(
+                candidate,
+                root=packages_dir,
+                allow_missing=False,
+            )
+        except (OSError, UnsafePathError) as exc:
+            raise UpgradeCompatibilityError(
+                f"Cached Velopack rollback bundle is unsafe: {exc}"
+            ) from exc
+        identity_path = packages_dir / _LOCAL_VELOPACK_IDENTITY_NAME
+        if (
+            identity_path.is_symlink()
+            or not identity_path.is_file()
+            or identity_path.stat().st_size > 64 * 1024
+        ):
+            raise UpgradeCompatibilityError(
+                "Cached Velopack rollback bundle identity is missing"
+            )
+        try:
+            assert_contained_no_reparse(
+                identity_path,
+                root=packages_dir,
+                allow_missing=False,
+            )
+            identity = _read_json_object(identity_path)
+            if (
+                set(identity)
+                != {
+                    "format_version",
+                    "dicepp_version",
+                    "channel",
+                    "platform",
+                    "arch",
+                    "filename",
+                    "size",
+                    "sha256",
+                }
+                or identity["format_version"] != 1
+                or Version(str(identity["dicepp_version"]))
+                != Version(current_version)
+                or identity["channel"] not in {"stable", "prerelease"}
+                or identity["platform"] != "windows"
+                or identity["arch"] != "amd64"
+                or identity["filename"] != VELOPACK_BUNDLE_NAME
+                or type(identity["size"]) is not int
+                or candidate.stat().st_size != identity["size"]
+                or _sha256_file(candidate) != identity["sha256"]
+            ):
+                raise UpgradeCompatibilityError(
+                    "Cached Velopack rollback bundle identity differs"
+                )
+            validated = validate_velopack_bundle(
+                candidate,
+                expected_dicepp_version=current_version,
+                expected_channel=identity["channel"],
+                expected_size=identity["size"],
+                expected_sha256=identity["sha256"],
+            )
+        except (OSError, ValueError, VelopackBundleError) as exc:
+            raise UpgradeCompatibilityError(
+                f"Cached Velopack rollback bundle is invalid: {exc}"
+            ) from exc
+        return candidate.resolve(), validated
 
-    async def _current_full_package(self) -> tuple[str, Path, str]:
+    async def _current_rollback_bundle(
+        self,
+    ) -> tuple[str, Path, str, ValidatedVelopackBundle]:
         current_version = self._current_version()
-        matches = self._local_full_packages(current_version)
-        if len(matches) > 1:
+        local = self._local_rollback_bundle(current_version)
+        if local is not None:
+            path, validated = local
+            return current_version, path, _sha256_file(path), validated
+        if self.rollback_bundle_fetcher is None:
             raise UpgradeCompatibilityError(
-                "Exactly one verified current-version Velopack full package "
+                "A verified current-version Velopack bundle "
                 "is required for automatic rollback"
             )
-        if len(matches) == 1:
-            return current_version, matches[0], _sha256_file(matches[0])
-        if self.rollback_package_fetcher is None:
-            raise UpgradeCompatibilityError(
-                "Exactly one verified current-version Velopack full package "
-                "is required for automatic rollback"
-            )
-        # Neither the Portable zip nor Update.exe maintains root/packages,
-        # so the current-version full package may be missing locally.  Fetch
-        # it from the GitHub Release (verified against the Release contract)
-        # instead of refusing the automatic update.  The result is memoized:
-        # preflight, capture_current, and stage all resolve the material.
         cached = self._fetched_rollback.get(current_version)
-        if cached is not None and cached[0].is_file():
-            return current_version, cached[0], cached[1]
+        if (
+            cached is not None
+            and cached[0].is_file()
+            and not cached[0].is_symlink()
+            and _sha256_file(cached[0]) == cached[1]
+        ):
+            return current_version, *cached
         try:
             path, digest = await asyncio.to_thread(
-                self.rollback_package_fetcher, current_version
+                self.rollback_bundle_fetcher, current_version
+            )
+            packages_root = assert_contained_no_reparse(
+                self.layout.manager_packages_dir,
+                root=self.layout.root,
+                allow_missing=False,
+            )
+            assert_contained_no_reparse(
+                path,
+                root=packages_root,
+                allow_missing=False,
+            )
+            validated = await asyncio.to_thread(
+                validate_velopack_bundle,
+                path,
+                expected_dicepp_version=current_version,
+                expected_sha256=digest,
             )
         except Exception as exc:
             raise UpgradeCompatibilityError(
-                "The current-version Velopack full package is unavailable "
+                "The current-version Velopack bundle is unavailable "
                 "locally and could not be fetched from the Release; "
                 "use a manual Windows update"
             ) from exc
-        self._fetched_rollback[current_version] = (path, digest)
-        return current_version, path, digest
+        self._fetched_rollback[current_version] = (path, digest, validated)
+        return current_version, path, digest, validated
 
     def _maintain_packages_dir(self, package: VerifiedUpgradePackage) -> str | None:
-        """Best-effort: keep exactly the committed full package in root/packages.
+        """Best-effort: keep the committed bundle in root/packages.
 
         Neither Update.exe apply nor DicePP maintains the Velopack packages
         directory; without this housekeeping the next automatic update would
@@ -867,29 +1043,59 @@ class WindowsVelopackUpgradeAdapter:
         """
         try:
             packages_dir = self.layout.root / "packages"
-            if packages_dir.is_symlink():
-                return "Velopack packages directory is not a regular directory"
+            assert_contained_no_reparse(
+                packages_dir,
+                root=self.layout.root,
+                allow_missing=True,
+            )
             packages_dir.mkdir(parents=True, exist_ok=True)
+            assert_contained_no_reparse(
+                packages_dir,
+                root=self.layout.root,
+                allow_missing=False,
+            )
+            assert_directory_no_reparse(packages_dir)
+            validated = self._validate_target_package(package)
             expected = package.artifact.get("sha256")
             if not isinstance(expected, str) or not expected:
-                return "Committed package digest is unavailable"
-            target = packages_dir / package.path.name
+                return "Committed bundle digest is unavailable"
+            assert package.bundle_path is not None
+            target = packages_dir / VELOPACK_BUNDLE_NAME
             if (
                 target.is_symlink()
                 or not target.is_file()
                 or _sha256_file(target) != expected
             ):
-                _atomic_copy(package.path, target)
+                _atomic_copy(package.bundle_path, target)
             if _sha256_file(target) != expected:
-                return "Refreshed rollback package digest mismatch"
-            for candidate in packages_dir.glob("*-full.nupkg"):
-                if (
-                    candidate.is_file()
-                    and candidate.resolve() != target.resolve()
-                ):
-                    candidate.unlink()
+                return "Refreshed rollback bundle digest mismatch"
+            validate_velopack_bundle(
+                target,
+                expected_dicepp_version=package.version,
+                expected_channel=validated.manifest["channel"],
+                expected_size=package.artifact["size"],
+                expected_sha256=expected,
+            )
+            _atomic_json(
+                packages_dir / _LOCAL_VELOPACK_IDENTITY_NAME,
+                {
+                    "format_version": 1,
+                    "dicepp_version": package.version,
+                    "channel": validated.manifest["channel"],
+                    "platform": "windows",
+                    "arch": "amd64",
+                    "filename": VELOPACK_BUNDLE_NAME,
+                    "size": package.artifact["size"],
+                    "sha256": expected,
+                },
+            )
             return None
-        except OSError as exc:
+        except (
+            OSError,
+            UnsafePathError,
+            VelopackBundleError,
+            UpgradeCompatibilityError,
+        ) as exc:
             return str(exc) or type(exc).__name__
 
     async def rollback(
@@ -2117,7 +2323,11 @@ class UpgradeCoordinator:
             metadata = _read_json_object(metadata_path)
             artifact = dict(metadata["artifact"])
             filename = str(artifact["filename"])
-            path = version_dir / filename
+            verified_name = metadata.get("verified_path")
+            if type(verified_name) is not str:
+                raise UpgradeCompatibilityError(
+                    "Verified package path metadata is missing"
+                )
             available_artifact = next(
                 (
                     {
@@ -2152,113 +2362,101 @@ class UpgradeCoordinator:
                 metadata.get("version") != target_version
                 or metadata.get("compatibility") != compatibility
                 or metadata.get("change_scope") != available.get("change_scope")
-                or metadata.get("verified_path") != filename
                 or artifact != available_artifact
-                or path.is_symlink()
-                or not path.is_file()
-                or path.stat().st_size != artifact["size"]
-                or _sha256_file(path) != artifact["sha256"]
             ):
                 raise UpgradeCompatibilityError(
                     "Downloaded package no longer matches verified release metadata"
                 )
+            bundle_path: Path | None = None
+            bundle_manifest: dict[str, Any] | None = None
             if artifact.get("platform") == "windows":
-                if artifact.get("purpose") != "velopack-full":
+                if (
+                    artifact.get("purpose") != "velopack-bundle"
+                    or artifact.get("filename") != VELOPACK_BUNDLE_NAME
+                ):
                     raise UpgradeCompatibilityError(
-                        "Windows automatic updates require the Velopack full package"
+                        "Windows automatic updates require the Velopack bundle"
                     )
-                companions = metadata.get("companions")
-                if not isinstance(companions, list):
+                bundle_manifest = metadata.get("bundle_manifest")
+                payload_name = metadata.get("payload_verified_path")
+                generation = metadata.get("generation")
+                if (
+                    not isinstance(bundle_manifest, dict)
+                ):
                     raise UpgradeCompatibilityError(
-                        "Verified Velopack feed metadata is missing"
+                        "Verified Velopack bundle payload metadata is missing"
                     )
-                expected_by_purpose = {
-                    item.get("purpose"): {
-                        key: item[key]
-                        for key in (
-                            "platform",
-                            "arch",
-                            "filename",
-                            "purpose",
-                            "size",
-                            "sha256",
-                        )
-                    }
-                    for item in available.get("artifacts", [])
-                    if isinstance(item, dict)
-                    and all(
-                        key in item
-                        for key in (
-                            "platform",
-                            "arch",
-                            "filename",
-                            "purpose",
-                            "size",
-                            "sha256",
-                        )
+                verified_name, payload_name = (
+                    _validate_windows_generation_names(
+                        generation,
+                        verified_name,
+                        payload_name,
                     )
-                }
-                seen_companions: set[str] = set()
-                for companion in companions:
-                    companion_artifact = (
-                        companion.get("artifact")
-                        if isinstance(companion, dict)
-                        else None
+                )
+                packages_root = assert_contained_no_reparse(
+                    self.layout.manager_packages_dir,
+                    root=self.layout.root,
+                    allow_missing=False,
+                )
+                assert_directory_no_reparse(packages_root)
+                trusted_version_dir = assert_contained_no_reparse(
+                    version_dir,
+                    root=packages_root,
+                    allow_missing=False,
+                )
+                assert_directory_no_reparse(trusted_version_dir)
+                bundle_path = trusted_version_dir / verified_name
+                package_path = trusted_version_dir / payload_name
+                assert_contained_no_reparse(
+                    bundle_path,
+                    root=trusted_version_dir,
+                    allow_missing=False,
+                )
+                assert_contained_no_reparse(
+                    package_path,
+                    root=trusted_version_dir,
+                    allow_missing=False,
+                )
+                try:
+                    validated = validate_velopack_bundle(
+                        bundle_path,
+                        expected_dicepp_version=target_version,
+                        expected_channel=available.get("channel"),
+                        expected_size=artifact["size"],
+                        expected_sha256=artifact["sha256"],
                     )
-                    companion_name = (
-                        companion.get("verified_path")
-                        if isinstance(companion, dict)
-                        else None
-                    )
-                    if not isinstance(companion_artifact, dict):
-                        raise UpgradeCompatibilityError(
-                            "Verified Velopack companion metadata is invalid"
-                        )
-                    purpose = companion_artifact.get("purpose")
-                    if (
-                        purpose not in {"velopack-releases", "velopack-assets"}
-                        or companion_artifact != expected_by_purpose.get(purpose)
-                        or companion_name != companion_artifact.get("filename")
-                    ):
-                        raise UpgradeCompatibilityError(
-                            "Velopack feed does not match the current Release"
-                        )
-                    companion_path = version_dir / str(companion_name)
-                    if (
-                        companion_path.is_symlink()
-                        or not companion_path.is_file()
-                        or companion_path.stat().st_size
-                        != companion_artifact.get("size")
-                        or _sha256_file(companion_path)
-                        != companion_artifact.get("sha256")
-                    ):
-                        raise UpgradeCompatibilityError(
-                            "Verified Velopack feed asset changed after download"
-                        )
-                    try:
-                        feed = json.loads(
-                            companion_path.read_text(encoding="utf-8")
-                        )
-                    except (OSError, ValueError) as exc:
-                        raise UpgradeCompatibilityError(
-                            "Velopack feed asset is invalid JSON"
-                        ) from exc
-                    # Velopack publishes the releases feed as a JSON object
-                    # ({"Assets": [...]}) but the assets feed as a bare array.
-                    expected_root = (
-                        dict if purpose == "velopack-releases" else list
-                    )
-                    if not isinstance(feed, expected_root):
-                        raise UpgradeCompatibilityError(
-                            "Velopack releases feed must be a JSON object"
-                            if purpose == "velopack-releases"
-                            else "Velopack assets feed must be a JSON array"
-                        )
-                    seen_companions.add(str(purpose))
-                if seen_companions != {"velopack-releases", "velopack-assets"}:
+                except VelopackBundleError as exc:
                     raise UpgradeCompatibilityError(
-                        "Both Velopack release and asset feeds are required"
+                        f"Downloaded Velopack bundle is invalid: {exc}"
+                    ) from exc
+                with open_regular_binary_no_follow(package_path) as payload:
+                    payload_info = os.fstat(payload.fileno())
+                    payload_digest = _sha256_handle(payload)
+                if (
+                    validated.manifest != bundle_manifest
+                    or payload_info.st_nlink != 1
+                    or payload_info.st_size != validated.nupkg_size
+                    or payload_digest != validated.nupkg_sha256
+                ):
+                    raise UpgradeCompatibilityError(
+                        "Downloaded Velopack payload no longer matches its bundle"
                     )
+            else:
+                if verified_name != filename:
+                    raise UpgradeCompatibilityError(
+                        "Downloaded package path differs from verified metadata"
+                    )
+                path = version_dir / verified_name
+                if (
+                    path.is_symlink()
+                    or not path.is_file()
+                    or path.stat().st_size != artifact["size"]
+                    or _sha256_file(path) != artifact["sha256"]
+                ):
+                    raise UpgradeCompatibilityError(
+                        "Downloaded package no longer matches verified release metadata"
+                    )
+                package_path = path
         except (OSError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, UpgradeCompatibilityError):
                 raise
@@ -2269,10 +2467,12 @@ class UpgradeCoordinator:
             version=target_version,
             platform=str(artifact["platform"]),
             arch=str(artifact["arch"]),
-            path=path,
+            path=package_path,
             metadata_path=metadata_path,
             artifact=artifact,
             release={**available, "fallbacks": metadata.get("fallbacks", {})},
+            bundle_path=bundle_path,
+            bundle_manifest=bundle_manifest,
         )
 
     def _record_running(
@@ -2664,41 +2864,38 @@ def _identity_belongs_to_instance(
         return False
 
 
-def _nupkg_version(path: Path) -> str | None:
-    try:
-        with zipfile.ZipFile(path) as archive:
-            nuspecs = [
-                name
-                for name in archive.namelist()
-                if PurePosixPath(name).suffix.casefold() == ".nuspec"
-            ]
-            if len(nuspecs) != 1:
-                return None
-            root = ElementTree.fromstring(archive.read(nuspecs[0]))
-    except (
-        OSError,
-        zipfile.BadZipFile,
-        ElementTree.ParseError,
-        KeyError,
-    ):
-        return None
-    for element in root.iter():
-        if element.tag.rsplit("}", 1)[-1] == "version":
-            value = (element.text or "").strip()
-            return value or None
-    return None
-
-
-
-
-
-
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+        return _sha256_handle(handle)
+
+
+def _sha256_handle(handle) -> str:
+    handle.seek(0)
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validate_windows_generation_names(
+    generation: Any,
+    bundle_name: Any,
+    payload_name: Any,
+) -> tuple[str, str]:
+    """Validate untrusted metadata without constructing or touching a path."""
+
+    if (
+        type(generation) is not str
+        or type(bundle_name) is not str
+        or type(payload_name) is not str
+        or not _VELOPACK_GENERATION_ID_RE.fullmatch(generation)
+        or bundle_name != f"velopack-{generation}.win-x64.zip"
+        or payload_name != f"payload-{generation}.nupkg"
+    ):
+        raise UpgradeCompatibilityError(
+            "Verified Velopack generation paths are unsafe or inconsistent"
+        )
+    return bundle_name, payload_name
 
 
 def _is_sha256(value: Any) -> bool:
