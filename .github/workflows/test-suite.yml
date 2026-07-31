@@ -62,7 +62,7 @@ jobs:
           docker build -f Dockerfile.dashboard -t dicepp-dashboard:ci .
       - name: Smoke test Dashboard image
         run: |
-          expected="$(sed -n 's/^version = "\\\(.*\\\)"$/\\1/p' pyproject.toml)"
+          expected="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
           actual="$(docker run --rm --network=none dicepp-dashboard:ci python -m dashboard --version)"
           if [ "$actual" != "DicePP Dashboard v$expected" ]; then
             echo "Dashboard version mismatch: expected 'DicePP Dashboard v$expected', got '$actual'"
@@ -141,7 +141,7 @@ jobs:
           docker build -f Dockerfile -t dicepp-runtime:ci .
       - name: Smoke test Runtime image
         run: |
-          expected="$(sed -n 's/^version = "\\\(.*\\\)"$/\\1/p' pyproject.toml)"
+          expected="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
           actual="$(docker run --rm --network=none dicepp-runtime:ci python bot.py --version)"
           if [ "$actual" != "DicePP v$expected" ]; then
             echo "Runtime version mismatch: expected 'DicePP v$expected', got '$actual'"
