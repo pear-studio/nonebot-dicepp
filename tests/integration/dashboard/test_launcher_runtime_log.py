@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from types import SimpleNamespace
 from datetime import datetime
 from pathlib import Path
 import importlib.util
+import os
 import sys
 import time
 
@@ -13,6 +15,36 @@ from dashboard.src import launcher
 from dashboard.src.config import DashboardPaths
 from dashboard.src.runtime_log import rotate_runtime_log, runtime_log_path
 from tests.support.paths import find_repository_root
+
+
+_LAUNCHER_ENV_KEYS = (
+    "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
+    "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
+    "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
+    "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
+    "DICEPP_MANAGER_PROCESS_CWD",
+)
+
+
+@pytest.fixture
+def clean_launcher_env() -> Iterator[None]:
+    """Clear launcher env vars and restore the previous values afterwards.
+
+    ``configure_launcher_environment`` writes ``os.environ`` directly, which
+    ``monkeypatch.delenv`` cannot undo; without an explicit restore those
+    values leak into later tests on the same xdist worker.
+    """
+    saved = {key: os.environ.get(key) for key in _LAUNCHER_ENV_KEYS}
+    for key in _LAUNCHER_ENV_KEYS:
+        os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        for key in _LAUNCHER_ENV_KEYS:
+            os.environ.pop(key, None)
+        os.environ.update(
+            {key: value for key, value in saved.items() if value is not None}
+        )
 
 
 class FakeManagerClient:
@@ -72,15 +104,7 @@ def test_rotate_runtime_log_keeps_latest_ten_histories(tmp_path: Path) -> None:
     assert log_path.read_text(encoding="utf-8") == ""
 
 
-def test_launcher_environment_makes_manager_the_stable_owner(monkeypatch, tmp_path: Path) -> None:
-    for key in (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
-        "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
-        "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
-        "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
-        "DICEPP_MANAGER_PROCESS_CWD",
-    ):
-        monkeypatch.delenv(key, raising=False)
+def test_launcher_environment_makes_manager_the_stable_owner(clean_launcher_env, tmp_path: Path) -> None:
     env = launcher.configure_launcher_environment(tmp_path)
     assert env["DICEPP_MANAGER_URL"] == "http://127.0.0.1:4091"
     assert env["DICEPP_MANAGER_TOKEN_FILE"] == str(tmp_path / "manager" / "state" / "api-token")
@@ -90,17 +114,9 @@ def test_launcher_environment_makes_manager_the_stable_owner(monkeypatch, tmp_pa
 
 
 def test_velopack_current_keeps_mutable_instance_data_in_install_root(
-    monkeypatch,
+    clean_launcher_env,
     tmp_path: Path,
 ) -> None:
-    for key in (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
-        "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
-        "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
-        "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
-        "DICEPP_MANAGER_PROCESS_CWD",
-    ):
-        monkeypatch.delenv(key, raising=False)
     current = tmp_path / "current"
     current.mkdir()
     (current / "config" / "bots").mkdir(parents=True)
@@ -291,18 +307,10 @@ def test_background_launcher_runs_tray_without_opening_browser(
     ],
 )
 def test_velopack_config_seed_rejects_symlink_destination(
-    monkeypatch,
+    clean_launcher_env,
     tmp_path: Path,
     relative: Path,
 ) -> None:
-    for key in (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
-        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
-        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
-        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
-        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
-    ):
-        monkeypatch.delenv(key, raising=False)
     current = tmp_path / "current"
     source = current / relative
     source.parent.mkdir(parents=True)
@@ -324,18 +332,10 @@ def test_velopack_config_seed_rejects_symlink_destination(
 
 @pytest.mark.parametrize("ancestor", ["config", "config/bots"])
 def test_launcher_seed_rejects_redirected_config_ancestor(
-    monkeypatch,
+    clean_launcher_env,
     tmp_path: Path,
     ancestor: str,
 ) -> None:
-    for key in (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
-        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
-        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
-        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
-        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
-    ):
-        monkeypatch.delenv(key, raising=False)
     current = tmp_path / "current"
     (current / "config" / "bots").mkdir(parents=True)
     (current / "config" / "global.json").write_text("{}", encoding="utf-8")
@@ -361,17 +361,10 @@ def test_launcher_seed_rejects_redirected_config_ancestor(
 @pytest.mark.parametrize("ancestor", ["config", "config/bots"])
 def test_pyinstaller_seed_rejects_redirected_config_ancestor(
     monkeypatch,
+    clean_launcher_env,
     tmp_path: Path,
     ancestor: str,
 ) -> None:
-    for key in (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST",
-        "DASHBOARD_PORT", "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT",
-        "DICEPP_MANAGER_URL", "DICEPP_MANAGER_TOKEN_FILE",
-        "DICEPP_MANAGER_RUNTIME", "DICEPP_MANAGER_RUNTIME_UNIT_ID",
-        "DICEPP_MANAGER_PROCESS_COMMAND", "DICEPP_MANAGER_PROCESS_CWD",
-    ):
-        monkeypatch.delenv(key, raising=False)
     current = tmp_path / "current"
     (current / "config" / "bots").mkdir(parents=True)
     (current / "config" / "global.json").write_text("{}", encoding="utf-8")
@@ -413,17 +406,9 @@ def test_pyinstaller_seed_rejects_redirected_config_ancestor(
 
 def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
     monkeypatch,
+    clean_launcher_env,
     tmp_path: Path,
 ) -> None:
-    keys = (
-        "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
-        "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
-        "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
-        "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
-        "DICEPP_MANAGER_PROCESS_CWD",
-    )
-    for key in keys:
-        monkeypatch.delenv(key, raising=False)
     current = tmp_path / "current"
     current.mkdir()
     (current / "config" / "bots").mkdir(parents=True)
