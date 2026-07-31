@@ -27,6 +27,25 @@ except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
     )
 
 
+def _canonical_nupkg_name(name: str, velopack_version: str) -> str:
+    """Canonicalise a Velopack-produced nupkg filename for the bundle contract.
+
+    Velopack names channel builds ``{id}-{version}-{channel}-full.nupkg``;
+    the bundle contract fixes the member name to ``{id}-{version}-full.nupkg``
+    so it does not depend on the Velopack channel spelling.
+    """
+    tail = "-full.nupkg"
+    marker = f"-{velopack_version}"
+    if name.casefold().endswith(f"{marker}{tail}".casefold()):
+        return name
+    idx = name.casefold().find(f"{marker}-".casefold())
+    if idx > 0 and name.casefold().endswith(tail):
+        return f"{name[: idx + len(marker)]}{tail}"
+    raise ValueError(
+        f"Velopack nupkg filename {name!r} does not contain version {velopack_version}"
+    )
+
+
 def build_bundle(
     *,
     dicepp_version: str,
@@ -37,11 +56,13 @@ def build_bundle(
 ) -> dict:
     if not nupkg_path.is_file() or nupkg_path.is_symlink():
         raise ValueError("Velopack full nupkg must be a regular file")
+    nupkg_name = _canonical_nupkg_name(nupkg_path.name, velopack_version)
     manifest = build_velopack_bundle_manifest(
         dicepp_version=dicepp_version,
         velopack_version=velopack_version,
         channel=channel,
         nupkg_path=nupkg_path,
+        nupkg_name=nupkg_name,
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, raw_temp = tempfile.mkstemp(
@@ -62,7 +83,7 @@ def build_bundle(
                 VELOPACK_BUNDLE_MANIFEST_NAME,
                 json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             )
-            archive.write(nupkg_path, arcname=nupkg_path.name)
+            archive.write(nupkg_path, arcname=nupkg_name)
         validate_velopack_bundle(
             temporary,
             expected_dicepp_version=manifest["dicepp_version"],

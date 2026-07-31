@@ -73,6 +73,7 @@ def build_velopack_bundle_manifest(
     velopack_version: str,
     channel: str,
     nupkg_path: Path,
+    nupkg_name: str | None = None,
 ) -> dict[str, Any]:
     """Build and validate the inner manifest for a release-produced nupkg."""
 
@@ -84,7 +85,7 @@ def build_velopack_bundle_manifest(
         "platform": "windows",
         "arch": "amd64",
         "nupkg": {
-            "filename": nupkg_path.name,
+            "filename": nupkg_name if nupkg_name is not None else nupkg_path.name,
             "size": nupkg_path.stat().st_size,
             "sha256": _sha256_file(nupkg_path),
         },
