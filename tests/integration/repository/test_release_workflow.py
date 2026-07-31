@@ -10,6 +10,7 @@ ROOT = next(
 )
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 WINDOWS_PACKAGE_SCRIPT = ROOT / "scripts" / "build" / "assemble_windows_package.ps1"
 
 
@@ -23,6 +24,11 @@ def _workflow_step(workflow_path: Path, job_name: str, step_name: str) -> dict:
         if step.get("name") == step_name:
             return step
     raise AssertionError(f"{step_name} step not found in {workflow_path.name}:{job_name}")
+
+
+def _workflow_call(workflow_path: Path) -> dict:
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    return workflow.get("on", workflow.get(True))["workflow_call"]
 
 
 def _create_release_script() -> str:
@@ -51,9 +57,56 @@ def test_create_release_uses_metadata_as_notes_file_when_available():
 
 
 def test_linux_release_package_embeds_docs_and_usage_guide_without_offline_name():
+    publish = _workflow_job(RELEASE_WORKFLOW, "publish")
+    steps = [step.get("name") for step in publish["steps"]]
+    verify = _workflow_step(
+        RELEASE_WORKFLOW,
+        "publish",
+        "Pull and verify promoted images from GHCR",
+    )["run"]
     step = _workflow_step(RELEASE_WORKFLOW, "publish", "Package Linux amd64 release bundle")
     script = step["run"]
+    normalized_package = " ".join(script.replace("\\\n", "").split())
 
+    assert "promote-docker" in publish["needs"]
+    assert steps.index("Pull and verify promoted images from GHCR") < steps.index(
+        "Package Linux amd64 release bundle"
+    )
+    assert "${{ needs.promote-docker.outputs.runtime_digest }}" in verify
+    assert "${{ needs.promote-docker.outputs.runtime_image_id }}" in verify
+    assert "${{ needs.promote-docker.outputs.dashboard_digest }}" in verify
+    assert "${{ needs.promote-docker.outputs.dashboard_image_id }}" in verify
+    assert verify.count("docker buildx imagetools inspect") == 2
+    assert verify.count("docker image inspect --format '{{.Id}}'") == 2
+    assert (
+        'EXPECTED_BOT_DIGEST="${{ needs.promote-docker.outputs.runtime_digest }}"'
+        in verify
+    )
+    assert (
+        'EXPECTED_BOT_IMAGE_ID="${{ needs.promote-docker.outputs.runtime_image_id }}"'
+        in verify
+    )
+    assert (
+        'EXPECTED_DASHBOARD_DIGEST="${{ needs.promote-docker.outputs.dashboard_digest }}"'
+        in verify
+    )
+    assert (
+        'EXPECTED_DASHBOARD_IMAGE_ID="${{ needs.promote-docker.outputs.dashboard_image_id }}"'
+        in verify
+    )
+    assert 'docker buildx imagetools inspect "$BOT_IMAGE"' in verify
+    assert 'docker buildx imagetools inspect "$DASHBOARD_IMAGE"' in verify
+    assert 'docker image inspect --format \'{{.Id}}\' "$BOT_IMAGE"' in verify
+    assert 'docker image inspect --format \'{{.Id}}\' "$DASHBOARD_IMAGE"' in verify
+    assert '[ "$ACTUAL_BOT_DIGEST" != "$EXPECTED_BOT_DIGEST" ]' in verify
+    assert (
+        '[ "$ACTUAL_DASHBOARD_DIGEST" != "$EXPECTED_DASHBOARD_DIGEST" ]' in verify
+    )
+    assert '[ "$ACTUAL_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]' in verify
+    assert (
+        '[ "$ACTUAL_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]'
+        in verify
+    )
     assert 'PACKAGE_DIR="DicePP-${TAG}-linux-amd64"' in script
     assert "offline" not in script.lower()
     assert 'cp docs/linux.md "${PACKAGE_DIR}/docs/linux.md"' in script
@@ -69,8 +122,98 @@ def test_linux_release_package_embeds_docs_and_usage_guide_without_offline_name(
     assert 'docker image inspect --format \'{{.Id}}\'' in script
     assert '--image-id "${BOT_IMAGE_ID}"' in script
     assert '--image-id "${DASHBOARD_IMAGE_ID}"' in script
+    assert (
+        '--image "${BOT_IMAGE}" --image "${DASHBOARD_IMAGE}" '
+        '--image-id "${BOT_IMAGE_ID}" --image-id "${DASHBOARD_IMAGE_ID}"'
+        in normalized_package
+    )
     assert "--minimum-manager-version" not in script
     assert "--automatic-upgrade" not in script
+
+
+def test_final_linux_zip_passes_isolated_offline_round_trip_before_release():
+    publish = _workflow_job(RELEASE_WORKFLOW, "publish")
+    step_names = [step.get("name") for step in publish["steps"]]
+    verify = _workflow_step(
+        RELEASE_WORKFLOW,
+        "publish",
+        "Verify final Linux bundle offline round trip",
+    )
+    cleanup = _workflow_step(
+        RELEASE_WORKFLOW,
+        "publish",
+        "Clean up Linux bundle offline smoke",
+    )
+    script = verify["run"]
+    normalized = " ".join(script.replace("\\\n", "").split())
+    python_smoke_transform = script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+
+    assert step_names.index("Package Linux amd64 release bundle") < step_names.index(
+        verify["name"]
+    )
+    assert step_names.index(verify["name"]) < step_names.index(cleanup["name"])
+    assert step_names.index(cleanup["name"]) < step_names.index(
+        "Generate release machine contract"
+    )
+    assert cleanup["if"] == "always()"
+    assert (
+        'EXPECTED_BOT_IMAGE_ID="${{ needs.promote-docker.outputs.runtime_image_id }}"'
+        in script
+    )
+    assert (
+        'EXPECTED_DASHBOARD_IMAGE_ID="${{ needs.promote-docker.outputs.dashboard_image_id }}"'
+        in script
+    )
+
+    # The formal tags must disappear before anything is recovered from the zip.
+    assert 'docker image rm "$BOT_IMAGE" "$DASHBOARD_IMAGE"' in script
+    assert script.index('docker image rm "$BOT_IMAGE" "$DASHBOARD_IMAGE"') < script.index(
+        'unzip -q "$PACKAGE_ZIP"'
+    )
+    assert "sha256sum -c checksums.sha256" in script
+    assert "validate_linux_bundle_candidate.py" in script
+    assert (
+        '--expected-image bot "$BOT_IMAGE" "$EXPECTED_BOT_IMAGE_ID"'
+        in normalized
+    )
+    assert (
+        "--expected-image dashboard "
+        '"$DASHBOARD_IMAGE" "$EXPECTED_DASHBOARD_IMAGE_ID"'
+        in normalized
+    )
+    assert "find \"$SMOKE_ROOT/images\"" not in script
+    assert 'zstd -d "$IMAGE_ARCHIVE_ZST" -o "$IMAGE_ARCHIVE"' in script
+    assert 'docker load -i "$IMAGE_ARCHIVE"' in script
+    assert script.index("validate_linux_bundle_candidate.py") < script.index(
+        'zstd -d "$IMAGE_ARCHIVE_ZST"'
+    )
+    assert script.index('docker load -i "$IMAGE_ARCHIVE"') < script.index(
+        "LOADED_BOT_IMAGE_ID="
+    )
+    assert 'docker image inspect --format \'{{.Id}}\' "$BOT_IMAGE"' in script
+    assert 'docker image inspect --format \'{{.Id}}\' "$DASHBOARD_IMAGE"' in script
+    assert '[ "$LOADED_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]' in script
+    assert (
+        '[ "$LOADED_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]'
+        in script
+    )
+
+    # The smoke compose is derived from the bundled compose, keeps role wiring,
+    # removes host-wide names/ports/builds, and can only use loaded images.
+    assert '-f "${SMOKE_ROOT}/docker-compose.yml" config --format json' in normalized
+    assert 'services["bot"]["image"] != bot_image' in script
+    assert 'services[role]["image"] != dashboard_image' in script
+    assert 'for key in ("build", "container_name", "ports")' in script
+    assert '"volumes"' not in python_smoke_transform
+    assert 'service["restart"] = "no"' in script
+    assert "DICEPP_MANAGER_RELEASE_SCHEDULER" in script
+    assert "up -d --pull never --wait --wait-timeout 180" in normalized
+    assert "for service in bot dashboard manager" in script
+    assert "for service in dashboard manager" in script
+    assert "ps --status running -q" in normalized
+    assert "{{.State.Health.Status}}" in script
+    assert "down --volumes --remove-orphans" in " ".join(cleanup["run"].split())
+    compile(python_smoke_transform, "linux-bundle-smoke-transform", "exec")
 
 
 def test_windows_release_uses_velpack_and_normalizes_public_names():
@@ -117,7 +260,8 @@ def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
 
     assert job["runs-on"] == "ubuntu-latest"
     assert job["needs"] == "quick"
-    assert build["run"].strip() == "docker build -f Dockerfile -t dicepp-runtime:ci ."
+    assert 'IMAGE="dicepp-runtime:ci"' in build["run"]
+    assert 'docker build -f Dockerfile -t "$IMAGE" .' in build["run"]
     assert "Version: 0.0.0-stale" in seed["run"]
     assert "src/plugins/DicePP/__pycache__/stale.cpython-313.pyc" in seed["run"]
     assert "python bot.py --version" in smoke["run"]
@@ -140,20 +284,13 @@ def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_
     ci_smoke = _workflow_step(
         TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Dashboard image"
     )["run"]
-    release_smoke = _workflow_step(
-        RELEASE_WORKFLOW, "build-docker", "Smoke test Dashboard image"
-    )["run"]
     ci_manager_smoke = _workflow_step(
         TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Manager image"
     )["run"]
-    release_manager_smoke = _workflow_step(
-        RELEASE_WORKFLOW, "build-docker", "Smoke test Manager image"
-    )["run"]
 
-    for script in (ci_smoke, release_smoke):
-        assert "/api/auth/status" in script
-        assert "smoke_dashboard_control_channel" not in script
-        assert "/ws/control" not in script
+    assert "/api/auth/status" in ci_smoke
+    assert "smoke_dashboard_control_channel" not in ci_smoke
+    assert "/ws/control" not in ci_smoke
 
     assert "Version: 0.0.0-stale" in seed
     assert "python -m dashboard --version" in ci_smoke
@@ -161,15 +298,14 @@ def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_
     assert "test ! -e /app/src/dicepp.egg-info" in ci_smoke
     assert "test ! -d /app/src/plugins/DicePP/__pycache__" in ci_smoke
 
-    for script in (ci_manager_smoke, release_manager_smoke):
-        assert "python -m dicepp_manager" in script
-        assert "dicepp-manager-smoke" in script
-        assert "DICEPP_MANAGER_RELEASE_SCHEDULER=false" in script
-        assert "/app/manager/state/api-token" in script
-        assert "Authorization: Bearer $token" in script
-        assert "http://127.0.0.1:4091/v1/health" in script
-        assert "smoke_dashboard_control_channel" not in script
-        assert "/ws/control" not in script
+    assert "python -m dicepp_manager" in ci_manager_smoke
+    assert "dicepp-manager-smoke" in ci_manager_smoke
+    assert "DICEPP_MANAGER_RELEASE_SCHEDULER=false" in ci_manager_smoke
+    assert "/app/manager/state/api-token" in ci_manager_smoke
+    assert "Authorization: Bearer $token" in ci_manager_smoke
+    assert "http://127.0.0.1:4091/v1/health" in ci_manager_smoke
+    assert "smoke_dashboard_control_channel" not in ci_manager_smoke
+    assert "/ws/control" not in ci_manager_smoke
 
     assert "from importlib.metadata import version" in ci_manager_smoke
     assert 'assert version("dicepp") == expected' in ci_manager_smoke
@@ -179,23 +315,163 @@ def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_
     )["run"]
     assert "dicepp-manager-smoke" in ci_cleanup
     assert "docker volume rm -f dicepp-manager-smoke" in ci_cleanup
-    assert "trap cleanup EXIT" in release_manager_smoke
 
 
-def test_release_bot_image_smoke_preflights_local_tag_without_network():
-    image = (
-        "ghcr.io/pear-studio/nonebot-dicepp:"
-        "${{ needs.release-metadata.outputs.tag }}"
+def test_release_gate_publishes_only_images_that_passed_the_image_smokes():
+    call = _workflow_call(TEST_SUITE_WORKFLOW)
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    gate = release["jobs"]["quality-gate"]
+
+    expected_outputs = {
+        f"{role}_candidate_{field}": {
+            "description": call["outputs"][f"{role}_candidate_{field}"]["description"],
+            "value": (
+                "${{ jobs."
+                + ("runtime-image" if role == "runtime" else "dashboard-image")
+                + f".outputs.candidate_{field} }}}}"
+            ),
+        }
+        for role in ("runtime", "dashboard")
+        for field in ("ref", "digest", "image_id")
+    }
+    assert call["outputs"] == expected_outputs
+    assert gate["permissions"] == {"contents": "read", "packages": "write"}
+
+    for job_name, role in (
+        ("runtime-image", "Runtime"),
+        ("dashboard-image", "Dashboard"),
+    ):
+        job = _workflow_job(TEST_SUITE_WORKFLOW, job_name)
+        names = [step.get("name") for step in job["steps"]]
+        publish = _workflow_step(
+            TEST_SUITE_WORKFLOW,
+            job_name,
+            f"Publish tested {role} candidate",
+        )
+        login = _workflow_step(
+            TEST_SUITE_WORKFLOW,
+            job_name,
+            "Login to GHCR for release candidate",
+        )
+        last_smoke = (
+            "Smoke test Runtime image"
+            if job_name == "runtime-image"
+            else "Smoke test Manager image"
+        )
+
+        assert names.index(last_smoke) < names.index(publish["name"])
+        assert job["permissions"] == {"contents": "read", "packages": "write"}
+        assert login["if"] == "inputs.release_tag != ''"
+        assert login["with"]["password"] == "${{ github.token }}"
+        assert publish["if"] == "inputs.release_tag != ''"
+        assert publish["id"] == "publish-candidate"
+        assert "candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in _workflow_step(
+            TEST_SUITE_WORKFLOW,
+            job_name,
+            f"Build {role} image",
+        )["run"]
+        assert "docker push \"$IMAGE\"" in publish["run"]
+        assert "docker buildx imagetools inspect" in publish["run"]
+        assert "PULLED_IMAGE_ID" in publish["run"]
+        assert "no automatic GHCR deletion" in publish["run"]
+
+
+def test_ordinary_ci_never_requests_or_publishes_release_candidates():
+    ci = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    caller = ci["jobs"]["test-suite"]
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
+
+    assert ci["permissions"] == {"contents": "read"}
+    assert "with" not in caller
+    assert "permissions" not in caller
+    for job_name in ("quick", "windows-package", "full"):
+        assert suite["jobs"][job_name]["permissions"] == {"contents": "read"}
+    for job_name in ("runtime-image", "dashboard-image"):
+        job = suite["jobs"][job_name]
+        login_steps = [
+            step for step in job["steps"] if step.get("uses") == "docker/login-action@v3"
+        ]
+        push_steps = [
+            step for step in job["steps"] if "docker push" in step.get("run", "")
+        ]
+        assert len(login_steps) == len(push_steps) == 1
+        assert login_steps[0]["if"] == "inputs.release_tag != ''"
+        assert push_steps[0]["if"] == "inputs.release_tag != ''"
+
+
+def test_release_promotes_candidate_manifest_digests_without_rebuilding():
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    promotion = release["jobs"]["promote-docker"]
+    script = _workflow_step(
+        RELEASE_WORKFLOW,
+        "promote-docker",
+        "Promote candidates without rebuilding",
+    )["run"]
+    normalized = " ".join(script.replace("\\\n", "").split())
+
+    assert set(promotion["needs"]) == {"release-metadata", "quality-gate"}
+    assert promotion["outputs"] == {
+        "runtime_digest": "${{ steps.promote.outputs.runtime_digest }}",
+        "runtime_image_id": "${{ steps.promote.outputs.runtime_image_id }}",
+        "dashboard_digest": "${{ steps.promote.outputs.dashboard_digest }}",
+        "dashboard_image_id": "${{ steps.promote.outputs.dashboard_image_id }}",
+    }
+    assert "docker build" not in script.replace("docker buildx imagetools", "")
+    assert "docker buildx imagetools create" in script
+    assert "--prefer-index=false" in script
+    for identity in (
+        "runtime_candidate_ref",
+        "runtime_candidate_digest",
+        "runtime_candidate_image_id",
+        "dashboard_candidate_ref",
+        "dashboard_candidate_digest",
+        "dashboard_candidate_image_id",
+    ):
+        assert f"${{{{ needs.quality-gate.outputs.{identity} }}}}" in script
+    assert (
+        'RUNTIME_CANDIDATE="${{ needs.quality-gate.outputs.runtime_candidate_ref }}"'
+        in script
     )
-    build = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Build image (local only)")
-    smoke = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Smoke test image")
-    script = smoke["run"]
-
-    assert build["with"]["load"] is True
-    assert image in build["with"]["tags"]
-    assert f'IMAGE="{image}"' in script
-    assert 'docker run --rm --network=none "$IMAGE" python bot.py --version' in script
-    assert 'docker run --rm --network=none "$IMAGE" python bot.py --smoke-check' in script
+    assert (
+        'RUNTIME_DIGEST="${{ needs.quality-gate.outputs.runtime_candidate_digest }}"'
+        in script
+    )
+    assert (
+        'RUNTIME_IMAGE_ID="${{ needs.quality-gate.outputs.runtime_candidate_image_id }}"'
+        in script
+    )
+    assert (
+        'DASHBOARD_CANDIDATE="${{ needs.quality-gate.outputs.dashboard_candidate_ref }}"'
+        in script
+    )
+    assert (
+        'DASHBOARD_DIGEST="${{ needs.quality-gate.outputs.dashboard_candidate_digest }}"'
+        in script
+    )
+    assert (
+        'DASHBOARD_IMAGE_ID="${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}"'
+        in script
+    )
+    assert 'if [ "$promoted_digest" != "$candidate_digest" ]' in script
+    assert (
+        'promote_exact_digest "$RUNTIME_CANDIDATE" "$RUNTIME_DIGEST" '
+        '"${RUNTIME_REPOSITORY}:${TAG}"'
+    ) in normalized
+    assert (
+        'promote_exact_digest "$DASHBOARD_CANDIDATE" "$DASHBOARD_DIGEST" '
+        '"${DASHBOARD_REPOSITORY}:${TAG}"'
+    ) in normalized
+    assert (
+        'promote_exact_digest "$RUNTIME_CANDIDATE" "$RUNTIME_DIGEST" '
+        '"${RUNTIME_REPOSITORY}:latest"'
+    ) in normalized
+    assert (
+        'promote_exact_digest "$DASHBOARD_CANDIDATE" "$DASHBOARD_DIGEST" '
+        '"${DASHBOARD_REPOSITORY}:latest"'
+    ) in normalized
+    assert 'echo "runtime_image_id=$RUNTIME_IMAGE_ID"' in script
+    assert 'echo "dashboard_image_id=$DASHBOARD_IMAGE_ID"' in script
+    assert '${{ needs.release-metadata.outputs.is_prerelease }}' in script
 
 
 def test_create_release_does_not_pass_empty_zip_argument():
@@ -332,7 +608,7 @@ def test_release_packages_the_exact_windows_candidate_tested_by_the_gate():
 
 def test_release_jobs_consume_one_validated_metadata_derivation():
     release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
-    job_names = ("build-docker", "windows-build", "publish")
+    job_names = ("promote-docker", "windows-build", "publish")
     step_names = [
         step.get("name")
         for job in release["jobs"].values()
