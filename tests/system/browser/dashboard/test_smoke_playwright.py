@@ -1594,6 +1594,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
                 "valid": True,
                 "description": body.get("description", ""),
                 "file_count": 1,
+                "opaque_sqlite_count": 2,
             }
             archives.insert(0, created)
             operation_id = "archive-create-1"
@@ -1822,6 +1823,9 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             page.locator('[data-testid="archive-create-button"]').click()
             expect(page.locator('[data-testid="archive-create-success"]')).to_contain_text(
                 "20260101-020304-created.zip"
+            )
+            expect(page.locator('[data-testid="archive-create-success"]')).to_contain_text(
+                "已原样保留 2 个未识别旧数据库"
             )
             expect(page.locator('[data-testid="archive-table"]')).to_contain_text(
                 "manual checkpoint"

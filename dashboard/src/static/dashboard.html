@@ -3120,7 +3120,17 @@ function app() {
         this.archiveCreating = false;
         const succeeded = operation.status === 'succeeded';
         const archive = operation.detail?.archive || null;
-        this.archiveCreateMessage = succeeded ? `已创建 ${archive?.filename || '存档'}` : '';
+        const opaqueSqliteCount = Number(
+          archive?.opaque_sqlite_count
+          || operation.detail?.manifest?.compatibility?.opaque_sqlite?.count
+          || 0
+        );
+        const opaqueSqliteNotice = opaqueSqliteCount > 0
+          ? `；已原样保留 ${opaqueSqliteCount} 个未识别旧数据库`
+          : '';
+        this.archiveCreateMessage = succeeded
+          ? `已创建 ${archive?.filename || '存档'}${opaqueSqliteNotice}`
+          : '';
         this.archiveCreateError = succeeded ? '' : (operation.message || '创建存档失败');
         if (succeeded) {
           this.archiveDescription = '';
