@@ -21,8 +21,8 @@ from dicepp_manager.runtime import UnavailableRuntimeAdapter
 from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
 from plugins.DicePP.core.data.schema import DicePPDatabase
-from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token, token_path
-from plugins.DicePP.module.dashboard_reporter.protocol import (
+from dicepp_control.control_token import ensure_token, token_path
+from dicepp_control.protocol import (
     auth,
     decode,
     encode,

@@ -16,7 +16,7 @@ import aiohttp
 
 from dicepp_meta import get_version
 from plugins.DicePP.frozen import is_frozen
-from plugins.DicePP.module.dashboard_reporter.protocol import (
+from dicepp_control.protocol import (
     auth as auth_msg,
     decode,
     encode,
@@ -63,7 +63,7 @@ class ControlChannelClient:
 
     Usage::
 
-        from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+        from dicepp_control.control_token import ensure_token
 
         token = ensure_token(project_root)
         client = ControlChannelClient(
