@@ -126,8 +126,10 @@ class FakeTray:
             return self.controller.toggle_autostart()
         return self.controller.exit()
 
-    def run(self) -> None:
+    def run(self, setup: Callable[["FakeTray"], None] | None = None) -> None:
         self.visible = True
+        if setup is not None:
+            setup(self)
 
     def stop(self) -> None:
         self.visible = False
@@ -555,7 +557,12 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             )
 
         try:
-            tray.run()
+            tray.run(
+                setup=lambda _icon: append_runtime_log_line(
+                    "launcher | startup complete",
+                    path=log_path,
+                )
+            )
         finally:
             controller.exit()
     except BaseException as exc:

@@ -651,6 +651,18 @@ def test_windows_release_requires_single_velopack_bundle_asset():
     assert "velopack.win-x64.zip" in validate
 
 
+def test_windows_package_job_runs_all_real_package_smokes():
+    smoke = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Run Windows package smokes",
+    )
+
+    assert smoke["env"]["DICEPP_WINDOWS_PACKAGE_SMOKE"] == "1"
+    assert "pytest tests/system/package/windows " in smoke["run"]
+    assert "test_windows_package_playwright.py" not in smoke["run"]
+
+
 def test_windows_release_smokes_executables_from_the_final_portable():
     job = _workflow_job(RELEASE_WORKFLOW, "windows-build")
     step_names = [step.get("name") for step in job["steps"]]
@@ -678,3 +690,24 @@ def test_windows_release_smokes_executables_from_the_final_portable():
     assert "-WindowStyle Hidden" in script
     assert "-RedirectStandardOutput" in script
     assert "-RedirectStandardError" in script
+    assert '$stableDashboard = Join-Path $extractRoot "DicePP.exe"' in script
+    assert "test_windows_package_detached_launch.py" in script
+
+
+def test_windows_release_installs_and_smokes_the_final_setup():
+    job = _workflow_job(RELEASE_WORKFLOW, "windows-build")
+    step_names = [step.get("name") for step in job["steps"]]
+    setup = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Smoke test final Windows Setup install",
+    )
+    script = setup["run"]
+
+    assert step_names.index("Package artifact") < step_names.index(setup["name"])
+    assert "--silent" in script
+    assert "--installto" in script
+    assert "WaitForExit(20000)" in script
+    assert 'Join-Path $installRoot "DicePP.exe"' in script
+    assert 'Join-Path $installRoot "current\\DicePP.exe"' in script
+    assert "test_windows_package_detached_launch.py" in script

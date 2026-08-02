@@ -194,7 +194,13 @@ def _is_velopack_hook(argv: list[str] | None = None) -> bool:
     launcher — otherwise the installer times out and force-kills the exe.
     """
     arguments = argv if argv is not None else sys.argv[1:]
-    return any(argument.startswith("--veloapp") for argument in arguments)
+    hooks = {
+        "--veloapp-install",
+        "--veloapp-updated",
+        "--veloapp-obsolete",
+        "--veloapp-uninstall",
+    }
+    return any(argument in hooks for argument in arguments)
 
 
 def _append_bootstrap_failure(app_dir: str, exc: BaseException) -> None:

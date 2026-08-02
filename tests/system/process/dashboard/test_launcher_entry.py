@@ -110,6 +110,35 @@ def test_velopack_hook_exits_zero_before_launcher_import(hook: str) -> None:
     assert payload["launcher_imported"] is False
 
 
+@pytest.mark.parametrize("argument", ["--veloapp", "--veloapplication"])
+def test_non_hook_velopack_prefix_continues_to_launcher_import(argument: str) -> None:
+    """Similar user arguments must not be mistaken for lifecycle hooks."""
+    project_root = repo_root()
+    code = textwrap.dedent(
+        f"""
+        import runpy
+        import sys
+
+        sys.argv = ["DicePP.exe", {argument!r}]
+        runpy.run_path(
+            {str(project_root / "scripts" / "build" / "dashboard_entry.py")!r},
+            run_name="dashboard_entry_test",
+        )
+        assert "dashboard.src.launcher" in sys.modules
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_dashboard_entry_preconfigures_env_before_dashboard_import(
     tmp_path: Path,
 ) -> None:

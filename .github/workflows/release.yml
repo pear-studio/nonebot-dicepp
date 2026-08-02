@@ -286,9 +286,67 @@ jobs:
               throw "Portable UpdateGuard version mismatch: expected '$expectedGuard', got '$actualGuard'"
             }
             Invoke-PackagedExe $updateGuard @("--smoke-check") | Out-Null
+
+            $stableDashboard = Join-Path $extractRoot "DicePP.exe"
+            if (-not (Test-Path -LiteralPath $stableDashboard -PathType Leaf)) {
+              throw "Portable stable DicePP.exe is missing"
+            }
+            $env:DICEPP_WINDOWS_PACKAGE_SMOKE = "1"
+            $env:DICEPP_DASHBOARD_EXE = $stableDashboard
+            uv run --frozen pytest `
+              tests/system/package/windows/test_windows_package_detached_launch.py `
+              -n0 --tb=short -q
+            if ($LASTEXITCODE -ne 0) {
+              throw "Final Portable detached launch smoke failed"
+            }
           } finally {
             if (Test-Path -LiteralPath $extractRoot) {
               Remove-Item -LiteralPath $extractRoot -Recurse -Force
+            }
+          }
+
+      - name: Smoke test final Windows Setup install
+        shell: pwsh
+        run: |
+          $setupPath = Resolve-Path "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe"
+          $installRoot = Join-Path $env:RUNNER_TEMP "dicepp-setup-$([guid]::NewGuid())"
+          $installer = $null
+          try {
+            $installer = Start-Process `
+              -FilePath $setupPath `
+              -ArgumentList @("--silent", "--installto", $installRoot) `
+              -PassThru `
+              -WindowStyle Hidden
+            if (-not $installer.WaitForExit(20000)) {
+              taskkill /PID $installer.Id /T /F | Out-Null
+              throw "Setup did not finish within 20 seconds; lifecycle hook may be blocked"
+            }
+            if ($installer.ExitCode -ne 0) {
+              throw "Setup exited with code $($installer.ExitCode)"
+            }
+
+            $stableDashboard = Join-Path $installRoot "DicePP.exe"
+            $payloadDashboard = Join-Path $installRoot "current\DicePP.exe"
+            foreach ($path in @($stableDashboard, $payloadDashboard)) {
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                throw "Setup installation is incomplete: $path"
+              }
+            }
+
+            $env:DICEPP_WINDOWS_PACKAGE_SMOKE = "1"
+            $env:DICEPP_DASHBOARD_EXE = $stableDashboard
+            uv run --frozen pytest `
+              tests/system/package/windows/test_windows_package_detached_launch.py `
+              -n0 --tb=short -q
+            if ($LASTEXITCODE -ne 0) {
+              throw "Installed stable entry detached launch smoke failed"
+            }
+          } finally {
+            if ($null -ne $installer -and -not $installer.HasExited) {
+              taskkill /PID $installer.Id /T /F | Out-Null
+            }
+            if (Test-Path -LiteralPath $installRoot) {
+              Remove-Item -LiteralPath $installRoot -Recurse -Force
             }
           }
 

@@ -13,9 +13,11 @@ import json
 import os
 import subprocess
 import sys
+import time
 import warnings
 from pathlib import Path
 
+import psutil
 import pytest
 
 from tests.support.dashboard.playwright import find_free_port, wait_for_server
@@ -36,7 +38,9 @@ pytestmark = [
     ),
     # Onefile extraction and local Manager startup need more than the
     # suite-wide 30-second budget, while remaining strictly bounded.
-    pytest.mark.timeout(60),
+    # Startup probes allow two bounded 30-second phases and cleanup can take
+    # another 35 seconds on a failing onefile process tree.
+    pytest.mark.timeout(120),
 ]
 
 # Win32 process creation flags: 子进程不继承父进程控制台, 对 GUI 子系统程序
@@ -68,6 +72,8 @@ def _launch_env(tmp_path: Path) -> tuple[dict[str, str], str]:
 
     port = find_free_port()
     manager_port = find_free_port()
+    while manager_port == port:
+        manager_port = find_free_port()
     env = os.environ.copy()
     for key in (
         "DICEPP_MANAGER_HOST",
@@ -109,26 +115,114 @@ def _launch_detached(exe: Path, args: list[str], env: dict[str, str]) -> subproc
     )
 
 
-def _stop_process_tree(proc: subprocess.Popen) -> None:
-    """Terminate the onefile parent and extracted child before the next test."""
-    result = subprocess.run(
-        ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+def _owned_listener_pids(exe: Path, ports: set[int]) -> set[int]:
+    """Return DicePP listeners owned by the package root under test."""
+    package_root = exe.parent.resolve()
+    pids: set[int] = set()
+    for connection in psutil.net_connections(kind="tcp"):
+        if (
+            connection.status != psutil.CONN_LISTEN
+            or connection.pid is None
+            or not connection.laddr
+            or connection.laddr.port not in ports
+        ):
+            continue
+        try:
+            process_exe = Path(psutil.Process(connection.pid).exe()).resolve()
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            continue
+        if (
+            process_exe.name.casefold() == "dicepp.exe"
+            and process_exe.is_relative_to(package_root)
+        ):
+            pids.add(connection.pid)
+    return pids
+
+
+def _stop_process_tree(
+    proc: subprocess.Popen,
+    exe: Path,
+    ports: set[int],
+) -> None:
+    """Terminate the stable stub, onefile parent and actual service process."""
+    targets = _owned_listener_pids(exe, ports)
+    if proc.poll() is None:
+        targets.add(proc.pid)
+
+    errors: list[str] = []
+    for pid in sorted(targets):
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            try:
+                psutil.Process(pid).kill()
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                pass
+            errors.append(f"taskkill timed out for pid {pid}")
+            continue
+        if result.returncode != 0 and psutil.pid_exists(pid):
+            errors.append(
+                f"taskkill failed for pid {pid}: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=10)
+        errors.append(f"launcher process {proc.pid} required direct kill")
+
+    remaining = _owned_listener_pids(exe, ports)
+    if remaining:
+        errors.append(f"DicePP listeners remain after cleanup: {sorted(remaining)}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+def _stop_process_tree_preserving_failure(
+    proc: subprocess.Popen,
+    exe: Path,
+    ports: set[int],
+) -> None:
+    """Do not let a teardown failure hide the startup assertion that preceded it."""
+    primary_error = sys.exc_info()[1]
+    try:
+        _stop_process_tree(proc, exe, ports)
+    except Exception as cleanup_error:
+        if primary_error is None:
+            raise
         warnings.warn(
-            "Packaged Dashboard 进程树等待 10 秒后仍未退出："
-            f"{result.stderr.strip() or result.stdout.strip()}",
+            f"Packaged process cleanup also failed: {cleanup_error}",
             RuntimeWarning,
             stacklevel=2,
         )
-        proc.kill()
-        proc.wait()
+
+
+def _wait_for_startup_complete(
+    log_path: Path,
+    *,
+    timeout: float,
+) -> str:
+    """Wait for the launcher stage after Manager, runtime and tray setup."""
+    deadline = time.monotonic() + timeout
+    latest = ""
+    while time.monotonic() < deadline:
+        if log_path.is_file():
+            latest = log_path.read_text(encoding="utf-8", errors="replace")
+            if "launcher | startup complete" in latest:
+                return latest
+        time.sleep(0.1)
+    raise TimeoutError(
+        "launcher did not record startup completion; latest runtime log:\n"
+        f"{latest or '<missing>'}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -143,22 +237,72 @@ def test_detached_exe_boots_without_console_streams(
     """Explorer 双击形态（无控制台/标准流）下三种入口模式都必须正常起服务。"""
     exe = _dashboard_exe()
     env, base_url = _launch_env(tmp_path)
+    ports = {
+        int(env["DASHBOARD_PORT"]),
+        int(env["DICEPP_MANAGER_PORT"]),
+    }
+    runtime_log = (
+        Path(env["DICEPP_PROJECT_ROOT"])
+        / "data"
+        / "logs"
+        / "dicepp-runtime.log"
+    )
 
     proc = _launch_detached(exe, args, env)
+    dashboard_ready = False
     try:
         wait_for_server(f"{base_url}/api/auth/status", timeout=30)
-        assert proc.poll() is None, (
-            f"packaged executable exited early with code {proc.returncode}"
-        )
+        dashboard_ready = True
+        log_text = _wait_for_startup_complete(runtime_log, timeout=30)
+        listener_pids = _owned_listener_pids(exe, ports)
+        assert listener_pids, "no DicePP process owns the ready service ports"
+        assert "launcher | DicePPDashboard server started" in log_text
+        assert "launcher | DicePPManager server started" in log_text
+        assert "bootstrap fatal error" not in log_text
     except Exception as exc:
         exit_state = (
             f"process exited with code {proc.returncode}"
             if proc.poll() is not None
-            else "process still running but Dashboard port never became ready"
+            else (
+                "process still running but startup completion was not recorded"
+                if dashboard_ready
+                else "process still running but Dashboard port never became ready"
+            )
         )
         pytest.fail(
             "Packaged Dashboard executable did not become ready without "
             f"console streams ({exit_state}): {exc}"
         )
     finally:
-        _stop_process_tree(proc)
+        _stop_process_tree_preserving_failure(proc, exe, ports)
+
+
+@pytest.mark.parametrize(
+    "hook",
+    ["--veloapp-install", "--veloapp-updated", "--veloapp-obsolete", "--veloapp-uninstall"],
+)
+def test_packaged_velopack_hooks_exit_quickly_without_starting_services(
+    tmp_path: Path,
+    hook: str,
+) -> None:
+    """The actual windowed executable must honour Velopack lifecycle hooks."""
+    exe = _dashboard_exe()
+    env, _base_url = _launch_env(tmp_path)
+    ports = {
+        int(env["DASHBOARD_PORT"]),
+        int(env["DICEPP_MANAGER_PORT"]),
+    }
+    proc = _launch_detached(exe, [hook, "3.0.0-rc.18"], env)
+
+    try:
+        assert proc.wait(timeout=10) == 0
+    except subprocess.TimeoutExpired:
+        _stop_process_tree(proc, exe, ports)
+        pytest.fail(f"Packaged Dashboard did not exit promptly for {hook}")
+
+    assert not (
+        Path(env["DICEPP_PROJECT_ROOT"])
+        / "data"
+        / "logs"
+        / "dicepp-runtime.log"
+    ).exists()

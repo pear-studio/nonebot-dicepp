@@ -247,8 +247,10 @@ def test_background_launcher_runs_tray_without_opening_browser(
             return True
 
     class FakeTray:
-        def run(self) -> None:
+        def run(self, setup=None) -> None:
             tray_runs.append(True)
+            if setup is not None:
+                setup(self)
 
         def stop(self) -> None:
             events.append("stop:tray")
@@ -726,9 +728,11 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
         def stop(self) -> None:
             events.append("stop:tray")
 
-        def run(self) -> None:
+        def run(self, setup=None) -> None:
             if failure_stage == "tray_run":
                 raise RuntimeError("tray initialization failed")
+            if setup is not None:
+                setup(self)
             if normal_exit is not None:
                 raise normal_exit
 
@@ -751,6 +755,11 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
     if normal_exit is not None:
         assert exc_info.value is normal_exit
         assert recorded == []
+
+    if failure_stage == "tray_run":
+        assert "launcher | startup complete" not in (
+            DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
+        )
 
     terminal_events = [event for event in events if event.startswith("terminal:")]
     assert terminal_events
