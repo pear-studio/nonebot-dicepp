@@ -3,7 +3,7 @@ import asyncio
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command.const import *
-from plugins.DicePP.core.command import UserCommandBase, custom_user_command
+from plugins.DicePP.core.command import UserCommandBase
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
@@ -41,9 +41,16 @@ LOC_HUB_URL_SET = "hub_url_set"
 LOC_HUB_URL_GET = "hub_url_get"
 
 
-@custom_user_command(readable_name="DiceHub指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
-                     flag=DPP_COMMAND_FLAG_HUB)
 class HubCommand(UserCommandBase):
+    """已停用的 DiceHub 指令实现。
+
+    保留实现供后续重做时参考，但不得注册到消息分发链。
+    """
+
+    readable_name = "DiceHub指令"
+    priority = DPP_COMMAND_PRIORITY_DEFAULT
+    flag = DPP_COMMAND_FLAG_HUB
+
     def __init__(self, bot: Bot):
         super().__init__(bot)
 

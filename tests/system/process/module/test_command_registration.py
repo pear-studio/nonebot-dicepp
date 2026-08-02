@@ -38,6 +38,7 @@ from plugins.DicePP.runtime_preflight import load_and_validate_dicepp_plugin
 
 plugin = load_and_validate_dicepp_plugin()
 from plugins.DicePP.core.command.user_cmd import DEFAULT_REGISTRY
+from plugins.DicePP.module.dice_hub.hub_command import HubCommand
 
 print(json.dumps({
     "module_name": plugin.module_name,
@@ -62,5 +63,6 @@ print(json.dumps({
     names = payload["commands"]
 
     assert payload["module_name"] == "plugins.DicePP.plugin"
+    assert "HubCommand" not in names
     assert names.count("LogCommand") == 1
     assert names.index("LogCommand") < names.index("QueryCommand")
