@@ -7,7 +7,7 @@ API bearer token and never falls back to the legacy ``data/dicepp.db`` value.
 from pathlib import Path
 
 from dicepp_data import InstanceLayout
-from dicepp_manager.auth import (
+from dicepp_security.private_token import (
     TokenSecurityError,
     ensure_private_token,
     read_private_token,

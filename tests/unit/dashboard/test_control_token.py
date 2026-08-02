@@ -7,8 +7,8 @@ import stat
 
 import pytest
 from dicepp_data import InstanceLayout
-import dicepp_manager.auth as manager_auth
-from dicepp_manager.auth import TokenSecurityError
+import dicepp_security.private_token as manager_auth
+from dicepp_security.private_token import TokenSecurityError
 from plugins.DicePP.core.data.schema import DicePPDatabase
 from dicepp_control.control_token import (
     ensure_token,

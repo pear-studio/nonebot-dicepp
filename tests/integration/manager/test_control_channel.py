@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-import dicepp_manager.auth as manager_auth
+import dicepp_security.private_token as manager_auth
 from dicepp_data import InstanceLayout
 from dicepp_manager.api import create_manager_app
 from dicepp_manager.archive_coordinator import ArchiveCoordinator
