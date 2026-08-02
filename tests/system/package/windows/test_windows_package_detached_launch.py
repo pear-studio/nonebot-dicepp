@@ -38,8 +38,8 @@ pytestmark = [
     ),
     # Onefile extraction and local Manager startup need more than the
     # suite-wide 30-second budget, while remaining strictly bounded.
-    # Startup probes allow two bounded 30-second phases and cleanup can take
-    # another 35 seconds on a failing onefile process tree.
+    # Startup probes allow two bounded 30-second phases and cleanup has one
+    # shared 30-second deadline for the complete packaged process set.
     pytest.mark.timeout(120),
 ]
 
@@ -115,6 +115,42 @@ def _launch_detached(exe: Path, args: list[str], env: dict[str, str]) -> subproc
     )
 
 
+def _owned_package_processes(exe: Path) -> dict[int, psutil.Process]:
+    """Return every live DicePP executable loaded from the package under test."""
+    package_root = exe.parent.resolve()
+    processes: dict[int, psutil.Process] = {}
+    for process in psutil.process_iter(["pid", "exe"]):
+        try:
+            process_exe_value = process.info["exe"]
+            if not process_exe_value:
+                continue
+            process_exe = Path(process_exe_value).resolve()
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            continue
+        if (
+            process_exe.name.casefold() == "dicepp.exe"
+            and process_exe.is_relative_to(package_root)
+        ):
+            processes[process.pid] = process
+    return processes
+
+
+def _wait_for_package_processes_to_exit(exe: Path, *, timeout: float) -> None:
+    """Wait until Windows has terminated and unmapped every package process."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = _owned_package_processes(exe)
+        if not remaining:
+            return
+        wait_time = min(0.2, deadline - time.monotonic())
+        if wait_time <= 0:
+            raise TimeoutError(
+                "packaged DicePP processes did not exit: "
+                f"{sorted(remaining)}"
+            )
+        psutil.wait_procs(list(remaining.values()), timeout=wait_time)
+
+
 def _owned_listener_pids(exe: Path, ports: set[int]) -> set[int]:
     """Return DicePP listeners owned by the package root under test."""
     package_root = exe.parent.resolve()
@@ -145,43 +181,53 @@ def _stop_process_tree(
     ports: set[int],
 ) -> None:
     """Terminate the stable stub, onefile parent and actual service process."""
-    targets = _owned_listener_pids(exe, ports)
-    if proc.poll() is None:
-        targets.add(proc.pid)
-
+    deadline = time.monotonic() + 30
     errors: list[str] = []
-    for pid in sorted(targets):
+
+    if proc.poll() is None:
         try:
-            result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-            )
+            proc.kill()
+        except OSError as exc:
+            errors.append(f"launcher process {proc.pid} kill failed: {exc}")
+        try:
+            proc.wait(timeout=max(0.1, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            try:
-                psutil.Process(pid).kill()
-            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                pass
-            errors.append(f"taskkill timed out for pid {pid}")
-            continue
-        if result.returncode != 0 and psutil.pid_exists(pid):
             errors.append(
-                f"taskkill failed for pid {pid}: "
-                f"{result.stderr.strip() or result.stdout.strip()}"
+                f"launcher process {proc.pid} did not exit before cleanup deadline"
             )
 
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=10)
-        errors.append(f"launcher process {proc.pid} required direct kill")
+    while time.monotonic() < deadline:
+        tracked_processes = _owned_package_processes(exe)
+        if not tracked_processes:
+            break
+        for process in tracked_processes.values():
+            try:
+                # psutil retains process identity and refuses to signal a reused PID.
+                process.kill()
+            except psutil.NoSuchProcess:
+                continue
+            except (psutil.AccessDenied, OSError) as exc:
+                errors.append(f"direct kill failed for pid {process.pid}: {exc}")
+        wait_time = min(0.5, max(0.0, deadline - time.monotonic()))
+        if wait_time == 0:
+            break
+        psutil.wait_procs(
+            list(tracked_processes.values()),
+            timeout=wait_time,
+        )
 
-    remaining = _owned_listener_pids(exe, ports)
-    if remaining:
-        errors.append(f"DicePP listeners remain after cleanup: {sorted(remaining)}")
+    remaining_listeners = _owned_listener_pids(exe, ports)
+    if remaining_listeners:
+        errors.append(
+            "DicePP listeners remain after cleanup: "
+            f"{sorted(remaining_listeners)}"
+        )
+    remaining_processes = _owned_package_processes(exe)
+    if remaining_processes:
+        errors.append(
+            "packaged DicePP processes remain after cleanup deadline: "
+            f"{sorted(remaining_processes)}"
+        )
     if errors:
         raise RuntimeError("; ".join(errors))
 
@@ -295,10 +341,12 @@ def test_packaged_velopack_hooks_exit_quickly_without_starting_services(
     proc = _launch_detached(exe, [hook, "3.0.0-rc.18"], env)
 
     try:
-        assert proc.wait(timeout=10) == 0
-    except subprocess.TimeoutExpired:
-        _stop_process_tree(proc, exe, ports)
-        pytest.fail(f"Packaged Dashboard did not exit promptly for {hook}")
+        return_code = proc.wait(timeout=10)
+        assert return_code == 0, f"stable entry exited with code {return_code}"
+        _wait_for_package_processes_to_exit(exe, timeout=10)
+    except Exception as exc:
+        _stop_process_tree_preserving_failure(proc, exe, ports)
+        pytest.fail(f"Packaged Dashboard did not exit promptly for {hook}: {exc}")
 
     assert not (
         Path(env["DICEPP_PROJECT_ROOT"])
