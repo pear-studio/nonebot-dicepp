@@ -7,8 +7,10 @@ import os
 import hashlib
 import shlex
 import shutil
+import stat
 from pathlib import Path
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from packaging.version import InvalidVersion, Version
 
@@ -19,6 +21,12 @@ from .discovery import RuntimeUnitDiscovery
 from .docker_runtime import DockerRuntimeAdapter, DockerSocketRuntimeAdapter
 from .docker_upgrade import DockerSocketUpgradeExecutor
 from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
+from ._path_security import (
+    assert_contained_no_reparse,
+    assert_directory_no_reparse,
+    delete_path_entry_no_follow,
+    open_regular_binary_no_follow,
+)
 from .process_runtime import ProcessRuntimeAdapter
 from .release import ReleaseManager
 from .upgrade import (
@@ -292,7 +300,7 @@ def _has_active_update_guard_transaction(instance_root: Path) -> bool:
 
 def _sha256_path(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with open_regular_binary_no_follow(path) as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -443,8 +451,27 @@ def _validate_guard_resume_paths(
         if path.resolve(strict=False) != (transaction_dir / filename).resolve():
             raise ValueError(f"UpdateGuard {field} escapes transaction")
     rollback_package = Path(request["rollback_package"])
-    if rollback_package.parent.resolve() != transaction_dir.resolve():
+    rollback_payload_dir = transaction_dir / "rollback-payload"
+    direct_layout = _same_lexical_path(
+        rollback_package.parent,
+        transaction_dir,
+    )
+    staged_layout = _same_lexical_path(
+        rollback_package.parent,
+        rollback_payload_dir,
+    )
+    if not direct_layout and not staged_layout:
         raise ValueError("UpdateGuard rollback package escapes transaction")
+    assert_contained_no_reparse(
+        rollback_package,
+        root=transaction_dir,
+        allow_missing=False,
+    )
+    assert_directory_no_reparse(transaction_dir)
+    if staged_layout:
+        assert_directory_no_reparse(rollback_payload_dir)
+    with open_regular_binary_no_follow(rollback_package):
+        pass
     target_package = Path(request["package"]).resolve(strict=False)
     if not target_package.is_relative_to(
         (root / "manager" / "packages").resolve()
@@ -453,6 +480,240 @@ def _validate_guard_resume_paths(
     for field in ("auth_token_path",):
         if not Path(request[field]).resolve(strict=False).is_relative_to(root):
             raise ValueError(f"UpdateGuard {field} escapes instance")
+
+
+def _same_lexical_path(left: Path, right: Path) -> bool:
+    """Compare absolute paths without resolving a symlink or junction alias."""
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+        os.path.abspath(right)
+    )
+
+
+def _ensure_legacy_guard_rollback_layout(
+    request: dict,
+    *,
+    request_path: Path,
+    transaction_dir: Path,
+) -> dict:
+    """Make a staged rc17/rc18 request readable after rollback to old Manager.
+
+    Those versions stage the nupkg in ``rollback-payload/`` but their own
+    startup validator only accepts a direct child of the transaction.  The
+    already-running Guard keeps its validated request in memory, so retaining
+    the staged file while atomically publishing a verified direct copy is safe
+    for both the live Guard and a restored old Manager.
+    """
+    rollback_package = Path(request["rollback_package"])
+    payload_dir = transaction_dir / "rollback-payload"
+    if not _same_lexical_path(rollback_package.parent, payload_dir):
+        return request
+
+    expected_digest = request["rollback_package_sha256"]
+    package_name = rollback_package.name
+    marker_names = {
+        "request.json",
+        "guard.json",
+        "started.json",
+        "health.json",
+        "rollback.json",
+    }
+    if (
+        package_name.casefold() in marker_names
+        or not package_name.casefold().endswith("-full.nupkg")
+        or len(package_name) > 200
+        or not package_name[0].isalnum()
+        or any(
+            not (character.isascii() and (character.isalnum() or character in "._+-"))
+            for character in package_name
+        )
+    ):
+        raise ValueError("UpdateGuard staged rollback package name is invalid")
+
+    assert_directory_no_reparse(transaction_dir)
+    assert_directory_no_reparse(payload_dir)
+    assert_contained_no_reparse(
+        rollback_package,
+        root=transaction_dir,
+        allow_missing=False,
+    )
+    legacy_package = transaction_dir / rollback_package.name
+    updated = dict(request)
+    updated["rollback_package"] = str(legacy_package)
+    old_package = str(rollback_package)
+    old_parent = str(rollback_package.parent)
+    new_package = str(legacy_package)
+    new_parent = str(transaction_dir)
+    updated["rollback_command"] = _rewrite_rollback_command_paths(
+        request["rollback_command"],
+        old_package=Path(old_package),
+        new_package=Path(new_package),
+        old_parent=Path(old_parent),
+        new_parent=Path(new_parent),
+    )
+    _publish_verified_rollback_copy(
+        rollback_package,
+        legacy_package,
+        expected_digest=expected_digest,
+        transaction_dir=transaction_dir,
+    )
+    validate_update_guard_request(updated)
+    _validate_guard_resume_paths(
+        updated,
+        request_path=request_path,
+        transaction_dir=transaction_dir,
+        instance_root=transaction_dir.parents[3],
+    )
+    _atomic_json(request_path, updated)
+    return updated
+
+
+def _publish_verified_rollback_copy(
+    source: Path,
+    target: Path,
+    *,
+    expected_digest: str,
+    transaction_dir: Path,
+) -> None:
+    """Publish one verified no-follow copy without replacing an existing entry."""
+    assert_contained_no_reparse(
+        target,
+        root=transaction_dir,
+        allow_missing=True,
+    )
+    if _sha256_path(source) != expected_digest:
+        raise ValueError("UpdateGuard staged rollback package digest mismatch")
+    if os.path.lexists(target):
+        if _sha256_path(target) != expected_digest:
+            raise ValueError("UpdateGuard legacy rollback package is invalid")
+        return
+
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+    temporary_identity: tuple[int, int] | None = None
+    try:
+        digest = hashlib.sha256()
+        with (
+            open_regular_binary_no_follow(source) as input_handle,
+            temporary.open("xb") as output_handle,
+        ):
+            metadata = os.fstat(output_handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise ValueError(
+                    "UpdateGuard rollback copy temporary is not a private file"
+                )
+            temporary_identity = (metadata.st_dev, metadata.st_ino)
+            for chunk in iter(lambda: input_handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+                output_handle.write(chunk)
+            output_handle.flush()
+            os.fsync(output_handle.fileno())
+        if digest.hexdigest() != expected_digest:
+            raise ValueError("UpdateGuard staged rollback package digest mismatch")
+        try:
+            if os.name == "nt":
+                os.rename(temporary, target)
+            else:
+                os.link(temporary, target)
+        except FileExistsError:
+            pass
+        assert_contained_no_reparse(
+            target,
+            root=transaction_dir,
+            allow_missing=False,
+        )
+        if _sha256_path(target) != expected_digest:
+            raise ValueError("UpdateGuard legacy rollback package is invalid")
+    finally:
+        if temporary_identity is not None:
+            delete_path_entry_no_follow(
+                temporary,
+                expected_identity=temporary_identity,
+            )
+
+
+def _rewrite_rollback_command_paths(
+    command: list[str],
+    *,
+    old_package: Path,
+    new_package: Path,
+    old_parent: Path,
+    new_parent: Path,
+) -> list[str]:
+    """Rewrite only whole path arguments or ``option=path`` arguments."""
+    rewritten: list[str] = []
+    package_replaced = False
+    for argument in command:
+        value, replaced = _rewrite_command_path_argument(
+            argument,
+            old=old_package,
+            new=new_package,
+        )
+        package_replaced = package_replaced or replaced
+        if not replaced:
+            value, _replaced_parent = _rewrite_command_path_argument(
+                argument,
+                old=old_parent,
+                new=new_parent,
+            )
+        rewritten.append(value)
+    if not package_replaced or not any(
+        _command_path_argument_matches(argument, new_package)
+        for argument in rewritten
+    ):
+        raise ValueError(
+            "UpdateGuard rollback command does not bind the staged package"
+        )
+    if any(
+        _command_path_argument_matches(argument, old_package)
+        or _command_path_argument_matches(argument, old_parent)
+        for argument in rewritten
+    ):
+        raise ValueError("UpdateGuard rollback command migration is incomplete")
+    return rewritten
+
+
+def _rewrite_command_path_argument(
+    argument: str,
+    *,
+    old: Path,
+    new: Path,
+) -> tuple[str, bool]:
+    prefix, candidate, quote = _split_command_path_argument(argument)
+    if candidate is None or not _same_lexical_path(Path(candidate), old):
+        return argument, False
+    return f"{prefix}{quote}{new}{quote}", True
+
+
+def _command_path_argument_matches(argument: str, path: Path) -> bool:
+    _prefix, candidate, _quote = _split_command_path_argument(argument)
+    return candidate is not None and _same_lexical_path(Path(candidate), path)
+
+
+def _split_command_path_argument(
+    argument: str,
+) -> tuple[str, str | None, str]:
+    quote, candidate = _strip_command_path_quotes(argument)
+    if Path(candidate).is_absolute():
+        return "", candidate, quote
+    if "=" not in argument:
+        return "", None, quote
+    option, separator, candidate = argument.partition("=")
+    prefix = option + separator
+    quote, candidate = _strip_command_path_quotes(candidate)
+    if not Path(candidate).is_absolute():
+        return prefix, None, quote
+    return prefix, candidate, quote
+
+
+def _strip_command_path_quotes(value: str) -> tuple[str, str]:
+    quote = ""
+    if (
+        len(value) >= 2
+        and value[0] == value[-1]
+        and value[0] in {'"', "'"}
+    ):
+        quote = value[0]
+        value = value[1:-1]
+    return quote, value
 
 
 async def resume_interrupted_update_guard(service) -> dict | None:
@@ -552,7 +813,7 @@ async def resume_interrupted_update_guard(service) -> dict | None:
             "reused_running_guard": True,
             "awaiting_terminal": True,
         }
-    if program_state == "target" and guard_running:
+    if program_state == "target" and guard_state in {"live", "dead"}:
         try:
             handoff_phase = _load_guard_nonterminal_phase(request)
         except (OSError, ValueError) as exc:
@@ -560,7 +821,19 @@ async def resume_interrupted_update_guard(service) -> dict | None:
             raise RuntimeError(
                 "UpdateGuard hand-off phase requires manual recovery"
             ) from exc
-        if handoff_phase in {"pristine", "started_no_health"}:
+        try:
+            request = _ensure_legacy_guard_rollback_layout(
+                request,
+                request_path=request_path.resolve(),
+                transaction_dir=request_path.resolve().parent,
+            )
+        except (OSError, ValueError, UpdateGuardError) as exc:
+            service.set_startup_maintenance_gate(True)
+            raise RuntimeError(
+                "UpdateGuard rollback compatibility migration requires "
+                "manual recovery"
+            ) from exc
+        if guard_running and handoff_phase in {"pristine", "started_no_health"}:
             # The live Guard is waiting for this target Manager to publish its
             # exact started marker and authenticated health.  Continue normal
             # coordinator recovery instead of shutting down the hand-off peer.
