@@ -669,9 +669,9 @@ class WindowsVelopackUpgradeAdapter:
         transaction_dir = self.guard_dir / transaction_id
         try:
             transaction_dir.mkdir(parents=True, exist_ok=False)
-            payload_dir = transaction_dir / "rollback-payload"
-            payload_dir.mkdir()
-            rollback_package = extract_verified_nupkg(validated, payload_dir)
+            # Keep the nupkg as a direct child for rollback compatibility with
+            # Managers predating the contract-v2 bundle extraction layout.
+            rollback_package = extract_verified_nupkg(validated, transaction_dir)
         except Exception as exc:
             if transaction_dir.is_dir() and not transaction_dir.is_symlink():
                 shutil.rmtree(transaction_dir)

@@ -124,6 +124,7 @@ def _write_guard_transaction(
     rollback_status: str | None,
     health_status: str | None = None,
     guard_status: str = "running",
+    rollback_layout: str = "direct",
 ) -> tuple[Path, dict]:
     transaction = (
         root / "manager" / "state" / "update-guard" / transaction_id
@@ -132,7 +133,14 @@ def _write_guard_transaction(
     target = root / "manager" / "packages" / "3.1.0" / "target.nupkg"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(_nupkg_bytes("3.1.0"))
-    rollback_package = transaction / "DicePP-3.0.0-full.nupkg"
+    if rollback_layout == "direct":
+        rollback_package = transaction / "DicePP-3.0.0-full.nupkg"
+    elif rollback_layout == "staged":
+        rollback_payload = transaction / "rollback-payload"
+        rollback_payload.mkdir()
+        rollback_package = rollback_payload / "DicePP-3.0.0-full.nupkg"
+    else:
+        raise ValueError(f"Unsupported rollback layout: {rollback_layout}")
     rollback_package.write_bytes(_nupkg_bytes("3.0.0"))
     token = root / "manager" / "state" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
@@ -234,6 +242,255 @@ def _write_guard_transaction(
             encoding="utf-8",
         )
     return transaction, request
+
+
+def test_guard_scan_does_not_mutate_real_staged_payload_before_resume(
+    tmp_path: Path,
+) -> None:
+    transaction, request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-rollback-payload",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    staged_package = Path(request["rollback_package"])
+
+    pending = manager_factory._find_resumable_update_guard_request(
+        tmp_path,
+        identity_loader=lambda _pid: None,
+    )
+    persisted = json.loads(
+        (transaction / "request.json").read_text(encoding="utf-8")
+    )
+
+    assert pending is not None
+    assert staged_package.is_file()
+    assert persisted == request
+    assert not (transaction / staged_package.name).exists()
+
+
+def test_staged_rollback_migration_is_retryable_after_request_write_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    transaction, original = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-write-retry",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    request_path = transaction / "request.json"
+    staged_package = Path(original["rollback_package"])
+    loaded = manager_factory._load_update_guard_resume_request(
+        tmp_path,
+        request_path,
+    )
+    real_atomic_json = manager_factory._atomic_json
+
+    def fail_request_write(_path: Path, _value: dict) -> None:
+        raise OSError("simulated request write failure")
+
+    monkeypatch.setattr(manager_factory, "_atomic_json", fail_request_write)
+    with pytest.raises(OSError, match="simulated request write failure"):
+        manager_factory._ensure_legacy_guard_rollback_layout(
+            loaded,
+            request_path=request_path,
+            transaction_dir=transaction,
+        )
+
+    direct_package = transaction / staged_package.name
+    assert json.loads(request_path.read_text(encoding="utf-8")) == original
+    assert staged_package.is_file()
+    assert direct_package.read_bytes() == staged_package.read_bytes()
+
+    monkeypatch.setattr(manager_factory, "_atomic_json", real_atomic_json)
+    migrated = manager_factory._ensure_legacy_guard_rollback_layout(
+        loaded,
+        request_path=request_path,
+        transaction_dir=transaction,
+    )
+    repeated = manager_factory._ensure_legacy_guard_rollback_layout(
+        migrated,
+        request_path=request_path,
+        transaction_dir=transaction,
+    )
+
+    assert Path(migrated["rollback_package"]) == direct_package
+    assert repeated == migrated
+
+
+def test_guard_resume_rejects_rollback_payload_reparse_directory(
+    tmp_path: Path,
+) -> None:
+    transaction, _request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-reparse",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    payload = transaction / "rollback-payload"
+    real_payload = transaction / "real-payload"
+    payload.rename(real_payload)
+    try:
+        payload.symlink_to(real_payload, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    with pytest.raises(OSError, match="symbolic link|reparse point"):
+        manager_factory._load_update_guard_resume_request(
+            tmp_path,
+            transaction / "request.json",
+        )
+
+
+def test_guard_migration_rejects_marker_filename_as_rollback_package(
+    tmp_path: Path,
+) -> None:
+    transaction, request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-marker-name",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    unsafe_package = transaction / "rollback-payload" / "request.json"
+    unsafe_package.write_bytes(_nupkg_bytes("3.0.0"))
+    request["rollback_package"] = str(unsafe_package)
+    request["rollback_package_sha256"] = hashlib.sha256(
+        unsafe_package.read_bytes()
+    ).hexdigest()
+    (transaction / "request.json").write_text(
+        json.dumps(request),
+        encoding="utf-8",
+    )
+    loaded = manager_factory._load_update_guard_resume_request(
+        tmp_path,
+        transaction / "request.json",
+    )
+
+    with pytest.raises(ValueError, match="package name is invalid"):
+        manager_factory._ensure_legacy_guard_rollback_layout(
+            loaded,
+            request_path=transaction / "request.json",
+            transaction_dir=transaction,
+        )
+
+
+def test_guard_migration_rejects_unbound_rollback_command(
+    tmp_path: Path,
+) -> None:
+    transaction, request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-unbound-command",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    request["rollback_command"] = [
+        "Update.exe",
+        f"--log={request['rollback_package']}.txt",
+    ]
+    request_path = transaction / "request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    loaded = manager_factory._load_update_guard_resume_request(
+        tmp_path,
+        request_path,
+    )
+
+    with pytest.raises(ValueError, match="does not bind the staged package"):
+        manager_factory._ensure_legacy_guard_rollback_layout(
+            loaded,
+            request_path=request_path,
+            transaction_dir=transaction,
+        )
+
+    assert json.loads(request_path.read_text(encoding="utf-8")) == request
+    assert not (transaction / Path(request["rollback_package"]).name).exists()
+
+
+def test_guard_migration_rejects_conflicting_direct_rollback_package(
+    tmp_path: Path,
+) -> None:
+    transaction, request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="staged-conflicting-direct",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    direct_package = transaction / Path(request["rollback_package"]).name
+    direct_package.write_bytes(b"conflicting package")
+    request_path = transaction / "request.json"
+    loaded = manager_factory._load_update_guard_resume_request(
+        tmp_path,
+        request_path,
+    )
+
+    with pytest.raises(ValueError, match="legacy rollback package is invalid"):
+        manager_factory._ensure_legacy_guard_rollback_layout(
+            loaded,
+            request_path=request_path,
+            transaction_dir=transaction,
+        )
+
+    assert json.loads(request_path.read_text(encoding="utf-8")) == request
+    assert direct_package.read_bytes() == b"conflicting package"
+
+
+@pytest.mark.parametrize("command_style", ["whole", "option"])
+def test_guard_migration_accepts_package_path_containing_equals(
+    tmp_path: Path,
+    command_style: str,
+) -> None:
+    root = tmp_path / "portable=instance"
+    transaction, request = _write_guard_transaction(
+        root,
+        transaction_id=f"staged-equals-{command_style}",
+        rollback_status=None,
+        rollback_layout="staged",
+    )
+    staged_package = Path(request["rollback_package"])
+    request["rollback_command"] = (
+        ["Update.exe", str(staged_package)]
+        if command_style == "whole"
+        else ["Update.exe", f'--package="{staged_package}"']
+    )
+    request_path = transaction / "request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    loaded = manager_factory._load_update_guard_resume_request(
+        root,
+        request_path,
+    )
+
+    migrated = manager_factory._ensure_legacy_guard_rollback_layout(
+        loaded,
+        request_path=request_path,
+        transaction_dir=transaction,
+    )
+
+    assert Path(migrated["rollback_package"]).parent == transaction
+    assert str(transaction) in migrated["rollback_command"][-1]
+    assert "rollback-payload" not in migrated["rollback_command"][-1]
+
+
+def test_guard_resume_rejects_rollback_payload_outside_transaction(
+    tmp_path: Path,
+) -> None:
+    transaction, request = _write_guard_transaction(
+        tmp_path,
+        transaction_id="escaped-rollback-payload",
+        rollback_status=None,
+    )
+    outside = tmp_path / "outside-rollback.nupkg"
+    outside.write_bytes(_nupkg_bytes("3.0.0"))
+    request["rollback_package"] = str(outside.resolve())
+    (transaction / "request.json").write_text(
+        json.dumps(request),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="rollback package escapes transaction"):
+        manager_factory._load_update_guard_resume_request(
+            tmp_path,
+            transaction / "request.json",
+        )
 
 
 def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
@@ -1376,7 +1633,9 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
         tmp_path,
         transaction_id="tx-started-no-health",
         rollback_status=None,
+        rollback_layout="staged",
     )
+    staged_package = Path(request["rollback_package"])
     stale_identity = {
         "pid": 21,
         "started_at": "stale-target",
@@ -1416,6 +1675,10 @@ async def test_manager_startup_relaunches_started_target_without_reapplying_pack
         pid = 4322
 
     def fake_start_guard(request_path: Path):
+        migrated_request = json.loads(request_path.read_text(encoding="utf-8"))
+        assert Path(migrated_request["rollback_package"]).parent == transaction
+        assert staged_package.is_file()
+
         def start(command):
             commands.append(command)
             started = {
@@ -1505,6 +1768,17 @@ def test_target_manager_with_live_guard_completes_real_lifespan_handoff(
         tmp_path,
         transaction_id="tx-live-target-pristine",
         rollback_status=None,
+        rollback_layout="staged",
+    )
+    staged_package = Path(request["rollback_package"])
+    request["rollback_command"] = [
+        "Update.exe",
+        f'--package="{staged_package}"',
+        f"--packageDir={staged_package.parent}",
+    ]
+    (transaction / "request.json").write_text(
+        json.dumps(request),
+        encoding="utf-8",
     )
     guard_identity = json.loads(
         (transaction / "guard.json").read_text(encoding="utf-8")
@@ -1656,6 +1930,18 @@ def test_target_manager_with_live_guard_completes_real_lifespan_handoff(
 
     assert persisted is not None
     assert persisted.status == "succeeded", persisted.to_dict()
+    migrated = json.loads(
+        (transaction / "request.json").read_text(encoding="utf-8")
+    )
+    migrated_package = Path(migrated["rollback_package"])
+    assert staged_package.is_file()
+    assert migrated_package.parent == transaction
+    assert migrated_package.read_bytes() == staged_package.read_bytes()
+    assert migrated["rollback_command"] == [
+        "Update.exe",
+        f'--package="{migrated_package}"',
+        f"--packageDir={transaction}",
+    ]
     assert service.store.get_journal(request["transaction_id"])[
         "status"
     ] == "committed"

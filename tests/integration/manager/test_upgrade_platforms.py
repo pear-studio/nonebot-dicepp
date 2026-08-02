@@ -1645,6 +1645,9 @@ async def test_windows_first_upgrade_fetches_rollback_bundle_from_release(
     ).hexdigest()
     assert Path(staged["rollback_package"]).read_bytes() == nupkg_body
     assert staged["rollback_package_sha256"] == nupkg_digest
+    assert Path(staged["rollback_package"]).parent == (
+        layout.manager_state_dir / "update-guard" / ("f" * 32)
+    )
     assert "https://downloads/velopack-bundle" in transport.requests
 
 
