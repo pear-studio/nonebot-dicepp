@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from tests.support.dashboard.app import setup_auth
+from tests.support.fs_utils import symlink_or_skip
 
 
 class TestListDecks:
@@ -187,7 +188,7 @@ class TestSymlinkTraversal:
         target_file.write_text("outside, should be blocked")
 
         link_path = DashboardPaths.CONTENT_DIR / "decks" / "evil_link.txt"
-        link_path.symlink_to(target_file)
+        symlink_or_skip(link_path, target_file)
 
         setup_auth(test_client)
         resp = test_client.get("/api/content/decks/evil_link.txt")

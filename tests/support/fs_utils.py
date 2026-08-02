@@ -8,8 +8,25 @@ import shutil
 import time
 from pathlib import Path
 
+import pytest
+
 DEFAULT_MAX_ATTEMPTS = 20
 DEFAULT_SLEEP_S = 0.05
+
+
+def symlink_or_skip(
+    link: Path,
+    target: Path,
+    *,
+    target_is_directory: bool = False,
+) -> None:
+    """Create a test symlink or skip when Windows denies link privileges."""
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows account cannot create symbolic links")
+        raise
 
 
 def rmtree_retry(
