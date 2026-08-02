@@ -400,12 +400,12 @@ jobs:
           }
           Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
           Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" @("--smoke-check") | Out-Null
-      - name: Run Windows Dashboard UI smoke
+      - name: Run Windows package smokes
         env:
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
           DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
-          uv run pytest tests/system/package/windows/test_windows_package_playwright.py -n0 --tb=short -q
+          uv run pytest tests/system/package/windows -n0 --tb=short -q
       - name: Record release candidate provenance
         if: inputs.release_tag != ''
         shell: pwsh
