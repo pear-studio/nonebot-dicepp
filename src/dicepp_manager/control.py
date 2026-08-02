@@ -38,6 +38,14 @@ class _BotState:
     websocket: WebSocket | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _ActiveSessionSnapshot:
+    """Thread-readable view of the event-loop-owned authenticated sessions."""
+
+    authenticated_sessions: int = 0
+    latest_heartbeat: float | None = None
+
+
 class ControlChannelService:
     """Own one authenticated v1 control session per Bot identity."""
 
@@ -59,9 +67,9 @@ class ControlChannelService:
         self.ping_interval = ping_interval
         self._states: dict[str, _BotState] = {}
         # Sync archive probes run in a worker so they must never traverse the
-        # event-loop-owned session map.  This scalar is updated by the loop
-        # whenever a current session reports a heartbeat.
-        self._latest_heartbeat: float | None = None
+        # event-loop-owned session map.  The loop atomically replaces this
+        # immutable snapshot whenever active session state changes.
+        self._active_session_snapshot = _ActiveSessionSnapshot()
         self._pending_reload: dict[str, asyncio.Future[dict]] = {}
         self._reload_locks: dict[str, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
@@ -100,17 +108,20 @@ class ControlChannelService:
 
     def probe(self) -> dict:
         """Provide the archive/upgrade hard-health view without Dashboard I/O."""
-        latest = self._latest_heartbeat
+        snapshot = self._active_session_snapshot
+        latest = snapshot.latest_heartbeat
         if latest is None:
             return {
                 "ok": False,
                 "status": "failed",
                 "message": "No Bot control heartbeat",
+                "active_authenticated_sessions": snapshot.authenticated_sessions,
             }
         age = max(0.0, time.time() - latest)
         return {
             "ok": age <= self.heartbeat_timeout,
             "status": "ok" if age <= self.heartbeat_timeout else "failed",
+            "active_authenticated_sessions": snapshot.authenticated_sessions,
             "heartbeat_age_seconds": age,
             "heartbeat": _iso_timestamp(latest),
         }
@@ -154,7 +165,7 @@ class ControlChannelService:
             bot_id = candidate_id
             await self._replace_session(bot_id, ws)
             await ws.send_text(encode(auth_result(True)))
-            ping_task = asyncio.create_task(self._ping_loop(ws))
+            ping_task = asyncio.create_task(self._ping_loop(bot_id, ws))
             while True:
                 raw = await ws.receive_text()
                 try:
@@ -192,6 +203,9 @@ class ControlChannelService:
                 for state in self._states.values()
                 if state.websocket is not None
             ]
+            for state in self._states.values():
+                state.websocket = None
+            self._publish_active_session_snapshot_locked()
             self._pending_reload.clear()
             self._reload_locks.clear()
         await asyncio.gather(
@@ -204,6 +218,11 @@ class ControlChannelService:
             state = self._states.setdefault(bot_id, _BotState(bot_id=bot_id))
             previous = state.websocket
             state.websocket = ws
+            # A new authenticated transport must earn its own heartbeat.  A
+            # heartbeat from the replaced transport is not evidence that the
+            # current session survived an upgrade or restart.
+            state.last_heartbeat = None
+            self._publish_active_session_snapshot_locked()
         if previous is not None and previous is not ws:
             try:
                 await previous.close(code=4000)
@@ -216,6 +235,7 @@ class ControlChannelService:
             state = self._states.get(bot_id)
             if state is not None and state.websocket is ws:
                 state.websocket = None
+                self._publish_active_session_snapshot_locked()
 
     async def _handle_message(self, bot_id: str, ws: WebSocket, message: dict) -> None:
         message_type = message.get("type")
@@ -267,10 +287,26 @@ class ControlChannelService:
                 return
             heartbeat = time.time()
             state.last_heartbeat = heartbeat
-            if self._latest_heartbeat is None or heartbeat > self._latest_heartbeat:
-                self._latest_heartbeat = heartbeat
+            self._publish_active_session_snapshot_locked()
             if isinstance(version, str):
                 state.version = version
+
+    def _publish_active_session_snapshot_locked(self) -> None:
+        """Publish current authenticated sessions while ``_lock`` is held."""
+        active = [
+            state for state in self._states.values() if state.websocket is not None
+        ]
+        self._active_session_snapshot = _ActiveSessionSnapshot(
+            authenticated_sessions=len(active),
+            latest_heartbeat=max(
+                (
+                    state.last_heartbeat
+                    for state in active
+                    if state.last_heartbeat is not None
+                ),
+                default=None,
+            ),
+        )
 
     async def _reload_one(self, bot_id: str) -> dict:
         async with self._lock:
@@ -308,6 +344,7 @@ class ControlChannelService:
                 state = self._states.get(bot_id)
                 if state is not None and state.websocket is websocket:
                     state.websocket = None
+                    self._publish_active_session_snapshot_locked()
             return {
                 "bot_id": bot_id,
                 "status": "offline",
@@ -333,10 +370,25 @@ class ControlChannelService:
             "error": "; ".join(str(error) for error in errors) or "reload failed",
         }
 
-    async def _ping_loop(self, ws: WebSocket) -> None:
-        while True:
-            await asyncio.sleep(self.ping_interval)
-            await ws.send_text(encode(ping_msg()))
+    async def _ping_loop(self, bot_id: str, ws: WebSocket) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self.ping_interval)
+                await ws.send_text(encode(ping_msg()))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Revoke health before closing the transport.  A replaced
+            # connection cannot clear its successor because removal is
+            # guarded by both Bot identity and websocket object identity.
+            await self._remove_if_current(bot_id, ws)
+            try:
+                await ws.close(code=1011)
+            except Exception:
+                logger.debug(
+                    "Failed to close unhealthy Bot control session",
+                    exc_info=True,
+                )
 
     async def _reject(self, ws: WebSocket, reason: str, code: int) -> None:
         await ws.send_text(encode(auth_result(False, reason)))

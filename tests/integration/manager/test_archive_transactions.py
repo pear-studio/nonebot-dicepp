@@ -120,6 +120,7 @@ def _coordinator(
         control_probe=lambda: {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         },
         fault_hook=fault_hook,
@@ -687,6 +688,7 @@ async def test_rollback_health_gate_uses_real_control_probe_contract(
         return {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": datetime.now(timezone.utc).isoformat(),
         }
     armed = {"value": True}
@@ -1429,6 +1431,7 @@ async def test_runtime_must_still_live_after_control_probe(
         return {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         }
 
@@ -1462,6 +1465,7 @@ async def test_hard_health_uses_manager_control_without_dashboard_probe(
         return {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         }
 
@@ -1492,6 +1496,7 @@ async def test_control_heartbeat_must_advance_after_target_restart(
     coordinator.control_probe = lambda: {
         "ok": True,
         "status": "ok",
+        "active_authenticated_sessions": 1,
         "heartbeat": "2026-07-23T00:00:01+00:00",
     }
     coordinator.health_timeout = 0.01
@@ -1514,6 +1519,7 @@ def _no_heartbeat_control_probe() -> dict:
         "ok": False,
         "status": "failed",
         "message": "No Bot control heartbeat",
+        "active_authenticated_sessions": 0,
     }
 
 
@@ -1613,6 +1619,7 @@ def _stale_heartbeat_control_probe() -> dict:
     return {
         "ok": False,
         "status": "failed",
+        "active_authenticated_sessions": 0,
         "heartbeat": "2026-07-23T00:00:01+00:00",
         "heartbeat_age_seconds": 3600.0,
     }

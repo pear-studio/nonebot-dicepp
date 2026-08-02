@@ -105,6 +105,30 @@ class _ReloadCallbackSocket(_FakeControlSocket):
         self.callback_tasks.append(asyncio.create_task(complete_reload()))
 
 
+class _PingFailureSocket:
+    def __init__(self, root: Path) -> None:
+        self._auth = encode(auth("bot-1", ensure_token(root)))
+        self._authenticated = False
+        self._blocked_receive = asyncio.Event()
+
+    async def accept(self) -> None:
+        return None
+
+    async def receive_text(self) -> str:
+        if not self._authenticated:
+            self._authenticated = True
+            return self._auth
+        await self._blocked_receive.wait()
+        raise AssertionError("blocked receive unexpectedly resumed")
+
+    async def send_text(self, payload: str) -> None:
+        if decode(payload)["type"] == "ping":
+            raise RuntimeError("injected ping transport failure")
+
+    async def close(self, **_kwargs) -> None:
+        self._blocked_receive.set()
+
+
 def test_control_auth_uses_local_token_not_manager_api_token(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         assert client.get("/v1/control/bots").status_code == 401
@@ -371,6 +395,130 @@ async def test_replaced_session_cannot_update_status_or_complete_reload(
 
     assert service.bot_statuses()[0]["version"] == "new"
     assert pending.result()["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_probe_drops_fresh_heartbeat_when_session_disconnects(
+    tmp_path: Path,
+) -> None:
+    """A fresh historical heartbeat cannot keep a disconnected Bot healthy."""
+    from dicepp_manager.control import ControlChannelService
+
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: {"bot-1"},
+    )
+    socket = _FakeControlSocket()
+    await service._replace_session("bot-1", socket)
+    await service._handle_message("bot-1", socket, status("bot-1", "3.0.0"))
+
+    assert service.probe()["ok"] is True
+
+    await service._remove_if_current("bot-1", socket)
+
+    assert service.probe() == {
+        "ok": False,
+        "status": "failed",
+        "message": "No Bot control heartbeat",
+        "active_authenticated_sessions": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_probe_ignores_disconnected_bots_when_selecting_latest_heartbeat(
+    tmp_path: Path,
+) -> None:
+    """A disconnected Bot's newer heartbeat cannot hide another active Bot."""
+    from dicepp_manager.control import ControlChannelService
+
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: {"bot-a", "bot-b"},
+    )
+    bot_a = _FakeControlSocket()
+    bot_b = _FakeControlSocket()
+    await service._replace_session("bot-a", bot_a)
+    await service._handle_message("bot-a", bot_a, status("bot-a", "3.0.0"))
+    bot_a_heartbeat = service.probe()["heartbeat"]
+    await service._replace_session("bot-b", bot_b)
+    await service._handle_message("bot-b", bot_b, status("bot-b", "3.0.0"))
+
+    await service._remove_if_current("bot-b", bot_b)
+
+    probe = service.probe()
+    assert probe["active_authenticated_sessions"] == 1
+    assert probe["heartbeat"] == bot_a_heartbeat
+
+
+@pytest.mark.asyncio
+async def test_reconnected_session_must_publish_a_new_heartbeat(
+    tmp_path: Path,
+) -> None:
+    """Replacing a transport clears its heartbeat until the new Bot reports."""
+    from dicepp_manager.control import ControlChannelService
+
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: {"bot-1"},
+    )
+    old_socket = _FakeControlSocket()
+    new_socket = _FakeControlSocket()
+    await service._replace_session("bot-1", old_socket)
+    await service._handle_message("bot-1", old_socket, status("bot-1", "3.0.0"))
+    previous = service.probe()["heartbeat"]
+
+    await service._replace_session("bot-1", new_socket)
+
+    assert service.probe()["active_authenticated_sessions"] == 1
+    assert service.probe()["ok"] is False
+
+    await service._handle_message("bot-1", new_socket, status("bot-1", "3.1.0"))
+
+    assert service.probe()["ok"] is True
+    assert service.probe()["heartbeat"] > previous
+
+
+@pytest.mark.asyncio
+async def test_ping_failure_revokes_session_while_receive_is_blocked(
+    tmp_path: Path,
+) -> None:
+    """A failed ping must terminate the paired receive loop and session."""
+    from dicepp_manager.control import ControlChannelService
+
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: {"bot-1"},
+        ping_interval=0,
+    )
+
+    await asyncio.wait_for(
+        service.websocket_endpoint(_PingFailureSocket(tmp_path)),
+        timeout=0.5,
+    )
+
+    assert service.probe()["active_authenticated_sessions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_replaced_session_ping_failure_cannot_revoke_successor(
+    tmp_path: Path,
+) -> None:
+    """Late transport failure cleanup is scoped to the exact old socket."""
+    from dicepp_manager.control import ControlChannelService
+
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: {"bot-1"},
+        ping_interval=0,
+    )
+    old_socket = _PingFailureSocket(tmp_path)
+    current_socket = _FakeControlSocket()
+    await service._replace_session("bot-1", old_socket)
+    await service._replace_session("bot-1", current_socket)
+
+    await service._ping_loop("bot-1", old_socket)
+
+    assert service.probe()["active_authenticated_sessions"] == 1
 
 
 @pytest.mark.asyncio

@@ -761,26 +761,57 @@ class ArchiveCoordinator:
         *,
         control_baseline: str | None = None,
         control_gate: str = CONTROL_GATE_ENFORCED,
+        control_failure_is_warning: bool = False,
     ) -> dict[str, Any]:
         self.store.ensure_schema()
         config = self._validate_config()
         runtime = await self._wait_runtime_healthy(expected_running)
+        warnings = [
+            "External NapCat/QQ/GitHub/LLM services are not hard health checks"
+        ]
         control_skip_reason = _CONTROL_GATE_SKIP_REASONS.get(control_gate)
-        if expected_running and control_skip_reason is None:
-            control = await self._run_probe(
-                self.control_probe,
-                "control",
-                predicate=lambda result: _heartbeat_is_newer(
-                    result.get("heartbeat"),
-                    control_baseline,
-                ),
-                failure_message="Bot control heartbeat did not advance after restart",
+        observe_optional_control = (
+            control_failure_is_warning
+            and control_gate == CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
+        )
+        if expected_running and (
+            control_skip_reason is None or observe_optional_control
+        ):
+            effective_baseline = (
+                None if observe_optional_control else control_baseline
             )
+            try:
+                control = await self._run_probe(
+                    self.control_probe,
+                    "control",
+                    predicate=lambda result: _heartbeat_is_newer(
+                        result.get("heartbeat"),
+                        effective_baseline,
+                    ),
+                    failure_message=(
+                        "Bot control channel did not reconnect after restart"
+                        if observe_optional_control
+                        else "Bot control heartbeat did not advance after restart"
+                    ),
+                )
+            except Exception as exc:
+                if not control_failure_is_warning:
+                    raise
+                warning = str(exc)
+                control = {
+                    "ok": False,
+                    "status": "degraded",
+                    "warning": warning,
+                }
+                warnings.append(warning)
         elif expected_running:
-            # No active control channel existed at baseline time, so no
-            # control heartbeat can ever advance; requiring it would always
-            # fail.
-            control = {"status": "not_applicable", "reason": control_skip_reason}
+            # No enforceable control baseline existed, so requiring a newer
+            # heartbeat would always fail.  Rollback still observes an
+            # optional channel above when Bots are bound but disconnected.
+            control = {
+                "status": "not_applicable",
+                "reason": control_skip_reason,
+            }
         else:
             control = {"status": "not_applicable"}
         # The runtime must still be healthy after the slower endpoint/control
@@ -792,9 +823,7 @@ class ArchiveCoordinator:
             "schema": "ok",
             "runtime_units": runtime,
             "control": control,
-            "warnings": [
-                "External NapCat/QQ/GitHub/LLM services are not hard health checks"
-            ],
+            "warnings": warnings,
         }
 
     def _validate_config(self) -> dict[str, Any]:
@@ -854,10 +883,10 @@ class ArchiveCoordinator:
         """Capture the control heartbeat baseline and decide the health gate.
 
         The gate decision is anchored at baseline time: without any bound
-        bot, or without an active control channel (the baseline probe does
-        not report a fresh heartbeat), no control heartbeat can ever
-        advance across the restart, so the health gate must not require it
-        to advance.
+        bot, or without a currently authenticated session whose heartbeat
+        is fresh, no control heartbeat can be required to advance across
+        the restart.  Historical heartbeats from disconnected transports
+        are deliberately insufficient.
         """
         baseline = await self._probe_once(self.control_probe)
         heartbeat = baseline.get("heartbeat") if isinstance(baseline, dict) else None
@@ -865,7 +894,17 @@ class ArchiveCoordinator:
         bots = status.get("bots") if isinstance(status, dict) else None
         if not bots:
             return heartbeat, CONTROL_GATE_SKIPPED_NO_BOUND_BOTS
-        if not isinstance(baseline, dict) or baseline.get("ok") is not True:
+        active_sessions = (
+            baseline.get("active_authenticated_sessions")
+            if isinstance(baseline, dict)
+            else None
+        )
+        if (
+            not isinstance(active_sessions, int)
+            or isinstance(active_sessions, bool)
+            or active_sessions <= 0
+            or baseline.get("ok") is not True
+        ):
             return heartbeat, CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
         return heartbeat, CONTROL_GATE_ENFORCED
 

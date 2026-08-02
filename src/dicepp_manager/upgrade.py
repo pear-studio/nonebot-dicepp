@@ -1768,22 +1768,54 @@ class UpgradeCoordinator:
                 detail,
                 allow_startup_recovery=recovery_allowed,
             )
+            rollback_succeeded = rollback.get("succeeded") is True
+            recovery_error = (
+                None
+                if rollback_succeeded
+                else str(
+                    rollback.get("error")
+                    or "Interrupted upgrade rollback failed"
+                )
+            )
             operation.transition(
                 "failed",
-                message="Interrupted upgrade automatically rolled back",
+                message=(
+                    "Interrupted upgrade automatically rolled back"
+                    if rollback_succeeded
+                    else "Interrupted upgrade rollback failed; "
+                    "manual recovery is required"
+                ),
                 detail={
                     **detail,
                     "recovered": True,
-                    "rolled_back": rollback.get("succeeded", False),
+                    "rolled_back": rollback_succeeded,
+                    "rollback_status": (
+                        "succeeded" if rollback_succeeded else "failed"
+                    ),
                     "rollback_result": rollback,
+                    **(
+                        {
+                            "recovery_error": recovery_error,
+                            "manual_recovery_required": True,
+                        }
+                        if recovery_error is not None
+                        else {}
+                    ),
                 },
             )
             self.store.save(operation)
             recovered.append(
                 {
                     "transaction_id": transaction_id,
-                    "action": "rolled_back",
+                    "action": (
+                        "rolled_back" if rollback_succeeded else "rollback_failed"
+                    ),
                     "result": rollback,
+                    **(
+                        {"manual_recovery_required": True}
+                        if not rollback_succeeded
+                        else {}
+                    ),
                 }
             )
         return recovered
@@ -2225,25 +2257,8 @@ class UpgradeCoordinator:
                     original,
                     control_baseline=rollback_baseline,
                     control_gate=rollback_control_gate,
+                    control_failure_is_warning=True,
                 )
-            result = {
-                "succeeded": True,
-                "program_restored": True,
-                "data_restored": True,
-                "program": program,
-                "archive": pre,
-                "restore": restored,
-                "migrations": migrations,
-                "health": health,
-            }
-            self._journal(
-                operation,
-                {**detail, "rollback_result": result},
-                phase="rolled_back",
-                status="rolled_back",
-            )
-            self.archive._apply_retention_if_safe()
-            return result
         except Exception as exc:
             cleanup_error = await self._cleanup_platform_staging(detail)
             result = {
@@ -2258,6 +2273,30 @@ class UpgradeCoordinator:
                 status="rollback_failed",
             )
             return result
+        result = {
+            "succeeded": True,
+            "program_restored": True,
+            "data_restored": True,
+            "program": program,
+            "archive": pre,
+            "restore": restored,
+            "migrations": migrations,
+            "health": health,
+        }
+        try:
+            self.archive._apply_retention_if_safe()
+        except Exception as exc:
+            result["warnings"] = [
+                "Rollback retention cleanup failed: "
+                f"{str(exc) or type(exc).__name__}"
+            ]
+        self._journal(
+            operation,
+            {**detail, "rollback_result": result},
+            phase="rolled_back",
+            status="rolled_back",
+        )
+        return result
 
     async def _cleanup_platform_staging(
         self, detail: dict[str, Any]

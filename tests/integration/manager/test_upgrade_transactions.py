@@ -214,6 +214,7 @@ def _setup(
         control_probe=lambda: {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         },
         health_timeout=0.1,
@@ -301,6 +302,7 @@ def _no_heartbeat_control_probe() -> dict:
         "ok": False,
         "status": "failed",
         "message": "No Bot control heartbeat",
+        "active_authenticated_sessions": 0,
     }
 
 
@@ -390,16 +392,27 @@ async def test_upgrade_health_gate_skips_control_probe_without_active_channel(
 
 
 @pytest.mark.asyncio
-async def test_upgrade_rollback_health_gate_skips_control_probe_without_active_channel(
+async def test_upgrade_rollback_observes_reconnect_without_active_baseline(
     tmp_path: Path,
 ):
-    """Bots are configured but the control channel is offline at both
-    baselines: the failed upgrade's rollback must skip the control probe
-    and report rollback_status=succeeded."""
+    """Rollback accepts the first fresh heartbeat after an offline baseline."""
     _layout, data_file, runtime, _service, coordinator, _platform = _setup(
         tmp_path, fault="migration"
     )
-    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    calls = {"count": 0}
+
+    def control_probe() -> dict:
+        calls["count"] += 1
+        if calls["count"] <= 2:
+            return _no_heartbeat_control_probe()
+        return {
+            "ok": True,
+            "status": "ok",
+            "active_authenticated_sessions": 1,
+            "heartbeat": "2026-07-23T00:00:02+00:00",
+        }
+
+    coordinator.archive.control_probe = control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -415,8 +428,10 @@ async def test_upgrade_rollback_health_gate_skips_control_probe_without_active_c
         "skipped_no_active_control_channel"
     )
     assert raised.value.detail["rollback_result"]["health"]["control"] == {
-        "status": "not_applicable",
-        "reason": "no_active_control_channel",
+        "ok": True,
+        "status": "ok",
+        "active_authenticated_sessions": 1,
+        "heartbeat": "2026-07-23T00:00:02+00:00",
     }
     assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
     assert runtime.state == "running"
@@ -429,8 +444,8 @@ async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
     """Baseline had an active control channel, so the upgrade gate is
     enforced; when the client never reconnects after the switch, the
     upgrade health gate fails and the rollback re-captures its baseline
-    with a stale heartbeat, skips the control probe, and succeeds instead
-    of being misreported as rollback_failed."""
+    with no active authenticated session.  Rollback still records degraded
+    control health without being misreported as rollback_failed."""
     _layout, data_file, runtime, _service, coordinator, adapter = _setup(tmp_path)
     control_online = {"value": True}
 
@@ -439,12 +454,14 @@ async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
             return {
                 "ok": False,
                 "status": "failed",
+                "active_authenticated_sessions": 0,
                 "heartbeat": "2026-07-23T00:00:01+00:00",
-                "heartbeat_age_seconds": 3600.0,
+                "heartbeat_age_seconds": 70.0,
             }
         return {
             "ok": True,
             "status": "ok",
+            "active_authenticated_sessions": 1,
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         }
 
@@ -473,11 +490,187 @@ async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
         "skipped_no_active_control_channel"
     )
     assert raised.value.detail["rollback_result"]["health"]["control"] == {
-        "status": "not_applicable",
-        "reason": "no_active_control_channel",
+        "ok": False,
+        "status": "degraded",
+        "warning": "Bot control channel did not reconnect after restart",
     }
+    assert "Bot control channel did not reconnect after restart" in (
+        raised.value.detail["rollback_result"]["health"]["warnings"]
+    )
     assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
     assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_control_disconnect_is_degraded_not_failed(
+    tmp_path: Path,
+) -> None:
+    """Local restoration succeeds even if rollback control never reconnects."""
+    _layout, data_file, runtime, service, coordinator, _platform = _setup(
+        tmp_path, fault="migration"
+    )
+    calls = {"count": 0}
+
+    def control_probe() -> dict:
+        calls["count"] += 1
+        if calls["count"] <= 2:
+            return {
+                "ok": True,
+                "status": "ok",
+                "active_authenticated_sessions": 1,
+                "heartbeat": "2026-07-23T00:00:01+00:00",
+            }
+        return {
+            "ok": False,
+            "status": "failed",
+            "active_authenticated_sessions": 0,
+            "heartbeat": "2026-07-23T00:00:01+00:00",
+            "heartbeat_age_seconds": 70.0,
+        }
+
+    coordinator.archive.control_probe = control_probe
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    detail = raised.value.detail
+    rollback = detail["rollback_result"]
+    assert detail["rolled_back"] is True
+    assert detail["rollback_status"] == "succeeded"
+    assert detail["rollback_control_gate"] == "enforced"
+    assert rollback["succeeded"] is True
+    assert rollback["health"]["control"] == {
+        "ok": False,
+        "status": "degraded",
+        "warning": "Bot control heartbeat did not advance after restart",
+    }
+    assert "Bot control heartbeat did not advance after restart" in rollback[
+        "health"
+    ]["warnings"]
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+    assert service.store.get_journal(detail["transaction_id"])["status"] == (
+        "rolled_back"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_accepts_reconnected_control_heartbeat(
+    tmp_path: Path,
+) -> None:
+    """A newly authenticated post-rollback heartbeat satisfies the gate."""
+    _layout, _data_file, runtime, _service, coordinator, _platform = _setup(
+        tmp_path, fault="migration"
+    )
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    detail = raised.value.detail
+    assert detail["rollback_control_gate"] == "enforced"
+    assert detail["rollback_status"] == "succeeded"
+    assert detail["rollback_result"]["health"]["control"]["status"] == "ok"
+    assert detail["rollback_result"]["health"]["control"][
+        "active_authenticated_sessions"
+    ] == 1
+    assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rollback_retention_failure_is_only_a_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-restoration retention cleanup cannot overturn safe rollback."""
+    _layout, data_file, runtime, service, coordinator, _platform = _setup(
+        tmp_path, fault="migration"
+    )
+
+    def fail_retention() -> list[str]:
+        raise OSError("injected retention cleanup failure")
+
+    monkeypatch.setattr(
+        coordinator.archive,
+        "_apply_retention_if_safe",
+        fail_retention,
+    )
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    detail = raised.value.detail
+    rollback = detail["rollback_result"]
+    assert detail["rolled_back"] is True
+    assert detail["rollback_status"] == "succeeded"
+    assert rollback["succeeded"] is True
+    assert rollback["warnings"] == [
+        "Rollback retention cleanup failed: injected retention cleanup failure"
+    ]
+    assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
+    assert runtime.state == "running"
+    assert service.store.get_journal(detail["transaction_id"])["status"] == (
+        "rolled_back"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upgrade_local_program_rollback_failure_requires_manual_recovery(
+    tmp_path: Path,
+) -> None:
+    """A real local restoration failure remains terminal and fail-closed."""
+    platform = Platform()
+
+    async def fail_rollback(_package, **_kwargs):
+        platform.calls.append("rollback")
+        raise OSError("injected local program rollback failure")
+
+    platform.rollback = fail_rollback
+    _layout, _data, _runtime, service, coordinator, _platform = _setup(
+        tmp_path,
+        platform=platform,
+        fault="migration",
+    )
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    with pytest.raises(UpgradeTransactionError) as raised:
+        await coordinator.run(operation, package)
+
+    detail = raised.value.detail
+    assert detail["rolled_back"] is False
+    assert detail["rollback_status"] == "failed"
+    assert "local program rollback failure" in detail["rollback_result"]["error"]
+    assert service.store.get_journal(detail["transaction_id"])["status"] == (
+        "rollback_failed"
+    )
+
+    recovered = await coordinator.recover()
+
+    assert recovered == [
+        {
+            "transaction_id": detail["transaction_id"],
+            "action": "rollback_failed",
+            "manual_recovery_required": True,
+        }
+    ]
 
 
 def test_windows_verified_package_accepts_single_velopack_bundle(
@@ -890,6 +1083,75 @@ async def test_restart_recovery_rolls_back_journal_after_program_switch(
     assert persisted is not None
     assert persisted.detail["recovered"] is True
     assert persisted.detail["rolled_back"] is True
+
+
+@pytest.mark.asyncio
+async def test_first_restart_recovery_reports_local_rollback_failure(
+    tmp_path: Path,
+) -> None:
+    """The first ordinary recovery exposes a real local rollback failure."""
+    _layout, data_file, _runtime, service, coordinator, platform = _setup(
+        tmp_path
+    )
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+    from dicepp_manager.archive import create_archive
+
+    pre, _ = create_archive(
+        "pre-upgrade failed recovery",
+        layout=coordinator.layout,
+        profile="regular",
+        archive_kind="system",
+    )
+    data_file.write_text('{"value": "new data"}', encoding="utf-8")
+    transaction_id = "interrupted-upgrade-rollback-failure"
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": package.version,
+        "platform": "linux",
+        "artifact": package.artifact["filename"],
+        "release_snapshot": package.release,
+        "phase": "migration",
+        "progress": 65,
+        "original_running": ["dicepp-runtime"],
+        "commit_point": "program_switch_started",
+        "pre_upgrade_filename": pre["filename"],
+        "platform_current": {"images": ["old"]},
+        "platform_staged": {"images": ["new"]},
+    }
+    operation.transition("interrupted", detail=detail)
+    service.store.save(operation)
+    service.store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase="migration",
+        status="interrupted",
+        operation_id=operation.operation_id,
+        detail=detail,
+    )
+
+    async def fail_rollback(_package, **_kwargs):
+        platform.calls.append("rollback")
+        raise OSError("injected first recovery rollback failure")
+
+    platform.rollback = fail_rollback
+
+    recovered = await coordinator.recover()
+
+    assert recovered[0]["action"] == "rollback_failed"
+    assert recovered[0]["manual_recovery_required"] is True
+    assert recovered[0]["result"]["succeeded"] is False
+    persisted = service.store.get(operation.operation_id)
+    assert persisted is not None
+    assert persisted.status == "failed"
+    assert persisted.detail["rolled_back"] is False
+    assert persisted.detail["rollback_status"] == "failed"
+    assert persisted.detail["manual_recovery_required"] is True
+    assert "first recovery rollback failure" in persisted.detail["recovery_error"]
+    assert service.store.get_journal(transaction_id)["status"] == "rollback_failed"
 
 
 @pytest.mark.asyncio
