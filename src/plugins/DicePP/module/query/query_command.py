@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Any
+from typing import List, Tuple, Dict, Optional, Set, Literal, Any
 import os
 import datetime
 #import openpyxl
@@ -10,20 +10,14 @@ from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command.const import *
 from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
-from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort
 from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 from plugins.DicePP.core.config.basic import Paths
-from plugins.DicePP.core.data.models import GroupConfig
 from plugins.DicePP.core.data.query_store import (
-    QUERY_DATA_FIELD,
-    QUERY_DATA_FIELD_LIST,
-    QUERY_REDIRECT_FIELD,
-    QUERY_REDIRECT_FIELD_LIST,
     QueryStoreError,
 )
 from plugins.DicePP.core.query_utils import command_split
 from plugins.DicePP.utils.time import get_current_date_raw
-from plugins.DicePP.utils.data import yield_deduplicate
 
 LOC_QUERY_RESULT = "query_result"
 LOC_QUERY_SINGLE_RESULT = "query_single_result"
@@ -38,6 +32,7 @@ LOC_QUERY_TOO_MUCH_RESULT = "query_too_much_result"
 LOC_QUERY_KEY_NUM_EXCEED = "query_key_num_exceed"
 LOC_QUERY_CELL_BOOK = "query_cell_book"
 LOC_QUERY_CELL_REDIRECT = "query_cell_redirect"
+LOC_QUERY_READ_ONLY = "query_read_only"
 
 CFG_QUERY_ENABLE = "query_enable"
 CFG_QUERY_DATA_PATH = "query_data_path"
@@ -51,10 +46,7 @@ MAX_QUERY_CANDIDATE_NUM = 10  # 详细查询时一页最多能同时展示多少
 MAX_QUERY_CANDIDATE_SIMPLE_NUM = 30  # 简略查询时一页最多能同时展示多少个条目
 MAX_QUERY_ITEM_NUM = 1000  # 最多能查询多少条目
 RECORD_RESPONSE_TIME = 60  # 至多响应多久以前的查询指令, 多余的将被清理, 单位为秒
-RECORD_EDIT_RESPONSE_TIME = 600  # 至多响应多久以前的编辑指令, 多余的将被清理, 单位为秒
 RECORD_CLEAN_FREQ = 50  # 每隔多少次查询指令尝试清理一次查询记录
-
-QUERY_DELETE_MAGICWORD = "DELETE"  # 删除查询条目必须回复的密文
 
 class QueryData:
     def __init__(self,data_str: List[str],redirect_by: str = "",database: str = "DND5E"):
@@ -81,82 +73,6 @@ class QueryData:
             self.display_prefix = []
             self.last_name = self.data_name
     
-    def get(self,data_index: int) -> str:
-        if data_index == 0:
-            return self.data_name
-        elif data_index == 1:
-            return self.data_name_en
-        elif data_index == 2:
-            return self.data_from
-        elif data_index == 3:
-            return self.data_catalogue
-        elif data_index == 4:
-            return self.data_tag
-        elif data_index == 5:
-            return self.data_content
-    
-    def get_shortcut(self,data_index: int) -> str:
-        result: str = ""
-        if data_index == 0:
-            result = self.data_name
-        elif data_index == 1:
-            result = self.data_name_en
-        elif data_index == 2:
-            result = self.data_from
-        elif data_index == 3:
-            result = self.data_catalogue
-        elif data_index == 4:
-            result = self.data_tag
-        elif data_index == 5:
-            result = self.data_content
-        
-        length: int = len(result) 
-        if length > 8:
-            return result[:6].strip() + "..."
-        elif length == 0:
-            return "<空>"
-        else:
-            return result
-    
-    def set(self,data_index: int,data_new: str):
-        if data_index == 0:
-            self.data_name = data_new
-        elif data_index == 1:
-            self.data_name_en = data_new
-        elif data_index == 2:
-            self.data_from = data_new
-        elif data_index == 3:
-            self.data_catalogue = data_new
-        elif data_index == 4:
-            self.data_tag = data_new
-        elif data_index == 5:
-            self.data_content = data_new
-    
-    def to_tuple(self) -> Tuple[str]:
-        return (self.data_name,self.data_name_en,self.data_from,self.data_catalogue,self.data_tag,self.data_content)
-    
-    def replace_semicolon_for_insert(self) -> str:
-        return "VALUES('{0}','{1}','{2}','{3}','{4}','{5}')".format(
-                self.data_name.replace("'","''"),
-                self.data_name_en.replace("'","''"),
-                self.data_from.replace("'","''"),
-                self.data_catalogue.replace("'","''"),
-                self.data_tag.replace("'","''"),
-                self.data_content.replace("'","''"))
-
-    def origin_check(self) -> str:
-        checks: list = []
-        index: int = 0
-        for field in QUERY_DATA_FIELD_LIST:
-            if len(self.original_data[index]) > 0:
-                checks.append(field + " Like '" + self.original_data[index].replace("'","''") + "'")
-            else:
-                checks.append(field + " NOT Like '_%'")
-            index += 1
-            if index >= 4:
-                break
-        return "WHERE ({0})".format(" AND ".join(checks))
-
 class QueryRecord:
     def __init__(self,data: List[QueryData] ,database: str , time: datetime.datetime, length: int):
         """记录一次可交互的查询指令"""
@@ -168,12 +84,6 @@ class QueryRecord:
         self.mode = 0  # 0代表仅显示名称, 1代表显示名称和简单描述
         self.filter_mode = 0  # 0代表直接显示, 1代表分类显示
 
-        self.edit_flag = False  # 编辑模式
-        self.editing = False  # 编辑中
-        self.edit_new = False  # 新建条目模式
-        self.edit_index = -1  # 正在编辑的内容的index
-        # 异步持久化：由 can_process_msg 标记，process_msg 真正执行 store 写入
-        self.pending_db_action: Optional[str] = None  # "commit" | "delete" | None
     
     def process_data(self):
         # 处理一下数据使得数据更易于查看
@@ -252,66 +162,6 @@ class QueryRecord:
         self.page = 1
         self.process_data()
 
-    def choose_edit_target(self,index: int) -> str:
-        if index < self.length:
-            self.data = [self.data[index]]
-            self.page = 1
-            self.length = 1
-            self.editing = True
-            self.edit_index = -1
-            feedback = []
-            data = self.data[0]
-            index = 0
-            for field in QUERY_DATA_FIELD_LIST:
-                feedback.append(str(index) + "." + field + ": " +  data.get_shortcut(index))
-                index += 1
-            return "查询编辑: " + self.data[0].data_name + "\n   " + "\n   ".join(feedback) + "\n   +.保存并退出\n   -.取消本次编辑"
-        else:
-            return "超出范围"
-
-    def edit_data(self, input_data: str) -> str:
-        data_new: str = input_data.strip()
-        if data_new == "-" or not data_new:
-            data_new = ""
-        else:
-            if self.edit_index == 0 or self.edit_index == 1 or self.edit_index == 7:
-                data_new = ((data_new.replace("：",":")).replace("（","(")).replace("）",")")
-            elif self.edit_index == 6:
-                data_new = data_new.replace("\n","")
-        if self.edit_index == 0 and data_new == "":
-            return "内容不能为空，请重新输入。"
-        self.data[0].set(self.edit_index,data_new)
-        self.edit_index = -1
-        return "编辑完成，您可以根据上表继续您的编辑。"
-
-    async def edit_commit(self, store):
-        data = self.data[0]
-        db_name = self.database
-
-        if self.edit_new:
-            # 兼容旧版：INSERT VALUES 子句仍由 QueryData 生成
-            await store.execute(db_name, "INSERT INTO data " + data.replace_semicolon_for_insert(), commit=True)
-        else:
-            await store.execute(
-                db_name,
-                "UPDATE data SET 名称 = ?,英文 = ?,来源 = ?,分类 = ?,标签 = ?,内容 = ? " + data.origin_check(),
-                data.to_tuple(),
-                commit=True,
-            )
-            # 如果改变了名称，就顺带着改编一下重定向
-            if data.data_name != data.original_data[0] and data.original_data[0] != "":
-                await store.execute(
-                    db_name,
-                    "UPDATE redirect SET 重定向 = ? WHERE 重定向 == ?",
-                    (data.data_name, data.original_data[0]),
-                    commit=True,
-                )
-    
-    async def delete(self, store):
-        data = self.data[0]
-        db_name = self.database
-        await store.execute(db_name, "DELETE FROM data " + data.origin_check(), commit=True)
-
 class QueryError(Exception):
     """
     因为查询产生的异常, 说明操作失败的原因, 应当在上一级捕获
@@ -321,6 +171,46 @@ class QueryError(Exception):
 
     def __str__(self):
         return f"[Query] [Error] {self.info}"
+
+
+def _is_legacy_query_management_command(msg_str: str) -> bool:
+    """识别已停用的 Bot 端资料管理入口。"""
+    lowered = msg_str.lower()
+    if lowered.startswith((".重定向", ".redirect", ".数据库", ".database")):
+        return True
+    # 旧编辑入口只在完整命令名下生效；`.q`/`.s` 的英文查询词不应被误判。
+    for key in ("查询", "query", "搜索", "检索", "search"):
+        prefix = f".{key}"
+        if lowered.startswith(prefix):
+            argument = lowered[len(prefix):].strip()
+            first_token = argument.split(maxsplit=1)[0] if argument else ""
+            return first_token in ("编辑", "edit", "创建", "create")
+    return False
+
+
+@custom_user_command(
+    readable_name="查询资料只读提示",
+    priority=-1,
+    group_only=False,
+    flag=DPP_COMMAND_FLAG_QUERY,
+)
+class QueryLegacyManagementCommand(UserCommandBase):
+    """在 `.r` 等宽前缀命令之前拦截旧资料管理指令。"""
+
+    def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
+        return _is_legacy_query_management_command(msg_str), False, None
+
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+        port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+        feedback = self.bot.loc_helper.format_loc_text(LOC_QUERY_READ_ONLY)
+        return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+
+    def get_help(self, keyword: str, meta: MessageMetaData) -> str:
+        return ""
+
+    def get_description(self) -> str:
+        return ""
+
 
 @custom_user_command(readable_name="查询指令",
                      priority=2,
@@ -358,6 +248,11 @@ class QueryCommand(UserCommandBase):
                 "来源展示格式，book: 来源*")
         reg_loc(LOC_QUERY_CELL_REDIRECT, "\n重定向自：{redirect}",
                 "重定向展示格式，redirect: 重定向自*")
+        reg_loc(
+            LOC_QUERY_READ_ONLY,
+            "Bot 端资料管理已停用，当前仅支持只读查询。",
+            "用户尝试使用已停用的 Bot 端资料管理指令时的提示",
+        )
 
         #已弃用，请使用mode_command那边的CFG。
 
@@ -376,146 +271,51 @@ class QueryCommand(UserCommandBase):
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = False
         should_pass: bool = False
-        mode: Optional[Literal["query", "search", "select", "flip_page", "editing", "new", "feedback", "redirect"]] = None
+        mode: Optional[Literal["query", "search", "select", "flip_page", "read_only"]] = None
         arg_str: str = ""
-        show_mode: int = 0
 
         # 响应交互查询指令
         port = MessagePort(meta.group_id, meta.user_id)
         if port in self.record_dict:
             record = self.record_dict[port]
             msg_word = msg_str.strip()
-            if get_current_date_raw() - record.time < datetime.timedelta(seconds=RECORD_EDIT_RESPONSE_TIME if record.edit_flag else RECORD_RESPONSE_TIME):
-                # 选择条目
-                if record.editing:
-                    if record.edit_index == -1:
-                        if msg_word == "+":  # 结束编辑并保存
-                            if not record.data[0].data_name and not record.data[0].data_name_en:
-                                mode, arg_str = "feedback", "查询条目的名称或英文不能为空！"
-                            else:
-                                # 异步持久化放到 process_msg 中执行
-                                record.pending_db_action = "commit"
-                                mode, arg_str = "feedback", "已结束本次编辑并保存"
-                            should_proc = True
-                        elif msg_word == "-":  # 取消编辑
-                            del self.record_dict[port]
-                            mode, arg_str = "feedback", "已取消本次编辑"
-                            should_proc = True
-                        elif msg_word == QUERY_DELETE_MAGICWORD:  # 删除条目
-                            if not record.edit_new:
-                                # 异步持久化放到 process_msg 中执行
-                                record.pending_db_action = "delete"
-                                mode, arg_str = "feedback", "接收到密文，已删除该条目"
-                                should_proc = True
-                        else:  # 开始编辑
-                            try:
-                                target_index: int = int(msg_word)
-                                should_proc = (0 <= target_index <= 5)
-                                mode, arg_str = "editing", meta.plain_msg
-                                should_proc = True
-                            except ValueError:
-                                pass
-                    else:
-                        mode, arg_str = "feedback", record.edit_data(str(meta.plain_msg))
-                        should_proc = True
-                else:
-                    try:
-                        target_index: int = int(msg_str)
-                        should_proc = (0 <= target_index <= record.length) if record.filter_mode == 0 else (0 <= target_index <= record.cata_length)
-                        mode, arg_str = "select", msg_str
-                    except ValueError:
-                        pass
-                    # 翻页
-                    if record.filter_mode == 0 and not should_proc:
-                        if msg_word == "+":
-                            should_proc, mode, arg_str = True, "flip_page", "+"
-                        elif msg_word == "-":
-                            should_proc, mode, arg_str = True, "flip_page", "-"
+            if get_current_date_raw() - record.time < datetime.timedelta(seconds=RECORD_RESPONSE_TIME):
+                try:
+                    target_index: int = int(msg_str)
+                    should_proc = (
+                        0 <= target_index <= record.length
+                        if record.filter_mode == 0
+                        else 0 <= target_index <= record.cata_length
+                    )
+                    mode, arg_str = "select", msg_str
+                except ValueError:
+                    pass
+                # 翻页
+                if record.filter_mode == 0 and not should_proc:
+                    if msg_word == "+":
+                        should_proc, mode, arg_str = True, "flip_page", "+"
+                    elif msg_word == "-":
+                        should_proc, mode, arg_str = True, "flip_page", "-"
             else:
                 del self.record_dict[port]  # 清理过期条目
+
+        # 旧管理入口仍由本命令接住，避免被当作查询词。
+        if not should_proc and _is_legacy_query_management_command(msg_str):
+            should_proc, mode = True, "read_only"
 
         # 常规查询指令
         for key in ["查询", "query", "q"]:
             if not should_proc and msg_str.startswith(f".{key}"):
                 arg_str = msg_str[1 + len(key):].strip()
-                should_proc, mode= True, "query"
+                mode = "query"
+                should_proc = True
         for key in ["搜索", "检索", "search", "s"]:
             if not should_proc and msg_str.startswith(f".{key}"):
                 arg_str = msg_str[1 + len(key):].strip()
-                should_proc, mode= True, "search"
-        # 重定向相关
-        for key in ["重定向", "redirect"]:
-            if not should_proc and msg_str.startswith(f".{key}"):
-                should_proc, mode, arg_str = True, "redirect", (meta.plain_msg.split(key,1)[1]).strip()
-        # 数据库相关
-        for key in ["数据库", "database"]:
-            if not should_proc and msg_str.startswith(f".{key}"):
-                should_proc, mode, arg_str = True, "database", msg_str[1 + len(key):].strip()
-        
-        # 数据库子指令解析不依赖权限：低权限用户也应得到明确的“无权限”反馈，而不是帮助文本
-        if mode == "database":
-            if arg_str.startswith("加载"):
-                arg_str = arg_str[2:].strip()
-                show_mode = 1  # 加载模式
-            elif arg_str.startswith("load"):
-                arg_str = arg_str[4:].strip()
-                show_mode = 1  # 加载模式
-            elif arg_str.startswith("卸载"):
-                arg_str = arg_str[2:].strip()
-                show_mode = 2  # 卸载模式
-            elif arg_str.startswith("disload"):
-                arg_str = arg_str[7:].strip()
-                show_mode = 2  # 卸载模式
-            elif arg_str.startswith("创建"):
-                arg_str = arg_str[2:].strip()
-                show_mode = 3  # 创建模式
-            elif arg_str.startswith("create"):
-                arg_str = arg_str[6:].strip()
-                show_mode = 3  # 创建模式
-            elif arg_str.startswith("导入"):
-                arg_str = arg_str[2:].strip()
-                show_mode = 4  # 导入模式
-            elif arg_str.startswith("import"):
-                arg_str = arg_str[6:].strip()
-                show_mode = 4  # 导入模式
-            elif arg_str.startswith("列表"):
-                arg_str = arg_str[2:].strip()
-                show_mode = 5  # 显示模式
-            elif arg_str.startswith("list"):
-                arg_str = arg_str[4:].strip()
-                show_mode = 5  # 显示模式
-
-        if meta.permission >= 3:# 需要3级权限（骰管理/骰主）才能编辑资料库
-            if mode == "redirect":
-                if arg_str.startswith("删除"):
-                    arg_str = arg_str[2:].strip()
-                    show_mode = 9 # 删除模式
-                elif arg_str.startswith("delete"):
-                    arg_str = arg_str[6:].strip()
-                    show_mode = 9 # 删除模式
-                elif arg_str.startswith("创建"):
-                    arg_str = arg_str[2:].strip()
-                    show_mode = 8 # 创建模式
-                elif arg_str.startswith("create"):
-                    arg_str = arg_str[6:].strip()
-                    show_mode = 8 # 创建模式
-            elif mode == "query" or mode == "search":
-                if arg_str.startswith("编辑"):
-                    arg_str = arg_str[2:].strip()
-                    show_mode = 9 # 编辑模式
-                elif arg_str.startswith("edit"):
-                    arg_str = arg_str[4:].strip()
-                    show_mode = 9 # 编辑模式
-                elif arg_str.startswith("创建"):
-                    arg_str = (meta.plain_msg.split("创建",1)[1]).strip()
-                    show_mode = 9 # 编辑模式
-                    should_proc, mode= True, "new"
-                elif arg_str.startswith("create"):
-                    arg_str = (meta.plain_msg.split("创建",1)[1]).strip()
-                    show_mode = 9 # 编辑模式
-                    should_proc, mode= True, "new"
+                mode = "search"
+                should_proc = True
         assert (not should_proc) or mode
-        hint = (mode, arg_str, show_mode)
+        hint = (mode, arg_str)
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
@@ -536,24 +336,9 @@ class QueryCommand(UserCommandBase):
             if not database:
                 database = self.bot.config.query.private_database
         source_port = MessagePort(meta.group_id, meta.user_id)
-        mode: Literal["query", "search", "select", "flip_page", "editing", "new", "feedback", "redirect"] = hint[0]
+        mode: Literal["query", "search", "select", "flip_page", "read_only"] = hint[0]
         arg_str: str = hint[1]
-        show_mode: int = hint[2] #if meta.group_id else 1
         feedback: str = ""
-
-        # 处理编辑提交/删除：该逻辑来自 can_process_msg（不能在 can_process_msg 中直接做异步 DB 写入）
-        record = self.record_dict.get(source_port)
-        if mode == "feedback" and record and record.pending_db_action:
-            if record.pending_db_action == "commit":
-                await record.edit_commit(self.bot.db.query)
-                feedback = arg_str
-            elif record.pending_db_action == "delete":
-                await record.delete(self.bot.db.query)
-                feedback = arg_str
-            record.pending_db_action = None
-            # 提交/删除完成后清理交互状态
-            if source_port in self.record_dict:
-                del self.record_dict[source_port]
 
         # 私设查询库
         query_homebrew = False
@@ -590,7 +375,6 @@ class QueryCommand(UserCommandBase):
                     arg_str,
                     source_port,
                     search_mode=(0 if mode == "query" else 1),
-                    show_mode=show_mode,
                 )
                 if feedback:
                     feedback = self.format_loc(LOC_QUERY_RESULT, result = feedback)
@@ -605,12 +389,9 @@ class QueryCommand(UserCommandBase):
                 if index >= record.length:
                     feedback = self.format_loc(LOC_QUERY_NO_RESULT)
                 else:
-                    if record.edit_flag:
-                        feedback = record.choose_edit_target(index)
-                    else:
-                        item = record.data[index]
-                        result = await self.query_feedback(database, homebrew_database, item, source_port)
-                        feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
+                    item = record.data[index]
+                    result = await self.query_feedback(database, homebrew_database, item, source_port)
+                    feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
             else:
                 index = int(arg_str)
                 if index >= len(record.catalogue_list.keys()):
@@ -634,233 +415,8 @@ class QueryCommand(UserCommandBase):
             next_page = (arg_str == "+")
             feedback, cur_page = self.flip_page(record, next_page)
             self.record_dict[source_port].page = cur_page
-        elif mode == "editing":
-            try:
-                index: int = int(arg_str)
-                self.record_dict[source_port].edit_index = index
-                feedback = self.record_dict[source_port].data[0].get(index)
-                if not feedback:
-                    feedback = "[原文为空]"
-                else:
-                    feedback = feedback.replace("''","'")
-            except ValueError:
-                feedback = "编辑失败，未知原因"
-                pass
-        elif mode == "new":
-            data = ["","","","","","","",""]
-            index: int = 0
-            for _data in arg_str.split("#"):
-                data[index] = _data.strip()
-                index += 1
-                if index >= 8:
-                    break
-            query_data: QueryData = QueryData(data,database=database)
-            query_data.data_extend()
-            self.record_dict[source_port] = QueryRecord([query_data],database,get_current_date_raw(), 1)
-            self.record_dict[source_port].mode = show_mode
-            self.record_dict[source_port].edit_flag = True
-            feedback = self.record_dict[source_port].choose_edit_target(0)
-            self.record_dict[source_port].edit_new = True
-        elif mode == "redirect":
-            if show_mode == 9:  # 删除重定向
-                rows = await self.bot.db.query.fetchall(
-                    database,
-                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 名称 Like ?",
-                    (arg_str,),
-                )
-                query_data = [row[1] for row in rows]
-                if query_data:
-                    await self.bot.db.query.execute(
-                        database,
-                        "DELETE FROM redirect WHERE 名称 Like ?",
-                        (arg_str,),
-                        commit=True,
-                    )
-                    feedback = "已删除重定向: " + arg_str + " -> " + "/".join(query_data)
-                else:
-                    feedback = self.format_loc(LOC_QUERY_NO_RESULT)
-
-            elif show_mode == 8:  # 创建重定向
-                if "=" in arg_str:
-                    arg = arg_str.split("=")
-                    name_list = [name.strip() for name in arg[0].split("/")]
-                    redirect_list = [redirect.strip() for redirect in arg[1].split("/")]
-                    cmd: list[tuple] = []
-                    if len(name_list) == 1 or len(redirect_list) == 1:
-                        for name in name_list:
-                            for redirect in redirect_list:
-                                if name != redirect and name != "" and redirect != "":
-                                    cmd.append((name, redirect))
-                        if len(cmd) != 0:
-                            await self.bot.db.query.executemany(
-                                database,
-                                "INSERT INTO redirect VALUES(?,?)",
-                                cmd,
-                                commit=True,
-                            )
-                            feedback = (
-                                "已创建重定向: " + "/".join(name_list) + " -> " + "/".join(redirect_list)
-                            )
-                        else:
-                            feedback = "无法创建重定向：内容有误"
-                    else:
-                        feedback = "无法创建重定向：无法创建N->N的重定向"
-                else:
-                    feedback = "无法创建重定向：错误的格式"
-
-            elif len(arg_str) > 0:
-                feedback = ""
-                # 显示所有 重定向 → XX
-                rows = await self.bot.db.query.fetchall(
-                    database,
-                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 名称 == ?",
-                    (arg_str,),
-                )
-                query_data = [row[1] for row in rows]
-                if query_data:
-                    feedback += "以下是 " + arg_str + " 可重定向到的目标条目：\n" + " , ".join(query_data)
-
-                # 显示所有 XX → 重定向
-                rows = await self.bot.db.query.fetchall(
-                    database,
-                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 重定向 == ?",
-                    (arg_str,),
-                )
-                query_data = [row[0] for row in rows]
-                if query_data:
-                    feedback += "以下是重定向到 " + arg_str + " 的同义词：\n" + " , ".join(query_data)
-
-                if len(feedback) == 0:
-                    feedback = self.format_loc(LOC_QUERY_NO_RESULT)
-
-            else:
-                feedback = (
-                    "重定向删改"
-                    "。重定向创建 [名称]=[对象] 创建一个1->1的重定向"
-                    "。重定向创建 [名称]/[名称]/...=[对象] 创建一组N->1的重定向"
-                    "。重定向创建 [名称]=[对象]/[对象]/... 创建一组1->N的消歧义重定向"
-                    "。重定向删除 [名称] 删除一个重定向"
-                    "。重定向 [名称/对象] 查阅已有的重定向"
-                )
-        elif mode == "database":
-            if arg_str.strip() == "" and show_mode != 5:
-                show_mode = 0
-            # 非管理员/骰主不允许进行数据库管理（加载/卸载/创建/导入），但允许查看列表
-            if show_mode in (1, 2, 3, 4) and meta.permission < 3:
-                feedback = "权限不足：需要3级权限（骰管理/骰主）才能管理查询数据库。"
-                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-            if show_mode == 1:# 加载数据库
-                database = arg_str.strip().upper()
-                try:
-                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
-                except ValueError:
-                    feedback = f"数据库名称无效: {database}"
-                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                if self.bot.db.query.has_database(database):
-                    feedback = f"{database}.db 已经被加载过了，无需再次加载。"
-                else:
-                    feedback = await self.bot.db.query.connect_path(database_file_path)
-                    if len(feedback) == 0:
-                        feedback = f"已载入 {database}.db。"
-            elif show_mode == 2:# 卸载数据库
-                database = arg_str.strip().upper()
-                try:
-                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
-                except ValueError:
-                    feedback = f"数据库名称无效: {database}"
-                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                if self.bot.db.query.has_database(database):
-                    await self.bot.db.query.disconnect_database(database)
-                    feedback = f"已卸载 {database}.db，您现在可以手动删除对应数据库来防止重启后被再次自动加载。"
-                elif os.path.exists(database_file_path):
-                    feedback = f"未加载 {database}.db。"
-                else:
-                    feedback = f"未找到文件{database}.db。"
-            elif show_mode == 3:# 创建数据库
-                database = arg_str.strip().upper()
-                try:
-                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
-                except ValueError:
-                    feedback = f"数据库名称无效: {database}"
-                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                if self.bot.db.query.has_database(database):
-                    feedback = f" {database}.db 已经处于加载状态，无法再次创建。"
-                elif os.path.exists(database_file_path):
-                    feedback = f"文件{database}.db 已存在，请使用 。数据库加载 进行加载。"
-                else:
-                    ok = await self.bot.db.query.create_empty_database(database_file_path)
-                    feedback = ""
-                    if ok:
-                        feedback = await self.bot.db.query.connect_path(database_file_path)
-                        if len(feedback) == 0:
-                            feedback = f"已创建并载入{database}.db。"
-                    else:
-                        feedback = f"创建{database}.db 失败。权限不足或路径不可写。"
-            elif show_mode == 4:# 导入数据库
-                arg_list = arg_str.split(" ")
-                if len(arg_list) != 3:
-                    feedback = f"请输入正确的指令。"
-                else:
-                    database = arg_list[0].strip().upper()
-                    xlsx_mode = arg_list[1].strip()
-                    file_path = arg_list[2].strip()
-                    if xlsx_mode in ["0","1","2"]:
-                        try:
-                            database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
-                            content_path = Paths.safe_content_subpath(Paths.CONTENT_EXCEL_DIR, file_path)
-                        except ValueError as e:
-                            feedback = f"路径无效: {e}"
-                            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                        if self.bot.db.query.has_database(database):
-                            load_dir = str(content_path)
-                            if os.path.isdir(load_dir):
-                                for inner_path, inner_dirs, file_names in os.walk(load_dir):
-                                    for file_name in file_names:
-                                        if file_name.endswith(".xlsx"):
-                                            inner_full_path = os.path.join(inner_path, file_name)
-                                            await self.bot.db.query.load_data_from_xlsx_to_sqlite(
-                                                inner_full_path,
-                                                database_file_path,
-                                                int(xlsx_mode),
-                                            )  # 0 旧版梨骰数据
-                                feedback += f"已将 excel/{file_path}下的全部xlsx文件载入至 {database}.db。"
-                            else:
-                                file_full_path = str(content_path)
-                                if os.path.exists(file_full_path):
-                                    await self.bot.db.query.load_data_from_xlsx_to_sqlite(
-                                        file_full_path,
-                                        database_file_path,
-                                        int(xlsx_mode),
-                                    )
-                                    feedback += f"已将 excel/{file_path}文件载入至 {database}.db。"
-                                elif os.path.exists(file_full_path+".xlsx"):
-                                    file_full_path = file_full_path+".xlsx"
-                                    await self.bot.db.query.load_data_from_xlsx_to_sqlite(
-                                        file_full_path,
-                                        database_file_path,
-                                        int(xlsx_mode),
-                                    )
-                                    feedback += f"已将 excel/{file_path}文件载入至 {database}.db。"
-                                else:
-                                    feedback += f"你输入的 excel/{file_path} 既不是文件夹也不是xlsx文件"
-                        else:
-                            feedback = f"未加载 {database}.db，请先创建或加载后再进行此操作。"
-                    else:
-                        feedback = f"请输入正确的模式值：\n0:旧版梨骰查询资料表\n1:新式梨骰查询表\n2:新式梨骰私设表"
-            elif show_mode == 5:# 显示数据库
-                feedback = (
-                    "目前已加载以下数据库（不包含私设数据库）：\n  -"
-                    + "\n  -".join([key for key in self.bot.db.query.list_databases() if not key.startswith("HB")])
-                )
-            else:
-                feedback = "数据库编辑"\
-                    "。数据库创建 [名称] 创建一个新的数据库\n"\
-                    "。数据库列表 查看全部已加载的数据库\n"\
-                    "。数据库加载 [名称] 加载一个已有数据库\n"\
-                    "。数据库卸载 [名称] 卸载一个已有数据库\n"\
-                    "。数据库导入 [名称] [模式] [文件相对路径(需后缀)] \n将 excel/ 下的一个xlsx文件/文件夹中的全部xlsx导入数据库，模式0为旧版梨骰查询资料表，1为新式梨骰查询表，2为新式梨骰私设表"
-        elif mode == "feedback":
-            feedback = arg_str
+        elif mode == "read_only":
+            feedback = self.format_loc(LOC_QUERY_READ_ONLY)
         else:
             raise NotImplementedError()
 
@@ -898,6 +454,7 @@ class QueryCommand(UserCommandBase):
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword in ["查询", "搜索", "检索", "q", "s"]:
             help_str = "查询资料: .查询 查询目标"\
+                    "\nBot 端资料管理已停用，当前仅支持只读查询"\
                     "\n查询指令支持部分匹配, 可用空格区分多个关键字"\
                     "\n可以用搜索指令来匹配词条内容(而不是仅匹配关键字)"\
                     "\n若有多条可能的结果, 可以通过查询或搜索后直接输入序号查询, 输入+或-可以翻页" \
@@ -924,7 +481,6 @@ class QueryCommand(UserCommandBase):
         query_keywords: str,
         port: MessagePort,
         search_mode: int,
-        show_mode: int = 0,
     ) -> str:
         """
         查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
@@ -933,17 +489,11 @@ class QueryCommand(UserCommandBase):
         # 清空过往记录
         if port in self.record_dict:
             del self.record_dict[port]
-        # 编辑模式
-        if show_mode == 9:
-            edit_flag = True
-            show_mode = 0
-        else:
-            edit_flag = False
         # 找到搜索候选
         try:
             poss_result = await self.query_item(
                 database,
-                homebrew_database if not edit_flag else "",
+                homebrew_database,
                 query_keywords,
                 search_mode,
             )
@@ -957,19 +507,11 @@ class QueryCommand(UserCommandBase):
         if not poss_result or poss_result_num == 0:  # 找不到结果
             return ""
         elif poss_result_num == 1:  # 找到唯一结果
-            if edit_flag:
-                self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
-                self.record_dict[port].show_mode = show_mode
-                self.record_dict[port].edit_flag = edit_flag
-                feedback = self.record_dict[port].choose_edit_target(0)
-            else:
-                feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port)
+            feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port)
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
-            # 记录当前信息以备将来查询或编辑
+            # 记录当前信息以备后续选择或翻页
             self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
-            self.record_dict[port].show_mode = show_mode
-            self.record_dict[port].edit_flag = edit_flag
-            page_item_num = MAX_QUERY_CANDIDATE_NUM if show_mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
+            page_item_num = MAX_QUERY_CANDIDATE_SIMPLE_NUM
             filter_mode: int = 1 if (poss_result_num >= page_item_num) else 0
             self.record_dict[port].filter_mode = filter_mode
             
