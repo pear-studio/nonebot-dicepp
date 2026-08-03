@@ -1,58 +1,67 @@
 ---
 name: git-commit-brief
-description: Read before every local git commit.
+description: 每次创建或重写 Git commit 前使用。检查实际变更边界，并生成符合项目约定的中文 Commit 提交说明。
 ---
 
 # Git Commit Brief
 
-## 提交格式规范
+提交前读取实际 diff，确认改动属于同一主题。若包含多个独立主题，考虑拆分提交；无法判断时询问用户。实现 backlog 时，对应 backlog 文件的修改与实现本体一起提交，不必拆分。
 
-统一遵循 Conventional Commits: `<type>(<scope>): <一句话主题>`
+## 格式
 
-- **type 和 scope 均为必填**，scope 使用小写英文
-- 主题与正文只写"代码改了什么/为什么/影响什么"，让未来 `git log` 读者一眼看出本次代码改动本身的内容
+```text
+<type>(<scope>): <中文主题>
 
-### Type 分类
+目的:
+- 说明为什么需要这次修改，以及要解决的问题。
 
-| Type | 含义 |
+改动:
+- 概括实现方式和关键变化。
+
+影响:
+- 说明对行为、兼容性、数据或使用者的影响。
+```
+
+`type` 和 `scope` 必填，使用小写英文。主题和正文使用中文；代码、API、配置项等专有名称可以保留英文。
+
+正文必须包含 `目的`、`改动`、`影响`。没有明显影响时可写“无明显影响”。
+
+## Type
+
+| Type | 用途 |
 |---|---|
-| `feat` | 新功能 |
-| `fix` | Bug 修复 |
-| `refactor` | 重构（不改变外部行为） |
-| `docs` | 纯文档变更 |
-| `chore` | 杂项维护（不改变功能逻辑的琐事：配置清理、依赖更新、backlog 整理、CI 调整等） |
+| `feat` | 新增功能或能力 |
+| `fix` | 修复错误 |
+| `refactor` | 调整实现但不改变外部行为 |
+| `test` | 新增或调整测试 |
+| `docs` | 仅修改文档 |
+| `chore` | 依赖、配置及其他维护工作 |
 
-### Scope 词汇表
+## Scope
 
-| Scope | 适用范围 |
+| Scope | 范围 |
 |---|---|
-| `persona` | persona 模块（角色卡、AI、对话、评分、prompt 等） |
-| `core` | 核心框架（bot/command/data/db/adapter） |
-| `module` | 其他功能模块（roll/deck/character/initiative/query/common） |
-| `test` | 测试基础设施（框架、fixture、配置、用例拆分等） |
-| `dev` | 开发环境/工具链（worktree/venv/Docker/shell/CI/配置） |
-| `agent` | Agent 配置与技能文件（docs/agent/rules/、docs/agent/skills-*/、docs/agent/sync.py） |
-| `docs` | 文档（架构、开发指南等） |
+| `persona` | 角色卡、AI、对话、评分及 prompt |
+| `core` | Bot 核心框架、命令、数据、数据库及适配器 |
+| `module` | roll、deck、character 等其他功能模块 |
+| `dashboard` | Dashboard 前端及其交互 |
+| `manager` | Manager 服务及管理接口 |
+| `dev` | 测试基础设施、开发工具、构建、CI、发布及环境配置 |
+| `agent` | Agent 规则、技能及同步工具 |
+| `docs` | 架构、开发指南等项目文档 |
 
-不确定 scope 时，选影响最大的模块作为 scope。
+确定 scope 时，选择主要影响对象。测试用例使用被测对象的 scope；测试基础设施使用 `dev`。不确定可以询问用户的意见。
 
-## 规则
+## 内容要求
 
-- Agent 工具目录由 `docs/agent/sync.py` 生成；提交前避免把同步产生的本地工作目录状态重复计入，按真实源目录 `docs/agent/*` 核对后再暂存.
-- **禁止把流程/过程性信息写进 commit message**. 这些元数据随时间贬值, 读者关心的是"代码到底改了什么", 不是"它走过哪几个开发流程节点":
-  - 禁止 review 阶段标记: `review 闭环`、`review 反馈修复`、`R1/R2/R4`、`处理 review 反馈 N 项`
-  - 禁止 backlog / 任务 ID 尾巴, 如 `(B-260507-d3cc8b)`
-  - 禁止版本/阶段拼接: `xxx v4 + review 反馈修复`, 把"主修改 + 流程修复"塞一起
-  - 禁止纯流程动词: `处理 review 反馈`、`完成 review`、`闭环` 这类只描述"流程节点"而非代码本身
-  - 注: `(#NN)` 是 GitHub squash merge 自动追加的 PR 号, 不在禁止之列; 但人手写 commit 时不要主动加.
-- 反/正例对照:
-  - 反例 `feat: persona 好感度阶段-想念-衰减联动重构 (review 闭环) (#19)` → 正例 `feat(persona): persona 好感度阶段-想念-衰减联动重构 (#19)`
-  - 反例 `feat: 事件生成 LLM 超时策略与 fallback delta 兜底 (B-260507-d3cc8b)` → 正例 `feat(persona): 事件生成 LLM 超时策略与 fallback delta 兜底`
-  - 反例 `feat: persona 分段回复 v4 + review 反馈修复` → 正例 合并写为对修改本身的描述, 如 `feat(persona): persona 分段回复支持 XXX 与 YYY 修正`
-  - 反例 `fix: 处理 review 反馈四项` → 正例 描述具体修了什么, 如 `fix(persona): 修正 share_desire 阈值边界`
-  - 反例 `fix: worktree 环境隔离修复` → 正例 `fix(dev): worktree 环境隔离修复`
-  - 反例 `test: unittest.TestCase 迁移为 pytest 风格` → 正例 `refactor(test): unittest.TestCase 迁移为 pytest 风格`
-- **不要在 commit message 与本文档中使用 emoji 符号** (包括打勾打叉箭头表情等图形/装饰字符), 用纯文字标记代替, 如 `反例` / `正例`、`错` / `对`.
-- 标点符号使用半角+空格, 如"xxx, xxx."
-- 读取实际修改的文件, 确认是否都是一个主题修改, 如果无法确定则询问用户. 根据修改的内容编写 commit log, 避免只看文件名称.
-- 可以考虑将不同类别的修改分批提交
+只记录脱离当前会话后仍有追溯价值的信息。不要写入本地路径、临时序号、review 阶段、任务执行过程等上下文，不主动添加任务或 PR 编号。
+
+根据实际修改编写提交说明，不要只看文件名。Agent 配置以 `docs/agent/*` 为源，不要重复提交同步生成的本地投影。
+
+不要使用 emoji。
+
+## 示例
+
+- 反例 `fix: 处理 review 反馈四项` → 正例 `fix(persona): 修正 share_desire 阈值边界`
+- 反例 `feat: 事件生成超时策略与兜底处理 (B-260507-d3cc8b)` → 正例 `feat(persona): 增加事件生成超时与兜底策略`
+- 反例 `refactor(test): 将 unittest.TestCase 迁移为 pytest` → 正例 `refactor(dev): 将测试基础设施迁移为 pytest`
