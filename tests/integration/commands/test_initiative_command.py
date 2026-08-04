@@ -366,3 +366,83 @@ class TestInitiativeErrors:
         await h.send_group(".init clr", checker=lambda s: "已清除先攻列表" in s)
         await h.send_group(".nn", checker=lambda s: "已将您的昵称从" in s or "您尚未设置过昵称" in s)
 
+
+class TestInitiativeRenameReroll:
+    """回归：改昵称后重掷先攻不得产生同 owner 重复条目（生产 handoff 20260803）。"""
+
+    async def test_reroll_after_rename_replaces_entry(self, h):
+        await h.send_group(".nn 虹·萨巴赫", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "已将您的昵称设为虹·萨巴赫" in s)
+        await h.send_group(".ri", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "虹·萨巴赫的先攻值是" in s)
+        await h.send_group(".nn 极北天穹王蘑菇", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "已将您的昵称设为极北天穹王蘑菇" in s)
+        await h.send_group(".ri", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "极北天穹王蘑菇的先攻值是" in s)
+        # 列表中只能有一个条目，且为新昵称
+        await h.send_group(".init", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: s.count("先攻:") == 1
+                           and "极北天穹王蘑菇" in s and "虹·萨巴赫" not in s)
+
+    async def test_del_after_rename_reroll(self, h):
+        await h.send_group(".init del 极北天穹王蘑菇", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "已从先攻列表中移除" in s and "极北天穹王蘑菇" in s)
+        await h.send_group(".init", user_id="rn_user", group_id="rn_group",
+                           checker=lambda s: "没有找到先攻列表" in s)
+
+
+class TestInitiativeDuplicateHeal:
+    """回归：存量完全重复条目可通过 .init del 一次清除（生产 handoff 20260803）。"""
+
+    async def test_del_duplicate_entries(self, h):
+        from plugins.DicePP.core.data.models import InitList, InitEntity
+        init_list = InitList(group_id="dup_group")
+        init_list.entities = [
+            InitEntity(name="萨巴赫", owner="", init=43),
+            InitEntity(name="萨巴赫", owner="", init=39),
+        ]
+        await h.bot.db.initiative.upsert(init_list)
+        await h.send_group(".init del 萨巴赫", group_id="dup_group",
+                           checker=lambda s: "已从先攻列表中移除" in s and "萨巴赫" in s)
+        await h.send_group(".init", group_id="dup_group",
+                           checker=lambda s: "没有找到先攻列表" in s)
+
+    async def test_del_duplicate_entries_partial_name(self, h):
+        # 部分名（模糊匹配）命中重复条目也应能一次删清，而不是误报歧义
+        from plugins.DicePP.core.data.models import InitList, InitEntity
+        init_list = InitList(group_id="dup_group")
+        init_list.entities = [
+            InitEntity(name="萨巴赫", owner="", init=43),
+            InitEntity(name="萨巴赫", owner="", init=39),
+        ]
+        await h.bot.db.initiative.upsert(init_list)
+        await h.send_group(".init del 萨巴", group_id="dup_group",
+                           checker=lambda s: "已从先攻列表中移除" in s and "萨巴赫" in s)
+        await h.send_group(".init", group_id="dup_group",
+                           checker=lambda s: "没有找到先攻列表" in s)
+
+
+class TestInitiativeSameValueHint:
+    """回归：同值提示引导到真实存在的 first/fst 子命令（生产 handoff 20260803）。"""
+
+    async def test_same_value_hint_guides_first(self, h):
+        await h.send_group(".ri8 左手", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: "左手的先攻值是 8" in s)
+        await h.send_group(".ri8 右手", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: "相同先攻值" in s and "回复.init first" in s)
+
+    async def test_first_actually_reorders(self, h):
+        # 提示指向的 first 命令必须真实生效：同值条目顺序确实变化
+        await h.send_group(".init first 右手", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: "右手的先攻已在相同先攻值中被提前" in s)
+        await h.send_group(".init", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: s.index("右手") < s.index("左手"))
+
+    async def test_fst_alias_equals_first(self, h):
+        await h.send_group(".init fst 左手", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: "左手的先攻已在相同先攻值中被提前" in s)
+        await h.send_group(".init", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: s.index("左手") < s.index("右手"))
+        await h.send_group(".init clr", user_id="sv_user", group_id="sv_group",
+                           checker=lambda s: "已清除先攻列表" in s)
+

@@ -67,7 +67,7 @@ class InitiativeCommand(UserCommandBase):
                                          "出现相同先攻值，请DM来决定由谁先行动，若不决定将保持默认顺序：",
                                          "出现相同先攻值时的提示")
         bot.loc_helper.register_loc_text(LOC_INIT_ENTITY_SAME_LIST,
-                                         "回复.init fst {entity_list}",
+                                         "回复.init first 名称 将该对象提前（同先攻值: {entity_list}）",
                                          "出现相同先攻值时，重复者的列表 {entity_list}:重复对象A/重复对象B")
         bot.loc_helper.register_loc_text(LOC_INIT_ENTITY_FIRST,
                                          "{name}的先攻已在相同先攻值中被提前",
@@ -125,6 +125,9 @@ class InitiativeCommand(UserCommandBase):
             elif arg_str.startswith("first"):
                 mode = "first"
                 arg_str = arg_str[5:]
+            elif arg_str.startswith("fst"):
+                mode = "first"
+                arg_str = arg_str[3:]
             elif arg_str.startswith("提前"):
                 mode = "first"
                 arg_str = arg_str[2:]
@@ -142,7 +145,7 @@ class InitiativeCommand(UserCommandBase):
                 arg_str = arg_str[2:]
             else:
                 feedback = self.format_loc(LOC_INIT_UNKNOWN, invalid_command=arg_str,
-                                           sub_command_list=["list/列表", "clr/清除", "del/刪除","first/提前","swap/交换","import/导入"])
+                                           sub_command_list=["list/列表", "clr/清除", "del/刪除","first/fst/提前","swap/交换","import/导入"])
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         else:
             return [
@@ -463,13 +466,15 @@ class InitiativeCommand(UserCommandBase):
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "init" or keyword == "先攻":
-            help_str = "显示先攻列表：.init ([可选指令]) [可选指令]:clr 清空先攻列表 del 删除指定先攻条目\n" \
+            help_str = "显示先攻列表：.init ([可选指令]) [可选指令]:clr 清空先攻列表 del 删除指定先攻条目 first/fst 提前同值条目 swap 交换两个条目\n" \
                        "del指令支持部分匹配\n" \
                        "hp信息也会在先攻列表上显示\n" \
                        "示例:\n" \
                        ".先攻 //查看先攻列表\n" \
                        ".先攻清除 //清空先攻列表\n" \
                        ".先攻删除地精 //在先攻列表中删除地精.init del 地精a/地精b/地精c //在先攻列表中删除地精abc\n"\
+                       ".init first 地精 //将地精在相同先攻值中提前\n"\
+                       ".init swap 地精/兽人 //互换地精与兽人的先攻值与位置\n"\
                        "如需查看投掷先攻相关的指令请输入.help 投掷先攻\n"\
                        "如需查看回合与轮次相关的指令请输入.help 战斗轮"
             return help_str
@@ -508,7 +513,9 @@ class InitiativeCommand(UserCommandBase):
             name_lower = name.lower()
             if name_lower in lower_to_origs:
                 origs = lower_to_origs[name_lower]
-                if len(origs) == 1:
+                if len(set(origs)) == 1:
+                    # origs 可能有多个完全相同的重复条目（历史 bug 残留），视为正常匹配，
+                    # 删除时由 InitList.del_entity 一并清除
                     result_list.append(origs[0])
                 else:
                     # 极端情况：同 lower 不同大小写共存（如 "Alex" 和 "alex"），按设计不应出现
@@ -516,7 +523,9 @@ class InitiativeCommand(UserCommandBase):
                         error_info=f"列表中存在大小写不同的同名条目 {origs}, 联系开发者") + "\n"
             else:
                 # 模糊匹配：大小写无关 substring
-                possible_res: List[str] = [orig for orig in global_list if name_lower in orig.lower()]
+                # 完全重复条目去重，避免同名残留被误报为歧义（del 时应能一次删清）
+                possible_res: List[str] = list(dict.fromkeys(
+                    orig for orig in global_list if name_lower in orig.lower()))
                 if len(possible_res) == 0:
                     feedback += self.format_loc(LOC_INIT_ENTITY_NOT_FOUND, name=name) + "\n"
                 elif len(possible_res) > 1:
@@ -540,6 +549,12 @@ class InitiativeCommand(UserCommandBase):
         init_data: InitList = await self.bot.db.initiative.get(group_id)
         if init_data is None:
             init_data = InitList(group_id=group_id)
+
+        # 更新玩家姓名（与 process_msg 中其他 .init 分支一致）：
+        # .ri 改昵称后重掷时按新昵称判重，避免同 owner 产生新旧昵称两个条目
+        for entity in init_data.entities:
+            if entity.owner:
+                entity.name = await self.bot.get_nickname(entity.owner, group_id)
 
         # 针对 .ri 3#地精 这种用法简化一下输出(会产生3次一样的roll_res)
         final_result_dict: Dict[str, Tuple[List[str], int]] = {}

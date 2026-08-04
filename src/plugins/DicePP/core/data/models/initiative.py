@@ -65,16 +65,17 @@ class InitList(BaseModel):
         all_index = [index for index, entity in enumerate(self.entities) if entity.name == entity_name]
         if len(all_index) == 0:
             raise InitiativeError(f"先攻列表中不存在名称为{entity_name}的条目")
-        if len(all_index) > 1:
-            raise InitiativeError(f"先攻列表中存在多个名称为{entity_name}的条目")
-        del self.entities[all_index[0]]
+        # 同名重复条目（历史 bug 可能产生完全相同的重复）一并删除, 保证用户侧可自愈
+        for index in reversed(all_index):
+            del self.entities[index]
         self.turns_in_round = len(self.entities)
 
-        if not self.first_turn:
+        if not self.first_turn and self.turns_in_round > 0:
+            # 先按删除位置平移 turn, 仍越界再回绕一轮（批量删除时平移后超出量至多为 1）
+            removed_before_turn = sum(1 for index in all_index if self.turn > index + 1)
+            self.turn -= removed_before_turn
             if self.turn > self.turns_in_round:
                 self.turn -= self.turns_in_round
                 self.round += 1
-            elif self.turn > all_index[0] + 1:
-                self.turn -= 1
 
         self.mod_time = get_current_date_str()
