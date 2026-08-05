@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
@@ -35,13 +36,7 @@ from .config_validation import (
     validate_bot_candidate,
     validate_user_candidate,
 )
-from .factory import (
-    cleanup_terminal_update_guard_transactions,
-    create_manager_service,
-    refresh_stable_update_guard_when_safe,
-    resume_interrupted_update_guard,
-    wait_for_update_guard_terminal,
-)
+from .factory import create_manager_service
 from .models import ManagerAction, VALID_ACTIONS
 from .release import ReleaseError, ReleaseManager
 from .upgrade import (
@@ -51,7 +46,6 @@ from .upgrade import (
     UpgradeCoordinator,
     UpgradeError,
     UpgradeTransactionError,
-    WindowsVelopackUpgradeAdapter,
 )
 from .runtime import RuntimeOperationUnsupported
 from .maintenance import MaintenanceConflict
@@ -62,6 +56,9 @@ from .service import (
     OperationFailed,
     UnknownRuntimeUnit,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
@@ -173,65 +170,27 @@ def create_manager_app(
     tasks: set[asyncio.Task] = set()
     critical_tasks: set[asyncio.Task] = set()
     release_tasks: set[asyncio.Task] = set()
+    startup_recovery: dict[str, Any] = {
+        "detected": False,
+        "results": [],
+        "task": None,
+    }
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         scheduler_task: asyncio.Task | None = None
         handoff_task: asyncio.Task | None = None
         try:
-            resumed_guard = await resume_interrupted_update_guard(
-                manager_service
+            await archive_coordinator.recover()
+            recovered = await upgrade_coordinator.recover(
+                prepare_windows_handoff_only=True
             )
-            recovered = []
-            if resumed_guard is None:
-                await archive_coordinator.recover()
-                recovered = await upgrade_coordinator.recover(
-                    prepare_windows_handoff_only=True
-                )
-                cleanup_terminal_update_guard_transactions(
-                    settings.layout.root,
-                    journal_loader=manager_service.store.get_journal,
-                )
-            if (
-                isinstance(resumed_guard, dict)
-                and resumed_guard.get("awaiting_terminal") is True
-            ):
-                async def finish_source_restore_after_terminal() -> None:
-                    await wait_for_update_guard_terminal(
-                        upgrade_coordinator.platform_adapter,
-                        Path(resumed_guard["request"]),
-                    )
-                    current = asyncio.current_task()
-                    if current is not None:
-                        critical_tasks.add(current)
-                    try:
-                        await archive_coordinator.recover(
-                            allow_startup_recovery=True
-                        )
-                        results = await upgrade_coordinator.recover(
-                            allow_startup_recovery=True
-                        )
-                        if any(
-                            item.get("action")
-                            in {"committed", "finalized", "rolled_back"}
-                            for item in results
-                        ):
-                            await refresh_stable_update_guard_when_safe(
-                                settings.layout.root,
-                                journal_loader=manager_service.store.get_journal,
-                            )
-                        cleanup_terminal_update_guard_transactions(
-                            settings.layout.root,
-                            journal_loader=manager_service.store.get_journal,
-                        )
-                    finally:
-                        if current is not None:
-                            critical_tasks.discard(current)
-
-                handoff_task = asyncio.create_task(
-                    finish_source_restore_after_terminal()
-                )
-            elif any(
+            startup_recovery["detected"] = any(
+                item.get("owns_runtime_state") is True
+                for item in recovered
+            )
+            startup_recovery["results"] = recovered
+            if any(
                 item.get("action") == "awaiting_api_bind"
                 for item in recovered
             ):
@@ -244,18 +203,7 @@ def create_manager_app(
                         results = await upgrade_coordinator.recover(
                             allow_startup_recovery=True
                         )
-                        if isinstance(
-                            upgrade_coordinator.platform_adapter,
-                            WindowsVelopackUpgradeAdapter,
-                        ) and any(
-                            item.get("action")
-                            in {"committed", "finalized", "rolled_back"}
-                            for item in results
-                        ):
-                            await refresh_stable_update_guard_when_safe(
-                                settings.layout.root,
-                                journal_loader=manager_service.store.get_journal,
-                            )
+                        startup_recovery["results"] = results
                     finally:
                         if current is not None:
                             critical_tasks.discard(current)
@@ -263,6 +211,7 @@ def create_manager_app(
                 handoff_task = asyncio.create_task(
                     finish_handoff_after_bind()
                 )
+                startup_recovery["task"] = handoff_task
             if settings.release_scheduler_enabled:
                 scheduler_task = asyncio.create_task(release_scheduler())
             yield
@@ -299,6 +248,23 @@ def create_manager_app(
                 await asyncio.gather(*critical_tasks, return_exceptions=True)
             if handoff_task is not None:
                 await asyncio.gather(handoff_task, return_exceptions=True)
+            if getattr(manager_service, "_startup_maintenance_active", False):
+                # Public lifecycle requests remain gated during a failed
+                # startup recovery.  Shutdown is the one internal boundary
+                # that must still make a final attempt to release current/.
+                try:
+                    with manager_service.maintenance(
+                        timeout=1,
+                        allow_startup_recovery=True,
+                    ) as maintenance:
+                        await archive_coordinator.runtime_support.quiesce(
+                            maintenance
+                        )
+                except Exception:
+                    logger.exception(
+                        "Manager shutdown could not quiesce Runtime during "
+                        "startup recovery"
+                    )
             await control_service.close()
             manager_service.close()
 
@@ -367,10 +333,24 @@ def create_manager_app(
     @app.get("/v1/health", dependencies=auth)
     async def health():
         # This route can only run after Uvicorn has completed ASGI startup and
-        # bound the authenticated local API.  It is the UpdateGuard's readiness
-        # boundary, not merely an in-process lifespan callback.
+        # bound the authenticated local API.  Windows target recovery waits
+        # for this boundary before running migrations and local hard health.
         upgrade_coordinator.mark_api_ready()
-        handoff = upgrade_coordinator.handoff_health()
+        handoff_task = startup_recovery.get("task")
+        if isinstance(handoff_task, asyncio.Task) and handoff_task.done():
+            # Surface unexpected recovery failures as an unhealthy Manager;
+            # expected rollback/manual-recovery outcomes are returned normally.
+            handoff_task.result()
+        handoff = None
+        if startup_recovery["detected"]:
+            handoff = {
+                "owns_runtime_state": True,
+                "pending": (
+                    isinstance(handoff_task, asyncio.Task)
+                    and not handoff_task.done()
+                ),
+                "results": list(startup_recovery["results"]),
+            }
         return {
             "ok": True,
             "dicepp_version": get_version(),

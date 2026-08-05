@@ -168,6 +168,11 @@ class InstanceLayout:
     def manager_backups_dir(self) -> Path:
         return self.manager_dir / "backups"
 
+    @property
+    def manager_recovery_dir(self) -> Path:
+        """Return short-lived Windows program recovery material storage."""
+        return self.manager_dir / "recovery"
+
     def area_root(self, area: str) -> Path:
         roots = {
             "config": self.config_dir,

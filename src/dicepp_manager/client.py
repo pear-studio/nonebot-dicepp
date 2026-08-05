@@ -69,6 +69,10 @@ class ManagerClient:
     async def status(self) -> dict:
         return await self._ensure_compatible()
 
+    async def health(self) -> dict:
+        """Read API readiness without requiring the status handshake first."""
+        return await self._request("GET", "/v1/health")
+
     async def _ensure_compatible(self) -> dict:
         payload = await self._request("GET", "/v1/status")
         health = payload.get("health")

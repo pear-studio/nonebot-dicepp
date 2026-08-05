@@ -213,7 +213,14 @@ class ManagerService:
                 self.store.save(rejected)
                 raise OperationConflict(rejected)
             operation = ManagerOperation.create(runtime_unit_id, action)
-            if self._maintenance_active or self._startup_maintenance_active:
+            # Startup recovery remains fail-closed for start/restart, but an
+            # explicit stop is always a safe convergence action.  In particular,
+            # the tray shutdown path must be able to retry after recovery's first
+            # best-effort quiesce failed, otherwise Runtime can keep current/
+            # occupied and make the manual recovery script impossible to run.
+            if self._maintenance_active or (
+                self._startup_maintenance_active and action != "stop"
+            ):
                 operation.transition(
                     "rejected",
                     message="Instance maintenance operation is active",

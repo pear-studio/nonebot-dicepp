@@ -129,6 +129,39 @@ class MaintenanceRuntimeSupport:
             return str(exc) or type(exc).__name__
         return None
 
+    async def best_effort_restore_state(
+        self,
+        runtime_unit_ids: list[str],
+        *,
+        allow_startup_recovery: bool = False,
+    ) -> str | None:
+        """Idempotently restore the exact captured Runtime running set."""
+
+        try:
+            with self.service.maintenance(
+                timeout=1,
+                allow_startup_recovery=allow_startup_recovery,
+            ) as maintenance:
+                units = self.service.units()
+                known = {unit.runtime_unit_id for unit in units}
+                desired = set(runtime_unit_ids)
+                if not desired <= known:
+                    missing = sorted(desired - known)
+                    raise ArchiveError(
+                        f"Captured RuntimeUnit is unavailable: {', '.join(missing)}"
+                    )
+                statuses = await self.service.runtime_adapter.status(sorted(known))
+                for unit_id in sorted(known):
+                    status = statuses.get(unit_id)
+                    running = status is not None and status.runtime_state == "running"
+                    if unit_id in desired and not running:
+                        await maintenance.operate_runtime_unit(unit_id, "start")
+                    elif unit_id not in desired and running:
+                        await maintenance.operate_runtime_unit(unit_id, "stop")
+        except Exception as exc:
+            return str(exc) or type(exc).__name__
+        return None
+
     def migrate_and_validate_schema(
         self,
         skip_paths: set[str] | None = None,

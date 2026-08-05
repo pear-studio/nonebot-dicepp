@@ -1186,6 +1186,8 @@ class WindowsVelopackUpgradeAdapter:
         return marker
 
 
+from .windows_upgrade import SimpleWindowsVelopackUpgradeAdapter  # noqa: E402
+
 class UpgradeCoordinator:
     def __init__(
         self,

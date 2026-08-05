@@ -831,7 +831,14 @@
             <ul class="list-disc pl-5 text-sm text-amber-900 space-y-1">
               <li>升级期间 Bot 与 Dashboard 会停机。</li>
               <li>切换程序前会创建并验证一份常规 pre-upgrade 归档。</li>
-              <li>任何安装、迁移或硬性健康检查失败都会自动完整回退程序和数据。</li>
+              <li
+                x-show="releaseState?.target?.platform === 'windows'"
+                data-testid="upgrade-windows-recovery-notice"
+              >Windows 会在切换前备份旧程序；新版无法正常启动时，请先关闭 DicePP，再运行安装目录根部的 DicePP-Recover.cmd。</li>
+              <li
+                x-show="releaseState?.target?.platform !== 'windows'"
+                data-testid="upgrade-linux-rollback-notice"
+              >Linux 安装、迁移或硬性健康检查失败时会自动完整回退程序和数据。</li>
             </ul>
             <label class="flex items-start gap-2 text-sm text-amber-950">
               <input
@@ -840,7 +847,11 @@
                 data-testid="upgrade-risk-confirm"
                 class="mt-1"
               >
-              <span>我已了解停机、升级前归档和失败自动完整回退，并确认开始安装。</span>
+              <span
+                x-text="releaseState?.target?.platform === 'windows'
+                  ? '我已了解停机、升级前归档和 Windows 失败时的人工恢复步骤，并确认开始安装。'
+                  : '我已了解停机、升级前归档和 Linux 失败自动完整回退，并确认开始安装。'"
+              ></span>
             </label>
             <div class="flex gap-2">
               <button

@@ -246,7 +246,7 @@ class ProcessRuntimeAdapter:
         }
 
     def _inspect_identity(self, pid: int) -> dict | None:
-        from .update_guard import inspect_process_identity
+        from .process_identity import inspect_process_identity
 
         return inspect_process_identity(pid)
 
@@ -256,7 +256,7 @@ class ProcessRuntimeAdapter:
     def _open_identity_handle(self, identity: dict):
         if self._identity_handle_opener is not None:
             return self._identity_handle_opener(identity)
-        from .update_guard import open_process_identity_handle
+        from .process_identity import open_process_identity_handle
 
         return open_process_identity_handle(identity)
 

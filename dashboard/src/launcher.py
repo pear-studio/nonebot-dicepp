@@ -477,8 +477,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
     """Start Dashboard, start runtime once, then run the tray.
 
     ``background`` keeps the tray available for a user session while avoiding
-    foreground UI from unattended launch paths such as login autostart and the
-    UpdateGuard restart handoff.
+    foreground UI from unattended launch paths such as login autostart.
     """
     log_path = _launcher_fallback_log_path()
     manager_server: ManagedServerHandle | None = None
@@ -510,7 +509,10 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         manager_client = ManagerClient(ManagerClientSettings.from_layout(manager_settings.layout))
         app.state.manager_client = manager_client
         url = dashboard_url(settings)
-        _wait_for_manager_service(manager_client, timeout=10.0)
+        manager_readiness = _wait_for_manager_service(
+            manager_client,
+            timeout=60.0,
+        )
 
         def stop_and_join_services() -> None:
             assert dashboard_server is not None
@@ -542,7 +544,18 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
                 ).start()
             )
 
-        _auto_start_runtime(controller, log_path)
+        upgrade_handoff = manager_readiness.get("upgrade_handoff")
+        if (
+            isinstance(upgrade_handoff, dict)
+            and upgrade_handoff.get("owns_runtime_state") is True
+        ):
+            append_runtime_log_line(
+                "launcher | startup recovery owns runtime state; "
+                "skipping generic auto-start",
+                path=log_path,
+            )
+        else:
+            _auto_start_runtime(controller, log_path)
         if background:
             append_runtime_log_line(
                 "launcher | browser auto-open disabled for background launch",
@@ -715,12 +728,21 @@ def _dashboard_server_config(settings: DashboardSettings) -> uvicorn.Config:
     )
 
 
-def _wait_for_manager_service(client: ManagerClient, *, timeout: float) -> None:
+def _wait_for_manager_service(
+    client: ManagerClient,
+    *,
+    timeout: float,
+) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
+            readiness = _run_async(client.health())
+            handoff = readiness.get("upgrade_handoff")
+            if isinstance(handoff, dict) and handoff.get("pending") is True:
+                time.sleep(0.05)
+                continue
             _run_async(client.status())
-            return
+            return readiness
         except Exception:
             pass
         time.sleep(0.05)
