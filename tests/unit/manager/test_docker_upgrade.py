@@ -59,6 +59,8 @@ class Runtime:
             "dicepp": "a" * 64,
             "dicepp-dashboard": "d" * 64,
         }
+        # container_id -> inspect payload returned verbatim
+        self.extra_identities: dict[str, dict] = {}
 
     async def _resolve_container(self, unit):
         assert unit == "dicepp-runtime"
@@ -68,10 +70,20 @@ class Runtime:
         self, method, path, *, expected, raw=False, json_body=None
     ):
         self.requests.append((method, path, json_body))
-        if path == f"/containers/{'a' * 64}/json":
-            return _inspect("bot", image="old-bot")
-        if path == f"/containers/{'d' * 64}/json":
-            return _inspect("dashboard", image="old-dashboard")
+        if path.startswith("/containers/") and path.endswith("/json"):
+            container_id = path.split("/", 2)[2].removesuffix("/json")
+            if container_id in self.extra_identities:
+                return self.extra_identities[container_id]
+            # Docker inspect returns the requested id; keep it consistent with
+            # the name-based container list so identity checks can match.
+            if container_id == "a" * 64:
+                payload = _inspect("bot", image="old-bot")
+                payload["Id"] = container_id
+                return payload
+            if container_id == "d" * 64:
+                payload = _inspect("dashboard", image="old-dashboard")
+                payload["Id"] = container_id
+                return payload
         if path.startswith("/images/") and path.endswith("/json"):
             encoded = path.removeprefix("/images/").removesuffix("/json")
             identity = urllib.parse.unquote(encoded)
@@ -364,4 +376,167 @@ async def test_socket_upgrade_rejects_changed_defaults_even_when_effective_equal
     assert all(
         not (method == "DELETE" or path.startswith("/containers/create?"))
         for method, path, _body in runtime.requests
+    )
+
+
+@pytest.mark.asyncio
+async def test_socket_upgrade_rejects_replacing_unrelated_same_name_container():
+    """A same-name container with an unknown identity is never deleted."""
+    runtime = Runtime()
+    executor = DockerSocketUpgradeExecutor(runtime)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+    previous = await executor.capture_images(records)
+    resolved = await executor.resolve_images(records)
+    # The captured bot container was replaced by an unrelated container that
+    # merely shares the name.
+    runtime.current["dicepp"] = "c" * 64
+
+    with pytest.raises(DockerRuntimeError, match="identity"):
+        await executor.switch_images(target_images=resolved, previous=previous)
+
+    assert all(
+        method != "DELETE" for method, _path, _body in runtime.requests
+    )
+    assert not any(
+        method == "POST" and path.startswith("/containers/create?")
+        for method, path, _body in runtime.requests
+    )
+
+
+@pytest.mark.asyncio
+async def test_socket_upgrade_allows_replacing_transaction_labeled_container():
+    """The same-name container carrying this transaction's label is authorized.
+
+    This is the takeover retry path: the Updater already created the target
+    runtime (new id, transaction label) and the coordinator replaces it again.
+    """
+    runtime = Runtime()
+    executor = DockerSocketUpgradeExecutor(runtime)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+    previous = await executor.capture_images(records)
+    resolved = await executor.resolve_images(records)
+    transaction_id = "t" * 32
+    labeled = _inspect("bot", image="old-bot")
+    labeled["Config"]["Labels"]["io.dicepp.upgrade-transaction"] = transaction_id
+    runtime.extra_identities["c" * 64] = labeled
+    runtime.current["dicepp"] = "c" * 64
+
+    await executor._replace(
+        previous["containers"]["bot"],
+        resolved["bot"],
+        extra_labels={
+            "io.dicepp.upgrade-transaction": transaction_id,
+            "io.dicepp.upgrade-role": "runtime",
+        },
+        restart_policy="no",
+        start=False,
+        expected_container_id=previous["containers"]["bot"]["container_id"],
+        expected_transaction_id=transaction_id,
+    )
+
+    deleted = [
+        path
+        for method, path, _body in runtime.requests
+        if method == "DELETE"
+    ]
+    assert deleted == [f"/containers/{'c' * 64}?v=0&force=0"]
+
+
+@pytest.mark.asyncio
+async def test_socket_upgrade_restore_authorizes_transaction_labeled_container():
+    """restore_images with the transaction id may replace the transaction's
+    target containers even though their ids differ from the captured identity.
+
+    This is the rollback-after-takeover path: the target containers were
+    created by the target Manager's process (never this executor), so neither
+    the captured id nor ``_created`` matches — only the transaction label.
+    """
+    runtime = Runtime()
+    executor = DockerSocketUpgradeExecutor(runtime)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+    previous = await executor.capture_images(records)
+    transaction_id = "t" * 32
+    # The bot name is now held by the transaction-labeled target container
+    # (created by the target Manager); the dashboard still holds the source.
+    labeled = _inspect("bot", image="old-bot")
+    labeled["Config"]["Labels"]["io.dicepp.upgrade-transaction"] = transaction_id
+    runtime.extra_identities["c" * 64] = labeled
+    runtime.current["dicepp"] = "c" * 64
+
+    result = await executor.restore_images(
+        previous, transaction_id=transaction_id
+    )
+
+    assert result["status"] == "restored"
+    deleted = [
+        path
+        for method, path, _body in runtime.requests
+        if method == "DELETE"
+    ]
+    assert deleted == [
+        f"/containers/{'c' * 64}?v=0&force=0",
+        f"/containers/{'d' * 64}?v=0&force=0",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_socket_upgrade_restore_refuses_unknown_name_holder():
+    """restore_images without the transaction id must not delete a container
+    whose id differs from the captured identity and carries no label."""
+    runtime = Runtime()
+    executor = DockerSocketUpgradeExecutor(runtime)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+    previous = await executor.capture_images(records)
+    # An unrelated container (no labels) now holds the official bot name.
+    runtime.current["dicepp"] = "c" * 64
+
+    with pytest.raises(DockerRuntimeError, match="identity"):
+        await executor.restore_images(previous)
+
+    assert all(
+        method != "DELETE" for method, _path, _body in runtime.requests
     )

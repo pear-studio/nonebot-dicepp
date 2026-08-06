@@ -1,6 +1,11 @@
+# 镜像版本策略：
+# - 默认使用 Manager 受管的本地 tag `dicepp-current`；首次部署必须显式设置
+#   DICEPP_IMAGE_TAG=vX.Y.Z（例如 `DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d`）。
+# - `dicepp-current` 由首次健康启动的 Manager 从已验证容器 Image ID 播种；
+#   已进入受管 alias 模式后，不要对 dicepp-current 执行远程 docker compose pull。
 services:
   bot:
-    image: "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}}"
+    image: "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-dicepp-current}}"
     build:
       context: .
       dockerfile: Dockerfile
@@ -61,7 +66,7 @@ services:
         compress: "true"
 
   dashboard:
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-latest}}"
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-dicepp-current}}"
     build:
       context: .
       dockerfile: Dockerfile.dashboard
@@ -117,7 +122,7 @@ services:
 
   manager:
     # Manager 与 Dashboard 复用同一发布镜像，但使用独立入口。
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-latest}}"
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-dicepp-current}}"
     build:
       context: .
       dockerfile: Dockerfile.dashboard
@@ -161,6 +166,10 @@ services:
       - ./data:/app/data:rw
       - ./content:/app/content:rw
       - ./manager:/app/manager:rw
+      # 升级事务的 Dashboard DB 快照/恢复挂载：Dashboard 停止后由 Manager
+      # 经此挂载访问主库；恢复目录（manager/recovery）不挂载给 Dashboard，
+      # 也不经普通 archive API 列出。
+      - ./dashboard/data:/app/dashboard/data:rw
       # 自动升级只读比较当前 Compose 拓扑；Manager 不会修改此文件。
       - ./docker-compose.yml:/app/docker-compose.yml:ro
       # 仅 Manager 接触 Docker Socket；Dashboard 不挂载。

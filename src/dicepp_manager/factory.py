@@ -156,9 +156,12 @@ def _create_upgrade_adapter(
 
     compose = settings.layout.root / "docker-compose.yml"
     if isinstance(runtime_adapter, DockerSocketRuntimeAdapter) and compose.is_file():
+        from .docker_handoff import DockerHandoffExecutor
+
         return LinuxBundleUpgradeAdapter(
             layout=settings.layout,
             executor=DockerSocketUpgradeExecutor(runtime_adapter),
+            handoff_executor=DockerHandoffExecutor(runtime_adapter),
             current_compose=compose,
         )
     return UnsupportedUpgradeAdapter(

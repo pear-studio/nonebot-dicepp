@@ -33,6 +33,32 @@ def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
     assert "DICEPP_MANAGER_URL=http://manager:4091" in services["bot"]["environment"]
 
 
+def test_compose_image_expressions_default_to_managed_current_alias() -> None:
+    root = Path(inspect.getfile(dashboard_app)).resolve().parents[2]
+    text = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    services = yaml.safe_load(text)["services"]
+    assert (
+        services["bot"]["image"]
+        == "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-dicepp-current}}"
+    )
+    shared = "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-dicepp-current}}"
+    assert services["dashboard"]["image"] == shared
+    assert services["manager"]["image"] == shared
+    # 注释契约：首次部署必须显式版本；受管 alias 由 Manager 播种；已进入
+    # 受管 alias 模式后不得对 dicepp-current 执行远程 docker compose pull。
+    assert "DICEPP_IMAGE_TAG=vX.Y.Z" in text
+    assert "dicepp-current" in text
+    assert "docker compose pull" in text
+
+
+def test_compose_manager_mounts_dashboard_data_for_db_snapshot() -> None:
+    root = Path(inspect.getfile(dashboard_app)).resolve().parents[2]
+    services = yaml.safe_load(
+        (root / "docker-compose.yml").read_text(encoding="utf-8")
+    )["services"]
+    assert "./dashboard/data:/app/dashboard/data:rw" in services["manager"]["volumes"]
+
+
 def test_dashboard_import_boundary_exposes_only_manager_client() -> None:
     source = inspect.getsource(dashboard_app)
     assert "ManagerService" not in source

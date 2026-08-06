@@ -82,6 +82,8 @@ _HOST_KEYS = {
     "Init",
 }
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+#: Must match ``LinuxBundleUpgradeAdapter._tx_labels`` in upgrade.py.
+_TRANSACTION_LABEL = "io.dicepp.upgrade-transaction"
 
 
 class DockerSocketUpgradeExecutor:
@@ -94,6 +96,10 @@ class DockerSocketUpgradeExecutor:
 
     def __init__(self, runtime: DockerSocketRuntimeAdapter) -> None:
         self.runtime = runtime
+        #: Container ids created by this executor in the current process.
+        #: A replace is authorized to delete them even when their id no longer
+        #: matches the captured identity (same-transaction switch -> restore).
+        self._created: set[str] = set()
 
     async def capture_images(
         self, image_records: list[dict[str, str]]
@@ -124,6 +130,46 @@ class DockerSocketUpgradeExecutor:
             "targets": targets,
             "containers": containers,
         }
+
+    async def capture_manager(self, project: str) -> dict[str, Any]:
+        """Capture the official Manager container under the Compose project."""
+        manager_id = await self._resolve_compose_service(project, "manager")
+        manager = await self.runtime._request(
+            "GET", f"/containers/{manager_id}/json", expected={200}
+        )
+        captured = await self._capture_with_image_defaults(manager)
+        labels = manager.get("Config", {}).get("Labels") or {}
+        return {
+            "container_id": captured["container_id"],
+            "name": captured["name"],
+            "image_id": captured["image_id"],
+            "image_reference": captured["image_reference"],
+            "running": captured["running"],
+            "restart_policy": (
+                (manager.get("HostConfig") or {}).get("RestartPolicy") or {}
+            ).get("Name"),
+            "labels": {str(k): str(v) for k, v in labels.items()},
+        }
+
+    async def inspect_tag(self, reference: str) -> dict[str, Any]:
+        """Resolve a local repository tag to its immutable image identity."""
+        payload = await self.runtime._request(
+            "GET",
+            "/images/" + urllib.parse.quote(reference, safe="") + "/json",
+            expected={200},
+        )
+        if not isinstance(payload, dict):
+            raise DockerRuntimeError("Docker image tag inspect payload is invalid")
+        return payload
+
+    async def inspect_tag_optional(self, reference: str) -> dict[str, Any] | None:
+        """Resolve a local tag, returning ``None`` only for Docker HTTP 404."""
+        try:
+            return await self.inspect_tag(reference)
+        except DockerRuntimeError as exc:
+            if exc.detail.get("status_code") == 404:
+                return None
+            raise
 
     async def load_images(self, archive: Path) -> dict[str, Any]:
         result = await asyncio.to_thread(self._load_images_sync, archive)
@@ -159,7 +205,13 @@ class DockerSocketUpgradeExecutor:
         switched: list[str] = []
         try:
             for role in ("bot", "dashboard"):
-                await self._replace(previous["containers"][role], targets[role])
+                await self._replace(
+                    previous["containers"][role],
+                    targets[role],
+                    expected_container_id=previous["containers"][role][
+                        "container_id"
+                    ],
+                )
                 switched.append(role)
         except Exception:
             for role in reversed(switched):
@@ -172,6 +224,9 @@ class DockerSocketUpgradeExecutor:
                                 "image_defaults"
                             ],
                         },
+                        expected_container_id=previous["containers"][role][
+                            "container_id"
+                        ],
                     )
                 except Exception:
                     pass
@@ -184,7 +239,12 @@ class DockerSocketUpgradeExecutor:
             },
         }
 
-    async def restore_images(self, previous: dict[str, Any]) -> dict[str, Any]:
+    async def restore_images(
+        self,
+        previous: dict[str, Any],
+        *,
+        transaction_id: str | None = None,
+    ) -> dict[str, Any]:
         restored: list[str] = []
         for role in ("bot", "dashboard"):
             container = previous["containers"][role]
@@ -194,6 +254,8 @@ class DockerSocketUpgradeExecutor:
                     "image_id": container["image_id"],
                     "defaults": container["image_defaults"],
                 },
+                expected_container_id=container["container_id"],
+                expected_transaction_id=transaction_id,
             )
             restored.append(role)
         return {"status": "restored", "roles": restored}
@@ -247,8 +309,25 @@ class DockerSocketUpgradeExecutor:
         return container_id
 
     async def _replace(
-        self, captured: dict[str, Any], image: dict[str, Any]
+        self,
+        captured: dict[str, Any],
+        image: dict[str, Any],
+        *,
+        extra_labels: dict[str, str] | None = None,
+        restart_policy: str | None = None,
+        start: bool = True,
+        expected_container_id: str | None = None,
+        expected_transaction_id: str | None = None,
     ) -> None:
+        """Replace a captured container by name, verifying identity first.
+
+        The existing container is stopped and deleted only when its identity
+        is authorized: it matches ``expected_container_id`` (the captured
+        identity), it was created by this executor in the current transaction
+        (``_created``), or it carries ``expected_transaction_id`` in its
+        ``io.dicepp.upgrade-transaction`` label.  Anything else fails closed
+        and never reaches a DELETE.
+        """
         config = dict(captured["config"])
         config.update(
             _explicit_image_overrides(
@@ -258,12 +337,28 @@ class DockerSocketUpgradeExecutor:
             )
         )
         config["Image"] = image["image_id"]
+        if extra_labels:
+            labels = dict(config.get("Labels") or {})
+            labels.update(extra_labels)
+            config["Labels"] = labels
         config["HostConfig"] = dict(captured["host_config"])
+        if restart_policy is not None:
+            config["HostConfig"]["RestartPolicy"] = {"Name": restart_policy}
         config["NetworkingConfig"] = {
             "EndpointsConfig": dict(captured["endpoints"])
         }
         current_id = await self._find_by_name(captured["name"])
         if current_id is not None:
+            if not await self._authorized_to_replace(
+                current_id,
+                expected_container_id=expected_container_id,
+                expected_transaction_id=expected_transaction_id,
+            ):
+                raise DockerRuntimeError(
+                    f"Refusing to replace container {captured['name']}: "
+                    "existing identity does not match the captured or "
+                    "transaction identity"
+                )
             await self.runtime._request(
                 "POST",
                 f"/containers/{current_id}/stop?t=30",
@@ -284,10 +379,41 @@ class DockerSocketUpgradeExecutor:
         container_id = created.get("Id") if isinstance(created, dict) else None
         if not isinstance(container_id, str):
             raise DockerRuntimeError("Docker did not return a created container id")
-        if captured["running"]:
+        self._created.add(container_id)
+        if start and captured["running"]:
             await self.runtime._request(
                 "POST", f"/containers/{container_id}/start", expected={204, 304}
             )
+
+    async def _authorized_to_replace(
+        self,
+        current_id: str,
+        *,
+        expected_container_id: str | None,
+        expected_transaction_id: str | None,
+    ) -> bool:
+        if expected_container_id is not None and current_id == expected_container_id:
+            return True
+        if current_id in self._created:
+            return True
+        if expected_transaction_id is not None:
+            payload = await self._inspect_container(current_id)
+            labels = payload.get("Config", {}).get("Labels") or {}
+            if not isinstance(labels, dict):
+                labels = {}
+            if labels.get(_TRANSACTION_LABEL) == expected_transaction_id:
+                return True
+        return False
+
+    async def _inspect_container(self, container_id: str) -> dict[str, Any]:
+        payload = await self.runtime._request(
+            "GET",
+            f"/containers/{container_id}/json",
+            expected={200},
+        )
+        if not isinstance(payload, dict):
+            raise DockerRuntimeError("Docker inspect payload is invalid")
+        return payload
 
     async def _find_by_name(self, name: str) -> str | None:
         filters = json.dumps({"name": [f"^/{name}$"]})
