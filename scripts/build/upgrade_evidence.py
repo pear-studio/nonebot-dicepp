@@ -305,10 +305,7 @@ def validate_upgrade_protocol_registry(
             for field in ("medium", "producer", "support_window")
         ):
             raise ValueError("upgrade protocol ownership is incomplete")
-        if contract["verification_status"] not in {
-            "verified",
-            "pending_real_rc17_export",
-        }:
+        if contract["verification_status"] != "verified":
             raise ValueError("upgrade protocol verification status is invalid")
         if not isinstance(contract["consumers"], list) or not contract["consumers"]:
             raise ValueError("upgrade protocol consumers are incomplete")
@@ -347,10 +344,13 @@ def validate_upgrade_protocol_registry_ready(payload: Any) -> dict[str, Any]:
 def validate_scenario_result(
     value: Any,
     *,
+    expected_platform: str,
     expected_name: str,
     expected_source_version: str,
     expected_target_version: str,
 ) -> dict[str, Any]:
+    if expected_platform not in {"windows", "linux"}:
+        raise ValueError("upgrade scenario expected platform is invalid")
     if (
         not isinstance(expected_source_version, str)
         or not expected_source_version
@@ -390,11 +390,15 @@ def validate_scenario_result(
         or observations["health_status"] != "healthy"
     ):
         raise ValueError("healthy commit observations are inconsistent")
+    rollback_status = {
+        "windows": "program_rolled_back",
+        "linux": "restored",
+    }[expected_platform]
     if expected_name == "target_health_failure_rollback" and (
         observations["target_version_observed"] != expected_target_version
         or observations["restored_version"] != expected_source_version
         or observations["journal_status"] != "rolled_back"
-        or observations["rollback_marker_status"] != "program_rolled_back"
+        or observations["rollback_marker_status"] != rollback_status
     ):
         raise ValueError("health rollback observations are inconsistent")
     if expected_name == "retry_after_rollback" and (
@@ -407,7 +411,7 @@ def validate_scenario_result(
         type(observations["target_process_start_count"]) is not int
         or observations["target_process_start_count"] != 0
         or observations["source_version_after"] != expected_source_version
-        or observations["journal_status"] != "aborted_before_switch"
+        or observations["journal_status"] != "rolled_back"
         or type(observations["apply_exit_code"]) is not int
         or observations["apply_exit_code"] == 0
     ):
@@ -486,8 +490,15 @@ def _validate_matrix_source(
         raise ValueError("supported source must pin at least one asset")
     names: list[str] = []
     for asset in assets:
-        if not isinstance(asset, dict) or set(asset) != {"name", "url", "sha256"}:
+        if not isinstance(asset, dict) or set(asset) != {
+            "purpose",
+            "name",
+            "url",
+            "sha256",
+        }:
             raise ValueError("invalid supported source asset")
+        if not isinstance(asset["purpose"], str) or not asset["purpose"]:
+            raise ValueError("supported source asset purpose is invalid")
         if not isinstance(asset["name"], str) or not asset["name"]:
             raise ValueError("supported source asset name is invalid")
         if (
@@ -500,6 +511,15 @@ def _validate_matrix_source(
         names.append(asset["name"])
     if len(names) != len(set(names)):
         raise ValueError("supported source contains duplicate asset names")
+    purposes = [asset["purpose"] for asset in assets]
+    if len(purposes) != len(set(purposes)):
+        raise ValueError("supported source contains duplicate asset purposes")
+    expected = {
+        "windows": {"portable", "velopack-bundle"},
+        "linux": {"linux-bundle"},
+    }[source["platform"]]
+    if set(purposes) != expected:
+        raise ValueError("supported source asset purposes are incomplete")
 
 
 def validate_upgrade_evidence(
@@ -566,7 +586,11 @@ def validate_upgrade_evidence(
     for key, source in expected_sources.items():
         result = actual[key]
         expected_assets = [
-            {"name": asset["name"], "sha256": asset["sha256"]}
+            {
+                "purpose": asset["purpose"],
+                "name": asset["name"],
+                "sha256": asset["sha256"],
+            }
             for asset in source["assets"]
         ]
         if result["source_assets"] != expected_assets:
@@ -577,6 +601,7 @@ def validate_upgrade_evidence(
         for scenario, name in zip(scenarios, REQUIRED_SCENARIOS, strict=True):
             validate_scenario_result(
                 scenario,
+                expected_platform=result["platform"],
                 expected_name=name,
                 expected_source_version=source["source_version"],
                 expected_target_version=target_version.removeprefix("v"),

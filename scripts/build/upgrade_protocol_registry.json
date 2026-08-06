@@ -37,7 +37,7 @@
       "producer": "UpgradeCoordinator",
       "consumers": ["ManagerOperationStore", "UpgradeCoordinator.recover"],
       "format_versions": ["unversioned-row-v1"],
-      "verification_status": "pending_real_rc17_export",
+      "verification_status": "verified",
       "support_window": "while a journal is recoverable or retains recovery material",
       "compatibility_fixtures": []
     },

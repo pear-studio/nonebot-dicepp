@@ -24,7 +24,7 @@ def _sha256(path: Path) -> str:
 
 
 def _validate_asset(record: Any, *, label: str) -> None:
-    expected = {"name", "path", "sha256", "size"}
+    expected = {"purpose", "name", "path", "sha256", "size"}
     if label == "target":
         expected = {"filename", "path", "sha256", "size", "platform", "arch", "purpose"}
     if not isinstance(record, dict) or set(record) != expected:

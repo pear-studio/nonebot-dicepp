@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import urllib.request
@@ -61,6 +62,27 @@ HARNESS_ENTRYPOINTS = {
     "windows": Path(__file__).with_name("windows_upgrade_matrix_harness.py"),
     "linux": Path(__file__).with_name("linux_upgrade_matrix_harness.py"),
 }
+
+_VERSION_RE = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:(?:rc|-rc\.)(\d+)|a(\d+)|b(\d+))?$"
+)
+
+
+def _version_key(value: str) -> tuple[int, int, int, int, int]:
+    match = _VERSION_RE.fullmatch(value)
+    if match is None:
+        raise ValueError(f"unsupported matrix version: {value!r}")
+    major, minor, patch = (int(match.group(index)) for index in range(1, 4))
+    rc, alpha, beta = match.group(4), match.group(5), match.group(6)
+    if alpha is not None:
+        suffix = (0, int(alpha))
+    elif beta is not None:
+        suffix = (1, int(beta))
+    elif rc is not None:
+        suffix = (2, int(rc))
+    else:
+        suffix = (3, 0)
+    return major, minor, patch, *suffix
 
 
 def _sha256(path: Path) -> str:
@@ -168,6 +190,7 @@ def _run_harness(
     }
     return validate_scenario_result(
         scenario,
+        expected_platform=context["platform"],
         expected_name=context["scenario"],
         expected_source_version=context["source_version"],
         expected_target_version=context["target_version"],
@@ -209,6 +232,13 @@ def run_platform(
         or len(target_assets) != len(actual_purposes)
     ):
         raise ValueError(f"target assets are incomplete for {platform}/{arch}")
+    normalized_target_version = _version_key(target_version)
+    for source in sources:
+        source_version = _version_key(source["source_version"])
+        if source_version >= normalized_target_version:
+            raise ValueError(
+                "matrix source version must be older than the target candidate"
+            )
     try:
         entrypoint = HARNESS_ENTRYPOINTS[platform]
     except KeyError as exc:
@@ -229,6 +259,7 @@ def run_platform(
                 "scenario": scenario,
                 "source_assets": [
                     {
+                        "purpose": asset["purpose"],
                         "name": asset["name"],
                         "path": str(path),
                         "sha256": asset["sha256"],
@@ -261,7 +292,11 @@ def run_platform(
                 "arch": arch,
                 "source_version": source["source_version"],
                 "source_assets": [
-                    {"name": asset["name"], "sha256": asset["sha256"]}
+                    {
+                        "purpose": asset["purpose"],
+                        "name": asset["name"],
+                        "sha256": asset["sha256"],
+                    }
                     for asset in source["assets"]
                 ],
                 "scenarios": scenarios,
