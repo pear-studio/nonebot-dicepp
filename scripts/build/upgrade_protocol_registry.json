@@ -1,0 +1,85 @@
+{
+  "contract_version": 1,
+  "policy": {
+    "current_matrix": "functional_rc_validation",
+    "future_release_window": "previous_stable_to_current"
+  },
+  "contracts": [
+    {
+      "name": "update_guard_request",
+      "medium": "json-file",
+      "producer": "WindowsVelopackUpgradeAdapter.switch",
+      "consumers": ["UpdateGuard.run_guard", "Manager startup resume"],
+      "format_versions": [2],
+      "verification_status": "verified",
+      "support_window": "all published v2 layouts",
+      "compatibility_fixtures": [
+        "tests/fixtures/update_guard/v2-direct.json",
+        "tests/fixtures/update_guard/rc17-staged.json"
+      ]
+    },
+    {
+      "name": "update_guard_markers",
+      "medium": "json-files",
+      "producer": "UpdateGuard and target Manager",
+      "consumers": ["UpdateGuard", "source Manager", "target Manager"],
+      "format_versions": [2],
+      "verification_status": "verified",
+      "support_window": "while a v2 transaction is recoverable",
+      "compatibility_fixtures": [
+        "tests/fixtures/update_guard/v2-direct.json",
+        "tests/fixtures/update_guard/rc17-staged.json"
+      ]
+    },
+    {
+      "name": "manager_upgrade_journal",
+      "medium": "sqlite-row",
+      "producer": "UpgradeCoordinator",
+      "consumers": ["ManagerOperationStore", "UpgradeCoordinator.recover"],
+      "format_versions": ["unversioned-row-v1"],
+      "verification_status": "pending_real_rc17_export",
+      "support_window": "while a journal is recoverable or retains recovery material",
+      "compatibility_fixtures": []
+    },
+    {
+      "name": "release_manifest",
+      "medium": "json-file",
+      "producer": "generate_release_manifest.py",
+      "consumers": ["ReleaseManager", "candidate receipt", "promotion"],
+      "format_versions": [2],
+      "verification_status": "verified",
+      "support_window": "current release discovery contract",
+      "compatibility_fixtures": []
+    },
+    {
+      "name": "windows_bundle_manifest",
+      "medium": "json-in-zip",
+      "producer": "build_velopack_bundle.py",
+      "consumers": ["ReleaseManager", "WindowsVelopackUpgradeAdapter"],
+      "format_versions": [1],
+      "verification_status": "verified",
+      "support_window": "current automatic-upgrade source window",
+      "compatibility_fixtures": []
+    },
+    {
+      "name": "linux_bundle_manifest",
+      "medium": "json-in-zip",
+      "producer": "build_linux_bundle.sh",
+      "consumers": ["ReleaseManager", "LinuxDockerUpgradeAdapter"],
+      "format_versions": [1],
+      "verification_status": "verified",
+      "support_window": "current automatic-upgrade source window",
+      "compatibility_fixtures": []
+    },
+    {
+      "name": "deployment_schema",
+      "medium": "integer-in-health-and-manifests",
+      "producer": "Manager and release build",
+      "consumers": ["ManagerClient", "ReleaseManager", "UpgradeCoordinator"],
+      "format_versions": [2],
+      "verification_status": "verified",
+      "support_window": "current deployment topology",
+      "compatibility_fixtures": []
+    }
+  ]
+}
