@@ -184,6 +184,19 @@ def _is_background_launch(argv: list[str] | None = None) -> bool:
     return any(argument in {"--background", "--manager-tray"} for argument in arguments)
 
 
+def _is_velopack_hook(argv: list[str] | None = None) -> bool:
+    """Detect Velopack installer lifecycle hooks (``--veloapp-*``).
+
+    The installer invokes the main executable with these arguments during
+    install/update/uninstall and expects a fast exit.  Every hook is a no-op
+    for DicePP (shortcuts and registry entries belong to the installer), so
+    the process must return immediately instead of starting the resident
+    launcher — otherwise the installer times out and force-kills the exe.
+    """
+    arguments = argv if argv is not None else sys.argv[1:]
+    return any(argument.startswith("--veloapp") for argument in arguments)
+
+
 def _append_bootstrap_failure(app_dir: str, exc: BaseException) -> None:
     """Best-effort logging before the regular launcher logger exists."""
     try:
@@ -216,6 +229,12 @@ if getattr(sys, "frozen", False):
     app_dir = os.path.dirname(sys.executable)
 else:
     app_dir = project_root
+
+
+# Velopack lifecycle hooks must return before any environment setup or heavy
+# import: the installer holds file locks and enforces a short timeout.
+if _is_velopack_hook():
+    raise SystemExit(0)
 
 
 try:

@@ -83,7 +83,15 @@ def _stderr_colorize() -> bool:
 _STDERR_HANDLER_ID: int | None = None
 
 
-def _add_stderr_handler(level: str) -> int:
+def _add_stderr_handler(level: str) -> int | None:
+    """Add the console handler, returning its id or None when unavailable.
+
+    PyInstaller windowed executables (``console=False``) launched from
+    Explorer have ``sys.stderr is None``; Loguru rejects a None sink, so the
+    console handler is skipped while file handlers keep working.
+    """
+    if sys.stderr is None:
+        return None
     return logger.add(
         sys.stderr,
         format=_safe_format(LOG_FORMAT),
@@ -130,7 +138,8 @@ def restore_runtime_logging(
 
     In the shell scenario, BotRunner calls this repeatedly (activate/restore),
     so _STDERR_HANDLER_ID is rebuilt on every call — callers must not cache
-    that value across calls.
+    that value across calls.  It stays None when no console stream exists
+    (windowed frozen executable), in which case only file handlers are active.
     """
     global _STDERR_HANDLER_ID
     configure_redirected_stdio_utf8()
