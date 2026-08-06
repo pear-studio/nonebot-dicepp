@@ -7,8 +7,8 @@ from importlib.metadata import version as package_version
 
 import pytest
 
+from dicepp_control.protocol import auth_result, encode
 from plugins.DicePP.module.dashboard_reporter import ws_client
-from plugins.DicePP.module.dashboard_reporter.protocol import auth_result, encode
 
 
 @pytest.mark.quick

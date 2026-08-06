@@ -16,6 +16,8 @@ hiddenimports += collect_submodules("websockets")
 hiddenimports += collect_submodules("pystray")
 hiddenimports += collect_submodules("PIL")
 hiddenimports += collect_submodules("dicepp_manager")
+hiddenimports += collect_submodules("dicepp_control")
+hiddenimports += collect_submodules("dicepp_security")
 hiddenimports += collect_submodules("pydantic")
 
 datas = [

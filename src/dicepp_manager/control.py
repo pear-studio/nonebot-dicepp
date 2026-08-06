@@ -16,8 +16,8 @@ from typing import Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from plugins.DicePP.module.dashboard_reporter.control_token import read_token
-from plugins.DicePP.module.dashboard_reporter.protocol import (
+from dicepp_control.control_token import read_token
+from dicepp_control.protocol import (
     auth_result,
     decode,
     encode,

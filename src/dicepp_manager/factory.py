@@ -39,7 +39,7 @@ from .owner import ManagerOwnerLock
 from .runtime import RuntimeAdapter, UnavailableRuntimeAdapter
 from .service import ManagerService
 from .store import ManagerOperationStore
-from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+from dicepp_control.control_token import ensure_token
 
 
 def create_runtime_adapter(settings: ManagerSettings) -> RuntimeAdapter:

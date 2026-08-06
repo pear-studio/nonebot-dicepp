@@ -11,6 +11,60 @@ import pytest
 from tests.support.dashboard.paths import repo_root
 
 
+def test_windowed_frozen_entry_imports_without_console_streams(tmp_path: Path) -> None:
+    """模拟 PyInstaller console=False 从 Explorer 双击启动：frozen 且无标准流。
+
+    RC17 阻断回归：GUI 程序从 Explorer 启动时 sys.stdout/sys.stderr 为 None,
+    入口 import 链拉起 Bot logger 后在 Loguru None sink 上崩溃, 进程在 import
+    阶段弹窗退出。修复后入口 import 必须在 None 流下安静完成。
+    """
+    app_dir = tmp_path / "DicePP"
+    app_dir.mkdir()
+    marker = tmp_path / "entry-ok.txt"
+    project_root = repo_root()
+    code = textwrap.dedent(
+        f"""
+        import os
+        import runpy
+        import sys
+
+        for key in (
+            "DICEPP_PROJECT_ROOT",
+            "DASHBOARD_HOST",
+            "DASHBOARD_PORT",
+            "DICEPP_MANAGER_RUNTIME",
+            "DICEPP_MANAGER_PROCESS_COMMAND",
+            "DICEPP_MANAGER_PROCESS_CWD",
+        ):
+            os.environ.pop(key, None)
+
+        sys.frozen = True
+        sys.executable = {str(app_dir / "DicePP.exe")!r}
+        sys.argv = [sys.executable]
+        # PyInstaller windowed（console=False）进程没有控制台流
+        sys.stdout = None
+        sys.stderr = None
+        runpy.run_path(
+            {str(project_root / "scripts" / "build" / "dashboard_entry.py")!r},
+            run_name="dashboard_entry_test",
+        )
+        with open({str(marker)!r}, "w", encoding="utf-8") as output:
+            output.write("ok")
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text(encoding="utf-8") == "ok"
+
+
 @pytest.mark.parametrize(
     "hook",
     ["--veloapp-install", "--veloapp-updated", "--veloapp-obsolete", "--veloapp-uninstall"],

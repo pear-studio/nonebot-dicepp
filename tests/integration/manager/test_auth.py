@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import dicepp_manager.auth as manager_auth
+import dicepp_security.private_token as manager_auth
 from dicepp_manager.auth import read_api_token
 from dicepp_manager.client import ManagerClient, ManagerUnavailable
 from dicepp_manager.config import ManagerClientSettings

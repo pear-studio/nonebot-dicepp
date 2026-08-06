@@ -133,7 +133,7 @@ class Bot:
         # Manager 控制通道（源码环境显式启用，Windows EXE 默认连接本机）
         self._control_channel = None
         try:
-            from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+            from dicepp_control.control_token import ensure_token
             from plugins.DicePP.module.dashboard_reporter.ws_client import (
                 ControlChannelClient,
                 resolve_manager_url,

@@ -152,6 +152,10 @@ hiddenimports = [
 # keeps its graph visible to Analysis.
 hiddenimports += collect_submodules('nonebot')
 hiddenimports += collect_submodules('lark')
+# Bot 侧仅在函数内惰性 import 控制协议/凭据（dicebot、ws_client），显式收集
+# 无副作用共享包，避免 frozen runtime 缺失 dicepp_control。
+hiddenimports += collect_submodules('dicepp_control')
+hiddenimports += collect_submodules('dicepp_security')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件
