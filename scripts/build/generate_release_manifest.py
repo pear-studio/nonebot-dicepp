@@ -18,13 +18,6 @@ from dicepp_manager.release import (
     validate_release_manifest,
 )
 try:
-    from scripts.build.release_build_metadata import (
-        velopack_channel,
-        velopack_version,
-    )
-except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
-    from release_build_metadata import velopack_channel, velopack_version
-try:
     from scripts.build.release_metadata import (
         ReleaseMetadata,
         parse_release_metadata,
@@ -86,6 +79,26 @@ def build_manifest(
         },
     }
     return validate_release_manifest(payload)
+
+
+def velopack_version(version: str) -> str:
+    """Translate public PEP 440 release versions to Velopack SemVer 2."""
+    parsed = Version(version.removeprefix("v"))
+    base = ".".join(str(item) for item in parsed.release)
+    if parsed.pre is None:
+        return base
+    label, number = parsed.pre
+    labels = {"a": "alpha", "b": "beta", "rc": "rc"}
+    return f"{base}-{labels[label]}.{number}"
+
+
+def velopack_channel(channel: str, arch: str) -> str:
+    if channel not in {"stable", "prerelease"}:
+        raise ValueError("channel must be stable or prerelease")
+    arch_label = {"amd64": "x64", "arm64": "arm64"}.get(arch)
+    if arch_label is None:
+        raise ValueError("unsupported Velopack architecture")
+    return f"win-{arch_label}-{channel}"
 
 
 def main() -> int:

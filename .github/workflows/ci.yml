@@ -8,9 +8,6 @@ on:
   pull_request:
     branches: [main, master, develop]
 
-permissions:
-  contents: read
-
 jobs:
   test-suite:
     name: Test Suite

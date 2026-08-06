@@ -33,9 +33,6 @@ pytestmark = [
         not _running_on_windows,
         reason="Windows package smoke only runs on Windows",
     ),
-    # Onefile extraction, local Manager startup, and Chromium need more than
-    # the suite-wide 30-second budget, while remaining strictly bounded.
-    pytest.mark.timeout(60),
 ]
 
 @pytest.fixture(scope="module", autouse=True)
