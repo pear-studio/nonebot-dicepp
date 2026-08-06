@@ -22,7 +22,7 @@ import json
 import os
 import re
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Mapping
 from uuid import uuid4
@@ -135,8 +135,19 @@ def _validate_snapshot_path(value: object) -> str:
             "dashboard_db path must be a non-empty relative path",
             code="handoff_request_invalid",
         )
-    path = Path(value)
-    if path.is_absolute() or ".." in path.parts:
+    # The wire format always uses POSIX separators. Host ``Path`` semantics
+    # are not sufficient here: on Windows, ``/etc/dashboard.db`` is rooted
+    # but ``Path.is_absolute()`` is false because it has no drive. Validate
+    # both path dialects so the same request is accepted or rejected on every
+    # platform.
+    posix_path = PurePosixPath(value)
+    windows_path = PureWindowsPath(value)
+    if (
+        posix_path.is_absolute()
+        or bool(windows_path.anchor)
+        or "\\" in value
+        or ".." in posix_path.parts
+    ):
         raise HandoffProtocolError(
             "dashboard_db path must stay inside the transaction directory",
             code="handoff_request_invalid",

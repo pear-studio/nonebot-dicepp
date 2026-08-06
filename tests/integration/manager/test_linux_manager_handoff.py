@@ -14,6 +14,7 @@ import json
 import socket
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -668,15 +669,17 @@ async def test_source_restore_applies_preupgrade_data_after_updater_confirmed(
     # then writes its own rows into the shared bind mount.  Rollback must
     # restore the source snapshot, not the target leftovers.
     layout.dashboard_data_dir.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(layout.dashboard_db) as connection:
+    with closing(sqlite3.connect(layout.dashboard_db)) as connection:
         connection.execute(
             "CREATE TABLE admins (id INTEGER PRIMARY KEY, name TEXT)"
         )
         connection.execute("INSERT INTO admins (id, name) VALUES (1, 'source')")
+        connection.commit()
     snapshot = snapshot_for_transaction(layout, TRANSACTION_ID)
-    with sqlite3.connect(layout.dashboard_db) as connection:
+    with closing(sqlite3.connect(layout.dashboard_db)) as connection:
         connection.execute("DELETE FROM admins")
         connection.execute("INSERT INTO admins (id, name) VALUES (1, 'target')")
+        connection.commit()
     request = request_payload(
         transaction_id=TRANSACTION_ID,
         operation_id=OPERATION_ID,
@@ -730,7 +733,7 @@ async def test_source_restore_applies_preupgrade_data_after_updater_confirmed(
     assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
     # The Dashboard DB was restored from the transaction snapshot by the WAL
     # safe flow, with the target-written rows replaced.
-    with sqlite3.connect(layout.dashboard_db) as connection:
+    with closing(sqlite3.connect(layout.dashboard_db)) as connection:
         assert (
             connection.execute("SELECT name FROM admins").fetchone()
             == ("source",)
@@ -986,9 +989,10 @@ async def test_rollback_failed_preserves_transaction_dir(
     # A valid Dashboard snapshot so the rollback sequence only fails on the
     # missing pre-upgrade archive below.
     layout.dashboard_data_dir.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(layout.dashboard_db) as connection:
+    with closing(sqlite3.connect(layout.dashboard_db)) as connection:
         connection.execute("CREATE TABLE admins (id INTEGER PRIMARY KEY)")
         connection.execute("INSERT INTO admins (id) VALUES (1)")
+        connection.commit()
     snapshot = snapshot_for_transaction(layout, TRANSACTION_ID)
     request = request_payload(
         transaction_id=TRANSACTION_ID,

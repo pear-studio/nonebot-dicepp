@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import stat
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,7 @@ def _snapshot_dir(layout: InstanceLayout, seed: str) -> Path:
 
 
 def _schema_rows(path: Path) -> list[tuple[str, str, str]]:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         return connection.execute(
             "SELECT type, name, COALESCE(sql, '') FROM sqlite_master "
             "ORDER BY type, name, sql"
@@ -71,7 +73,7 @@ def test_snapshot_contains_uncheckpointed_wal_commits(tmp_path: Path) -> None:
 
         snapshot_dashboard_db(layout.dashboard_db, snapshot)
 
-        with sqlite3.connect(snapshot) as restored:
+        with closing(sqlite3.connect(snapshot)) as restored:
             rows = restored.execute(
                 "SELECT id, value FROM facts ORDER BY id"
             ).fetchall()
@@ -83,7 +85,7 @@ def test_snapshot_contains_uncheckpointed_wal_commits(tmp_path: Path) -> None:
         connection.close()
 
 
-def test_snapshot_permissions_and_digest_are_restricted_and_consistent(
+def test_snapshot_digest_and_posix_permissions_are_consistent(
     tmp_path: Path,
 ) -> None:
     layout = InstanceLayout.from_root(tmp_path)
@@ -92,8 +94,9 @@ def test_snapshot_permissions_and_digest_are_restricted_and_consistent(
         result = snapshot_for_transaction(layout, "b" * 32)
 
         snapshot = layout.manager_recovery_dir / ("b" * 32) / "dashboard.db"
-        assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
-        assert stat.S_IMODE(snapshot.parent.stat().st_mode) == 0o700
+        if os.name != "nt":
+            assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+            assert stat.S_IMODE(snapshot.parent.stat().st_mode) == 0o700
         assert result["sha256"] == hashlib.sha256(snapshot.read_bytes()).hexdigest()
     finally:
         connection.close()
@@ -127,7 +130,7 @@ def test_restore_recovers_corrupted_target_with_integrity_and_schema(
 
     restore_dashboard_db(layout.dashboard_db, snapshot, digest)
 
-    with sqlite3.connect(layout.dashboard_db) as restored:
+    with closing(sqlite3.connect(layout.dashboard_db)) as restored:
         assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         values = restored.execute(
             "SELECT value FROM facts ORDER BY id"
@@ -156,7 +159,7 @@ def test_restore_quarantines_target_wal_shm_sidecars(tmp_path: Path) -> None:
 
     assert not sidecar_wal.exists()
     assert not sidecar_shm.exists()
-    with sqlite3.connect(layout.dashboard_db) as restored:
+    with closing(sqlite3.connect(layout.dashboard_db)) as restored:
         assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert restored.execute("SELECT COUNT(*) FROM facts").fetchone() == (25,)
 
@@ -260,7 +263,7 @@ def test_restore_for_transaction_recovers_target_from_handoff_request(
 
     restore_for_transaction(layout, request)
 
-    with sqlite3.connect(layout.dashboard_db) as restored:
+    with closing(sqlite3.connect(layout.dashboard_db)) as restored:
         assert restored.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert restored.execute("SELECT COUNT(*) FROM facts").fetchone() == (25,)
 
