@@ -160,7 +160,7 @@ def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
     services = compose["services"]
     assert set(services) == {"bot", "dashboard", "manager"}
     assert services["manager"]["command"] == ["python", "-m", "dicepp_manager"]
-    assert services["manager"].get("ports") is None
+    assert services["manager"]["ports"] == ["127.0.0.1:4091:4091"]
     assert "4091" in services["manager"]["expose"]
     assert "/var/run/docker.sock:/var/run/docker.sock" in services["manager"]["volumes"]
     assert "./docker-compose.yml:/app/docker-compose.yml:ro" in services["manager"]["volumes"]
