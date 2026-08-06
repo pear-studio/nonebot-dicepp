@@ -258,15 +258,17 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             # 3. Click "配置编辑" tab in sidebar navigation
             page.get_by_role("button", name="配置编辑").click()
 
-            # Wait for config editor to finish loading (fields view indicator)
-            page.wait_for_selector("text=字段视图", timeout=10000)
+            # Wait for the Manager-backed user.json read before editing.
+            json_view = page.get_by_role("button", name="JSON 视图")
+            expect(json_view).to_be_enabled(timeout=10000)
 
             # 4. Switch to JSON view — simpler than field-level editing
-            page.get_by_role("button", name="JSON 视图").click()
+            json_view.click()
 
             # 5. Modify a field in the JSON textarea (e.g. app.name)
             textarea = page.locator("textarea").first
             textarea.wait_for(state="visible", timeout=5000)
+            expect(textarea).to_be_enabled(timeout=10000)
             textarea.fill('{"app": {"name": "modified", "version": "1.0.0"}}')
 
             # 6. Click save and wait for the matching Dashboard response.  This
@@ -294,6 +296,62 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             _wait_for_json_value(
                 tmp_path / "config" / "user.json", expected_user_config
             )
+        finally:
+            browser.close()
+
+
+def test_config_manager_read_failure_is_visible_and_retryable(
+    dashboard_url: str,
+    tmp_path: Path,
+) -> None:
+    """A failed initial Manager read leaves a visible path to retry safely."""
+    bots_dir = tmp_path / "config" / "bots"
+    bots_dir.mkdir(parents=True, exist_ok=True)
+    (bots_dir / "test_bot.json").write_text("{}", encoding="utf-8")
+
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            _login(page, dashboard_url)
+            first_read = True
+
+            def fail_first_manager_config_read(route) -> None:
+                nonlocal first_read
+                if route.request.method == "GET" and first_read:
+                    first_read = False
+                    route.fulfill(
+                        status=503,
+                        content_type="application/json",
+                        body=json.dumps(
+                            {"ok": False, "message": "Manager is unavailable"}
+                        ),
+                    )
+                    return
+                route.continue_()
+
+            page.route("**/api/config/user", fail_first_manager_config_read)
+            page.wait_for_selector(
+                "aside select option[value='test_bot']",
+                state="attached",
+                timeout=10000,
+            )
+            page.locator("aside select").select_option("test_bot")
+            page.get_by_role("button", name="配置编辑").click()
+
+            json_view = page.get_by_role("button", name="JSON 视图")
+            expect(json_view).to_be_disabled(timeout=10000)
+            load_error = page.get_by_test_id("config-user-load-error")
+            expect(load_error).to_be_visible(timeout=10000)
+            retry = load_error.get_by_role("button", name="重试")
+            expect(retry).to_be_enabled()
+
+            retry.click()
+            expect(load_error).not_to_be_visible(timeout=10000)
+            expect(json_view).to_be_enabled(timeout=10000)
+            json_view.click()
+            expect(page.locator("textarea").first).to_be_enabled(timeout=10000)
         finally:
             browser.close()
 

@@ -126,7 +126,9 @@ services:
     networks:
       - manager-net
 
-    # Manager API 只在 Compose 网络内可见，不映射到宿主机。
+    # 仅向同机 Agent 暴露回环地址；Compose 内仍通过 manager-net 访问。
+    ports:
+      - "127.0.0.1:4091:4091"
     expose:
       - "4091"
 

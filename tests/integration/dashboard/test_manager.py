@@ -25,6 +25,11 @@ class ErrorClient:
         raise ManagerClientError("Invalid Manager API token", status_code=401)
 
 
+class CredentialsUnavailableClient:
+    async def list_archives(self):
+        raise ManagerUnavailable("Manager credentials are unavailable", status_code=503)
+
+
 class RecordingClient:
     def __init__(self): self.calls = []
     async def status(self):
@@ -120,6 +125,21 @@ def test_dashboard_distinguishes_incompatible_and_http_error(test_client: TestCl
     health = test_client.get("/api/manager/status").json()["health"]
     assert health["status"] == "error"
     assert health["status_code"] == 401
+
+
+def test_dashboard_proxy_hides_local_manager_credential_security_reason(
+    test_client: TestClient,
+) -> None:
+    setup_auth(test_client)
+    test_client.app.state.manager_client = CredentialsUnavailableClient()
+
+    response = test_client.get("/api/archives")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ok": False,
+        "message": "Manager credentials are unavailable",
+    }
 
 
 def test_dashboard_controls_shared_runtime_unit_and_reconnects_by_operation_id(test_client: TestClient) -> None:

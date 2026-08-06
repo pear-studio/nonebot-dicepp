@@ -198,22 +198,6 @@ def _apply_deep(target: dict, path: str, value) -> None:
     d[parts[-1]] = value
 
 
-def _validate_merged_update_config(user_cfg: dict) -> None:
-    global_cfg = _read_json_safe(DashboardPaths.CONFIG_GLOBAL)
-    global_update = global_cfg.get("update", {})
-    user_update = user_cfg.get("update", {})
-    if not isinstance(global_update, dict) or not isinstance(user_update, dict):
-        _err("Invalid update configuration: update must be an object", 422)
-    merged = {**global_update, **user_update}
-    module = _load_pydantic_models_module()
-    if module is None:
-        _err("Update configuration schema is unavailable", 500)
-    try:
-        module.UpdateConfig.model_validate(merged)
-    except Exception as exc:
-        _err(f"Invalid update configuration: {exc}", 422)
-
-
 def _remove_deep(target: dict, path: str) -> bool:
     """Remove a key at a dotted path in a nested dict. Returns True if removed."""
     parts = path.split(".")
@@ -1170,7 +1154,10 @@ def _find_meta(dotted: str, meta: dict) -> dict:
 async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     """Merge global.json + user.json + bots/{bot_id}.json with source annotation."""
     global_cfg = _read_json_safe(DashboardPaths.CONFIG_GLOBAL)
-    user_cfg = _read_json_safe(DashboardPaths.CONFIG_USER)
+    try:
+        user_cfg = await _get_manager_client(request).get_user_config()
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     # Annotate merged config: global=default, user overlays=user, bot overlays=bot
     result_annotated = {}
@@ -1206,7 +1193,11 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
     # Merge bot over user+default
     if bot_id:
-        bot_cfg = _read_json_safe(DashboardPaths.bot_config_path(bot_id))
+        _validate_identifier(bot_id, "bot_id")
+        try:
+            bot_cfg = await _get_manager_client(request).get_bot_config(bot_id)
+        except ManagerClientError as exc:
+            return _manager_error_response(exc)
         # Re-annotate: start from the previous result, update with bot overrides
         # For each key in bot_cfg, overwrite source to "bot"
         def _flatten_and_annotate(d: dict, prefix: str = ""):
@@ -1250,17 +1241,20 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 async def config_set(request: Request):
     """Deep merge a value into user.json, then persist it through Manager."""
     body = await request.json()
+    if not isinstance(body, dict):
+        _err("Body must be a JSON object")
     path = body.get("path", "")
     value = body.get("value")
 
     if not path:
         _err("path is required")
 
-    user_path = DashboardPaths.CONFIG_USER
-    user_cfg = _read_json_safe(user_path)
+    try:
+        user_cfg = await _get_manager_client(request).get_user_config()
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     _apply_deep(user_cfg, path, value)
-    _validate_merged_update_config(user_cfg)
     try:
         await _get_manager_client(request).save_user_config(user_cfg)
     except ManagerClientError as exc:
@@ -1281,13 +1275,17 @@ async def config_set(request: Request):
 async def config_reset(request: Request):
     """Remove a key from user.json, then persist it through Manager."""
     body = await request.json()
+    if not isinstance(body, dict):
+        _err("Body must be a JSON object")
     path = body.get("path", "")
 
     if not path:
         _err("path is required")
 
-    user_path = DashboardPaths.CONFIG_USER
-    user_cfg = _read_json_safe(user_path)
+    try:
+        user_cfg = await _get_manager_client(request).get_user_config()
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     removed = _remove_deep(user_cfg, path)
     try:
@@ -1310,8 +1308,10 @@ async def config_reset(request: Request):
 async def config_bot_get(bot_id: str, request: Request):
     """Read bot config file content."""
     _validate_identifier(bot_id, "bot_id")
-    cfg_path = DashboardPaths.bot_config_path(bot_id)
-    cfg = _read_json_safe(cfg_path)
+    try:
+        cfg = await _get_manager_client(request).get_bot_config(bot_id)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
     return _ok({"config": cfg})
 
 
@@ -1340,7 +1340,10 @@ async def config_bot_save(bot_id: str, request: Request):
 @app.get("/api/config/user", dependencies=[Depends(require_auth)])
 async def config_user_get(request: Request):
     """Return raw user.json content for JSON view editing."""
-    user_cfg = _read_json_safe(DashboardPaths.CONFIG_USER)
+    try:
+        user_cfg = await _get_manager_client(request).get_user_config()
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
     return _ok({"config": user_cfg})
 
 
@@ -1350,7 +1353,6 @@ async def config_user_save(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
-    _validate_merged_update_config(body)
 
     try:
         await _get_manager_client(request).save_user_config(body)

@@ -359,7 +359,12 @@
           <div>
             <div class="flex gap-4 mb-4 border-b">
               <button @click="configView = 'fields'" :class="configView === 'fields' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">字段视图</button>
-              <button @click="configView = 'json'; userConfigText = JSON.stringify(userConfig, null, 2)" :class="configView === 'json' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">JSON 视图</button>
+              <button @click="configView = 'json'; userConfigText = JSON.stringify(userConfig, null, 2)" :disabled="configLoading || !userConfigReady" :class="configView === 'json' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium disabled:opacity-50">JSON 视图</button>
+            </div>
+
+            <div x-show="userConfigLoadError" data-testid="config-user-load-error" class="mb-2 bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm">
+              <span x-text="userConfigLoadError"></span>
+              <button @click="retryConfigLoad" :disabled="configLoading" class="ml-2 underline disabled:opacity-50">重试</button>
             </div>
 
             <!-- Fields view -->
@@ -438,9 +443,10 @@
             <!-- JSON view -->
             <div x-show="configView === 'json'" x-cloak>
               <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
-              <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
+              <div x-show="configLoading" data-testid="config-json-loading" class="text-sm text-gray-500 mb-2">正在从 Manager 读取配置…</div>
+              <textarea x-model="userConfigText" :disabled="configLoading || !userConfigReady" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500" @input="validateJson"></textarea>
               <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
-              <button @click="saveUserConfig" :disabled="!userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+              <button @click="saveUserConfig" :disabled="configLoading || !userConfigReady || !userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
               <div x-show="reloadResult" data-testid="config-save-feedback" class="mt-4">
                 <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
                 <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
@@ -1694,6 +1700,8 @@ function app() {
     userConfig: {},
     userConfigText: '',
     userConfigValid: true,
+    userConfigReady: false,
+    userConfigLoadError: '',
     reloadResult: null,
 
     // ── Tab: Persona ──
@@ -2038,6 +2046,8 @@ function app() {
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换 Bot 吗？')) return;
       this._mergedCache = null;
       this._lastBotId = '';
+      this.userConfigReady = false;
+      this.userConfigLoadError = '';
       this.loadTabData(this.currentTab);
     },
 
@@ -2107,10 +2117,15 @@ function app() {
     async ensureConfigLoaded() {
       if (this._mergedCache && this._lastBotId === this.selectedBotId) return;
       this._mergedCache = null;
-      const [mergedData, userData] = await Promise.all([
-        this.api(`/api/config/merged?bot_id=${this.selectedBotId}`).catch(() => ({ config: {}, layout: {} })),
-        this.api('/api/config/user').catch(() => ({ config: {} })),
+      this.userConfigReady = false;
+      this.userConfigLoadError = '';
+      const [mergedResult, userResult] = await Promise.allSettled([
+        this.api(`/api/config/merged?bot_id=${this.selectedBotId}`),
+        this.api('/api/config/user'),
       ]);
+      const mergedData = mergedResult.status === 'fulfilled'
+        ? mergedResult.value
+        : { config: {}, layout: {} };
       const configData = mergedData.config || {};
       this._mergedCache = configData;
       this._layout = mergedData.layout || {};
@@ -2118,8 +2133,23 @@ function app() {
       if (Object.keys(configData).length > 0) {
         this._lastBotId = this.selectedBotId;
       }
-      this.userConfig = userData.config || {};
-      this.userConfigText = JSON.stringify(this.userConfig, null, 2);
+      if (userResult.status === 'fulfilled' && userResult.value.config && typeof userResult.value.config === 'object') {
+        this.userConfig = userResult.value.config;
+        this.userConfigText = JSON.stringify(this.userConfig, null, 2);
+        this.userConfigValid = true;
+        this.userConfigReady = true;
+      } else {
+        this.userConfig = {};
+        this.userConfigText = '';
+        this.userConfigValid = true;
+        this.userConfigLoadError = '无法从 Manager 读取 user.json；请检查 Manager 后重试。';
+      }
+    },
+
+    async retryConfigLoad() {
+      this._mergedCache = null;
+      this._lastBotId = '';
+      await this.loadConfig();
     },
 
     // Build field objects from merged config, filtered by tab
@@ -2330,7 +2360,7 @@ function app() {
     },
 
     async saveUserConfig() {
-      if (!this.userConfigValid) return;
+      if (!this.userConfigReady || !this.userConfigValid) return;
       this.saving = true;
       try {
         const parsed = JSON.parse(this.userConfigText);
@@ -2339,6 +2369,8 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(parsed),
         });
+        this.userConfig = parsed;
+        this.userConfigText = JSON.stringify(parsed, null, 2);
         this.reloadResult = data.reload || null;
       } catch (err) {
         this.errorMessage = '保存失败: ' + err.message;
