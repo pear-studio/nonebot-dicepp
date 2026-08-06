@@ -28,6 +28,7 @@ from dicepp_manager.upgrade import (
     VerifiedUpgradePackage,
     WindowsVelopackUpgradeAdapter,
 )
+from tests.support.fs_utils import symlink_or_skip
 
 DEFAULT_COMPOSE = """
 services:
@@ -1744,7 +1745,11 @@ async def test_windows_commit_reports_packages_maintenance_failure_without_faili
     )
     # A symlinked packages/ drives _maintain_packages_dir onto its first
     # failure return path without raising.
-    (tmp_path / "packages").symlink_to(tmp_path / "elsewhere")
+    symlink_or_skip(
+        tmp_path / "packages",
+        tmp_path / "elsewhere",
+        target_is_directory=True,
+    )
     adapter = _rollback_adapter(tmp_path, layout, version="3.0.0")
 
     result = await adapter.commit(
@@ -1897,7 +1902,7 @@ def test_windows_guard_cache_prune_unlinks_symlink_without_following(
     (outside / "keep.txt").write_text("safe", encoding="utf-8")
     _seed_guard_cache(adapter, "a" * 64)
     link = adapter.guard_runtime_dir / ("b" * 64)
-    link.symlink_to(outside, target_is_directory=True)
+    symlink_or_skip(link, outside, target_is_directory=True)
 
     removed = adapter.prune_external_guard_cache("a" * 64)
 
