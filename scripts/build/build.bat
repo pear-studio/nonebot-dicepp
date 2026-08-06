@@ -74,13 +74,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [INFO] Building DicePP UpdateGuard...
-uv run pyinstaller scripts\build\update_guard.spec --clean --noconfirm
-if errorlevel 1 (
-    echo [ERROR] UpdateGuard build failed!
-    exit /b 1
-)
-
 echo.
 echo [INFO] Preparing user-accessible files...
 set "DIST_DIR=dist\DicePP"
@@ -110,11 +103,6 @@ if errorlevel 1 (
     echo [ERROR] Launcher smoke test failed! See output above.
     exit /b 1
 )
-"%DIST_DIR%\DicePP-UpdateGuard.exe" --smoke-check
-if errorlevel 1 (
-    echo [ERROR] UpdateGuard smoke test failed! See output above.
-    exit /b 1
-)
 echo [INFO] Smoke test passed
 
 echo.
@@ -129,7 +117,6 @@ dir /b "dist\DicePP\"
 echo.
 echo To run: dist\DicePP\DicePP.exe
 echo Runtime: dist\DicePP\DicePP-Runtime.exe
-echo Update guard: dist\DicePP\DicePP-UpdateGuard.exe
 echo ============================================================
 
 endlocal

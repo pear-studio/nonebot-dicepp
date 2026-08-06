@@ -1,7 +1,6 @@
 param(
     [string]$DistDir = "dist/DicePP",
-    [string]$LauncherSource = "dist/DicePP.exe",
-    [string]$UpdateGuardSource = "dist/DicePP-UpdateGuard.exe"
+    [string]$LauncherSource = "dist/DicePP.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,10 +35,6 @@ if (Test-Path -LiteralPath $LauncherSource -PathType Leaf) {
         throw "Temporary launcher still exists: $LauncherSource"
     }
 }
-
-Copy-RequiredFile `
-    -Source $UpdateGuardSource `
-    -Destination (Join-Path $DistDir "DicePP-UpdateGuard.exe")
 
 Copy-RequiredFile -Source "config/global.json" -Destination (Join-Path $DistDir "config/global.json")
 Copy-RequiredFile -Source "config/bots/_template.json" -Destination (Join-Path $DistDir "config/bots/_template.json")

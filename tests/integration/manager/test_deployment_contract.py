@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import inspect
 import io
 import json
-import hashlib
 import time
 import zipfile
 from pathlib import Path
@@ -31,6 +32,7 @@ from dicepp_manager.upgrade import (
     VerifiedUpgradePackage,
     WindowsVelopackUpgradeAdapter,
 )
+from tests.support.paths import find_repository_root
 
 
 def _nupkg_bytes(version: str) -> bytes:
@@ -242,6 +244,232 @@ def _write_guard_transaction(
             encoding="utf-8",
         )
     return transaction, request
+
+
+_UPDATE_GUARD_FIXTURES = (
+    find_repository_root(Path(__file__)) / "tests" / "fixtures" / "update_guard"
+)
+
+
+def _replace_fixture_root(value, instance_root: Path):
+    if isinstance(value, str):
+        return value.replace("${INSTANCE_ROOT}", str(instance_root.resolve()))
+    if isinstance(value, list):
+        return [_replace_fixture_root(item, instance_root) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_fixture_root(item, instance_root)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _materialize_update_guard_fixture(
+    tmp_path: Path,
+    fixture_name: str,
+) -> tuple[Path, dict, Path, dict]:
+    fixture = json.loads(
+        (_UPDATE_GUARD_FIXTURES / f"{fixture_name}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    instance_root = tmp_path / "instance"
+    instance_root.mkdir()
+    for relative_name, record in fixture["files"].items():
+        relative_path = Path(relative_name)
+        assert not relative_path.is_absolute() and ".." not in relative_path.parts
+        target = instance_root / relative_path
+        payload = base64.b64decode(record["base64"], validate=True)
+        assert hashlib.sha256(payload).hexdigest() == record["sha256"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+
+    request = _replace_fixture_root(fixture["request"], instance_root)
+    assert request["format_version"] == fixture["request_format_version"]
+    transaction = instance_root / fixture["transaction_dir"]
+    request_path = transaction / "request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+    actual_tree = sorted(
+        str(path.relative_to(transaction)).replace("\\", "/")
+        for path in transaction.rglob("*")
+        if path.is_file()
+    )
+    assert actual_tree == sorted(fixture["expected_transaction_tree"])
+    return instance_root, fixture, request_path, request
+
+
+@pytest.mark.asyncio
+async def test_production_windows_request_round_trips_through_startup_resume(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    _velopack_package(tmp_path / "packages", "3.0.0")
+    target = _velopack_package(tmp_path, "3.1.0")
+    identity = {
+        "pid": 17,
+        "started_at": "source-manager",
+        "executable": str((tmp_path / "current" / "DicePP.exe").resolve()),
+    }
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=[str(tmp_path / "DicePP-UpdateGuard.exe")],
+        install_command=[
+            str(tmp_path / "Update.exe"),
+            "apply",
+            "-p",
+            "{package}",
+        ],
+        restart_command=[str(tmp_path / "DicePP.exe"), "--background"],
+        process_identity_loader=lambda: identity,
+        version_loader=lambda: "3.0.0",
+        guard_runtime_root=tmp_path.parent / "guard-runtime",
+    )
+    spawned: list[Path] = []
+
+    class Process:
+        pid = 4040
+
+    def fake_start_guard(request_path: Path):
+        spawned.append(request_path.resolve())
+        return Process(), tmp_path / "DicePP-UpdateGuard.exe"
+
+    monkeypatch.setattr(adapter, "start_guard", fake_start_guard)
+    current = await adapter.capture_current(target)
+    staged = await adapter.stage(target, "production-contract")
+    switched = await adapter.switch(
+        target,
+        current=current,
+        staged=staged,
+        transaction_id="production-contract",
+    )
+    request_path = Path(switched["request"])
+    rollback_package = Path(staged["rollback_package"])
+
+    assert rollback_package.parent == request_path.parent
+    assert hashlib.sha256(rollback_package.read_bytes()).hexdigest() == staged[
+        "rollback_package_sha256"
+    ]
+    pending = manager_factory._find_resumable_update_guard_request(
+        tmp_path,
+        identity_loader=lambda _pid: None,
+    )
+    assert pending == {
+        "request_path": request_path.resolve(),
+        "guard_state": "missing",
+        "guard_running": False,
+    }
+    loaded = manager_factory._load_update_guard_resume_request(
+        tmp_path,
+        request_path,
+    )
+    assert loaded["rollback_package"] == str(rollback_package)
+    assert loaded["rollback_package_sha256"] == staged[
+        "rollback_package_sha256"
+    ]
+    assert hashlib.sha256(Path(loaded["package"]).read_bytes()).hexdigest() == loaded[
+        "package_sha256"
+    ]
+    transaction = request_path.parent
+    assert Path(loaded["guard_marker"]) == transaction / "guard.json"
+    assert Path(loaded["started_marker"]) == transaction / "started.json"
+    assert Path(loaded["health_marker"]) == transaction / "health.json"
+    assert Path(loaded["rollback_marker"]) == transaction / "rollback.json"
+
+    service = ManagerService(
+        unit_provider=lambda: [],
+        runtime_adapter=UnavailableRuntimeAdapter(),
+        store=ManagerOperationStore(layout.manager_db),
+        state_dir=layout.manager_state_dir,
+    )
+    service.upgrade_coordinator = SimpleNamespace(platform_adapter=adapter)
+    service.pending_update_guard_resume = pending
+    shutdown: list[str] = []
+    service.set_shutdown_callback(shutdown.append)
+    monkeypatch.setattr(
+        manager_factory,
+        "current_process_identity",
+        lambda: identity,
+    )
+    try:
+        resumed = await manager_factory.resume_interrupted_update_guard(service)
+    finally:
+        service.close()
+
+    assert resumed == {
+        "request": str(request_path),
+        "guard_pid": 4040,
+        "reused_running_guard": False,
+        "awaiting_terminal": False,
+    }
+    assert spawned == [request_path.resolve(), request_path.resolve()]
+    assert shutdown == ["windows_update_guard_resume"]
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "rollback_parent"),
+    [
+        pytest.param("v2-direct", ".", id="v2-direct"),
+        pytest.param("rc17-staged", "rollback-payload", id="rc17-staged"),
+    ],
+)
+def test_supported_update_guard_golden_layouts_are_loaded_and_migrated(
+    tmp_path: Path,
+    fixture_name: str,
+    rollback_parent: str,
+) -> None:
+    instance_root, fixture, request_path, original = (
+        _materialize_update_guard_fixture(tmp_path, fixture_name)
+    )
+    transaction = request_path.parent
+
+    pending = manager_factory._find_resumable_update_guard_request(
+        instance_root,
+        identity_loader=lambda _pid: None,
+    )
+    loaded = manager_factory._load_update_guard_resume_request(
+        instance_root,
+        request_path,
+    )
+
+    assert pending is not None
+    assert pending["request_path"] == request_path.resolve()
+    assert loaded == original
+    assert loaded["format_version"] == fixture["request_format_version"]
+    rollback_package = Path(loaded["rollback_package"])
+    expected_parent = (
+        transaction
+        if rollback_parent == "."
+        else transaction / rollback_parent
+    )
+    assert rollback_package.parent == expected_parent
+    assert hashlib.sha256(rollback_package.read_bytes()).hexdigest() == loaded[
+        "rollback_package_sha256"
+    ]
+    target_package = Path(loaded["package"])
+    assert target_package.is_relative_to(
+        instance_root / "manager" / "packages"
+    )
+    assert hashlib.sha256(target_package.read_bytes()).hexdigest() == loaded[
+        "package_sha256"
+    ]
+
+    migrated = manager_factory._ensure_legacy_guard_rollback_layout(
+        loaded,
+        request_path=request_path,
+        transaction_dir=transaction,
+    )
+    persisted = json.loads(request_path.read_text(encoding="utf-8"))
+    assert persisted == migrated
+    assert Path(migrated["rollback_package"]).parent == transaction
+    assert hashlib.sha256(
+        Path(migrated["rollback_package"]).read_bytes()
+    ).hexdigest() == migrated["rollback_package_sha256"]
+    if fixture_name == "v2-direct":
+        assert migrated == original
+    else:
+        assert Path(original["rollback_package"]).is_file()
+        assert "rollback-payload" not in migrated["rollback_command"][-1]
 
 
 def test_guard_scan_does_not_mutate_real_staged_payload_before_resume(

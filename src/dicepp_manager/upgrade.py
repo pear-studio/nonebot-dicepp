@@ -1,9 +1,8 @@
 """Confirmed, durable DicePP program upgrade transactions.
 
 The coordinator owns data safety and transaction recovery.  Platform adapters
-own only the program switch: Docker images on Linux and the UpdateGuard /
-Velopack hand-off on Windows.  External services are deliberately outside the
-hard-health boundary.
+own only the program switch: Docker images on Linux and the explicit Velopack
+hand-off on Windows.  External services are deliberately outside hard health.
 """
 
 from __future__ import annotations
@@ -16,8 +15,6 @@ import re
 import secrets
 import shutil
 import stat
-import subprocess
-import tempfile
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -33,7 +30,7 @@ from packaging.version import Version
 from .archive import ArchiveError, apply_archive, create_archive, estimate_archive
 from .archive_housekeeping import ArchiveHousekeeping
 from .archive_coordinator import ArchiveCoordinator
-from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
+from ._file_utils import _atomic_json, _read_json_object
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
 from .maintenance_policy import is_terminal_rollback_failure
@@ -52,9 +49,7 @@ from .release import (
 )
 from .velopack_bundle import (
     VELOPACK_BUNDLE_NAME,
-    ValidatedVelopackBundle,
     VelopackBundleError,
-    extract_verified_nupkg,
     validate_velopack_bundle,
 )
 from .service import MaintenanceReservation, ManagerService
@@ -69,32 +64,8 @@ MAX_LINUX_TOTAL_UNCOMPRESSED_BYTES = 16 * 1024**3
 MAX_LINUX_MEMBER_COUNT = 10_000
 LINUX_STAGE_RESERVE_BYTES = 256 * 1024**2
 CONFIRMATION_TTL = timedelta(minutes=15)
-_GUARD_CACHE_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"succeeded", "failed", "rejected", "interrupted"}
-_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x0010)
-_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
-    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400
-)
-_LOCAL_VELOPACK_IDENTITY_NAME = "velopack.win-x64.verified.json"
 _VELOPACK_GENERATION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-
-
-def _is_directory_reparse_point(path: Path) -> bool:
-    """Return whether ``path`` is a Windows directory reparse point.
-
-    ``Path.is_junction`` was added after this project's minimum supported
-    Python version.  ``lstat`` exposes the same Windows reparse attribute on
-    those older interpreters without following the point.
-    """
-    try:
-        metadata = os.lstat(path)
-    except OSError:
-        return False
-    attributes = getattr(metadata, "st_file_attributes", 0)
-    return bool(attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT) and (
-        stat.S_ISDIR(metadata.st_mode)
-        or bool(attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY)
-    )
 
 
 class UpgradeError(RuntimeError):
@@ -182,13 +153,9 @@ class UpgradePlatformAdapter(Protocol):
         transaction_id: str,
     ) -> dict[str, Any]: ...
 
-    def stable_guard_digest(self) -> str | None: ...
-
-    def prune_external_guard_cache(self, keep_digest: str) -> list[str]: ...
-
-
 class UnsupportedUpgradeAdapter:
     supported = False
+
     def __init__(self, platform: str, reason: str) -> None:
         self.platform = platform
         self.reason = reason
@@ -210,13 +177,6 @@ class UnsupportedUpgradeAdapter:
 
     async def commit(self, _package, **_kwargs) -> dict[str, Any]:
         raise UpgradeCompatibilityError(self.reason)
-
-    def stable_guard_digest(self) -> str | None:
-        return None
-
-    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
-        return []
-
 
 class LinuxUpgradeExecutor(Protocol):
     """Fixed-operation Docker boundary used after the bundle is verified."""
@@ -356,12 +316,6 @@ class LinuxBundleUpgradeAdapter:
     async def cleanup(self, staged: dict[str, Any]) -> None:
         await asyncio.to_thread(self._cleanup_staged, staged)
 
-    def stable_guard_digest(self) -> str | None:
-        return None
-
-    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
-        return []
-
     def _cleanup_staged(self, staged: dict[str, Any]) -> None:
         raw = staged.get("stage_dir")
         if not isinstance(raw, str) or not raw:
@@ -474,719 +428,8 @@ class LinuxBundleUpgradeAdapter:
         return manifest
 
 
-class WindowsVelopackUpgradeAdapter:
-    """Create a durable UpdateGuard request outside versioned program dirs."""
-
-    platform = "windows"
-    supported = True
-
-    def __init__(
-        self,
-        *,
-        layout: InstanceLayout,
-        guard_command: list[str],
-        install_command: list[str],
-        process_identity_loader: Callable[[], dict[str, Any]],
-        version_loader: Callable[[], str] = get_version,
-        bundled_guard_path: Path | None = None,
-        restart_command: list[str] | None = None,
-        health_url: str = f"http://127.0.0.1:{MANAGER_DEFAULT_PORT}/v1/health",
-        auth_token_path: Path | None = None,
-        manager_exit_timeout: float = 60.0,
-        health_timeout: float = 120.0,
-        rollback_bundle_fetcher: Callable[[str], tuple[Path, str]] | None = None,
-        guard_runtime_root: Path | None = None,
-    ) -> None:
-        if not guard_command or not install_command:
-            raise ValueError("UpdateGuard and Velopack commands are required")
-        self.layout = layout
-        self.guard_command = list(guard_command)
-        self.install_command = list(install_command)
-        self.restart_command = list(
-            restart_command or [str(layout.root / "DicePP.exe"), "--background"]
-        )
-        self.process_identity_loader = process_identity_loader
-        self.version_loader = version_loader
-        self.rollback_bundle_fetcher = rollback_bundle_fetcher
-        self._fetched_rollback: dict[
-            str, tuple[Path, str, ValidatedVelopackBundle]
-        ] = {}
-        self.bundled_guard_path = bundled_guard_path or (
-            Path(os.environ.get("DICEPP_APP_DIR", str(layout.root)))
-            / "DicePP-UpdateGuard.exe"
-        )
-        self.health_url = health_url
-        self.auth_token_path = auth_token_path or layout.manager_token
-        self.manager_exit_timeout = manager_exit_timeout
-        self.health_timeout = health_timeout
-        self.guard_dir = layout.manager_state_dir / "update-guard"
-        default_guard_runtime_root = (
-            Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()))
-            / "DicePP-UpdateGuard"
-        )
-        instance_key = hashlib.sha256(
-            os.path.normcase(str(layout.root.resolve())).encode("utf-8")
-        ).hexdigest()[:16]
-        self.guard_runtime_dir = (
-            Path(guard_runtime_root or default_guard_runtime_root).resolve()
-            / instance_key
-        )
-        if self.guard_runtime_dir.is_relative_to(layout.root.resolve()):
-            raise ValueError(
-                "UpdateGuard runtime directory must be outside the install root"
-            )
-
-    def _validate_target_package(
-        self,
-        package: VerifiedUpgradePackage,
-    ) -> ValidatedVelopackBundle:
-        if (
-            package.platform != "windows"
-            or package.arch != "amd64"
-            or package.artifact.get("platform") != "windows"
-            or package.artifact.get("arch") != "amd64"
-            or package.artifact.get("purpose") != "velopack-bundle"
-            or package.artifact.get("filename") != VELOPACK_BUNDLE_NAME
-            or package.bundle_path is None
-            or package.bundle_manifest is None
-        ):
-            raise UpgradeCompatibilityError(
-                "Windows automatic updates require the verified Velopack bundle"
-            )
-        try:
-            packages_root = assert_contained_no_reparse(
-                self.layout.manager_packages_dir,
-                root=self.layout.root,
-                allow_missing=False,
-            )
-            assert_directory_no_reparse(packages_root)
-            assert_contained_no_reparse(
-                package.bundle_path,
-                root=packages_root,
-                allow_missing=False,
-            )
-            assert_contained_no_reparse(
-                package.path,
-                root=packages_root,
-                allow_missing=False,
-            )
-            validated = validate_velopack_bundle(
-                package.bundle_path,
-                expected_dicepp_version=package.version,
-                expected_channel=package.release.get("channel"),
-                expected_size=package.artifact.get("size"),
-                expected_sha256=package.artifact.get("sha256"),
-            )
-        except (OSError, UnsafePathError, VelopackBundleError) as exc:
-            raise UpgradeCompatibilityError(
-                f"Windows Velopack bundle is invalid: {exc}"
-            ) from exc
-        if (
-            validated.manifest != package.bundle_manifest
-            or package.path.is_symlink()
-            or not package.path.is_file()
-            or package.path.stat().st_size != validated.nupkg_size
-            or _sha256_file(package.path) != validated.nupkg_sha256
-        ):
-            raise UpgradeCompatibilityError(
-                "Verified Velopack payload no longer matches its bundle"
-            )
-        return validated
-
-    async def preflight(self, package: VerifiedUpgradePackage) -> dict[str, Any]:
-        if package.platform != "windows":
-            raise UpgradeCompatibilityError("Windows adapter received another platform")
-        self._validate_target_package(package)
-        identity = _validate_process_identity(self.process_identity_loader())
-        if Version(self._current_version()) == Version(package.version):
-            raise UpgradeCompatibilityError(
-                "Windows automatic update target is already installed"
-            )
-        source_version, rollback_bundle, rollback_digest, _validated = (
-            await self._current_rollback_bundle()
-        )
-        update_exe = Path(self.install_command[0])
-        stable_guard = Path(self.guard_command[0])
-        bundled_guard = self.bundled_guard_path
-        current_dir = self.layout.root / "current"
-        restart_exe = Path(self.restart_command[0])
-        if (
-            not update_exe.is_absolute()
-            or update_exe.is_symlink()
-            or not update_exe.is_file()
-            or current_dir.is_symlink()
-            or not current_dir.is_dir()
-            or not restart_exe.is_absolute()
-            or restart_exe.is_symlink()
-            or not restart_exe.is_file()
-            or not stable_guard.is_absolute()
-            or stable_guard.is_symlink()
-            or not stable_guard.is_file()
-            or bundled_guard.is_symlink()
-            or not bundled_guard.is_file()
-        ):
-            raise UpgradeCompatibilityError(
-                "Velopack stable root is incomplete (Update.exe/current/root launcher)"
-            )
-        if _sha256_file(stable_guard) != _sha256_file(bundled_guard):
-            raise UpgradeCompatibilityError(
-                "Stable UpdateGuard does not match the current version; "
-                "wait for Guard refresh or use a manual update"
-            )
-        return {
-            "status": "ok",
-            "process_identity": identity,
-            "source_version": source_version,
-            "rollback_bundle": str(rollback_bundle),
-            "rollback_bundle_sha256": rollback_digest,
-        }
-
-    async def capture_current(self, package) -> dict[str, Any]:
-        self._validate_target_package(package)
-        if Version(self._current_version()) == Version(package.version):
-            raise UpgradeCompatibilityError(
-                "Windows automatic update target is already installed"
-            )
-        source_version, rollback_bundle, rollback_digest, _validated = (
-            await self._current_rollback_bundle()
-        )
-        return {
-            "process_identity": _validate_process_identity(
-                self.process_identity_loader()
-            ),
-            "source_version": source_version,
-            "rollback_bundle": str(rollback_bundle),
-            "rollback_bundle_sha256": rollback_digest,
-        }
-
-    async def stage(
-        self, package: VerifiedUpgradePackage, transaction_id: str
-    ) -> dict[str, Any]:
-        self._validate_target_package(package)
-        # Resolve the rollback material before creating the transaction
-        # directory: the resolution may download from the Release, and a
-        # failure there must not leave an orphan guard_dir/<uuid>/ behind.
-        source_version, rollback_bundle, rollback_bundle_digest, validated = (
-            await self._current_rollback_bundle()
-        )
-        transaction_dir = self.guard_dir / transaction_id
-        try:
-            transaction_dir.mkdir(parents=True, exist_ok=False)
-            # Keep the nupkg as a direct child for rollback compatibility with
-            # Managers predating the contract-v2 bundle extraction layout.
-            rollback_package = extract_verified_nupkg(validated, transaction_dir)
-        except Exception as exc:
-            if transaction_dir.is_dir() and not transaction_dir.is_symlink():
-                shutil.rmtree(transaction_dir)
-            if isinstance(exc, UpgradeCompatibilityError):
-                raise
-            raise UpgradeCompatibilityError(
-                f"Could not stage the verified rollback bundle: {exc}"
-            ) from exc
-        return {
-            "package": str(package.path),
-            "request": str(transaction_dir / "request.json"),
-            "guard_marker": str(transaction_dir / "guard.json"),
-            "started_marker": str(transaction_dir / "started.json"),
-            "health_marker": str(transaction_dir / "health.json"),
-            "rollback_marker": str(transaction_dir / "rollback.json"),
-            "source_version": source_version,
-            "rollback_package": str(rollback_package),
-            "rollback_package_sha256": validated.nupkg_sha256,
-            "rollback_bundle": str(rollback_bundle),
-            "rollback_bundle_sha256": rollback_bundle_digest,
-            "transaction_id": transaction_id,
-        }
-
-    async def switch(
-        self,
-        package: VerifiedUpgradePackage,
-        *,
-        current: dict[str, Any],
-        staged: dict[str, Any],
-        transaction_id: str,
-    ) -> dict[str, Any]:
-        request = {
-            "format_version": 2,
-            "transaction_id": transaction_id,
-            "target_version": package.version,
-            "source_version": current["source_version"],
-            "package": str(package.path),
-            "package_sha256": self._validate_target_package(
-                package
-            ).nupkg_sha256,
-            "rollback_package": staged["rollback_package"],
-            "rollback_package_sha256": staged["rollback_package_sha256"],
-            "manager_identity": current["process_identity"],
-            "guard_marker": staged["guard_marker"],
-            "started_marker": staged["started_marker"],
-            "health_marker": staged["health_marker"],
-            "rollback_marker": staged["rollback_marker"],
-            "health_url": self.health_url,
-            "auth_token_path": str(self.auth_token_path.resolve()),
-            "install_command": [
-                value.replace("{package}", str(package.path)).replace(
-                    "{package_dir}", str(package.path.parent)
-                )
-                for value in self.install_command
-            ],
-            "rollback_command": [
-                value.replace("{package}", staged["rollback_package"]).replace(
-                    "{package_dir}", str(Path(staged["rollback_package"]).parent)
-                )
-                for value in self.install_command
-            ],
-            "restart_command": list(self.restart_command),
-            "manager_exit_timeout_seconds": self.manager_exit_timeout,
-            "health_timeout_seconds": self.health_timeout,
-            "requested_at": utc_now(),
-        }
-        _atomic_json(Path(staged["request"]), request)
-        process, guard_executable = self.start_guard(
-            Path(staged["request"])
-        )
-        return {
-            "guard_pid": process.pid,
-            "guard_executable": str(guard_executable),
-            "handoff_required": True,
-            "request": staged["request"],
-        }
-
-    def start_guard(
-        self, request_path: Path
-    ) -> tuple[subprocess.Popen, Path]:
-        """Start an independent Guard from outside the Velopack install root."""
-
-        guard_executable = self._prepare_external_guard()
-        guard_output = request_path.parent / "guard-output.log"
-        guard_environment = os.environ.copy()
-        guard_environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-        with guard_output.open("ab", buffering=0) as output:
-            process = subprocess.Popen(
-                [
-                    str(guard_executable),
-                    *self.guard_command[1:],
-                    "--request",
-                    str(request_path),
-                ],
-                env=guard_environment,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-            )
-        return process, guard_executable
-
-    def _prepare_external_guard(self) -> Path:
-        source = Path(self.guard_command[0])
-        if (
-            not source.is_absolute()
-            or source.is_symlink()
-            or not source.is_file()
-        ):
-            raise UpgradeCompatibilityError(
-                "Stable UpdateGuard executable is unavailable"
-            )
-        source_digest = _sha256_file(source)
-        version_dir = self.guard_runtime_dir / source_digest
-        version_dir.mkdir(parents=True, exist_ok=True)
-        resolved_version_dir = version_dir.resolve(strict=True)
-        if (
-            version_dir.is_symlink()
-            or resolved_version_dir.is_relative_to(self.layout.root.resolve())
-        ):
-            raise UpgradeCompatibilityError(
-                "UpdateGuard runtime directory is unsafe"
-            )
-        target = resolved_version_dir / "DicePP-UpdateGuard.exe"
-        _atomic_copy(source, target)
-        if (
-            target.is_symlink()
-            or not target.is_file()
-            or _sha256_file(target) != source_digest
-        ):
-            raise UpgradeCompatibilityError(
-                "External UpdateGuard executable digest mismatch"
-            )
-        return target
-
-    def stable_guard_digest(self) -> str | None:
-        """SHA-256 of the stable-root Guard, i.e. its runtime cache dir name."""
-        return _sha256_file(Path(self.guard_command[0]))
-
-    def prune_external_guard_cache(self, keep_digest: str) -> list[str]:
-        """Delete stale external Guard versions, keeping ``keep_digest``.
-
-        Only direct children of ``guard_runtime_dir`` are touched: symlinks
-        and Windows junctions are removed without following, and a real
-        directory is removed recursively only after its resolved path is
-        confirmed to stay inside ``guard_runtime_dir`` (a TOCTOU window
-        between the check and the removal remains, which is acceptable for
-        a per-user LOCALAPPDATA cache).  Returns the removed child names
-        for audit.
-        """
-        if not _GUARD_CACHE_DIGEST_RE.fullmatch(keep_digest):
-            raise ValueError(
-                "UpdateGuard cache keep digest must be a SHA-256 hex string"
-            )
-        runtime_dir = self.guard_runtime_dir
-        if not runtime_dir.is_dir():
-            return []
-        removed: list[str] = []
-        for child in runtime_dir.iterdir():
-            if child.name == keep_digest:
-                continue
-            if child.is_symlink():
-                child.unlink()
-            elif _is_directory_reparse_point(child):
-                # A junction is not a symlink; remove only the reparse
-                # point itself, never the target's contents.
-                os.rmdir(child)
-            elif not child.is_dir():
-                child.unlink()
-            else:
-                if not child.resolve().is_relative_to(runtime_dir):
-                    continue
-                shutil.rmtree(child)
-            removed.append(child.name)
-        return removed
-
-    def validate_rollback_marker(
-        self, detail: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        staged = detail.get("platform_staged")
-        if not isinstance(staged, dict):
-            return None
-        marker_path = Path(str(staged.get("rollback_marker", "")))
-        if (
-            not marker_path.is_absolute()
-            or marker_path.is_symlink()
-            or not marker_path.is_file()
-        ):
-            return None
-        marker = _read_json_object(marker_path)
-        expected_identity = marker.get("manager_identity")
-        try:
-            expected_identity = _validate_process_identity(expected_identity)
-        except UpgradeCompatibilityError:
-            return None
-        if (
-            marker.get("format_version") != 2
-            or marker.get("status")
-            not in {
-                "program_rollback_started",
-                "program_rolled_back",
-                "program_rollback_failed",
-            }
-            or marker.get("transaction_id") != detail.get("transaction_id")
-            or marker.get("target_version") != detail.get("target_version")
-            or marker.get("source_version") != staged.get("source_version")
-            or not _identity_belongs_to_instance(
-                expected_identity, self.layout.root
-            )
-        ):
-            return None
-        return marker
-
-    def _current_version(self) -> str:
-        current_version = self.version_loader()
-        if not isinstance(current_version, str) or current_version == "unknown":
-            raise UpgradeCompatibilityError(
-                "Current Windows program version is unavailable"
-            )
-        return current_version
-
-    def _local_rollback_bundle(
-        self,
-        current_version: str,
-    ) -> tuple[Path, ValidatedVelopackBundle] | None:
-        packages_dir = self.layout.root / "packages"
-        try:
-            assert_contained_no_reparse(
-                packages_dir,
-                root=self.layout.root,
-                allow_missing=True,
-            )
-        except (OSError, UnsafePathError) as exc:
-            raise UpgradeCompatibilityError(
-                f"Velopack bundle cache is unsafe: {exc}"
-            ) from exc
-        if not packages_dir.exists():
-            return None
-        try:
-            assert_directory_no_reparse(packages_dir)
-        except (OSError, UnsafePathError) as exc:
-            raise UpgradeCompatibilityError(
-                f"Velopack bundle cache is not a regular directory: {exc}"
-            ) from exc
-        candidate = packages_dir / VELOPACK_BUNDLE_NAME
-        if not os.path.lexists(candidate):
-            return None
-        try:
-            assert_contained_no_reparse(
-                candidate,
-                root=packages_dir,
-                allow_missing=False,
-            )
-        except (OSError, UnsafePathError) as exc:
-            raise UpgradeCompatibilityError(
-                f"Cached Velopack rollback bundle is unsafe: {exc}"
-            ) from exc
-        identity_path = packages_dir / _LOCAL_VELOPACK_IDENTITY_NAME
-        if (
-            identity_path.is_symlink()
-            or not identity_path.is_file()
-            or identity_path.stat().st_size > 64 * 1024
-        ):
-            raise UpgradeCompatibilityError(
-                "Cached Velopack rollback bundle identity is missing"
-            )
-        try:
-            assert_contained_no_reparse(
-                identity_path,
-                root=packages_dir,
-                allow_missing=False,
-            )
-            identity = _read_json_object(identity_path)
-            if (
-                set(identity)
-                != {
-                    "format_version",
-                    "dicepp_version",
-                    "channel",
-                    "platform",
-                    "arch",
-                    "filename",
-                    "size",
-                    "sha256",
-                }
-                or identity["format_version"] != 1
-                or Version(str(identity["dicepp_version"]))
-                != Version(current_version)
-                or identity["channel"] not in {"stable", "prerelease"}
-                or identity["platform"] != "windows"
-                or identity["arch"] != "amd64"
-                or identity["filename"] != VELOPACK_BUNDLE_NAME
-                or type(identity["size"]) is not int
-                or candidate.stat().st_size != identity["size"]
-                or _sha256_file(candidate) != identity["sha256"]
-            ):
-                raise UpgradeCompatibilityError(
-                    "Cached Velopack rollback bundle identity differs"
-                )
-            validated = validate_velopack_bundle(
-                candidate,
-                expected_dicepp_version=current_version,
-                expected_channel=identity["channel"],
-                expected_size=identity["size"],
-                expected_sha256=identity["sha256"],
-            )
-        except (OSError, ValueError, VelopackBundleError) as exc:
-            raise UpgradeCompatibilityError(
-                f"Cached Velopack rollback bundle is invalid: {exc}"
-            ) from exc
-        return candidate.resolve(), validated
-
-    async def _current_rollback_bundle(
-        self,
-    ) -> tuple[str, Path, str, ValidatedVelopackBundle]:
-        current_version = self._current_version()
-        local = self._local_rollback_bundle(current_version)
-        if local is not None:
-            path, validated = local
-            return current_version, path, _sha256_file(path), validated
-        if self.rollback_bundle_fetcher is None:
-            raise UpgradeCompatibilityError(
-                "A verified current-version Velopack bundle "
-                "is required for automatic rollback"
-            )
-        cached = self._fetched_rollback.get(current_version)
-        if (
-            cached is not None
-            and cached[0].is_file()
-            and not cached[0].is_symlink()
-            and _sha256_file(cached[0]) == cached[1]
-        ):
-            return current_version, *cached
-        try:
-            path, digest = await asyncio.to_thread(
-                self.rollback_bundle_fetcher, current_version
-            )
-            packages_root = assert_contained_no_reparse(
-                self.layout.manager_packages_dir,
-                root=self.layout.root,
-                allow_missing=False,
-            )
-            assert_contained_no_reparse(
-                path,
-                root=packages_root,
-                allow_missing=False,
-            )
-            validated = await asyncio.to_thread(
-                validate_velopack_bundle,
-                path,
-                expected_dicepp_version=current_version,
-                expected_sha256=digest,
-            )
-        except Exception as exc:
-            raise UpgradeCompatibilityError(
-                "The current-version Velopack bundle is unavailable "
-                "locally and could not be fetched from the Release; "
-                "use a manual Windows update"
-            ) from exc
-        self._fetched_rollback[current_version] = (path, digest, validated)
-        return current_version, path, digest, validated
-
-    def _maintain_packages_dir(self, package: VerifiedUpgradePackage) -> str | None:
-        """Best-effort: keep the committed bundle in root/packages.
-
-        Neither Update.exe apply nor DicePP maintains the Velopack packages
-        directory; without this housekeeping the next automatic update would
-        not find its rollback material locally.  A failure here must not
-        invalidate an already healthy commit, so it is reported, not raised.
-        """
-        try:
-            packages_dir = self.layout.root / "packages"
-            assert_contained_no_reparse(
-                packages_dir,
-                root=self.layout.root,
-                allow_missing=True,
-            )
-            packages_dir.mkdir(parents=True, exist_ok=True)
-            assert_contained_no_reparse(
-                packages_dir,
-                root=self.layout.root,
-                allow_missing=False,
-            )
-            assert_directory_no_reparse(packages_dir)
-            validated = self._validate_target_package(package)
-            expected = package.artifact.get("sha256")
-            if not isinstance(expected, str) or not expected:
-                return "Committed bundle digest is unavailable"
-            assert package.bundle_path is not None
-            target = packages_dir / VELOPACK_BUNDLE_NAME
-            if (
-                target.is_symlink()
-                or not target.is_file()
-                or _sha256_file(target) != expected
-            ):
-                _atomic_copy(package.bundle_path, target)
-            if _sha256_file(target) != expected:
-                return "Refreshed rollback bundle digest mismatch"
-            validate_velopack_bundle(
-                target,
-                expected_dicepp_version=package.version,
-                expected_channel=validated.manifest["channel"],
-                expected_size=package.artifact["size"],
-                expected_sha256=expected,
-            )
-            _atomic_json(
-                packages_dir / _LOCAL_VELOPACK_IDENTITY_NAME,
-                {
-                    "format_version": 1,
-                    "dicepp_version": package.version,
-                    "channel": validated.manifest["channel"],
-                    "platform": "windows",
-                    "arch": "amd64",
-                    "filename": VELOPACK_BUNDLE_NAME,
-                    "size": package.artifact["size"],
-                    "sha256": expected,
-                },
-            )
-            return None
-        except (
-            OSError,
-            UnsafePathError,
-            VelopackBundleError,
-            UpgradeCompatibilityError,
-        ) as exc:
-            return str(exc) or type(exc).__name__
-
-    async def rollback(
-        self,
-        package: VerifiedUpgradePackage,
-        *,
-        current: dict[str, Any],
-        staged: dict[str, Any],
-        transaction_id: str,
-    ) -> dict[str, Any]:
-        del current
-        marker = Path(staged["rollback_marker"])
-        if not marker.is_file():
-            raise UpgradeError(
-                "UpdateGuard has not confirmed program rollback",
-                code="guard_rollback_pending",
-            )
-        result = _read_json_object(marker)
-        if (
-            result.get("format_version") != 2
-            or result.get("transaction_id") != transaction_id
-            or result.get("target_version") != package.version
-            or result.get("source_version") != staged.get("source_version")
-            or result.get("status") != "program_rolled_back"
-        ):
-            raise UpgradeError("UpdateGuard rollback marker protocol mismatch")
-        return result
-
-    async def commit(
-        self,
-        package: VerifiedUpgradePackage,
-        *,
-        current: dict[str, Any],
-        staged: dict[str, Any],
-        transaction_id: str,
-    ) -> dict[str, Any]:
-        del current
-        marker = Path(staged["health_marker"])
-        if not marker.is_file():
-            raise UpgradeError(
-                "UpdateGuard health marker is missing",
-                code="guard_health_pending",
-            )
-        result = _read_json_object(marker)
-        if (
-            result.get("format_version") != 2
-            or result.get("transaction_id") != transaction_id
-            or result.get("target_version") != package.version
-            or result.get("status") != "healthy"
-            or not _identity_belongs_to_instance(
-                _validate_process_identity(result.get("manager_identity")),
-                self.layout.root,
-            )
-        ):
-            raise UpgradeError("UpdateGuard did not report healthy")
-        maintenance_error = await asyncio.to_thread(
-            self._maintain_packages_dir, package
-        )
-        if maintenance_error is not None:
-            result = {**result, "packages_maintenance_error": maintenance_error}
-        return result
-
-    def validate_health_marker(
-        self, detail: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        staged = detail.get("platform_staged")
-        if not isinstance(staged, dict):
-            return None
-        path = Path(str(staged.get("health_marker", "")))
-        if not path.is_absolute() or path.is_symlink() or not path.is_file():
-            return None
-        try:
-            marker = _read_json_object(path)
-            identity = _validate_process_identity(marker.get("manager_identity"))
-        except (OSError, ValueError, UpgradeCompatibilityError):
-            return None
-        if (
-            marker.get("format_version") != 2
-            or marker.get("transaction_id") != detail.get("transaction_id")
-            or marker.get("target_version") != detail.get("target_version")
-            or marker.get("status") not in {"healthy", "failed"}
-            or not _identity_belongs_to_instance(identity, self.layout.root)
-        ):
-            return None
-        return marker
-
-
 from .windows_upgrade import SimpleWindowsVelopackUpgradeAdapter  # noqa: E402
+
 
 class UpgradeCoordinator:
     def __init__(
@@ -1307,7 +550,15 @@ class UpgradeCoordinator:
             "change_scope": list(package.release.get("change_scope", [])),
             "downtime_required": True,
             "pre_upgrade_archive": "regular",
-            "automatic_rollback": True,
+            "automatic_rollback": self.platform_adapter.platform != "windows",
+            **(
+                {
+                    "manual_recovery_entry": "DicePP-Recover.cmd",
+                    "recovery_scope": "program_data_runtime",
+                }
+                if self.platform_adapter.platform == "windows"
+                else {}
+            ),
             "estimated_archive_bytes": estimate["input_bytes"],
             "warnings": [
                 "External NapCat/QQ/GitHub/LLM availability is warning-only"
@@ -1378,10 +629,14 @@ class UpgradeCoordinator:
             "phase": "preflight",
             "progress": 5,
             "original_running": [],
+            "runtime_state_captured": False,
             "commit_point": "not_started",
             "rolled_back": False,
             "rollback_status": "not_started",
         }
+        protocol = getattr(self.platform_adapter, "protocol", None)
+        if isinstance(protocol, str) and protocol:
+            detail["platform_protocol"] = protocol
         operation.transition("running", detail=detail)
         self.store.save(operation)
         self._journal(operation, detail)
@@ -1417,6 +672,26 @@ class UpgradeCoordinator:
                 staged = await self.platform_adapter.stage(package, transaction_id)
                 detail["platform_current"] = current
                 detail["platform_staged"] = staged
+                # Persist the recovery path before preparing scripts/metadata.  If
+                # preparation is interrupted, startup recovery can now remove the
+                # exact transaction instead of leaving an upgrade-blocking orphan.
+                self._journal(operation, detail)
+                prepare_recovery = getattr(
+                    self.platform_adapter,
+                    "prepare_recovery",
+                    None,
+                )
+                if callable(prepare_recovery):
+                    staged = await prepare_recovery(
+                        staged,
+                        transaction_id=transaction_id,
+                        source_version=str(current.get("source_version") or ""),
+                        target_version=package.version,
+                        pre_upgrade_filename=str(detail["pre_upgrade_filename"]),
+                        original_running=list(original),
+                    )
+                    detail["platform_staged"] = staged
+                    self._journal(operation, detail)
                 self._phase(operation, detail, "program_switch", 50)
                 detail["commit_point"] = "program_switch_started"
                 self._journal(operation, detail)
@@ -1429,19 +704,23 @@ class UpgradeCoordinator:
                 detail["program_switch"] = switch
                 self._fault("program_switch")
                 if switch.get("handoff_required") is True:
-                    detail["phase"] = "awaiting_update_guard"
+                    detail["phase"] = "awaiting_windows_restart"
                     detail["progress"] = 55
-                    self._journal(operation, detail, phase="awaiting_update_guard")
+                    self._journal(
+                        operation,
+                        detail,
+                        phase="awaiting_windows_restart",
+                    )
                     operation.transition(
                         "running",
-                        message="UpdateGuard is waiting for Manager hand-off",
+                        message="Velopack is applying the Windows update",
                         detail=detail,
                     )
                     self.store.save(operation)
                     asyncio.get_running_loop().call_later(
                         0.25,
                         self.service.request_shutdown,
-                        "windows_update_guard_handoff",
+                        "windows_velopack_handoff",
                     )
                     return operation
                 self._phase(operation, detail, "migration", 65)
@@ -1481,7 +760,6 @@ class UpgradeCoordinator:
             )
             self.store.save(operation)
             self.store.retire_terminal_rollback_journals()
-            self._prune_external_guard_cache(operation, detail)
             return operation
         except Exception as exc:
             rollback = await self._rollback(
@@ -1512,6 +790,7 @@ class UpgradeCoordinator:
         allow_startup_recovery: bool = False,
     ) -> list[dict[str, Any]]:
         recovered: list[dict[str, Any]] = []
+        runtime_state_owned: set[str] = set()
         # The startup maintenance gate blocks user-submitted operations while
         # recovery is pending; recovery itself raises that gate below and must
         # stay exempt from it, otherwise it deadlocks against its own gate and
@@ -1522,55 +801,12 @@ class UpgradeCoordinator:
                 continue
             detail = dict(journal.get("detail") or {})
             transaction_id = str(journal["transaction_id"])
-            rollback_validator = getattr(
-                self.platform_adapter,
-                "validate_rollback_marker",
-                None,
-            )
-            health_validator = getattr(
-                self.platform_adapter,
-                "validate_health_marker",
-                None,
-            )
-            authoritative_rollback = None
-            authoritative_health = None
-            if callable(rollback_validator):
-                try:
-                    authoritative_rollback = rollback_validator(detail)
-                except (OSError, ValueError, json.JSONDecodeError):
-                    # A malformed/unreadable marker is never authoritative.
-                    authoritative_rollback = None
-            if callable(health_validator):
-                try:
-                    authoritative_health = health_validator(detail)
-                except (OSError, ValueError, json.JSONDecodeError):
-                    authoritative_health = None
-            # Terminal rollback adjudication rule (shared with
-            # archive_coordinator.ArchiveCoordinator.recover): a rollback
-            # that already ran its destructive phase and was adjudicated
-            # failed is terminal and requires manual recovery.  Replaying it
-            # after a restart would only repeat the damage (stop Bots,
-            # rebuild the old containers, re-apply the old archive).  A
-            # rollback that failed before the program switch only owes a
-            # best-effort restart and stays retryable.  Exemption: when the
-            # UpdateGuard rollback marker already validated
-            # program_rolled_back, the destructive program rollback is known
-            # to have completed and only data recovery/restart/health
-            # failed; retrying via _recover_update_guard_handoff never
-            # replays the destructive phase, so the journal stays
-            # recoverable instead of terminal.
-            if is_terminal_rollback_failure(
-                journal,
-                authoritative_rollback=authoritative_rollback,
+            if (
+                isinstance(self.platform_adapter, SimpleWindowsVelopackUpgradeAdapter)
+                and detail.get("platform_protocol") == "windows-simple-v1"
+                and detail.get("runtime_state_captured") is True
             ):
-                recovered.append(
-                    {
-                        "transaction_id": transaction_id,
-                        "action": "rollback_failed",
-                        "manual_recovery_required": True,
-                    }
-                )
-                continue
+                runtime_state_owned.add(transaction_id)
             operation = (
                 self.store.get(str(journal.get("operation_id")))
                 if journal.get("operation_id")
@@ -1578,174 +814,31 @@ class UpgradeCoordinator:
             )
             if operation is None:
                 operation = self.new_operation()
-            guard_handoff = self._is_guard_handoff(
-                journal,
-                detail,
-                rollback_validator=rollback_validator,
-                health_validator=health_validator,
-            )
-            if guard_handoff:
-                self.service.set_startup_maintenance_gate(True)
-                recovery_allowed = True
-            if (
-                isinstance(authoritative_rollback, dict)
-                and authoritative_rollback.get("status") == "program_rolled_back"
+            if isinstance(
+                self.platform_adapter,
+                SimpleWindowsVelopackUpgradeAdapter,
             ):
-                guard_result = await self._recover_update_guard_handoff(
-                    operation,
-                    None,
-                    detail,
-                    validated_rollback_marker=authoritative_rollback,
-                    allow_startup_recovery=recovery_allowed,
-                )
-                recovered.append(
-                    {
-                        "transaction_id": transaction_id,
-                        **guard_result,
-                    }
-                )
-                continue
-            guard_waiting_for_rollback = (
-                isinstance(authoritative_rollback, dict)
-                and authoritative_rollback.get("status")
-                == "program_rollback_started"
-            )
-            guard_reported_health_failure = (
-                isinstance(authoritative_health, dict)
-                and authoritative_health.get("status") == "failed"
-            )
-            guard_health_committed = (
-                isinstance(authoritative_health, dict)
-                and authoritative_health.get("status") == "healthy"
-            )
-            guard_pending = (
-                guard_handoff
-                and not guard_health_committed
-                and not (
-                    isinstance(authoritative_rollback, dict)
-                    and authoritative_rollback.get("status")
-                    in {"program_rolled_back", "program_rollback_failed"}
-                )
-            )
-            if guard_pending:
-                self._normalize_guard_handoff(
+                simple_result = await self._recover_simple_windows_handoff(
+                    journal,
                     operation,
                     detail,
-                    marker=authoritative_rollback or authoritative_health,
+                    prepare_only=prepare_windows_handoff_only,
                 )
-            preparing_handoff = guard_pending or (
-                journal.get("phase") == "awaiting_update_guard"
-            )
-            if preparing_handoff and prepare_windows_handoff_only:
-                self.service.set_startup_maintenance_gate(True)
-                recovery_allowed = True
-                try:
-                    prepared = self._publish_started_marker(detail)
-                except BaseException:
-                    self.service.set_startup_maintenance_gate(False)
-                    raise
-                if guard_waiting_for_rollback or guard_reported_health_failure:
-                    self._handoff_status = dict(
-                        authoritative_rollback or authoritative_health
-                    )
-                recovered.append(
-                    {
-                        "transaction_id": transaction_id,
-                        "action": "awaiting_api_bind",
-                        "result": prepared,
-                    }
-                )
-                continue
-            if guard_pending and (
-                guard_waiting_for_rollback or guard_reported_health_failure
-            ):
-                marker = authoritative_rollback or authoritative_health
-                self._handoff_status = dict(marker)
-                self.service.request_shutdown(
-                    "windows_update_guard_rollback_pending"
-                )
-                recovered.append(
-                    {
-                        "transaction_id": transaction_id,
-                        "action": "awaiting_guard_rollback",
-                        "result": marker,
-                    }
-                )
-                continue
-            try:
-                release_snapshot = detail.get("release_snapshot")
-                if not isinstance(release_snapshot, dict):
-                    raise UpgradeCompatibilityError(
-                        "Interrupted upgrade has no durable Release snapshot"
-                    )
-                package = self._package_from_release(
-                    str(detail.get("target_version") or ""),
-                    release_snapshot,
-                )
-            except Exception as exc:
-                cleanup_error = await self._cleanup_platform_staging(detail)
-                operation.transition(
-                    "failed",
-                    message="Interrupted upgrade package is unavailable",
-                    detail={
-                        **detail,
-                        "recovered": True,
-                        "recovery_error": str(exc),
-                        "staging_cleanup_error": cleanup_error,
-                    },
-                )
-                self.store.save(operation)
-                recovered.append(
-                    {"transaction_id": transaction_id, "action": "package_missing"}
-                )
-                continue
-            if detail.get("commit_point") == "health_passed":
-                if (
-                    not callable(health_validator)
-                    or guard_health_committed
-                ):
-                    detail["platform_commit"] = (
-                        await self.platform_adapter.commit(
-                            package,
-                            current=dict(detail.get("platform_current") or {}),
-                            staged=dict(detail.get("platform_staged") or {}),
-                            transaction_id=transaction_id,
-                        )
-                    )
-                    self._journal(
-                        operation, detail, phase="committed", status="committed"
-                    )
-                    operation.transition(
-                        "succeeded",
-                        message="Upgrade commit finalized after Manager restart",
-                        detail={**detail, "recovered": True},
-                    )
-                    self.store.save(operation)
-                    self.store.retire_terminal_rollback_journals()
-                    self._prune_external_guard_cache(operation, detail)
-                    # Commit, journal, and operation state are now durable.
-                    # Later Guard refresh/cleanup may retry independently and
-                    # must not keep ordinary runtime lifecycle work blocked.
-                    self.service.set_startup_maintenance_gate(False)
+                if simple_result is not None:
                     recovered.append(
-                        {"transaction_id": transaction_id, "action": "finalized"}
+                        {"transaction_id": transaction_id, **simple_result}
                     )
                     continue
-            if guard_pending or journal.get("phase") == "awaiting_update_guard":
-                guard_result = await self._recover_update_guard_handoff(
-                    operation,
-                    package,
-                    detail,
-                    allow_startup_recovery=recovery_allowed,
-                )
-                recovered.append(
-                    {
-                        "transaction_id": transaction_id,
-                        **guard_result,
-                    }
-                )
+            if is_terminal_rollback_failure(journal):
+                recovered.append({
+                    "transaction_id": transaction_id,
+                    "action": "rollback_failed",
+                    "manual_recovery_required": True,
+                })
                 continue
             if detail.get("commit_point") == "not_started":
+                # No program/data switch occurred, so abort does not depend on
+                # the target package cache still being available.
                 self.archive_housekeeping.cleanup_inprogress()
                 cleanup_error = await self._cleanup_platform_staging(detail)
                 restart_error = await self.runtime_support.best_effort_restart(
@@ -1781,6 +874,72 @@ class UpgradeCoordinator:
                 self.store.save(operation)
                 recovered.append(
                     {"transaction_id": transaction_id, "action": status}
+                )
+                continue
+            try:
+                release_snapshot = detail.get("release_snapshot")
+                if not isinstance(release_snapshot, dict):
+                    raise UpgradeCompatibilityError(
+                        "Interrupted upgrade has no durable Release snapshot"
+                    )
+                package = self._package_from_release(
+                    str(detail.get("target_version") or ""),
+                    release_snapshot,
+                )
+            except Exception as exc:
+                if (
+                    isinstance(
+                        self.platform_adapter,
+                        SimpleWindowsVelopackUpgradeAdapter,
+                    )
+                    and detail.get("commit_point") == "health_passed"
+                ):
+                    finalized = await self._finalize_recovered_commit(
+                        operation,
+                        None,
+                        detail,
+                        transaction_id=transaction_id,
+                        package_error=str(exc) or type(exc).__name__,
+                    )
+                    recovered.append({
+                        "transaction_id": transaction_id,
+                        "action": (
+                            "finalized_with_package_warning"
+                            if finalized
+                            else "commit_cleanup_pending"
+                        ),
+                    })
+                    continue
+                cleanup_error = await self._cleanup_platform_staging(detail)
+                operation.transition(
+                    "failed",
+                    message="Interrupted upgrade package is unavailable",
+                    detail={
+                        **detail,
+                        "recovered": True,
+                        "recovery_error": str(exc),
+                        "staging_cleanup_error": cleanup_error,
+                    },
+                )
+                self.store.save(operation)
+                recovered.append(
+                    {"transaction_id": transaction_id, "action": "package_missing"}
+                )
+                continue
+            if detail.get("commit_point") == "health_passed":
+                finalized = await self._finalize_recovered_commit(
+                    operation,
+                    package,
+                    detail,
+                    transaction_id=transaction_id,
+                )
+                recovered.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "action": (
+                            "finalized" if finalized else "commit_cleanup_pending"
+                        ),
+                    }
                 )
                 continue
             rollback = await self._rollback(
@@ -1839,138 +998,409 @@ class UpgradeCoordinator:
                     ),
                 }
             )
+        for result in recovered:
+            if str(result.get("transaction_id") or "") in runtime_state_owned:
+                result["owns_runtime_state"] = True
         return recovered
 
-    async def _recover_update_guard_handoff(
+    async def _recover_simple_windows_handoff(
         self,
+        journal: dict[str, Any],
         operation: ManagerOperation,
-        package: VerifiedUpgradePackage | None,
         detail: dict[str, Any],
         *,
-        validated_rollback_marker: dict[str, Any] | None = None,
-        allow_startup_recovery: bool = False,
-    ) -> dict[str, Any]:
-        staged = dict(detail.get("platform_staged") or {})
-        rollback_marker = Path(str(staged.get("rollback_marker", "")))
-        marker = validated_rollback_marker
-        marker_was_validated = marker is not None
-        if marker is None:
-            validator = getattr(
-                self.platform_adapter, "validate_rollback_marker", None
-            )
-            if callable(validator):
-                marker = validator(detail)
-                marker_was_validated = marker is not None
-            elif rollback_marker.is_file() and not rollback_marker.is_symlink():
-                marker = _read_json_object(rollback_marker)
-        if isinstance(marker, dict):
-            marker_matches = marker.get("transaction_id") == detail["transaction_id"]
-            if (
-                marker_matches
-                and marker.get("status") == "program_rollback_started"
-            ):
-                self._handoff_status = dict(marker)
-                self.service.request_shutdown(
-                    "windows_update_guard_rollback_pending"
+        prepare_only: bool,
+    ) -> dict[str, Any] | None:
+        """Resume only the source-owned simple Windows recovery contract."""
+
+        transaction_id = str(detail.get("transaction_id") or "")
+        simple_protocol = detail.get("platform_protocol") == "windows-simple-v1"
+        if not simple_protocol:
+            # rc20 is a clean protocol boundary: old Guard journals have no
+            # discriminator and are evidence only.  Never interpret any of
+            # their markers, phases, or commit points as the simple protocol.
+            return {"action": "ignored_legacy_windows_upgrade"}
+        manual = self.platform_adapter.load_manual_restore_request(detail)
+        persisted_rollback = detail.get("rollback_result")
+        if (
+            manual is None
+            and detail.get("platform_protocol") == "windows-simple-v1"
+            and detail.get("phase")
+            in {"manual_data_restored", "manual_cleanup_failed"}
+            and isinstance(persisted_rollback, dict)
+            and persisted_rollback.get("succeeded") is True
+        ):
+            staged = detail.get("platform_staged")
+            manual = {
+                "source_version": (
+                    staged.get("source_version")
+                    if isinstance(staged, dict)
+                    else ""
                 )
-                return {
-                    "action": "awaiting_guard_rollback",
-                    "result": marker,
+            }
+        if manual is not None:
+            self.service.set_startup_maintenance_gate(True)
+            source_version = str(manual.get("source_version") or "")
+            actual_version = get_version()
+            try:
+                source_is_running = (
+                    actual_version != "unknown"
+                    and source_version
+                    and Version(actual_version) == Version(source_version)
+                )
+            except Exception:
+                source_is_running = False
+            if not source_is_running:
+                blocked_detail = {
+                    **detail,
+                    "phase": "manual_restore_blocked",
+                    "manual_restore": {
+                        "requested": True,
+                        "program_directory_restored": False,
+                        "data_runtime_restored": False,
+                        "error": (
+                            f"Running Manager version {actual_version!r} does not "
+                            f"match recovery source {source_version!r}"
+                        ),
+                    },
+                    "manual_recovery_required": True,
                 }
-            if marker_matches and marker.get("status") == "program_rolled_back":
+                self._journal(
+                    operation,
+                    blocked_detail,
+                    phase="manual_restore_blocked",
+                    status="rollback_failed",
+                )
+                operation.transition(
+                    "failed",
+                    message=(
+                        "Manual recovery marker belongs to another Manager version"
+                    ),
+                    detail=blocked_detail,
+                )
+                self.store.save(operation)
+                return {
+                    "action": "manual_restore_blocked",
+                    "actual_version": actual_version,
+                    "source_version": source_version,
+                    "program_directory_restored": False,
+                    "data_runtime_restored": False,
+                    "manual_recovery_required": True,
+                }
+            if detail.get("phase") == "manual_restore_failed":
+                return {
+                    "action": "manual_restore_failed",
+                    "program_directory_restored": True,
+                    "data_runtime_restored": False,
+                    "manual_recovery_required": True,
+                }
+            if (
+                detail.get("phase")
+                in {"manual_data_restored", "manual_cleanup_failed"}
+                and isinstance(persisted_rollback, dict)
+                and persisted_rollback.get("succeeded") is True
+            ):
+                # Data and Runtime restoration already completed before the
+                # prior process died.  Do not replay destructive restoration;
+                # resume only recovery-material cleanup and terminal recording.
+                rollback = dict(persisted_rollback)
+            else:
+                detail.update(
+                    {
+                        "phase": "manual_data_restore",
+                        "manual_restore": {
+                            "requested": True,
+                            "program_directory_restored": True,
+                            "data_runtime_restored": False,
+                        },
+                    }
+                )
+                self._journal(
+                    operation,
+                    detail,
+                    phase="manual_data_restore",
+                    status="interrupted",
+                )
                 rollback = await self._rollback(
                     operation,
-                    package,
+                    None,
                     detail,
-                    program_already_restored=marker_was_validated,
-                    allow_startup_recovery=allow_startup_recovery,
+                    program_already_restored=True,
+                    allow_startup_recovery=True,
                 )
-                rollback_succeeded = rollback.get("succeeded") is True
-                recovery_error = (
-                    None
-                    if rollback_succeeded
-                    else str(
-                        rollback.get("error")
-                        or "Program rollback completed but data recovery failed"
-                    )
+            if rollback.get("succeeded") is not True:
+                failed_detail = {
+                    **detail,
+                    "phase": "manual_restore_failed",
+                    "manual_restore": {
+                        "requested": True,
+                        "program_directory_restored": True,
+                        "data_runtime_restored": False,
+                        "error": str(
+                            rollback.get("error")
+                            or "Pre-upgrade data or Runtime restoration failed"
+                        ),
+                    },
+                    "rollback_result": rollback,
+                    "manual_recovery_required": True,
+                }
+                self._journal(
+                    operation,
+                    failed_detail,
+                    phase="manual_restore_failed",
+                    status="rollback_failed",
                 )
                 operation.transition(
                     "failed",
                     message=(
-                        "UpdateGuard restored the previous program and data"
-                        if rollback_succeeded
-                        else "Previous program is active but data recovery failed; "
-                        "manual recovery is required"
+                        "Previous program directory was restored, but its data "
+                        "or Runtime state could not be restored"
                     ),
-                    detail={
-                        **detail,
-                        "recovered": True,
-                        "rolled_back": rollback_succeeded,
-                        "rollback_status": (
-                            "succeeded" if rollback_succeeded else "failed"
-                        ),
-                        "rollback_result": rollback,
-                        **(
-                            {"recovery_error": recovery_error}
-                            if recovery_error is not None
-                            else {}
-                        ),
-                    },
+                    detail=failed_detail,
                 )
                 self.store.save(operation)
-                if rollback_succeeded:
-                    self.service.set_startup_maintenance_gate(False)
-                    return {"action": "rolled_back", "result": rollback}
                 return {
-                    "action": "rollback_failed",
+                    "action": "manual_restore_failed",
                     "result": rollback,
+                    "program_directory_restored": True,
+                    "data_runtime_restored": False,
                     "manual_recovery_required": True,
                 }
-            if marker_matches and marker.get("status") == "program_rollback_failed":
-                recovery_error = str(
-                    marker.get("rollback_error")
-                    or "UpdateGuard could not restore the previous program"
+
+            cleanup_error = await self.runtime_support.best_effort_restore_state(
+                _string_list(detail.get("original_running")),
+                allow_startup_recovery=True,
+            )
+            if cleanup_error is not None:
+                cleanup_error = (
+                    "Restored Runtime state could not be reasserted before cleanup: "
+                    f"{cleanup_error}"
+                )
+            else:
+                cleanup_error = await self.platform_adapter.finish_manual_restore(
+                    dict(detail.get("platform_staged") or {}),
+                    transaction_id,
+                )
+            if cleanup_error is not None:
+                cleanup_detail = {
+                    **detail,
+                    "phase": "manual_cleanup_failed",
+                    "manual_restore": {
+                        "requested": True,
+                        "program_directory_restored": True,
+                        "data_runtime_restored": True,
+                        "cleanup_warning": cleanup_error,
+                    },
+                    "rollback_result": rollback,
+                    "rolled_back": True,
+                    "rollback_status": "succeeded",
+                }
+                self._journal(
+                    operation,
+                    cleanup_detail,
+                    phase="manual_cleanup_failed",
+                    status="interrupted",
+                )
+                operation.transition(
+                    "interrupted",
+                    message=(
+                        "Manual restore succeeded; recovery-material cleanup "
+                        "will be retried"
+                    ),
+                    detail=cleanup_detail,
+                )
+                self.store.save(operation)
+                return {
+                    "action": "manual_cleanup_pending",
+                    "result": rollback,
+                    "cleanup_warning": cleanup_error,
+                }
+            restored_detail = {
+                **detail,
+                "phase": "manual_restored",
+                "manual_restore": {
+                    "requested": True,
+                    "program_directory_restored": True,
+                    "data_runtime_restored": True,
+                },
+                "rollback_result": rollback,
+                "rolled_back": True,
+                "rollback_status": "succeeded",
+            }
+            self._journal(
+                operation,
+                restored_detail,
+                phase="manual_restored",
+                status="rolled_back",
+            )
+            operation.transition(
+                "failed",
+                message="Upgrade was manually restored to the previous version",
+                detail=restored_detail,
+            )
+            self.store.save(operation)
+            self.service.set_startup_maintenance_gate(False)
+            return {
+                "action": "manual_restored",
+                "result": rollback,
+                "cleanup_warning": None,
+            }
+
+        if simple_protocol and detail.get("commit_point") == "health_passed":
+            # The target health decision is durable.  Let the generic recovery
+            # finalizer retry commit/cleanup idempotently; this is rc20 state,
+            # not a legacy Guard phase.
+            self.service.set_startup_maintenance_gate(True)
+            return None
+        if (
+            detail.get("commit_point") == "not_started"
+            and detail.get("platform_protocol") == "windows-simple-v1"
+        ):
+            # rc20 staging/preparation was interrupted before Velopack started.
+            # Generic recovery owns the exact transaction cleanup and Runtime
+            # state restoration for this pre-switch state.
+            return None
+        if (
+            simple_protocol
+            and detail.get("commit_point") == "program_switch_started"
+            and detail.get("phase") != "target_health_failed"
+        ):
+            actual_version = get_version()
+            target_version = str(detail.get("target_version") or "")
+            current = detail.get("platform_current")
+            staged = detail.get("platform_staged")
+            source_version = str(
+                (
+                    current.get("source_version")
+                    if isinstance(current, dict)
+                    else None
+                )
+                or (
+                    staged.get("source_version")
+                    if isinstance(staged, dict)
+                    else None
+                )
+                or ""
+            )
+            try:
+                running_target = (
+                    actual_version != "unknown"
+                    and target_version
+                    and Version(actual_version) == Version(target_version)
+                )
+                running_source = (
+                    actual_version != "unknown"
+                    and source_version
+                    and Version(actual_version) == Version(source_version)
+                )
+            except Exception:
+                running_target = running_source = False
+            if running_target:
+                # Velopack completed before the source Manager could persist its
+                # handoff phase.  Normalize durably and use the ordinary target
+                # migration/health/commit path below.
+                detail["phase"] = "awaiting_windows_restart"
+                self._journal(
+                    operation,
+                    detail,
+                    phase="awaiting_windows_restart",
+                    status="interrupted",
+                )
+            elif running_source:
+                # Velopack did not replace the program.  No data migration has
+                # started, so downgrade to the package-independent pre-switch
+                # abort path instead of pretending program rollback occurred.
+                detail["commit_point"] = "not_started"
+                detail["phase"] = "switch_aborted_on_source"
+                self._journal(
+                    operation,
+                    detail,
+                    phase="switch_aborted_on_source",
+                    status="interrupted",
+                )
+                return None
+            else:
+                self.service.set_startup_maintenance_gate(True)
+                blocked_detail = {
+                    **detail,
+                    "phase": "switch_identity_unknown",
+                    "actual_version": actual_version,
+                    "source_version": source_version,
+                    "manual_recovery_required": True,
+                }
+                self._journal(
+                    operation,
+                    blocked_detail,
+                    phase="switch_identity_unknown",
+                    status="rollback_failed",
                 )
                 operation.transition(
                     "failed",
                     message=(
-                        "UpdateGuard could not restore the previous program; "
-                        "manual recovery is required"
+                        "Interrupted Windows switch cannot be classified; "
+                        "recovery material was preserved"
                     ),
-                    detail={
-                        **detail,
-                        "recovered": True,
-                        "rolled_back": False,
-                        "rollback_status": "failed",
-                        "rollback_result": marker,
-                        "recovery_error": recovery_error,
-                    },
+                    detail=blocked_detail,
                 )
                 self.store.save(operation)
                 return {
-                    "action": "rollback_failed",
-                    "result": marker,
+                    "action": "manual_recovery_required",
+                    "error": "windows_switch_identity_unknown",
+                    "program_directory_restored": False,
                     "manual_recovery_required": True,
                 }
-        health_marker = Path(str(staged.get("health_marker", "")))
-        health_marker_published = False
+        if detail.get("phase") not in {
+            "awaiting_windows_restart",
+            "target_health_failed",
+        }:
+            return None
+        if detail.get("phase") == "target_health_failed":
+            self.service.set_startup_maintenance_gate(True)
+            return {
+                "action": "manual_recovery_required",
+                "program_directory_restored": False,
+                "manual_recovery_required": True,
+            }
+        self.service.set_startup_maintenance_gate(True)
+        if prepare_only:
+            return {"action": "awaiting_api_bind"}
         try:
-            started = self._publish_started_marker(detail)
-            if started["status"] != "started":
-                raise UpgradeCompatibilityError(started["error"])
+            actual_version = get_version()
+            target_version = str(detail.get("target_version") or "")
+            if (
+                actual_version == "unknown"
+                or not target_version
+                or Version(actual_version) != Version(target_version)
+            ):
+                raise UpgradeCompatibilityError(
+                    f"Updated Manager version {actual_version!r} does not match "
+                    f"target {target_version!r}"
+                )
+            package: VerifiedUpgradePackage | None = None
+            package_error: str | None = None
+            release_snapshot = detail.get("release_snapshot")
+            if not isinstance(release_snapshot, dict):
+                package_error = "Interrupted upgrade has no durable Release snapshot"
+            else:
+                try:
+                    package = self._package_from_release(
+                        target_version,
+                        release_snapshot,
+                    )
+                except Exception as package_exc:
+                    package_error = str(package_exc) or type(package_exc).__name__
             with self._maintenance_context(
                 None,
                 timeout=1,
-                allow_startup_recovery=allow_startup_recovery,
+                allow_startup_recovery=True,
             ) as maintenance:
                 migrations = await asyncio.to_thread(
                     self.runtime_support.migrate_and_validate_schema
                 )
-                await self.runtime_support.restart(
-                    maintenance, _string_list(detail.get("original_running"))
-                )
+                original = _string_list(detail.get("original_running"))
+                await self.runtime_support.restart(maintenance, original)
                 health = await self.runtime_support.hard_health(
-                    _string_list(detail.get("original_running")),
+                    original,
                     control_baseline=detail.get("control_heartbeat_baseline"),
                     control_gate=str(
                         detail.get("control_gate") or CONTROL_GATE_ENFORCED
@@ -1986,122 +1416,72 @@ class UpgradeCoordinator:
                 }
             )
             self._journal(operation, detail, phase="healthy")
-            marker = {
-                "format_version": 2,
-                "transaction_id": detail["transaction_id"],
-                "target_version": detail["target_version"],
-                "status": "healthy",
-                "health": health,
-                "manager_identity": started["manager_identity"],
-                "updated_at": utc_now(),
-            }
-            _atomic_json(health_marker, marker)
-            self._handoff_status = marker
-            health_marker_published = True
-            commit = await self.platform_adapter.commit(
-                package,
-                current=dict(detail.get("platform_current") or {}),
-                staged=staged,
-                transaction_id=str(detail["transaction_id"]),
-            )
-            detail["platform_commit"] = commit
-            detail["phase"] = "committed"
-            detail["progress"] = 100
-            self._journal(
-                operation, detail, phase="committed", status="committed"
-            )
-            operation.transition(
-                "succeeded",
-                message=f"Upgrade to {package.version} committed after UpdateGuard hand-off",
-                detail={**detail, "recovered": True},
-            )
-            self.store.save(operation)
-            self.store.retire_terminal_rollback_journals()
-            self._prune_external_guard_cache(operation, detail)
-            self.archive_housekeeping.apply_retention()
-            self.service.set_startup_maintenance_gate(False)
-            return {"action": "committed"}
         except Exception as exc:
-            if health_marker_published:
-                # Publishing a healthy marker is the Windows program commit
-                # decision.  Never tell the guard to downgrade after that
-                # point; a later Manager can finalize the durable "healthy"
-                # journal deterministically.
-                self.service.set_startup_maintenance_gate(False)
-                return {
-                    "action": "healthy_marker_published",
-                    "error": str(exc) or type(exc).__name__,
-                }
-            marker = {
-                "format_version": 2,
-                "transaction_id": detail["transaction_id"],
-                "target_version": detail["target_version"],
-                "status": "failed",
-                "error": str(exc) or type(exc).__name__,
-                "manager_identity": _current_process_identity(),
-                "updated_at": utc_now(),
+            target_runtime_stop_error = None
+            try:
+                with self._maintenance_context(
+                    None,
+                    timeout=1,
+                    allow_startup_recovery=True,
+                ) as maintenance:
+                    await self.runtime_support.quiesce(maintenance)
+            except Exception as stop_exc:
+                target_runtime_stop_error = (
+                    str(stop_exc) or type(stop_exc).__name__
+                )
+            failed_detail = {
+                **detail,
+                "phase": "target_health_failed",
+                "new_version_health_error": str(exc) or type(exc).__name__,
+                "target_runtime_stopped": target_runtime_stop_error is None,
+                **(
+                    {"target_runtime_stop_error": target_runtime_stop_error}
+                    if target_runtime_stop_error is not None
+                    else {}
+                ),
+                "manual_recovery_required": True,
+                "manual_restore": {
+                    "requested": False,
+                    "program_directory_restored": False,
+                    "data_runtime_restored": False,
+                },
             }
-            _atomic_json(health_marker, marker)
-            self._handoff_status = marker
-            asyncio.get_running_loop().call_later(
-                0.25,
-                self.service.request_shutdown,
-                "windows_update_guard_rollback",
-            )
             self._journal(
                 operation,
-                {**detail, "new_version_health_error": marker["error"]},
-                phase="awaiting_update_guard",
-                status="interrupted",
+                failed_detail,
+                phase="target_health_failed",
+                status="rollback_failed",
             )
             operation.transition(
                 "failed",
-                message=marker["error"],
-                detail={
-                    **detail,
-                    "phase": "awaiting_program_rollback",
-                    "new_version_health_error": marker["error"],
-                    "rolled_back": False,
-                },
+                message=(
+                    "Updated Windows program did not pass local health checks; "
+                    "run DicePP-Recover.cmd after closing DicePP"
+                ),
+                detail=failed_detail,
             )
             self.store.save(operation)
-            return {"action": "health_failed_waiting_guard", "error": marker["error"]}
+            return {
+                "action": "manual_recovery_required",
+                "error": failed_detail["new_version_health_error"],
+                "program_directory_restored": False,
+                "manual_recovery_required": True,
+            }
 
-    def _publish_started_marker(self, detail: dict[str, Any]) -> dict[str, Any]:
-        staged = dict(detail.get("platform_staged") or {})
-        path = Path(str(staged.get("started_marker", "")))
-        if not path.is_absolute():
-            raise UpgradeCompatibilityError(
-                "UpdateGuard started marker path is unavailable"
-            )
-        identity = _current_process_identity()
-        actual_version = get_version()
-        target_version = str(detail.get("target_version") or "")
-        valid_identity = _identity_belongs_to_instance(identity, self.layout.root)
-        valid_version = (
-            actual_version != "unknown"
-            and target_version
-            and Version(actual_version) == Version(target_version)
+        # Once health_passed is durable, cleanup/commit persistence failures must
+        # never be reclassified as target-health failures.  A crash or exception
+        # here leaves the healthy journal recoverable and the commit is retried
+        # idempotently on the next startup.
+        finalized = await self._finalize_recovered_commit(
+            operation,
+            package,
+            detail,
+            transaction_id=transaction_id,
+            package_error=package_error,
         )
-        marker = {
-            "format_version": 2,
-            "transaction_id": detail["transaction_id"],
-            "target_version": target_version,
-            "actual_version": actual_version,
-            "status": "started" if valid_identity and valid_version else "failed",
-            "manager_identity": identity,
-            "updated_at": utc_now(),
+        return {
+            "action": "committed" if finalized else "commit_cleanup_pending"
         }
-        if not valid_identity:
-            marker["error"] = "Updated Manager executable is outside instance root"
-        elif not valid_version:
-            marker["error"] = (
-                f"Updated Manager version {actual_version!r} does not match "
-                f"target {target_version!r}"
-            )
-        _atomic_json(path, marker)
-        self._handoff_status = marker
-        return marker
 
     def mark_api_ready(self) -> None:
         self._api_ready.set()
@@ -2110,85 +1490,7 @@ class UpgradeCoordinator:
         await self._api_ready.wait()
 
     def handoff_health(self) -> dict[str, Any] | None:
-        if self._handoff_status is not None:
-            return dict(self._handoff_status)
-        for journal in self.store.list_recoverable_journals():
-            if journal.get("kind") != UPGRADE_JOURNAL_KIND:
-                continue
-            detail = dict(journal.get("detail") or {})
-            if not self._is_guard_handoff(
-                journal,
-                detail,
-                rollback_validator=getattr(
-                    self.platform_adapter, "validate_rollback_marker", None
-                ),
-                health_validator=getattr(
-                    self.platform_adapter, "validate_health_marker", None
-                ),
-            ):
-                continue
-            staged = dict(detail.get("platform_staged") or {})
-            for name in (
-                "rollback_marker",
-                "health_marker",
-                "started_marker",
-            ):
-                path = Path(str(staged.get(name, "")))
-                if path.is_file() and not path.is_symlink():
-                    marker = _read_json_object(path)
-                    if (
-                        marker.get("transaction_id") == detail.get("transaction_id")
-                        and marker.get("target_version")
-                        == detail.get("target_version")
-                    ):
-                        return marker
-        return None
-
-    def _is_guard_handoff(
-        self,
-        journal: dict[str, Any],
-        detail: dict[str, Any],
-        *,
-        rollback_validator,
-        health_validator,
-    ) -> bool:
-        if (
-            not callable(rollback_validator)
-            or not callable(health_validator)
-            or journal.get("kind") != UPGRADE_JOURNAL_KIND
-            or detail.get("commit_point") == "not_started"
-        ):
-            return False
-        staged = detail.get("platform_staged")
-        if not isinstance(staged, dict):
-            return False
-        return all(
-            isinstance(staged.get(name), str) and staged[name]
-            for name in (
-                "started_marker",
-                "health_marker",
-                "rollback_marker",
-            )
-        )
-
-    def _normalize_guard_handoff(
-        self,
-        operation: ManagerOperation,
-        detail: dict[str, Any],
-        *,
-        marker: dict[str, Any] | None,
-    ) -> None:
-        detail["phase"] = "awaiting_update_guard"
-        if isinstance(marker, dict):
-            detail["guard_status"] = marker.get("status")
-        self._journal(
-            operation,
-            detail,
-            phase="awaiting_update_guard",
-            status="interrupted",
-        )
-        operation.detail = dict(detail)
-        self.store.save(operation)
+        return dict(self._handoff_status) if self._handoff_status is not None else None
 
     async def _rollback(
         self,
@@ -2245,7 +1547,7 @@ class UpgradeCoordinator:
             ) as maintenance:
                 await self.runtime_support.quiesce(maintenance)
                 if program_already_restored:
-                    program = {"already_restored_by_update_guard": True}
+                    program = {"already_restored_by_user": True}
                 else:
                     if package is None:
                         raise UpgradeError(
@@ -2281,11 +1583,22 @@ class UpgradeCoordinator:
                     control_failure_is_warning=True,
                 )
         except Exception as exc:
-            cleanup_error = await self._cleanup_platform_staging(detail)
+            cleanup_error = None
+            if not program_already_restored:
+                cleanup_error = await self._cleanup_platform_staging(detail)
             result = {
                 "succeeded": False,
                 "error": str(exc) or type(exc).__name__,
                 "staging_cleanup_error": cleanup_error,
+                **(
+                    {
+                        "staging_cleanup_skipped": (
+                            "manual_program_directory_already_restored"
+                        )
+                    }
+                    if program_already_restored
+                    else {}
+                ),
             }
             self._journal(
                 operation,
@@ -2311,22 +1624,147 @@ class UpgradeCoordinator:
                 "Rollback retention cleanup failed: "
                 f"{str(exc) or type(exc).__name__}"
             ]
+        journal_phase = (
+            "manual_data_restored" if program_already_restored else "rolled_back"
+        )
         self._journal(
             operation,
-            {**detail, "rollback_result": result},
-            phase="rolled_back",
-            status="rolled_back",
+            {**detail, "phase": journal_phase, "rollback_result": result},
+            phase=journal_phase,
+            status="interrupted" if program_already_restored else "rolled_back",
         )
         return result
+
+    async def _finalize_recovered_commit(
+        self,
+        operation: ManagerOperation,
+        package: VerifiedUpgradePackage | None,
+        detail: dict[str, Any],
+        *,
+        transaction_id: str,
+        package_error: str | None = None,
+    ) -> bool:
+        """Idempotently finalize a platform commit after durable target health."""
+
+        simple_windows = isinstance(
+            self.platform_adapter,
+            SimpleWindowsVelopackUpgradeAdapter,
+        )
+        if simple_windows:
+            restart_error = await self.runtime_support.best_effort_restore_state(
+                _string_list(detail.get("original_running")),
+                allow_startup_recovery=True,
+            )
+            if restart_error is not None:
+                detail["platform_commit"] = {
+                    "status": "cleanup_pending",
+                    "recovery_material_removed": False,
+                    "warnings": [
+                        "Target Runtime state could not be reasserted before cleanup: "
+                        f"{restart_error}"
+                    ],
+                }
+            elif package is None:
+                cleanup_error = await self._cleanup_platform_staging(detail)
+                warnings = [
+                    "Target package was unavailable during post-health finalization: "
+                    f"{package_error or 'unknown package error'}"
+                ]
+                if cleanup_error is not None:
+                    warnings.append(cleanup_error)
+                detail["platform_commit"] = {
+                    "status": "committed",
+                    "recovery_material_removed": cleanup_error is None,
+                    "warnings": warnings,
+                }
+            else:
+                detail["platform_commit"] = await self.platform_adapter.commit(
+                    package,
+                    current=dict(detail.get("platform_current") or {}),
+                    staged=dict(detail.get("platform_staged") or {}),
+                    transaction_id=transaction_id,
+                )
+        else:
+            if package is None:
+                raise UpgradeCompatibilityError(
+                    "Target package is required to finalize this platform"
+                )
+            detail["platform_commit"] = await self.platform_adapter.commit(
+                package,
+                current=dict(detail.get("platform_current") or {}),
+                staged=dict(detail.get("platform_staged") or {}),
+                transaction_id=transaction_id,
+            )
+        if (
+            simple_windows
+            and detail["platform_commit"].get("recovery_material_removed") is not True
+        ):
+            detail["phase"] = "commit_cleanup_failed"
+            operation.transition(
+                "interrupted",
+                message=(
+                    "Target health passed; recovery-material cleanup will be retried"
+                ),
+                detail={**detail, "recovered": True},
+            )
+            self.store.save(operation)
+            self._journal(
+                operation,
+                detail,
+                phase="commit_cleanup_failed",
+                status="interrupted",
+            )
+            return False
+        detail["phase"] = "committed"
+        detail["progress"] = 100
+        operation.transition(
+            "succeeded",
+            message=(
+                f"Upgrade to {package.version} committed after restart"
+                if package is not None
+                else (
+                    "Upgrade commit finalized after restart without the cached "
+                    "target package"
+                )
+            ),
+            detail={**detail, "recovered": True},
+        )
+        # Keep the journal recoverable until both the operation and terminal
+        # journal writes succeed.  Retrying commit after either write fails is
+        # safe even when the recovery directory was already removed.
+        self.store.save(operation)
+        self.store.retire_terminal_rollback_journals()
+        self.archive_housekeeping.apply_retention()
+        self._journal(
+            operation,
+            detail,
+            phase="committed",
+            status="committed",
+        )
+        self.service.set_startup_maintenance_gate(False)
+        return True
 
     async def _cleanup_platform_staging(
         self, detail: dict[str, Any]
     ) -> str | None:
+        staged = dict(detail.get("platform_staged") or {})
+        if not staged:
+            cleanup_transaction = getattr(
+                self.platform_adapter,
+                "cleanup_transaction",
+                None,
+            )
+            if callable(cleanup_transaction):
+                try:
+                    await cleanup_transaction(str(detail.get("transaction_id") or ""))
+                except Exception as exc:
+                    return str(exc) or type(exc).__name__
+            return None
         cleanup = getattr(self.platform_adapter, "cleanup", None)
         if not callable(cleanup):
             return None
         try:
-            await cleanup(dict(detail.get("platform_staged") or {}))
+            await cleanup(staged)
         except Exception as exc:
             return str(exc) or type(exc).__name__
         return None
@@ -2542,6 +1980,7 @@ class UpgradeCoordinator:
         running: list[str],
     ) -> None:
         detail["original_running"] = list(running)
+        detail["runtime_state_captured"] = True
         self._journal(operation, detail, phase="quiescing")
 
     def _phase(
@@ -2573,49 +2012,6 @@ class UpgradeCoordinator:
             operation_id=operation.operation_id,
             detail=detail,
         )
-
-    def _prune_external_guard_cache(
-        self, operation: ManagerOperation, detail: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Best-effort cleanup of stale external UpdateGuard versions.
-
-        Runs only once no journal still needs recovery; any failure degrades
-        to a journal-visible warning.  Never raises: a cleanup problem must
-        not affect the committed upgrade it runs after.
-        """
-        digest_loader = getattr(
-            self.platform_adapter, "stable_guard_digest", None
-        )
-        prune = getattr(
-            self.platform_adapter, "prune_external_guard_cache", None
-        )
-        if digest_loader is None or prune is None:
-            return {}
-        try:
-            if self.store.list_recoverable_journals():
-                result = {"guard_cache_prune_skipped": "recoverable_journals"}
-            else:
-                keep_digest = digest_loader()
-                if keep_digest is None:
-                    return {}
-                removed = prune(keep_digest)
-                result = {"guard_cache_pruned": removed} if removed else {}
-        except Exception as exc:
-            result = {
-                "guard_cache_prune_error": str(exc) or type(exc).__name__
-            }
-        if not result:
-            return {}
-        try:
-            self._journal(
-                operation,
-                {**detail, **result},
-                phase="committed",
-                status="committed",
-            )
-        except Exception:
-            pass
-        return result
 
     def _fault(self, phase: str) -> None:
         if self.fault_hook is not None:
@@ -2880,48 +2276,6 @@ def _safe_member_name(name: Any) -> bool:
         return False
     path = PurePosixPath(name)
     return not path.is_absolute() and all(part not in {"", ".", ".."} for part in path.parts)
-
-
-def _validate_process_identity(value: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise UpgradeCompatibilityError("Manager process identity is unavailable")
-    try:
-        pid = value["pid"]
-        started_at = value["started_at"]
-        executable = value["executable"]
-    except KeyError as exc:
-        raise UpgradeCompatibilityError(
-            "Manager process identity must include PID/start time/executable"
-        ) from exc
-    if (
-        type(pid) is not int
-        or pid <= 0
-        or not isinstance(started_at, str)
-        or not started_at
-        or not isinstance(executable, str)
-        or not Path(executable).is_absolute()
-    ):
-        raise UpgradeCompatibilityError("Manager process identity is invalid")
-    return {"pid": pid, "started_at": started_at, "executable": executable}
-
-
-def _current_process_identity() -> dict[str, Any]:
-    # Import lazily: UpdateGuard shares validation helpers from this module.
-    from .update_guard import current_process_identity as inspect_current
-
-    return inspect_current()
-
-
-def _identity_belongs_to_instance(
-    identity: dict[str, Any], instance_root: Path
-) -> bool:
-    executable = Path(identity["executable"])
-    try:
-        return executable.resolve(strict=False).is_relative_to(
-            instance_root.resolve()
-        )
-    except OSError:
-        return False
 
 
 def _sha256_file(path: Path) -> str:
