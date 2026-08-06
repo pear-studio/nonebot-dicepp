@@ -87,6 +87,14 @@ def test_control_token_reads_safe_existing_file_without_write_access(
         return original_open(path, flags, *args, **kwargs)
 
     monkeypatch.setattr(manager_auth.os, "open", readonly_open)
+    # The production policy checks this capability before using ``dir_fd``.
+    # Keep that declaration true for the wrapper, which transparently forwards
+    # its descriptor-relative calls to the real POSIX ``os.open``.
+    monkeypatch.setattr(
+        manager_auth.os,
+        "supports_dir_fd",
+        manager_auth.os.supports_dir_fd | {readonly_open},
+    )
     monkeypatch.setattr(
         manager_auth.os,
         "fchmod",
