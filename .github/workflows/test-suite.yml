@@ -54,7 +54,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.release_commit_sha || github.sha }}
       - name: Lint — forbid datetime.now() in tests
@@ -65,12 +65,12 @@ jobs:
             exit 1
           fi
           echo "OK: no datetime.now() in tests"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          version: "0.5.24"
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
@@ -92,7 +92,7 @@ jobs:
       candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}
       candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.release_commit_sha || github.sha }}
       - name: Verify checked-out source identity
@@ -196,7 +196,7 @@ jobs:
           docker volume rm -f dicepp-manager-smoke 2>/dev/null || true
       - name: Login to GHCR for release candidate
         if: inputs.release_tag != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -232,7 +232,6 @@ jobs:
             echo "- Reference: \`$IMAGE\`"
             echo "- Manifest digest: \`$DIGEST\`"
             echo "- Image ID: \`$PULLED_IMAGE_ID\`"
-            echo "- Retention: run-scoped provenance tag retained; no automatic GHCR deletion"
           } >> "$GITHUB_STEP_SUMMARY"
 
   runtime-image:
@@ -246,7 +245,7 @@ jobs:
       candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}
       candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.release_commit_sha || github.sha }}
       - name: Verify checked-out source identity
@@ -299,7 +298,7 @@ jobs:
           docker run --rm --network=none "$IMAGE" python bot.py --smoke-check
       - name: Login to GHCR for release candidate
         if: inputs.release_tag != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -335,7 +334,6 @@ jobs:
             echo "- Reference: \`$IMAGE\`"
             echo "- Manifest digest: \`$DIGEST\`"
             echo "- Image ID: \`$PULLED_IMAGE_ID\`"
-            echo "- Retention: run-scoped provenance tag retained; no automatic GHCR deletion"
           } >> "$GITHUB_STEP_SUMMARY"
 
   windows-package:
@@ -347,7 +345,7 @@ jobs:
     outputs:
       candidate_digest: ${{ steps.record-candidate.outputs.package_tree_sha256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.release_commit_sha || github.sha }}
       - name: Verify checked-out source identity
@@ -360,12 +358,12 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:EXPECTED_COMMIT_SHA) {
             throw "Checked-out commit differs from the requested candidate"
           }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          version: "0.5.24"
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
@@ -456,7 +454,7 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: inputs.release_tag == ''
         with:
           name: dicepp-windows-ci
@@ -464,7 +462,7 @@ jobs:
           retention-days: 3
       - name: Upload release-ready Windows candidate
         if: inputs.release_tag != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dicepp-windows-candidate
           path: |
@@ -481,15 +479,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.release_commit_sha || github.sha }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "latest"
+          version: "0.5.24"
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
