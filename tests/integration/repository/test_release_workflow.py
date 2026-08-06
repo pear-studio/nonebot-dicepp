@@ -10,8 +10,20 @@ ROOT = next(
 )
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
+CANDIDATE_WORKFLOW = ROOT / ".github" / "workflows" / "candidate.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 WINDOWS_PACKAGE_SCRIPT = ROOT / "scripts" / "build" / "assemble_windows_package.ps1"
+WINDOWS_FINAL_VALIDATOR = (
+    ROOT / "scripts" / "build" / "validate_windows_final_candidate.ps1"
+)
+LINUX_FINAL_VALIDATOR = (
+    ROOT / "scripts" / "build" / "validate_linux_final_candidate.sh"
+)
+RELEASE_METADATA_REQUIREMENTS = (
+    ROOT / "scripts" / "build" / "release-metadata-requirements.txt"
+)
+VELOPACK_VERSION_FILE = ROOT / "scripts" / "build" / "velopack-tool-version.txt"
+VELOPACK_INSTALLER = ROOT / "scripts" / "build" / "install_velopack_tool.ps1"
 
 
 def _workflow_job(workflow_path: Path, job_name: str) -> dict:
@@ -29,6 +41,218 @@ def _workflow_step(workflow_path: Path, job_name: str, step_name: str) -> dict:
 def _workflow_call(workflow_path: Path) -> dict:
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     return workflow.get("on", workflow.get(True))["workflow_call"]
+
+
+def _workflow_dispatch(workflow_path: Path) -> dict:
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    return workflow.get("on", workflow.get(True))["workflow_dispatch"]
+
+
+def test_final_candidate_dispatch_binds_every_build_to_an_exact_commit():
+    dispatch = _workflow_dispatch(CANDIDATE_WORKFLOW)
+    candidate = yaml.safe_load(CANDIDATE_WORKFLOW.read_text(encoding="utf-8"))
+    metadata = candidate["jobs"]["candidate-metadata"]
+    gate = candidate["jobs"]["quality-gate"]
+
+    assert dispatch["inputs"] == {
+        "version": {
+            "description": "Exact PEP 440 project version to build (without v prefix)",
+            "required": True,
+            "type": "string",
+        },
+        "commit_sha": {
+            "description": "Full lowercase 40-character source commit SHA",
+            "required": True,
+            "type": "string",
+        },
+    }
+    metadata_checkout = next(
+        step for step in metadata["steps"] if step.get("uses") == "actions/checkout@v4"
+    )
+    target_guard = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "candidate-metadata",
+        "Reject an ambiguous target commit",
+    )
+    assert target_guard["env"] == {
+        "INPUT_COMMIT_SHA": "${{ inputs.commit_sha }}",
+        "WORKFLOW_SHA": "${{ github.sha }}",
+    }
+    assert '"$WORKFLOW_SHA" != "$INPUT_COMMIT_SHA"' in target_guard["run"]
+    assert metadata_checkout["with"]["ref"] == "${{ inputs.commit_sha }}"
+    derive = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "candidate-metadata",
+        "Derive metadata from the checked-out source",
+    )["run"]
+    assert 'actual_commit="$(git rev-parse HEAD)"' in derive
+    assert 'actual_commit" != "$INPUT_COMMIT_SHA' in derive
+    assert gate["uses"] == "./.github/workflows/test-suite.yml"
+    assert gate["with"]["release_commit_sha"] == (
+        "${{ needs.candidate-metadata.outputs.commit_sha }}"
+    )
+    assert candidate["permissions"] == {"contents": "read"}
+    assert gate["permissions"] == {"contents": "read", "packages": "write"}
+    assert candidate["jobs"]["linux-final"]["permissions"] == {
+        "contents": "read",
+        "packages": "read",
+    }
+    for job_name in ("candidate-metadata", "windows-final", "receipt"):
+        assert candidate["jobs"][job_name]["permissions"] == {"contents": "read"}
+
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
+    for job in suite["jobs"].values():
+        checkout = next(
+            step
+            for step in job["steps"]
+            if step.get("uses") == "actions/checkout@v4"
+        )
+        assert checkout["with"]["ref"] == (
+            "${{ inputs.release_commit_sha || github.sha }}"
+        )
+    for job_name in ("runtime-image", "dashboard-image", "windows-package"):
+        verify = _workflow_step(
+            TEST_SUITE_WORKFLOW,
+            job_name,
+            "Verify checked-out source identity",
+        )
+        assert verify["if"] == "inputs.release_commit_sha != ''"
+        assert "git rev-parse HEAD" in verify["run"]
+
+
+def test_parser_entry_jobs_install_the_hash_pinned_dependency_before_execution():
+    expected_install = [
+        "python",
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-deps",
+        "--only-binary=:all:",
+        "--require-hashes",
+        "-r",
+        "scripts/build/release-metadata-requirements.txt",
+    ]
+    for workflow, job_name, derive_name in (
+        (
+            CANDIDATE_WORKFLOW,
+            "candidate-metadata",
+            "Derive metadata from the checked-out source",
+        ),
+        (
+            RELEASE_WORKFLOW,
+            "release-metadata",
+            "Derive and validate release metadata",
+        ),
+        (
+            CANDIDATE_WORKFLOW,
+            "receipt",
+            "Generate immutable candidate receipt",
+        ),
+    ):
+        steps = _workflow_job(workflow, job_name)["steps"]
+        names = [step.get("name") for step in steps]
+        setup_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("uses") == "actions/setup-python@v5"
+        )
+        install = _workflow_step(
+            workflow, job_name, "Install release metadata dependency"
+        )
+        assert install["run"].replace("\\\n", " ").split() == expected_install
+        assert setup_index < names.index(install["name"]) < names.index(derive_name)
+
+    assert RELEASE_METADATA_REQUIREMENTS.read_text(encoding="utf-8") == (
+        "packaging==26.2 "
+        "--hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e\n"
+    )
+
+
+def test_final_candidate_seals_the_complete_public_artifact_contract_without_release():
+    workflow_text = CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+    receipt = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "receipt",
+        "Generate immutable candidate receipt",
+    )["run"]
+    upload = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "receipt",
+        "Upload sealed final candidate",
+    )
+    windows = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "windows-final",
+        "Build final Velopack artifacts",
+    )["run"]
+    linux = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "linux-final",
+        "Package final Linux bundle",
+    )["run"]
+    candidate_windows_validation = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "windows-final",
+        "Validate final Windows candidate bytes",
+    )["run"]
+    release_windows_validation = _workflow_step(
+        RELEASE_WORKFLOW,
+        "windows-build",
+        "Validate final Windows asset set",
+    )["run"]
+
+    assert "vpk pack" in windows
+    assert "generate_velopack_bundle.py" in windows
+    assert "docker save" in linux
+    assert "generate_linux_package_manifest.py" in linux
+    assert "validate_windows_final_candidate.ps1" in candidate_windows_validation
+    assert "validate_windows_final_candidate.ps1" in release_windows_validation
+    assert "candidate_receipt.py" in receipt
+    assert receipt.count("--container ") == 2
+    assert receipt.count("--toolchain ") == 6
+    assert "--package-tree-sha256" in receipt
+    assert '--workflow-sha "$WORKFLOW_SHA"' in receipt
+    assert upload["with"]["path"] == "dist/final"
+    assert upload["with"]["retention-days"] == 30
+    assert "gh release" not in workflow_text
+    assert "git push" not in workflow_text
+    assert "tags:" not in workflow_text
+
+    release_manifest = _workflow_step(
+        RELEASE_WORKFLOW,
+        "publish",
+        "Generate release machine contract",
+    )["run"]
+    for identity in (
+        "windows:amd64:portable:",
+        "windows:amd64:setup:",
+        "windows:amd64:velopack-bundle:",
+        "linux:amd64:linux-bundle:",
+    ):
+        assert identity in release_manifest
+    for filename in (
+        "win64-Portable.zip",
+        "win64-Setup.exe",
+        "velopack.win-x64.zip",
+        "linux-amd64.zip",
+    ):
+        assert filename in workflow_text
+        assert filename in release_manifest
+
+
+def test_shared_windows_final_validator_covers_portable_setup_and_exact_set():
+    validator = WINDOWS_FINAL_VALIDATOR.read_text(encoding="utf-8")
+
+    assert "Compare-Object" in validator
+    assert "Final Windows asset set is incomplete, renamed, or ambiguous" in validator
+    for executable in ("DicePP-Runtime.exe", "DicePP.exe", "DicePP-UpdateGuard.exe"):
+        assert executable in validator
+    assert validator.count("--smoke-check") == 3
+    assert "test_windows_package_detached_launch.py" in validator
+    assert '--silent", "--installto"' in validator
+    assert 'Join-Path $installRoot "DicePP.exe"' in validator
+    assert 'Join-Path $installRoot "current\\DicePP.exe"' in validator
 
 
 def _create_release_script() -> str:
@@ -142,89 +366,117 @@ def test_linux_release_package_embeds_docs_and_usage_guide_without_offline_name(
     assert "--automatic-upgrade" not in script
 
 
-def test_final_linux_zip_passes_isolated_offline_round_trip_before_release():
-    publish = _workflow_job(RELEASE_WORKFLOW, "publish")
-    step_names = [step.get("name") for step in publish["steps"]]
-    verify = _workflow_step(
+def test_final_linux_zip_passes_shared_offline_round_trip_before_receipt_or_release():
+    release = _workflow_job(RELEASE_WORKFLOW, "publish")
+    release_names = [step.get("name") for step in release["steps"]]
+    release_verify = _workflow_step(
         RELEASE_WORKFLOW,
         "publish",
         "Verify final Linux bundle offline round trip",
     )
-    cleanup = _workflow_step(
-        RELEASE_WORKFLOW,
-        "publish",
-        "Clean up Linux bundle offline smoke",
+    candidate = _workflow_job(CANDIDATE_WORKFLOW, "linux-final")
+    candidate_names = [step.get("name") for step in candidate["steps"]]
+    candidate_verify = _workflow_step(
+        CANDIDATE_WORKFLOW,
+        "linux-final",
+        "Validate final Linux bundle bytes",
     )
-    script = verify["run"]
-    normalized = " ".join(script.replace("\\\n", "").split())
-    python_smoke_transform = script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    validator = LINUX_FINAL_VALIDATOR.read_text(encoding="utf-8")
+    normalized = " ".join(validator.replace("\\\n", "").split())
+    python_blocks = [
+        block.split("\nPY", 1)[0]
+        for block in validator.split("<<'PY'\n")[1:]
+    ]
 
-    assert step_names.index("Package Linux amd64 release bundle") < step_names.index(
-        verify["name"]
+    assert release_names.index("Package Linux amd64 release bundle") < release_names.index(
+        release_verify["name"]
     )
-    assert step_names.index(verify["name"]) < step_names.index(cleanup["name"])
-    assert step_names.index(cleanup["name"]) < step_names.index(
+    assert release_names.index(release_verify["name"]) < release_names.index(
         "Generate release machine contract"
     )
-    assert cleanup["if"] == "always()"
-    assert (
-        'EXPECTED_BOT_IMAGE_ID="${{ needs.promote-docker.outputs.runtime_image_id }}"'
-        in script
+    assert candidate_names.index("Package final Linux bundle") < candidate_names.index(
+        candidate_verify["name"]
     )
-    assert (
-        'EXPECTED_DASHBOARD_IMAGE_ID="${{ needs.promote-docker.outputs.dashboard_image_id }}"'
-        in script
-    )
+    invocation = "bash scripts/build/validate_linux_final_candidate.sh"
+    assert invocation in release_verify["run"]
+    assert invocation in candidate_verify["run"]
+    assert release_verify["env"] == {
+        "TAG": "${{ needs.release-metadata.outputs.tag }}",
+        "RUNTIME_IMAGE_ID": "${{ needs.promote-docker.outputs.runtime_image_id }}",
+        "DASHBOARD_IMAGE_ID": "${{ needs.promote-docker.outputs.dashboard_image_id }}",
+    }
+    assert candidate_verify["env"] == {
+        "TAG": "${{ needs.candidate-metadata.outputs.tag }}",
+        "RUNTIME_IMAGE_ID": "${{ needs.quality-gate.outputs.runtime_candidate_image_id }}",
+        "DASHBOARD_IMAGE_ID": "${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}",
+    }
 
-    # The formal tags must disappear before anything is recovered from the zip.
-    assert 'docker image rm "$BOT_IMAGE" "$DASHBOARD_IMAGE"' in script
-    assert script.index('docker image rm "$BOT_IMAGE" "$DASHBOARD_IMAGE"') < script.index(
-        'unzip -q "$PACKAGE_ZIP"'
+    purge_index = validator.index("# Delete all local references and content")
+    absent_index = validator.index(
+        "pre-package image identity still exists", purge_index
     )
-    assert "sha256sum -c checksums.sha256" in script
-    assert "validate_linux_bundle_candidate.py" in script
+    unzip_index = validator.index('unzip -q "$PACKAGE_ZIP"')
+    purge = validator[purge_index:absent_index]
+    assert "timeout 60s docker image rm --force" in purge
+    assert '"$EXPECTED_BOT_IMAGE_ID" "$EXPECTED_DASHBOARD_IMAGE_ID"' in purge
+    assert '"$BOT_IMAGE" "$DASHBOARD_IMAGE"' in purge
+    assert '"$EXPECTED_BOT_IMAGE_ID" "$EXPECTED_DASHBOARD_IMAGE_ID"' in purge
+    assert purge_index < absent_index < unzip_index
+    assert "sha256sum -c checksums.sha256" in validator
+    assert "validate_linux_bundle_candidate.py" in validator
     assert (
         '--expected-image bot "$BOT_IMAGE" "$EXPECTED_BOT_IMAGE_ID"'
         in normalized
     )
     assert (
-        "--expected-image dashboard "
-        '"$DASHBOARD_IMAGE" "$EXPECTED_DASHBOARD_IMAGE_ID"'
+        '--expected-image dashboard "$DASHBOARD_IMAGE" "$EXPECTED_DASHBOARD_IMAGE_ID"'
         in normalized
     )
-    assert "find \"$SMOKE_ROOT/images\"" not in script
-    assert 'zstd -d "$IMAGE_ARCHIVE_ZST" -o "$IMAGE_ARCHIVE"' in script
-    assert 'docker load -i "$IMAGE_ARCHIVE"' in script
-    assert script.index("validate_linux_bundle_candidate.py") < script.index(
-        'zstd -d "$IMAGE_ARCHIVE_ZST"'
-    )
-    assert script.index('docker load -i "$IMAGE_ARCHIVE"') < script.index(
-        "LOADED_BOT_IMAGE_ID="
-    )
-    assert 'docker image inspect --format \'{{.Id}}\' "$BOT_IMAGE"' in script
-    assert 'docker image inspect --format \'{{.Id}}\' "$DASHBOARD_IMAGE"' in script
-    assert '[ "$LOADED_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]' in script
+    assert 'zstd -d "$IMAGE_ARCHIVE_ZST"' in validator
+    assert "timeout 120s docker load" in validator
+    assert '[ "$LOADED_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]' in validator
     assert (
         '[ "$LOADED_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]'
-        in script
+        in validator
     )
-
-    # The smoke compose is derived from the bundled compose, keeps role wiring,
-    # removes host-wide names/ports/builds, and can only use loaded images.
     assert '-f "${SMOKE_ROOT}/docker-compose.yml" config --format json' in normalized
-    assert 'services["bot"]["image"] != bot_image' in script
-    assert 'services[role]["image"] != dashboard_image' in script
-    assert 'for key in ("build", "container_name", "ports")' in script
-    assert '"volumes"' not in python_smoke_transform
-    assert 'service["restart"] = "no"' in script
-    assert "DICEPP_MANAGER_RELEASE_SCHEDULER" in script
+    assert 'services["bot"]["image"] != bot_image' in validator
+    assert 'for role in ("dashboard", "manager")' in validator
+    assert 'for key in ("build", "container_name", "ports")' in validator
+    assert 'service["restart"] = "no"' in validator
+    assert "DICEPP_MANAGER_RELEASE_SCHEDULER" in validator
     assert "up -d --pull never --wait --wait-timeout 180" in normalized
-    assert "for service in bot dashboard manager" in script
-    assert "for service in dashboard manager" in script
+    assert "timeout 210s docker compose" in validator
+    assert "for service in bot dashboard manager" in validator
+    assert "for service in dashboard manager" in validator
     assert "ps --status running -q" in normalized
-    assert "{{.State.Health.Status}}" in script
-    assert "down --volumes --remove-orphans" in " ".join(cleanup["run"].split())
-    compile(python_smoke_transform, "linux-bundle-smoke-transform", "exec")
+    assert "{{.State.Health.Status}}" in validator
+    assert "trap cleanup EXIT" in validator
+    assert "down --volumes --remove-orphans" in normalized
+    assert 'RUNNER_TEMP_ROOT="$(realpath -e -- "$RUNNER_TEMP_INPUT")"' in validator
+    assert '[ -L "$SMOKE_ROOT_CREATED" ]' in validator
+    assert '"$(dirname -- "$SMOKE_ROOT")" != "$RUNNER_TEMP_ROOT"' in validator
+    assert "^dicepp-linux-bundle\\.[[:alnum:]]{6}$" in validator
+    assert "SMOKE_ROOT_IDENTITY=\"$(stat -Lc '%d:%i'" in validator
+    assert "validate_smoke_root_for_removal()" in validator
+    assert '[ "$identity" = "$SMOKE_ROOT_IDENTITY" ]' in validator
+    assert "refusing to remove unverified smoke directory" in validator
+    assert validator.count("uv run --frozen python") == 3
+    assert not any(line.startswith("python ") for line in validator.splitlines())
+    assert "|| true" not in validator
+    assert "local main_status=$?" in validator
+    assert "local cleanup_status=0" in validator
+    assert 'if [ -f "$SMOKE_COMPOSE" ]' in validator
+    assert "timeout 60s docker compose" in validator
+    assert "timeout 60s docker image rm --force" in validator
+    assert "timeout 30s sudo --non-interactive rm -rf" in validator
+    assert "offline smoke directory still exists after cleanup" in validator
+    assert 'if [ "$main_status" -ne 0 ]' in validator
+    assert 'exit "$main_status"' in validator
+    assert 'exit "$cleanup_status"' in validator
+    assert len(python_blocks) == 2
+    for index, block in enumerate(python_blocks):
+        compile(block, f"linux-final-python-{index}", "exec")
 
 
 def test_windows_release_uses_velpack_and_normalizes_public_names():
@@ -242,7 +494,38 @@ def test_windows_release_uses_velpack_and_normalizes_public_names():
     assert '--output "velopack.win-x64.zip"' in script
     assert "releases." not in script
     assert "assets." not in script
-    assert "dotnet tool install -g vpk --version 1.2.0" in script
+    assert "install_velopack_tool.ps1" in script
+
+
+def test_windows_final_jobs_install_and_record_one_pinned_velpack_tool_version():
+    candidate = _workflow_job(CANDIDATE_WORKFLOW, "windows-final")
+    install = _workflow_step(
+        CANDIDATE_WORKFLOW, "windows-final", "Install build dependencies"
+    )
+    record = _workflow_step(
+        CANDIDATE_WORKFLOW, "windows-final", "Record Windows toolchain"
+    )
+    release_pack = _workflow_step(
+        RELEASE_WORKFLOW, "windows-build", "Package artifact"
+    )
+    installer = VELOPACK_INSTALLER.read_text(encoding="utf-8")
+    workflow_text = (
+        CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+        + RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    )
+
+    assert install["id"] == "install-toolchain"
+    assert install["shell"] == "pwsh"
+    assert "install_velopack_tool.ps1" in install["run"]
+    assert "install_velopack_tool.ps1" in release_pack["run"]
+    assert candidate["outputs"]["velopack_version"] == (
+        "${{ steps.install-toolchain.outputs.velopack_version }}"
+    )
+    assert "vpk --version" not in record["run"]
+    assert "dotnet tool install -g vpk --version 1.2.0" not in workflow_text
+    assert VELOPACK_VERSION_FILE.read_text(encoding="utf-8") == "1.2.0\n"
+    assert "dotnet tool install -g vpk --version $version" in installer
+    assert '"velopack_version=$version" >> $env:GITHUB_OUTPUT' in installer
 
 
 def test_release_manifest_is_generated_after_all_platform_artifacts():
