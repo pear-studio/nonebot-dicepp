@@ -51,6 +51,3 @@ class PersistingConfigManager:
 
     async def control_bots(self) -> list[dict]:
         return []
-
-    async def reload_bots(self, bot_id: str | None = None) -> list[dict]:
-        return []

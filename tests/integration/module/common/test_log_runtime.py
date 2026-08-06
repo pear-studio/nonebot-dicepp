@@ -14,7 +14,6 @@ from plugins.DicePP.core.communication import (
     MessageSender,
     PostSendEvent,
 )
-from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.data import LogRepository
 from plugins.DicePP.core.data.models import LogPublication
 from plugins.DicePP.core.data.schema import ensure_bot_log_schema
@@ -248,40 +247,3 @@ def test_refresh_publication_provider_preserves_injected_provider(runtime_parts)
     assert runtime.publisher is original_publisher
     assert runtime.publisher._provider is provider
     assert runtime.publication_error is None
-
-
-def test_bot_reload_config_refreshes_log_publication_provider(monkeypatch):
-    import plugins.DicePP.core.bot.dicebot as dicebot_module
-
-    new_config = SimpleNamespace(
-        log=SimpleNamespace(level="INFO"),
-        persona="new-persona",
-        persona_ai=SimpleNamespace(character_path="characters/new"),
-        health_monitor=SimpleNamespace(
-            heartbeat_timeout_seconds=11,
-            consecutive_fail_threshold=4,
-            failure_log_interval_seconds=23,
-        ),
-    )
-    bot = object.__new__(Bot)
-    bot._cfg_loader = SimpleNamespace(reload=lambda: new_config)
-    bot.config = SimpleNamespace()
-    bot._persona_loader = SimpleNamespace(
-        reload=lambda: None,
-        set_character_path=lambda _path: None,
-    )
-    bot.loc_helper = SimpleNamespace(
-        reset_to_default=lambda: None,
-        set_persona=lambda _persona: None,
-    )
-    bot.health_monitor = SimpleNamespace()
-    refreshed_with = []
-    bot.log_runtime = SimpleNamespace(
-        refresh_publication_provider=lambda: refreshed_with.append(bot.config)
-    )
-    monkeypatch.setattr(dicebot_module, "configure_log_level", lambda _level: None)
-
-    result = Bot.reload_config(bot)
-
-    assert result is new_config
-    assert refreshed_with == [new_config]

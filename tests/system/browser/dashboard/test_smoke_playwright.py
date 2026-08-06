@@ -252,8 +252,8 @@ def test_setup_form_inline_validation(dashboard_url: str) -> None:
             browser.close()
 
 
-def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None:
-    """Login, edit config in JSON view, save, and verify feedback."""
+def test_config_edit_requires_runtime_restart(dashboard_url: str, tmp_path: Path) -> None:
+    """A saved config is visibly deferred and never presented as hot-reloaded."""
     # Create a dummy bot config so a bot is available in the sidebar
     bots_dir = tmp_path / "config" / "bots"
     bots_dir.mkdir(parents=True, exist_ok=True)
@@ -264,6 +264,69 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
+        lifecycle_requests: list[tuple[str, str]] = []
+
+        def route_config_runtime(route):
+            path = urlparse(route.request.url).path
+            method = route.request.method
+            if path == "/api/manager/status" and method == "GET":
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "ok": True,
+                        "health": {"status": "ok", "runtime_adapter": "FakeAdapter"},
+                        "bots": [],
+                        "runtime_units": [{
+                            "runtime_unit_id": "dicepp-runtime",
+                            "bot_ids": ["test_bot", "shared_bot"],
+                            "shared_process": True,
+                            "runtime": {"runtime_state": "running", "health": "healthy"},
+                            "manager": {"operation_status": "idle"},
+                        }],
+                    }),
+                )
+                return
+            if path == "/api/manager/runtime-units/dicepp-runtime/restart" and method == "POST":
+                lifecycle_requests.append((method, path))
+                operation_id = f"config-restart-op-{len(lifecycle_requests)}"
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "ok": True,
+                        "operation": {
+                            "operation_id": operation_id,
+                            "runtime_unit_id": "dicepp-runtime",
+                            "action": "restart",
+                            "status": "queued",
+                        },
+                    }),
+                )
+                return
+            if path in {
+                "/api/manager/operations/config-restart-op-1",
+                "/api/manager/operations/config-restart-op-2",
+            } and method == "GET":
+                succeeded = path.endswith("-1")
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({
+                        "ok": True,
+                        "operation": {
+                            "operation_id": path.rsplit("/", 1)[-1],
+                            "runtime_unit_id": "dicepp-runtime",
+                            "action": "restart",
+                            "status": "succeeded" if succeeded else "failed",
+                            "message": "" if succeeded else "runtime restart failed",
+                        },
+                    }),
+                )
+                return
+            route.continue_()
+
+        page.route("**/api/manager/**", route_config_runtime)
 
         try:
             _login(page, dashboard_url)
@@ -313,13 +376,49 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             assert save_response.status == 200
             assert save_response.json()["ok"] is True
 
-            # 7. Verify feedback — saved + reload result headings become visible
+            # 7. Verify the fixed restart warning and deferred-save feedback.
             page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
             assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
-            assert page.locator("text=运行时重载：").first.is_visible()
-            expect(page.get_by_test_id("config-reload-result")).to_have_text(
-                "test_bot: 离线，将在下次启动时加载"
+            expect(page.get_by_test_id("config-restart-notice")).to_contain_text(
+                "重启 RuntimeUnit 后才会完整生效"
             )
+            expect(page.get_by_test_id("config-runtime-accounts")).to_have_text(
+                "test_bot、shared_bot"
+            )
+            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
+                "尚未应用到运行中的 Bot"
+            )
+            expect(page.locator("body")).not_to_contain_text("运行时重载：")
+            page.once("dialog", lambda dialog: dialog.accept())
+            with page.expect_response(
+                "**/api/manager/runtime-units/dicepp-runtime/restart"
+            ):
+                page.get_by_test_id("config-restart-runtime").click()
+            expect(page.get_by_test_id("config-restart-runtime")).to_be_enabled()
+            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
+                "RuntimeUnit 重启成功，新配置已完整生效"
+            )
+
+            # Saving again restores the pending restart notice. A failed
+            # terminal operation must not clear it.
+            with page.expect_response("**/api/config/user/save"):
+                page.get_by_role("button", name="保存").click()
+            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
+                "尚未应用到运行中的 Bot"
+            )
+            page.once("dialog", lambda dialog: dialog.accept())
+            with page.expect_response(
+                "**/api/manager/runtime-units/dicepp-runtime/restart"
+            ):
+                page.get_by_test_id("config-restart-runtime").click()
+            expect(page.get_by_test_id("config-restart-runtime")).to_be_enabled()
+            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
+                "尚未应用到运行中的 Bot"
+            )
+            assert lifecycle_requests == [
+                ("POST", "/api/manager/runtime-units/dicepp-runtime/restart"),
+                ("POST", "/api/manager/runtime-units/dicepp-runtime/restart"),
+            ]
             _wait_for_json_value(
                 tmp_path / "config" / "user.json", expected_user_config
             )

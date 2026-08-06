@@ -1802,20 +1802,22 @@ def test_target_manager_with_live_guard_completes_real_lifespan_handoff(
     )
 
     class Archive:
+        def __init__(self):
+            self.runtime_support = SimpleNamespace(
+                migrate_and_validate_schema=lambda: {"status": "ok"},
+                restart=self.restart,
+                hard_health=self.hard_health,
+            )
+            self.housekeeping = SimpleNamespace(apply_retention=lambda: None)
+
         async def recover(self):
             return []
 
-        def _migrate_and_validate_schema(self):
-            return {"status": "ok"}
-
-        async def _restart(self, _maintenance, _original):
+        async def restart(self, _maintenance, _original):
             return None
 
-        async def _hard_health(self, _original, **_kwargs):
+        async def hard_health(self, _original, **_kwargs):
             return {"status": "ok"}
-
-        def _apply_retention_if_safe(self):
-            return None
 
     archive = Archive()
     release = SimpleNamespace(status=lambda: {})

@@ -316,7 +316,7 @@ async def test_upgrade_health_gate_skips_control_probe_without_bound_bots(
     _layout, _data, runtime, _service, coordinator, _platform = _setup(
         tmp_path, bot_ids=()
     )
-    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    coordinator.runtime_support.control_probe = _no_heartbeat_control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -343,7 +343,7 @@ async def test_upgrade_rollback_health_gate_skips_control_probe_without_bound_bo
     _layout, data_file, runtime, _service, coordinator, _platform = _setup(
         tmp_path, fault="migration", bot_ids=()
     )
-    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    coordinator.runtime_support.control_probe = _no_heartbeat_control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -371,7 +371,7 @@ async def test_upgrade_health_gate_skips_control_probe_without_active_channel(
     the bound-bot list, but with no fresh baseline heartbeat the gate must
     skip the control probe instead of failing the upgrade."""
     _layout, _data, runtime, service, coordinator, _platform = _setup(tmp_path)
-    coordinator.archive.control_probe = _no_heartbeat_control_probe
+    coordinator.runtime_support.control_probe = _no_heartbeat_control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -412,7 +412,7 @@ async def test_upgrade_rollback_observes_reconnect_without_active_baseline(
             "heartbeat": "2026-07-23T00:00:02+00:00",
         }
 
-    coordinator.archive.control_probe = control_probe
+    coordinator.runtime_support.control_probe = control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -465,7 +465,7 @@ async def test_upgrade_rollback_recaptures_gate_when_control_channel_drops(
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         }
 
-    coordinator.archive.control_probe = control_probe
+    coordinator.runtime_support.control_probe = control_probe
     original_switch = adapter.switch
 
     async def switch(package, **kwargs):
@@ -528,7 +528,7 @@ async def test_upgrade_rollback_control_disconnect_is_degraded_not_failed(
             "heartbeat_age_seconds": 70.0,
         }
 
-    coordinator.archive.control_probe = control_probe
+    coordinator.runtime_support.control_probe = control_probe
     preview = await coordinator.preview()
     operation, package = coordinator.confirm(
         version="3.1.0",
@@ -600,8 +600,8 @@ async def test_upgrade_rollback_retention_failure_is_only_a_warning(
         raise OSError("injected retention cleanup failure")
 
     monkeypatch.setattr(
-        coordinator.archive,
-        "_apply_retention_if_safe",
+        coordinator.archive_housekeeping,
+        "apply_retention",
         fail_retention,
     )
     preview = await coordinator.preview()
@@ -2185,13 +2185,13 @@ async def test_new_windows_version_health_failure_signals_guard_without_data_com
     await asyncio.sleep(0.3)
     shutdown = []
     service.set_shutdown_callback(shutdown.append)
-    coordinator.archive.control_probe = lambda: {
+    coordinator.runtime_support.control_probe = lambda: {
         "ok": False,
         "status": "failed",
         "message": "No Bot control heartbeat",
     }
-    coordinator.archive.health_timeout = 0.01
-    coordinator.archive.health_interval = 0.001
+    coordinator.runtime_support.health_timeout = 0.01
+    coordinator.runtime_support.health_interval = 0.001
 
     recovered = await coordinator.recover()
     await asyncio.sleep(0.3)

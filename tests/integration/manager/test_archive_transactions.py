@@ -1477,7 +1477,7 @@ async def test_hard_health_uses_manager_control_without_dashboard_probe(
     # invoked it unconditionally.  The Manager-only health contract must not.
     coordinator.dashboard_probe = legacy_dashboard_probe
 
-    health = await coordinator._hard_health(
+    health = await coordinator.runtime_support.hard_health(
         ["dicepp-runtime"],
         control_baseline="2026-07-23T00:00:00+00:00",
     )

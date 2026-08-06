@@ -12,30 +12,6 @@
 
 ---
 
-## config
-
-### [B-260731-90cfb8] 取消通用配置热重载，改为保存后明确重启
-- 创建: 2026-07-31
-- 优先级: P1
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-  - `Bot.reload_config` 在日志、Persona、本地化和 HealthMonitor 全部更新成功前就替换 `self.config`；后续失败可能留下部分新配置、部分旧状态
-  - `.reload` 失败回复声称“已保留旧配置”，但在配置对象已经替换后该承诺不一定成立
-  - Bot 直接修改 HealthMonitor 私有字段，绕过其自身配置校验和状态管理
-  - Dashboard 保存配置后自动请求 Manager 通知 Bot reload；Manager 只能报告成功或失败，无法识别部分生效
-- 开发备忘:
-  - 取消通用配置热重载；完整配置只在 Bot Runtime 启动时加载并应用
-  - Dashboard 保存配置时继续执行模型校验和原子写入，但不再自动请求 Bot reload
-  - 保存成功后返回并展示“需要重启”，提供调用 Manager 重启整个 RuntimeUnit 的明确操作
-  - Dashboard 必须提示一个 RuntimeUnit 可能承载多个 QQ 账号，重启会使这些账号一起短暂离线
-  - 删除 `.reload` 命令，或在兼容阶段明确回复“通用热重载已停用，请在 Dashboard 重启 Bot”，不得继续执行部分更新
-  - Manager control reload 路径暂时保留兼容响应，但退出 Dashboard 正常流程；后续协议升级时再决定删除
-  - 删除生产路径中对 `Bot.reload_config` 的依赖以及对 HealthMonitor 私有字段的直接修改
-  - Persona 角色卡等内容第一版允许保存后要求重启；以后有明确需求时，为具体 Module 单独实现专用重载
-  - 不建立通用“部分字段可热重载”名单；专用重载需求另行新增 backlog
-  - 验证配置保存不会改变运行中 Bot、重启后完整生效、Dashboard 待重启状态准确、`.reload` 不再造成部分更新，并覆盖多账号 RuntimeUnit 提示
-
 ## dashboard
 
 ### [B-260731-cf6a1d] 设计 Dashboard 查询库与群私设管理
@@ -71,10 +47,10 @@
     - `.github/workflows/test-suite.yml` 与 `.github/workflows/release.yml` 各自包含 Windows executable 启动、标准流重定向和制品检查逻辑，已经发生 Windows 建链权限、进程树清理及 onefile payload 等待窗口导致的门禁失败。
     - 影响后果是打包与启动缺陷直到推 tag 后才暴露，发版需要撤回或移动 tag，失败定位还要区分产品缺陷与测试 harness 缺陷。
 - 开发备忘:
-    - 当前状态（2026-08-03）：本地 `master` 已实现并拆分提交 Windows 有界进程 runner、仓库污染守卫、Final Candidate/Receipt v2、Promotion 原字节晋升和 Gitee 停用；全量测试为 `4162 passed, 67 skipped`，但提交尚未 push，新流程也尚未在 GitHub/GHCR 上运行。后续 agent 不应重新设计或重复实现本地代码，除非真实验收暴露缺陷。
+    - 当前状态（2026-08-03）：本地 `master` 已实现并拆分提交 Windows 有界进程 runner、仓库污染守卫、Final Candidate/Receipt v2、Promotion 原字节晋升、Gitee 停用及升级证据 fail-closed 框架；Manager 维护边界、配置保存后重启和 Query 只读化也已完成。全量测试为 `4191 passed, 67 skipped`，但本轮提交尚未 push，新流程也尚未在 GitHub/GHCR 上运行。后续 agent 不应重新设计或重复实现本地代码，除非真实验收暴露缺陷。
     - 当前设计：Final Candidate 绑定当前 `master` 的精确 SHA，封存 Windows、Linux、release manifest、条件性 upgrade evidence、容器身份和 `dicepp-candidate.json`；Promotion 必须显式选择 run ID 与 artifact ID，复核同一字节和镜像 digest 后按 draft-first 流程发布，不重新构建、压缩或打包。
     - 当前有意不做：Gitee 同步、额外发布 token、release environment/第二位 reviewer、每次 Promotion 读取管理员配置、自动 GHCR candidate 清理。不得在没有新决策的情况下重新加入这些复杂度。
-    - 验收时机：先完成 `B-260802-3e3e23`、`B-260731-b6f811` 及本轮准备纳入发布的其他代码修改；随后冻结最终 `master` SHA。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
+    - 验收时机：`B-260731-b6f811` 及本轮其他代码修改已完成；先补完 `B-260802-3e3e23` 剩余的真实 journal 与双平台 harness，再冻结最终 `master` SHA。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
     - 冻结后一次性确认远端最小配置：启用 Immutable Releases、建立受保护的 `refs/tags/v*` ruleset、授予仓库 Actions 对两个 GHCR package 的 Write access；发布运行时只使用 `GITHUB_TOKEN`。
     - 验收顺序：push 冻结 SHA 并等待普通 CI → 先完成 `B-260802-eb74ca` 的 Linux 故障回退验收及 `B-260802-3e3e23` 的跨版本矩阵/evidence → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。
     - Promotion 会真实创建 tag、GitHub Release、正式 GHCR version tag 并最后更新 `latest`，不得作为无副作用的试运行；应使用计划公开的 RC 或正式版本。
@@ -117,7 +93,7 @@
     - 保持首次目标升级后的 control gate fail-closed；切换前存在 active session 而目标未重连时，升级仍必须失败并触发回退。
     - 补充 fresh heartbeat 后断开、多 Bot session 切换、回退后重连并产生新心跳、永久断开但本地恢复成功、本地恢复真实失败等回归测试。
     - 当前状态（2026-08-03）：active-session snapshot、断开后撤销健康、回退本地恢复与 post-rollback control health 分离、Manager 凭据就绪后重连及对应回归测试均已实现；本条代码主体完成，当前只保留真实跨版本故障注入验收。后续 agent 不应重新实现已有修复，除非验收失败。
-    - 验收时机：完成 `B-260802-3e3e23` 与 `B-260731-b6f811` 对升级、回退和 journal 路径的修改后，在最终冻结的 `master` SHA 上独立执行；它是 `B-260802-6fdfcc` Final Candidate/Promotion 之前的第一个系统验收。
+    - 验收时机：`B-260731-b6f811` 代码已完成；补完 `B-260802-3e3e23` 的真实 journal 与双平台 harness 后，在最终冻结的 `master` SHA 上独立执行；它是 `B-260802-6fdfcc` Final Candidate/Promotion 之前的第一个系统验收。
     - Linux 定向场景：从受支持旧版本 fresh 部署升级到冻结 SHA，在 confirm 前保持 fresh heartbeat 后主动断开控制通道并触发目标失败；确认程序镜像、配置、数据、schema、Runtime、marker/request 均恢复，operation journal 记录 `rollback_status=succeeded` 与 `rolled_back=true`，控制通道未恢复只产生 degraded warning。
     - 同次验收还要确认切换前存在 active session 而目标未重连时仍会 fail closed，并覆盖多 Bot session 切换、回退后重连产生新心跳、永久断开但本地恢复成功、本地恢复真实失败。
     - 若验收触发任何代码修复，必须重新冻结 SHA，并重跑本条、跨版本 evidence 和后续 Final Candidate/Promotion；不得沿用旧 Candidate。
@@ -135,63 +111,16 @@
     - Windows 真实升级与故障回退目前依赖 `.temp` 下的一次性验收 harness；已验证的 pre-bump 候选与公开 rc19 二进制、同一实例回退后再次升级仍需明确区分，尚未成为固定 Release 门禁。
     - 影响后果是 `automatic_upgrade: yes` 的版本可能在公开发布后才发现旧 Manager/Guard 无法消费新请求，严重时需要人工恢复。
 - 开发备忘:
+    - 当前状态（2026-08-03）：协议 registry、固定 rc17/rc19 来源资产及 SHA、闭合四场景 evidence contract、最终 Candidate 字节绑定、Receipt/Promotion 完整复验和 Candidate 双平台 job 已实现；任何字段、版本、场景、候选身份或最终资产篡改都会 fail closed。
+    - 当前有意保持 `automatic_upgrade: yes` 不可达：registry 的 `manager_upgrade_journal` 标记为 `pending_real_rc17_export`，且仓库内固定 Windows/Linux harness 在真实编排实现前只返回 `unavailable`。不得用 repo variable、任意命令、手写 journal 或模拟通过结果绕开。
     - 建立真实 `adapter.stage() → switch() → scan/load/resume` producer-consumer 契约测试；正常请求必须由生产 producer 生成，只有畸形和攻击样本允许手工 mutation。
     - 在 `tests/fixtures/update_guard/` 保存 `v2-direct`、`rc17-staged` 等不可变 golden protocol fixtures，使用路径占位符并记录期望事务树；当前 consumer 必须读取全部仍受支持的历史变体。
     - 盘点 request、guard/started/health/rollback marker、journal、release manifest、bundle manifest 和 deployment schema，逐项记录 producer、consumer、format version、支持周期及门禁测试；目录语义变化必须新增协议版本或显式布局字段。
     - 建立上一受支持版本→当前候选的 Windows/Linux E2E：正常健康提交、目标启动后健康失败自动回退、同一实例回退后再次升级、Velopack apply 失败且目标代码从未执行。
     - 普通 PR 跑低成本 producer-consumer 与 golden tests；涉及 Manager/UpdateGuard/Velopack/发布协议的 PR、nightly 和 Release 跑真实旧二进制矩阵，并固定下载资产 SHA-256。
     - `automatic_upgrade: yes` 必须绑定当前 SHA 的跨版本验证证据；证据缺失或受支持旧制品不可获得时只能发布为 `automatic_upgrade: no`。
-    - 本条应先于 `B-260731-b6f811` Manager 维护事务 Module 的大规模重构完成，以先建立旧 journal、回退状态和平台行为兼容护栏。
-
-### [B-260731-b6f811] 深化 Manager 维护事务 Module
-- 创建: 2026-07-31
-- 优先级: P1
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-  - `UpgradeCoordinator` 当前有 19 处对 `ArchiveCoordinator` 私有 Implementation 的直接调用，包括 `_quiesce`、`_restart`、`_hard_health`、`_migrate_and_validate_schema`、`_best_effort_restart`、`_capture_control_baseline`、`_cleanup_inprogress` 和 `_apply_retention_if_safe`
-  - 升级与归档恢复分别实现维护锁上下文、事务 journal、重启恢复和 `rollback_failed` 终态判定；共同的数据安全政策没有集中归属
-  - `docs/dev/manager-architecture.md` 已明确 terminal rollback adjudication rule 由升级与归档恢复共用，但两条代码路径仍分别解释 journal 状态；后续新增或调整状态时存在只更新一侧的风险
-  - 当前尚未确认已有生产数据损坏；本条处理的是高风险事务规则的 Locality、可验证性和长期分歧风险
-- 开发备忘:
-  - 目标:
-    - 建立升级与归档恢复共用的 Manager 维护事务 Module
-    - 消除 `UpgradeCoordinator` 对 `ArchiveCoordinator` 私有 Implementation 的调用
-    - 集中维护锁、RuntimeUnit 停写与恢复、迁移、健康检查、共同 journal 生命周期和回退终态政策
-  - 必须保持的不变量:
-    - 现有归档格式和 manifest 格式不变
-    - 现有 Manager HTTP Interface 和 operation 响应不变
-    - 已持久化的旧 journal 仍可读取和恢复
-    - 破坏性回退已失败的终态 journal 不会在 Manager 重启后重复执行
-    - UpdateGuard 已提供可靠回退证据的例外路径保持可恢复
-    - 成功、失败和 Manager 重启后均恢复原先运行的 RuntimeUnit 集合
-    - system 安全归档的保护与保留策略不变
-    - Linux Docker 与 Windows Velopack/UpdateGuard 的平台行为不变
-  - 不在本条范围:
-    - 不修改归档 payload、Catalog 或 schema migration 契约
-    - 不改变自动升级支持范围或部署拓扑
-    - 不重写 Docker、Velopack 或 UpdateGuard Adapter
-    - 不新增用户可见能力
-  - 建议提交顺序:
-    1. 补齐共同事务状态、故障阶段和旧 journal 的行为护栏
-    2. 提取 RuntimeUnit 停写、重启、迁移和健康检查等共同行为，替换 Upgrade → Archive 私有调用
-    3. 集中可重试回退与 terminal rollback 判定
-    4. 集中共同 journal 字段、阶段和 commit point 解释
-    5. 删除失去调用者的私有方法和重复规则，更新架构文档
-  - 提交要求:
-    - 在同一个 PR 中完成
-    - 每个提交均应可独立运行并通过其相关测试
-    - 不允许依赖后续提交才能恢复可运行状态
-    - 不得先完成整体重构，再事后机械拆分不可运行的提交
-  - 重点验证:
-    - 正常归档创建与恢复
-    - 正常 Linux/Windows 升级
-    - 停写、程序切换、数据切换、迁移、重启和健康检查各阶段失败
-    - 回退成功、回退失败及 terminal rollback
-    - Manager 在各 commit point 重启后的恢复
-    - Windows UpdateGuard handoff 与可靠 marker 例外
-    - 改动前生成的 journal 兼容读取
-    - Manager 相关测试与完整离线回归
+    - 剩余实现：从带明确 tag/commit/asset provenance 的真实 rc17 数据库导出 Manager journal fixture；在仓库固定 Windows/Linux harness 中编排四个真实场景；在最终冻结 SHA 上运行并保存双平台 evidence。
+    - 关闭条件：真实 journal fixture 被当前 `UpgradeCoordinator.recover` 消费；Windows/Linux 所有受支持来源的四场景均由真实旧制品与最终 Candidate 字节执行并通过；Candidate、Receipt、Promotion 的 fail-closed 行为在冻结 SHA 上完成外部验收。
 
 ## persona
 
@@ -213,28 +142,6 @@
   - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
-
-## query
-
-### [B-260731-731553] 将 Bot 资料查询命令收缩为只读
-- 创建: 2026-07-31
-- 优先级: P1
-- 类型: refactor
-- 改动量: L
-- 问题表现:
-    - 玩家仍需要 `.查询`、`.搜索`、结果选择和翻页，但 `QueryCommand` 同时承担骰主创建、编辑、删除、重定向写入和数据库管理
-    - 编辑状态跨 `can_process_msg` 与 `process_msg` 传递，依赖 `pending_db_action` 等隐藏状态
-    - 英文 `create` 分支判断英文命令后按中文“创建”切分，已存在明确错误
-    - 当前产品方向不再需要骰主通过群指令管理资料库
-- 开发备忘:
-    - 保留玩家查询、全文搜索、结果选择、翻页和只读重定向解析
-    - 删除条目创建、编辑、删除及 `DELETE` 密文流程
-    - 删除重定向创建和删除，只保留查询时的重定向读取
-    - 删除数据库创建、加载、卸载、导入和列表等管理指令
-    - 清理 `editing`、`edit_index`、`edit_new`、`edit_flag`、`pending_db_action` 等写入状态
-    - `HomebrewCommand` 和 `.私设` / `.hb` 本条不改
-    - 不在本条增加 Dashboard 写入能力；接受过渡期内没有内建单条资料 CRUD
-    - 更新帮助文本，并验证现有玩家查询行为不变、旧管理命令不再执行写入
 
 ## statistics
 

@@ -103,9 +103,11 @@ format v1 仍以保守兼容方式读取：它被视为 `regular`，并按旧 ma
 
 任一步失败都会自动应用 pre-restore、再次检查 schema 和本地健康，并恢复原运行状态。Manager 重启或断电恢复时，未开始切换的事务清理临时状态；已经开始切换但尚未提交的事务自动回退；已写入健康标记的事务完成收尾。回退失败会保留 journal 和安全归档，等待后续恢复重试。NapCat、QQ、GitHub、LLM 等外部依赖只形成 warning，不触发这一本地数据回退。
 
+归档恢复与升级保持各自独立的持久状态机，但通过 coordinator-neutral 的维护运行时边界共用控制心跳基线、原运行单元采集与暂停、重启、schema migration/validation 和本地硬健康检查。临时归档清理与 system 归档保留策略则经公开的 archive housekeeping 边界调用；升级流程不得调用归档 coordinator 的私有实现。维护 reservation 仍由发起事务持有直到 operation 与 journal 到达持久终态，不因共享原语的内部作用域提前释放。
+
 回退在破坏阶段开始后被判定失败的事务是终态的（terminal rollback adjudication rule，升级与归档恢复两侧共用同一规则）：Manager 重启不会重放破坏性回退，只重复上报需要人工恢复，journal 保留在可恢复集合中以持续保护目标版本包与安全归档。终态 journal 在任一恢复性操作成功时自动退役——成功恢复归档（典型为 pre-upgrade 归档）或成功完成一次升级 commit——状态移出可恢复集合并保留 operation 历史作证据，目标版本包与安全归档的保护随之解除（归档转为普通归档走正常保留策略，不立即删除），Manager 重启不再重复上报。退役之前仍需人工介入：按目标平台的部署指南完成手工恢复，再通过一次归档恢复或升级让系统回到受管健康状态。
 
-Bot 控制通道契约：Manager 是唯一的 `/v1/control/ws` 服务端，使用 `<instance>/manager/control/control-token` 认证；这枚 token 与 Manager HTTP API 的 `api-token` 完全独立，Dashboard 没有该路径的挂载权限。连接、单 bot 会话替换、ping/pong、状态心跳和 reload 请求/结果都保持 `dicepp-control-v1` 包络；同一 Bot 的 reload 在 Manager 串行，已被替换的会话不能上报状态或完成请求。Manager 内存中持有 Bot 的版本和最新心跳，并通过 `/v1/control/bots`、`/v1/control/reload` 提供认证 HTTP 调用；Dashboard 的状态 REST/SSE 和保存后的热重载只代理这些调用，不再持有 Bot WebSocket 或写入控制状态到 `dashboard.db`。
+Bot 控制通道契约：Manager 是唯一的 `/v1/control/ws` 服务端，使用 `<instance>/manager/control/control-token` 认证；这枚 token 与 Manager HTTP API 的 `api-token` 完全独立，Dashboard 没有该路径的挂载权限。连接、单 bot 会话替换、ping/pong、状态心跳和 reload 请求/结果都保持 `dicepp-control-v1` 包络；已被替换的会话不能上报状态或完成请求。Manager 内存中持有 Bot 的版本和最新心跳，并通过 `/v1/control/bots` 提供认证 HTTP 调用。`/v1/control/reload` 暂时保留协议兼容，但 Bot 会明确回复通用配置热重载已停用，Dashboard 保存配置后不会调用它。完整配置由 RuntimeUnit 启动时加载；Dashboard 通过 Manager 原子保存，并使用现有 RuntimeUnit restart operation 使其生效。
 
 控制迁移的混版本语义是明确失败而非回退：新 Dashboard 调用不具备 `control` capability 的旧 Manager 会报告“需先升级 Manager”；新 Manager 不再提供 Dashboard `/ws/control` 兼容端点，因此旧 Bot 会保持离线并在日志中重连，直到它被升级为 Manager URL。标准 Compose 以 Manager 为启动前提，Manager 本身不依赖 Dashboard。该拓扑变更和 Manager 自身发布均属于自动升级拒绝范围，必须在已有归档可恢复的前提下完成手工部署迁移；不要尝试让旧 Dashboard 直接接管控制通道。
 

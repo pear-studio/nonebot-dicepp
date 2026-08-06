@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import copy
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import yaml
 from fastapi.testclient import TestClient
@@ -62,11 +62,6 @@ class ConfigManagerClient:
         self.bot_configs[bot_id] = copy.deepcopy(config)
         return {"saved": True, "application": "deferred", "restart_required": True}
 
-    async def reload_bots(self, bot_id: str | None = None) -> list[dict]:
-        self.calls.append(("reload", bot_id, {}))
-        return []
-
-
 def _install(test_client: TestClient, client: ConfigManagerClient) -> None:
     test_client.app.state.manager_client = client
     setup_auth(test_client)
@@ -109,14 +104,10 @@ def test_config_write_routes_send_complete_candidates_to_manager(
     assert manager.calls == [
         ("get_user", None, {}),
         ("user", None, {"app": {"name": "after"}}),
-        ("reload", None, {}),
         ("get_user", None, {}),
         ("user", None, {"app": {}}),
-        ("reload", None, {}),
         ("user", None, {"update": {"check_interval_hours": 12.0}}),
-        ("reload", None, {}),
         ("bot", "test_bot", {"master": ["after"], "enabled": False}),
-        ("reload", "test_bot", {}),
     ]
     assert DashboardPaths.CONFIG_USER.read_bytes() == user_before
     assert bot_path.read_bytes() == bot_before
@@ -126,7 +117,7 @@ def test_config_write_conflict_is_transparent_and_has_no_dashboard_side_effects(
     test_client: TestClient,
     monkeypatch,
 ) -> None:
-    """A Manager maintenance conflict neither writes nor reloads locally."""
+    """A Manager maintenance conflict has no Dashboard-side write effects."""
     manager = ConfigManagerClient(
         ManagerClientError(
             "Maintenance transaction is active",
@@ -138,9 +129,7 @@ def test_config_write_conflict_is_transparent_and_has_no_dashboard_side_effects(
     before = b'{"app": {"name": "before"}}'
     DashboardPaths.CONFIG_USER.write_bytes(before)
     audit_log = Mock()
-    notify_reload = AsyncMock()
     monkeypatch.setattr("dashboard.src.app.audit_log", audit_log)
-    monkeypatch.setattr("dashboard.src.app._notify_reload", notify_reload)
 
     response = test_client.post(
         "/api/config/user/save",
@@ -155,14 +144,13 @@ def test_config_write_conflict_is_transparent_and_has_no_dashboard_side_effects(
     }
     assert DashboardPaths.CONFIG_USER.read_bytes() == before
     audit_log.assert_not_called()
-    notify_reload.assert_not_awaited()
 
 
 def test_manager_validation_error_is_transparent_for_a_dashboard_field_update(
     test_client: TestClient,
     monkeypatch,
 ) -> None:
-    """The Dashboard preserves Manager field errors and does not reload."""
+    """The Dashboard preserves Manager field errors without side effects."""
     manager = ConfigManagerClient(
         ManagerClientError(
             "Configuration validation failed",
@@ -182,9 +170,6 @@ def test_manager_validation_error_is_transparent_for_a_dashboard_field_update(
         user_config={"app": {"name": "before"}},
     )
     _install(test_client, manager)
-    notify_reload = AsyncMock()
-    monkeypatch.setattr("dashboard.src.app._notify_reload", notify_reload)
-
     response = test_client.post(
         "/api/config/set",
         json={"path": "update.cache_versions", "value": True},
@@ -201,7 +186,6 @@ def test_manager_validation_error_is_transparent_for_a_dashboard_field_update(
         ("get_user", None, {}),
         ("user", None, {"app": {"name": "before"}, "update": {"cache_versions": True}}),
     ]
-    notify_reload.assert_not_awaited()
 
 
 def test_dashboard_config_get_routes_read_through_manager(

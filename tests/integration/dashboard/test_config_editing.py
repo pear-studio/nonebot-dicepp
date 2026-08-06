@@ -104,13 +104,18 @@ class TestMergedView:
 
 class TestSetField:
     def test_set_field(self, test_client: TestClient, tmp_dashboard_paths):
-        """``POST /api/config/set`` writes to user.json and returns reload results."""
+        """``POST /api/config/set`` persists and reports deferred application."""
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/set", json={"path": "app.name", "value": "new_name"}
         )
         assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        assert resp.json() == {
+            "ok": True,
+            "saved": True,
+            "application": "deferred",
+            "restart_required": True,
+        }
 
         # Verify user.json was written
         user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
@@ -408,14 +413,14 @@ class TestFieldMetadata:
         assert "basic" in layout.get("sections", {})
 
 
-class TestReloadNotification:
-    def test_reload_notification_returned(self, test_client: TestClient):
-        """After a config save, the response includes reload_results."""
+class TestDeferredConfigApplication:
+    def test_config_save_requires_restart_and_does_not_report_reload(self, test_client: TestClient):
+        """A successful save never claims that a running Bot was updated."""
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/bots/test_bot/save", json={"master": ["m"]}
         )
         data = resp.json()
-        assert "reload" in data
-        # No bots are registered, so reload should be empty
-        assert data["reload"] == []
+        assert data["application"] == "deferred"
+        assert data["restart_required"] is True
+        assert "reload" not in data

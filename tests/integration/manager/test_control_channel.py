@@ -565,12 +565,18 @@ async def test_archive_control_probe_uses_heartbeat_snapshot_during_new_session(
             return super().values()
 
     service._states = OwnerLoopStates(service._states)
-    health_task = asyncio.create_task(coordinator._probe_once(service.probe))
+    health_task = asyncio.create_task(
+        coordinator.runtime_support.capture_control_baseline()
+    )
     new_session_task = asyncio.create_task(
         service._replace_session("new", _FakeControlSocket())
     )
 
-    health, _ = await asyncio.gather(health_task, new_session_task)
+    (heartbeat, control_gate), _ = await asyncio.gather(
+        health_task,
+        new_session_task,
+    )
 
-    assert health["status"] == "ok"
+    assert isinstance(heartbeat, str)
+    assert control_gate == "skipped_no_bound_bots"
     assert {row["bot_id"] for row in service.bot_statuses()} == {"existing", "new"}

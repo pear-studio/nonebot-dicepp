@@ -150,7 +150,7 @@ API Key 放在 `config/user.json`：
 | `DICEPP_MANAGER_DOCKER_COMMAND` | Linux Manager | Docker 控制端点；标准部署使用 Unix Socket，测试/兼容环境可指定单一 CLI 路径 | `unix:///var/run/docker.sock` |
 | `DICEPP_MANAGER_DOCKER_TIMEOUT` | Linux Manager | Docker 固定操作超时秒数 | `30` |
 | `DICEPP_MANAGER_CONTROL_HEARTBEAT_TIMEOUT` | Manager | Bot status/pong 心跳超时秒数 | `120` |
-| `DICEPP_MANAGER_CONTROL_RELOAD_TIMEOUT` | Manager | 等待 Bot 热重载结果的秒数 | `5` |
+| `DICEPP_MANAGER_CONTROL_RELOAD_TIMEOUT` | Manager | 等待旧版 control reload 兼容响应的秒数（Dashboard 不再调用） | `5` |
 
 Manager API、operation store 和部署拓扑分别带有独立的兼容版本。当前标准部署使用 Manager API `3`、operation schema `2` 和 deployment schema `2`。这些值由程序与发布包共同声明，用户不应通过环境变量强行覆盖。Linux Bot 容器使用以下标签声明可管理范围：
 
@@ -165,15 +165,15 @@ Manager 只控制三个标签同时匹配的容器。修改 RuntimeUnit id 或�
 
 ## 修改后如何生效
 
-**Web 管理面板**（推荐）：在面板中修改配置后点击保存，自动写入磁盘并通知 Bot 热重载。
+**Web 管理面板**（推荐）：在面板中修改配置后点击保存。Manager 会先校验并原子写入磁盘；页面会列出同一 RuntimeUnit 内会一起短暂离线的 QQ 账号，并提供重启按钮。配置只会在 RuntimeUnit 重启后完整生效。
 
 **手动编辑**：修改 JSON 文件后重启：
 
 ```bash
-docker compose restart
+docker compose restart bot
 ```
 
-或通过 QQ 发送 `.reload` 热重载。如果 JSON 写错，热重载会保留旧配置。
+`.reload` 仅保留为兼容提示，不会修改运行中的配置。直接编辑 JSON 时应先确认格式正确，再重启对应 RuntimeUnit；标准 Compose 也可以只重启 Bot 服务。
 
 ## 配置不生效时检查
 

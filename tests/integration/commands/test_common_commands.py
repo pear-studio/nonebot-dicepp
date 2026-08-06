@@ -101,6 +101,20 @@ class TestHelpCommandIntegration(_BotTestBase):
                       f"未知查询词应返回未找到提示，实际输出：{result}")
 
 
+class TestReloadTombstoneIntegration(_BotTestBase):
+    """The real command registry routes exact ``.reload`` before ``.r``."""
+
+    BOT_NAME = "test_reload_tombstone_bot"
+
+    async def test_reload_routes_to_restart_notice_instead_of_roll(self):
+        cmds = await self._send_private(".reload", user_id="test_master")
+        result = "\n".join(str(command) for command in cmds)
+
+        self.assertIn("通用配置热重载已停用", result)
+        self.assertIn("重启 Bot RuntimeUnit", result)
+        self.assertNotIn("掷骰结果", result)
+
+
 class TestWelcomeCommandIntegration(_BotTestBase):
     """WelcomeCommand (.welcome) 集成测试"""
 
