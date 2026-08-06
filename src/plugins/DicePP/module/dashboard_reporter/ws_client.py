@@ -8,6 +8,7 @@ reconnection.
 """
 import asyncio
 import logging
+import math
 import os
 import random
 from typing import Callable, Optional
@@ -33,6 +34,10 @@ _PING_TIMEOUT = 60
 _RECONNECT_BASE = 1.0
 _RECONNECT_MAX = 60.0
 _RECONNECT_JITTER = 0.25
+_RECONNECT_MAX_STEP = max(
+    0,
+    math.ceil(math.log2(_RECONNECT_MAX / _RECONNECT_BASE)),
+)
 
 
 def resolve_manager_url() -> Optional[str]:
@@ -63,20 +68,29 @@ class ControlChannelClient:
 
     Usage::
 
-        from dicepp_control.control_token import ensure_token
-
-        token = ensure_token(project_root)
         client = ControlChannelClient(
             bot_id="123456",
             manager_url="ws://manager:4091/v1/control/ws",
             # This is manager/control/control-token, not the Manager HTTP
             # api-token or the legacy data/dicepp.db value.
-            token=token,
+            token="manager-owned-token",
             on_reload=bot.reload_config,
         )
         await client.connect()
         # ... bot runs ...
         await client.stop()
+
+    When the Manager-owned token may appear after Bot startup, use the
+    mutually exclusive ``token_provider`` form instead::
+
+        from dicepp_control.control_token import ensure_token
+
+        client = ControlChannelClient(
+            bot_id="123456",
+            manager_url="ws://manager:4091/v1/control/ws",
+            token_provider=lambda: ensure_token(project_root),
+            on_reload=bot.reload_config,
+        )
     """
 
     def __init__(
@@ -84,12 +98,17 @@ class ControlChannelClient:
         *,
         bot_id: str,
         manager_url: str,
-        token: str,
+        token: str | None = None,
+        token_provider: Callable[[], str | None] | None = None,
         on_reload: Callable[[], object],
     ) -> None:
+        if (token is None) == (token_provider is None):
+            raise ValueError("provide exactly one of token or token_provider")
+
         self._bot_id = bot_id
         self._manager_url = manager_url
         self._token = token
+        self._token_provider = token_provider
         self._on_reload = on_reload
 
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
@@ -195,7 +214,8 @@ class ControlChannelClient:
             if not self._running:
                 break
 
-            delay = min(_RECONNECT_BASE * (2 ** attempt), _RECONNECT_MAX)
+            backoff_step = min(attempt, _RECONNECT_MAX_STEP)
+            delay = min(_RECONNECT_BASE * (2 ** backoff_step), _RECONNECT_MAX)
             jitter = delay * _RECONNECT_JITTER * (random.random() * 2 - 1)
             delay += jitter
             delay = max(0.5, delay)
@@ -205,6 +225,7 @@ class ControlChannelClient:
 
     async def _connect_and_loop(self) -> None:
         """Single connection lifecycle: auth → message loop."""
+        token = self._resolve_token()
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(
                 self._manager_url,
@@ -214,7 +235,7 @@ class ControlChannelClient:
                 self._ws = ws
 
                 # ── auth ──────────────────────────────────────────
-                await ws.send_str(encode(auth_msg(self._bot_id, self._token)))
+                await ws.send_str(encode(auth_msg(self._bot_id, token)))
                 raw = await asyncio.wait_for(ws.receive_str(), timeout=10)
                 reply = decode(raw)
                 if not is_valid(reply) or reply.get("type") != "auth_result":
@@ -245,6 +266,22 @@ class ControlChannelClient:
                     await asyncio.gather(
                         receive_task, status_task, return_exceptions=True
                     )
+
+    def _resolve_token(self) -> str:
+        """Resolve credentials for one connection attempt."""
+        if self._token_provider is None:
+            assert self._token is not None
+            return self._token
+
+        try:
+            token = self._token_provider()
+        except Exception:
+            # Provider errors can contain paths or credentials. Keep the retry
+            # signal while ensuring _run's warning cannot expose those details.
+            raise RuntimeError("control token is not available yet") from None
+        if not isinstance(token, str) or not token:
+            raise ValueError("control token provider returned an empty token")
+        return token
 
     async def _receive_loop(self, ws) -> None:
         """Receive messages, waking periodically to detect half-open sockets."""

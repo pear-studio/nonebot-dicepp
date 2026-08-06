@@ -1,13 +1,15 @@
 """Tests for Control Channel client runtime configuration and recovery."""
 
 import asyncio
+import logging
 import random
 import threading
 from importlib.metadata import version as package_version
+from types import SimpleNamespace
 
 import pytest
 
-from dicepp_control.protocol import auth_result, encode
+from dicepp_control.protocol import auth_result, decode, encode
 from plugins.DicePP.module.dashboard_reporter import ws_client
 
 
@@ -97,6 +99,134 @@ def _client():
 
 def test_client_reports_installed_package_version():
     assert _client()._version == package_version("dicepp")
+
+
+@pytest.mark.parametrize(
+    "token_options",
+    [
+        {},
+        {"token": "static-token", "token_provider": lambda: "dynamic-token"},
+    ],
+)
+def test_client_requires_exactly_one_token_source(token_options):
+    with pytest.raises(ValueError, match="exactly one"):
+        ws_client.ControlChannelClient(
+            bot_id="test-bot",
+            manager_url="ws://manager:4091/v1/control/ws",
+            on_reload=lambda: None,
+            **token_options,
+        )
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_token_fails_before_opening_connection(monkeypatch):
+    client = ws_client.ControlChannelClient(
+        bot_id="test-bot",
+        manager_url="ws://manager:4091/v1/control/ws",
+        token_provider=lambda: "",
+        on_reload=lambda: None,
+    )
+
+    def unexpected_session():
+        pytest.fail("an empty token must not reach the network")
+
+    monkeypatch.setattr(ws_client.aiohttp, "ClientSession", unexpected_session)
+
+    with pytest.raises(ValueError, match="empty token"):
+        await client._connect_and_loop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initial_failure",
+    ["permission_error", "os_error", "runtime_error", "missing"],
+)
+async def test_run_retries_until_token_provider_can_supply_credentials(
+    monkeypatch, caplog, initial_failure
+):
+    """A Bot started before Manager token creation must eventually connect."""
+    provider_calls = 0
+    sent_messages: list[str] = []
+
+    def provide_token() -> str | None:
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 1:
+            if initial_failure == "permission_error":
+                raise PermissionError("token unavailable: do-not-log-this-secret")
+            if initial_failure == "os_error":
+                raise OSError("read-only mount: do-not-log-this-secret")
+            if initial_failure == "runtime_error":
+                raise RuntimeError("provider failed: do-not-log-this-secret")
+            return None
+        return "fresh-token"
+
+    client = ws_client.ControlChannelClient(
+        bot_id="test-bot",
+        manager_url="ws://manager:4091/v1/control/ws",
+        token_provider=provide_token,
+        on_reload=lambda: None,
+    )
+
+    class RecoveringWebSocket(_FakeWebSocket):
+        async def send_str(self, message):
+            sent_messages.append(message)
+
+        async def receive(self):
+            client._running = False
+            return SimpleNamespace(type=ws_client.aiohttp.WSMsgType.CLOSED)
+
+    monkeypatch.setattr(
+        ws_client.aiohttp,
+        "ClientSession",
+        lambda: _FakeSession(RecoveringWebSocket()),
+    )
+
+    async def no_wait(delay):
+        if delay == ws_client._STATUS_INTERVAL:
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    client._running = True
+
+    with caplog.at_level(logging.WARNING, logger="bot.control_channel"):
+        await client._run()
+
+    assert provider_calls == 2
+    auth_message = decode(sent_messages[0])
+    assert auth_message["type"] == "auth"
+    assert auth_message["payload"]["token"] == "fresh-token"
+    assert "do-not-log-this-secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_reconnect_backoff_saturates_without_overflow(monkeypatch):
+    """A permanently missing token must keep retrying beyond float limits."""
+    client = _client()
+    attempts = 0
+    delays: list[float] = []
+
+    async def fail_connection():
+        nonlocal attempts
+        attempts += 1
+        raise ConnectionError("still unavailable")
+
+    async def no_wait(delay):
+        delays.append(delay)
+        if len(delays) == 1_030:
+            client._running = False
+
+    monkeypatch.setattr(client, "_connect_and_loop", fail_connection)
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    monkeypatch.setattr(random, "random", lambda: 0.5)
+    monkeypatch.setattr(ws_client.logger, "disabled", True)
+    client._running = True
+
+    await client._run()
+
+    assert attempts == 1_030
+    assert len(delays) == 1_030
+    assert delays[-100:] == [ws_client._RECONNECT_MAX] * 100
 
 
 @pytest.mark.asyncio

@@ -452,12 +452,16 @@ async def test_probe_ignores_disconnected_bots_when_selecting_latest_heartbeat(
 
 @pytest.mark.asyncio
 async def test_reconnected_session_must_publish_a_new_heartbeat(
+    monkeypatch,
     tmp_path: Path,
 ) -> None:
     """Replacing a transport clears its heartbeat until the new Bot reports."""
-    from dicepp_manager.control import ControlChannelService
+    import dicepp_manager.control as manager_control
 
-    service = ControlChannelService(
+    now = [1_700_000_000.0]
+    monkeypatch.setattr(manager_control.time, "time", lambda: now[0])
+
+    service = manager_control.ControlChannelService(
         project_root=tmp_path,
         known_bot_ids=lambda: {"bot-1"},
     )
@@ -472,6 +476,7 @@ async def test_reconnected_session_must_publish_a_new_heartbeat(
     assert service.probe()["active_authenticated_sessions"] == 1
     assert service.probe()["ok"] is False
 
+    now[0] += 1
     await service._handle_message("bot-1", new_socket, status("bot-1", "3.1.0"))
 
     assert service.probe()["ok"] is True

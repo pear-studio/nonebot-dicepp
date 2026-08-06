@@ -143,12 +143,10 @@ class Bot:
             if ws_url:
 
                 project_root = Paths.PROJECT_ROOT
-                token = ensure_token(project_root)
-
                 self._control_channel = ControlChannelClient(
                     bot_id=self.account,
                     manager_url=ws_url,
-                    token=token,
+                    token_provider=lambda: ensure_token(project_root),
                     on_reload=self.reload_config,
                 )
         except ImportError:
