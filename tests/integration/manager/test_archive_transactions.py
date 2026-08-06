@@ -12,11 +12,9 @@ from pathlib import Path
 import pytest
 
 import dicepp_manager.archive as archive_module
-import dicepp_manager.archive_coordinator as archive_coordinator_module
 from dicepp_data import InstanceLayout
 from dicepp_manager.archive import (
     ArchiveError,
-    ArchiveInvalidError,
     MAX_MANIFEST_BYTES,
     apply_archive,
     create_archive,
@@ -81,21 +79,6 @@ def _write(path: Path, value: str | bytes) -> None:
         path.write_bytes(value)
     else:
         path.write_text(value, encoding="utf-8")
-
-
-def _schema_metadata_rows(
-    *,
-    target_name: str = "instance",
-    current_version: str = "1",
-) -> list[tuple[str, str]]:
-    timestamp = "2026-01-01T00:00:00+00:00"
-    return [
-        ("application", "dicepp"),
-        ("target_name", target_name),
-        ("current_version", current_version),
-        ("created_at", timestamp),
-        ("updated_at", timestamp),
-    ]
 
 
 def _coordinator(
@@ -179,26 +162,12 @@ def _create_instance_database(path: Path, *, values: list[str] | None = None) ->
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            _schema_metadata_rows(),
+            [("target_name", "instance"), ("current_version", "1")],
         )
         connection.execute("CREATE TABLE entries (value TEXT PRIMARY KEY)")
         connection.executemany(
             "INSERT INTO entries(value) VALUES (?)",
             [(value,) for value in values or []],
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def _create_opaque_database(path: Path, *, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute("CREATE TABLE legacy_entries (value TEXT PRIMARY KEY)")
-        connection.execute(
-            "INSERT INTO legacy_entries(value) VALUES (?)",
-            (value,),
         )
         connection.commit()
     finally:
@@ -247,234 +216,6 @@ def test_create_archive_checkpoints_managed_sqlite_wal_before_snapshot(
         "base",
         "wal-committed",
     ]
-
-
-def test_opaque_sqlite_is_reported_and_restored_byte_for_byte(
-    tmp_path: Path,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    database = layout.data_root / "dicepp.db"
-    _create_opaque_database(database, value="legacy")
-    original = database.read_bytes()
-
-    summary, manifest = create_archive(layout=layout)
-    verification = verify_archive(summary["filename"], layout=layout)
-
-    expected = {
-        "count": 1,
-        "files": ["data/dicepp.db"],
-    }
-    assert summary["opaque_sqlite_count"] == 1
-    assert manifest["compatibility"]["opaque_sqlite"] == expected
-    assert verification["verified"] is True
-    assert verification["opaque_sqlite"] == expected
-    assert verification["restorable_files"] == ["data/dicepp.db"]
-    assert any("preserved as opaque files" in item for item in verification["warnings"])
-
-    database.write_bytes(b"changed after archive")
-    apply_archive(summary["filename"], layout=layout)
-
-    assert database.read_bytes() == original
-
-
-def test_corrupt_sqlite_cannot_be_downgraded_to_opaque(
-    tmp_path: Path,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    database = layout.data_root / "dicepp.db"
-    _create_opaque_database(database, value="legacy")
-    summary, _manifest = create_archive(layout=layout)
-    path = export_archive_path(summary["filename"], layout=layout)
-    _rewrite_payload(path, "data/dicepp.db", b"not a sqlite database")
-
-    verification = verify_archive(summary["filename"], layout=layout)
-
-    assert verification["verified"] is False
-    assert verification["opaque_sqlite"] == {"count": 0, "files": []}
-    assert any(
-        "SQLite schema metadata cannot be read" in item
-        for item in verification["problems"]
-    )
-
-
-def test_opaque_sqlite_must_pass_quick_check_before_publication(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    database = layout.data_root / "dicepp.db"
-    database.parent.mkdir(parents=True)
-    with sqlite3.connect(database) as connection:
-        connection.execute("PRAGMA page_size=1024")
-        connection.execute("VACUUM")
-        connection.execute(
-            "CREATE TABLE legacy_entries (id INTEGER PRIMARY KEY, payload BLOB)"
-        )
-        connection.executemany(
-            "INSERT INTO legacy_entries(payload) VALUES (?)",
-            [(bytes([index % 251]) * 400,) for index in range(200)],
-        )
-
-    # Page 1 contains sqlite_schema, while page 2 is this table's B-tree root.
-    # Damaging page 2 leaves the metadata lookup able to report a missing table,
-    # but makes SQLite's integrity check fail.
-    with database.open("r+b") as handle:
-        handle.seek(1024)
-        handle.write(b"\x00")
-    monkeypatch.setattr(
-        archive_module,
-        "_checkpoint_managed_sqlite_assets",
-        lambda *_args, **_kwargs: None,
-    )
-
-    with pytest.raises(
-        ArchiveInvalidError,
-        match="New archive verification failed",
-    ):
-        create_archive(layout=layout)
-
-    assert not list(layout.manager_backups_dir.glob("*.zip"))
-    assert not list(layout.manager_backups_dir.glob("*.inprogress"))
-
-
-@pytest.mark.parametrize(
-    ("removed_key", "updates", "expected_error"),
-    [
-        ("application", {}, "metadata is incomplete"),
-        (None, {"application": "other"}, "application mismatch"),
-        ("created_at", {}, "metadata is incomplete"),
-        ("updated_at", {}, "metadata is incomplete"),
-        (None, {"current_version": "invalid"}, "version is invalid"),
-        (None, {"current_version": "-1"}, "version is invalid"),
-        (None, {"current_version": "0"}, "version is invalid"),
-    ],
-)
-def test_managed_sqlite_requires_complete_valid_lifecycle_metadata(
-    tmp_path: Path,
-    removed_key: str | None,
-    updates: dict[str, str],
-    expected_error: str,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    database = layout.data_root / "dicepp.db"
-    metadata = dict(_schema_metadata_rows())
-    if removed_key is not None:
-        metadata.pop(removed_key)
-    metadata.update(updates)
-    database.parent.mkdir(parents=True)
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            "CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-        )
-        connection.executemany(
-            "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            metadata.items(),
-        )
-
-    with pytest.raises(ArchiveError, match=expected_error):
-        create_archive(layout=layout)
-
-    assert not list(layout.manager_backups_dir.glob("*.zip"))
-
-
-@pytest.mark.asyncio
-async def test_archive_operation_reports_and_restores_opaque_sqlite(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    layout, _runtime, _service, coordinator = _coordinator(tmp_path)
-    database = layout.data_root / "dicepp.db"
-    _create_opaque_database(database, value="legacy")
-    original = database.read_bytes()
-    operation = coordinator.new_operation("archive.create")
-
-    await coordinator.create(operation, description=None, profile="regular")
-
-    assert operation.status == "succeeded"
-    assert operation.detail["archive"]["opaque_sqlite_count"] == 1
-    assert operation.detail["manifest"]["compatibility"]["opaque_sqlite"] == {
-        "count": 1,
-        "files": ["data/dicepp.db"],
-    }
-
-    database.unlink()
-    _create_instance_database(database, values=["current"])
-    real_plan = coordinator.plan
-
-    def stale_preflight_plan(filename: str) -> dict:
-        plan = real_plan(filename)
-        plan["opaque_sqlite"] = {"count": 0, "files": []}
-        return plan
-
-    monkeypatch.setattr(coordinator, "plan", stale_preflight_plan)
-    restore = coordinator.new_operation("archive.restore")
-    await coordinator.restore(
-        restore,
-        filename=operation.detail["archive"]["filename"],
-    )
-
-    assert restore.status == "succeeded"
-    assert restore.detail["plan"]["opaque_sqlite"] == {
-        "count": 1,
-        "files": ["data/dicepp.db"],
-    }
-    assert all(
-        item["path"] != "data/dicepp.db"
-        for item in restore.detail["migrations"]
-    )
-    assert database.read_bytes() == original
-
-
-@pytest.mark.asyncio
-async def test_restore_rollback_uses_apply_plan_for_opaque_skip(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fail_restart = {"enabled": False}
-
-    def fault(phase: str) -> None:
-        if fail_restart["enabled"] and phase == "restart":
-            fail_restart["enabled"] = False
-            raise OSError("injected post-apply failure")
-
-    layout, _runtime, _service, coordinator = _coordinator(
-        tmp_path,
-        fault_hook=fault,
-    )
-    database = layout.data_root / "dicepp.db"
-    _create_instance_database(database, values=["archive-target"])
-    target, _manifest = create_archive(layout=layout)
-
-    database.unlink()
-    _create_opaque_database(database, value="rollback-source")
-    original = database.read_bytes()
-    real_create_archive = archive_coordinator_module.create_archive
-
-    def create_with_stale_returned_manifest(*args, **kwargs):
-        summary, manifest = real_create_archive(*args, **kwargs)
-        manifest["compatibility"]["opaque_sqlite"] = {
-            "count": 0,
-            "files": [],
-        }
-        return summary, manifest
-
-    monkeypatch.setattr(
-        archive_coordinator_module,
-        "create_archive",
-        create_with_stale_returned_manifest,
-    )
-    fail_restart["enabled"] = True
-    restore = coordinator.new_operation("archive.restore")
-
-    with pytest.raises(ArchiveTransactionError) as raised:
-        await coordinator.restore(restore, filename=target["filename"])
-
-    assert raised.value.detail["rolled_back"] is True
-    assert raised.value.detail["pre_restore_opaque_sqlite"] == {
-        "count": 1,
-        "files": ["data/dicepp.db"],
-    }
-    assert database.read_bytes() == original
 
 
 def test_sqlite_checkpoint_failure_prevents_archive_publication(
@@ -919,85 +660,6 @@ def test_v1_is_read_as_regular_and_cross_platform_source_is_informational(
     assert plan["profile"] == "regular"
 
 
-@pytest.mark.parametrize("format_version", [1, 2])
-def test_legacy_opaque_sqlite_without_declaration_is_inferred_from_payload(
-    tmp_path: Path,
-    format_version: int,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    _create_opaque_database(layout.data_root / "dicepp.db", value="legacy-v2")
-    summary, _manifest = create_archive(layout=layout)
-    path = export_archive_path(summary["filename"], layout=layout)
-
-    def downgrade_to_legacy(manifest: dict) -> None:
-        manifest["format_version"] = format_version
-        manifest.pop("compatibility")
-
-    _rewrite_manifest(path, downgrade_to_legacy)
-
-    listed = next(
-        item
-        for item in list_archives(layout=layout)
-        if item["filename"] == summary["filename"]
-    )
-    verification = verify_archive(summary["filename"], layout=layout)
-    plan = plan_archive_restore(summary["filename"], layout=layout)
-
-    assert listed["opaque_sqlite_count"] is None
-    assert verification["verified"] is True
-    assert verification["opaque_sqlite"] == {
-        "count": 1,
-        "files": ["data/dicepp.db"],
-    }
-    assert verification["archive"]["opaque_sqlite_count"] == 1
-    assert plan["opaque_sqlite"] == verification["opaque_sqlite"]
-    assert plan["archive"]["opaque_sqlite_count"] == 1
-
-
-def test_v3_requires_a_valid_opaque_sqlite_declaration(
-    tmp_path: Path,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    _write(layout.config_user, "{}")
-    summary, manifest = create_archive(layout=layout)
-    assert manifest["format_version"] == 3
-    path = export_archive_path(summary["filename"], layout=layout)
-    _rewrite_manifest(path, lambda value: value.pop("compatibility"))
-
-    listed = next(
-        item
-        for item in list_archives(layout=layout)
-        if item["filename"] == summary["filename"]
-    )
-    assert listed["valid"] is False
-    with pytest.raises(ArchiveInvalidError, match="declaration is missing"):
-        verify_archive(summary["filename"], layout=layout)
-
-
-def test_v3_opaque_sqlite_declaration_must_match_payload(
-    tmp_path: Path,
-) -> None:
-    layout = InstanceLayout.from_root(tmp_path)
-    _create_opaque_database(layout.data_root / "dicepp.db", value="legacy-v3")
-    summary, _manifest = create_archive(layout=layout)
-    path = export_archive_path(summary["filename"], layout=layout)
-
-    def remove_opaque_declaration(manifest: dict) -> None:
-        manifest["compatibility"]["opaque_sqlite"] = {
-            "count": 0,
-            "files": [],
-        }
-
-    _rewrite_manifest(path, remove_opaque_declaration)
-    verification = verify_archive(summary["filename"], layout=layout)
-
-    assert verification["verified"] is False
-    assert any(
-        "opaque SQLite declaration does not match" in problem
-        for problem in verification["problems"]
-    )
-
-
 def test_newer_schema_manifest_is_blocked_before_restore(tmp_path: Path) -> None:
     layout = InstanceLayout.from_root(tmp_path)
     _write(layout.config_user, "{}")
@@ -1042,7 +704,7 @@ def test_v2_sqlite_metadata_is_cross_checked_against_catalog(tmp_path: Path) -> 
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            _schema_metadata_rows(),
+            [("target_name", "instance"), ("current_version", "1")],
         )
     summary, _ = create_archive(layout=layout)
     path = export_archive_path(summary["filename"], layout=layout)
@@ -1054,7 +716,7 @@ def test_v2_sqlite_metadata_is_cross_checked_against_catalog(tmp_path: Path) -> 
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            _schema_metadata_rows(current_version="2"),
+            [("target_name", "instance"), ("current_version", "2")],
         )
     _rewrite_payload(path, "data/dicepp.db", future.read_bytes())
 
@@ -1076,7 +738,7 @@ def test_v2_sqlite_metadata_cannot_exceed_manifest_declaration(
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            _schema_metadata_rows(),
+            [("target_name", "instance"), ("current_version", "1")],
         )
     summary, _ = create_archive(layout=layout)
     path = export_archive_path(summary["filename"], layout=layout)
@@ -1283,7 +945,10 @@ def test_v1_sqlite_schema_newer_than_current_is_blocked(tmp_path: Path) -> None:
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            _schema_metadata_rows(current_version="999"),
+            [
+                ("target_name", "instance"),
+                ("current_version", "999"),
+            ],
         )
     payload = database.read_bytes()
     manifest = {

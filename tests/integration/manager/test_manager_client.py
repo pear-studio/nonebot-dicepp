@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from dicepp_manager.auth import ensure_api_token
 from dicepp_manager.client import ManagerClient
 from dicepp_manager.config import ManagerClientSettings
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_API_VERSION
@@ -35,7 +34,7 @@ async def test_archive_download_streams_bounded_chunks_from_real_client_boundary
     tmp_path: Path,
 ) -> None:
     client = _client(tmp_path)
-    ensure_api_token(tmp_path / "token")
+    (tmp_path / "token").write_text("secret", encoding="utf-8")
 
     async def request(method: str, path: str, **_kwargs):
         assert (method, path) == ("GET", "/v1/status")

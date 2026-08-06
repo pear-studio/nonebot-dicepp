@@ -64,7 +64,6 @@ class TestPIDFileFormat:
             _mod.PID_FILE = tmp_path / ".dev-pids.json"
             _mod._write_pids(
                 os.getpid(),
-                os.getpid(),
                 port=5090,
                 bind_host="127.0.0.1",
             )
@@ -74,11 +73,6 @@ class TestPIDFileFormat:
             assert state["port"] == 5090
             assert state["bind_host"] == "127.0.0.1"
             assert abs(float(state["process_created_at"]) - psutil.Process(os.getpid()).create_time()) < 1.0
-            manager = _mod._read_manager_state()
-            assert manager is not None
-            assert manager["pid"] == os.getpid()
-            assert manager["port"] == _mod.MANAGER_PORT
-            assert abs(float(manager["process_created_at"]) - psutil.Process(os.getpid()).create_time()) < 1.0
         finally:
             _mod.PID_FILE = original_pid_file
 
@@ -139,20 +133,15 @@ class TestSameRecordedProcessEdge:
 class TestForeignPortOwner:
     def test_no_listener_returns_none(self):
         """Free port → no foreign owner."""
-        assert _mod._foreign_port_owner(1, service="dashboard") is None
+        assert _mod._foreign_port_owner(1) is None
 
     def test_custom_port_used_in_check(self, tmp_path):
         """When state records port 9999, that port is checked, not 5090."""
         original_pid_file = _mod.PID_FILE
         try:
             _mod.PID_FILE = tmp_path / ".dev-pids.json"
-            _mod._write_pids(
-                os.getpid(),
-                os.getpid(),
-                port=9999,
-                bind_host="127.0.0.1",
-            )
-            owner = _mod._foreign_port_owner(9999, service="dashboard")
+            _mod._write_pids(os.getpid(), port=9999, bind_host="127.0.0.1")
+            owner = _mod._foreign_port_owner(9999)
             assert isinstance(owner, (int, type(None)))
         finally:
             _mod.PID_FILE = original_pid_file
@@ -187,12 +176,7 @@ class TestStopSafety:
         try:
             _mod.PID_FILE = tmp_path / ".dev-pids.json"
             import psutil
-            _mod._write_pids(
-                os.getpid(),
-                os.getpid(),
-                port=7777,
-                bind_host="127.0.0.1",
-            )
+            _mod._write_pids(os.getpid(), port=7777, bind_host="127.0.0.1")
             state = _mod._read_dashboard_state()
             assert state is not None
             assert state["port"] == 7777

@@ -19,13 +19,7 @@ def _create_instance_database(path: Path) -> None:
         )
         connection.executemany(
             "INSERT INTO schema_metadata(key, value) VALUES (?, ?)",
-            [
-                ("application", "dicepp"),
-                ("target_name", "instance"),
-                ("current_version", "1"),
-                ("created_at", "2026-01-01T00:00:00+00:00"),
-                ("updated_at", "2026-01-01T00:00:00+00:00"),
-            ],
+            [("target_name", "instance"), ("current_version", "1")],
         )
         connection.execute("CREATE TABLE entries (value TEXT PRIMARY KEY)")
         connection.execute("INSERT INTO entries(value) VALUES ('archived')")
