@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from typing import Any
 TARGETS = ("codex", "claude", "kimi")
 STATE_FILE = ".agent-sync.json"
 ENV_FILE = ".agent-env.json"
+MANIFEST_FILE = "manifest.json"
 
 
 class SyncError(RuntimeError):
@@ -43,6 +45,25 @@ class SkillSource:
     path: Path
 
 
+@dataclass(frozen=True)
+class GlobalTargetSpec:
+    name: str
+    skills_dir: Path
+    agents: tuple[str, ...]
+
+
+@dataclass
+class GlobalPlan:
+    targets: list[GlobalTargetSpec]
+    provider_roots: list[Path]
+    linked: list[tuple[GlobalTargetSpec, SkillSource, Path]]
+    provided: list[tuple[GlobalTargetSpec, SkillSource, Path, Path]]
+    missing: list[tuple[GlobalTargetSpec, SkillSource, Path]]
+    blocked: list[tuple[GlobalTargetSpec, SkillSource, Path, str]]
+    stale: list[tuple[GlobalTargetSpec, Path]]
+    conflicts: list[tuple[GlobalTargetSpec, SkillSource, Path]]
+
+
 @dataclass
 class Config:
     env: str
@@ -57,6 +78,10 @@ def agent_dir() -> Path:
 
 def repo_root() -> Path:
     return agent_dir().parent.parent
+
+
+def user_home() -> Path:
+    return Path.home()
 
 
 def rel(path: Path) -> str:
@@ -160,6 +185,14 @@ def skill_roots(env: str) -> list[Path]:
     return [root for root in roots if root.exists()]
 
 
+def all_skill_source_roots(root: Path | None = None) -> list[Path]:
+    base = root or agent_dir()
+    return sorted(
+        (path for path in base.glob("skills-*") if path.is_dir()),
+        key=lambda path: path.name,
+    )
+
+
 def collect_skills(env: str) -> dict[str, SkillSource]:
     result: dict[str, SkillSource] = {}
     owners: dict[str, str] = {}
@@ -174,6 +207,113 @@ def collect_skills(env: str) -> dict[str, SkillSource]:
             result[child.name] = SkillSource(child.name, root, child)
             owners[child.name] = rel(child)
     return result
+
+
+def load_agent_manifest(root: Path | None = None) -> dict[str, Any]:
+    manifest_path = (root or agent_dir()) / MANIFEST_FILE
+    manifest = load_json(manifest_path)
+    repository = manifest.get("repository")
+    if not isinstance(repository, str) or not repository.strip():
+        raise SyncError(f"{rel(manifest_path)} must contain a non-empty repository string.")
+    return manifest
+
+
+def repository_id(root: Path | None = None) -> str:
+    return str(load_agent_manifest(root)["repository"]).strip()
+
+
+def load_global_skill_names(root: Path | None = None) -> list[str]:
+    manifest_path = (root or agent_dir()) / MANIFEST_FILE
+    manifest = load_agent_manifest(root)
+    global_block = manifest.get("global")
+    if not isinstance(global_block, dict):
+        raise SyncError(f"{rel(manifest_path)} must contain a global object.")
+    names = global_block.get("skills")
+    if not isinstance(names, list):
+        raise SyncError(f"{rel(manifest_path)} global.skills must be a list.")
+
+    result: list[str] = []
+    for name in names:
+        if (
+            not isinstance(name, str)
+            or not name
+            or name.strip() != name
+            or name in {".", ".."}
+            or "/" in name
+            or "\\" in name
+            or Path(name).name != name
+        ):
+            raise SyncError(f"Invalid global skill name in {rel(manifest_path)}: {name!r}.")
+        if name in result:
+            raise SyncError(f"Duplicate global skill {name!r} in {rel(manifest_path)}.")
+        result.append(name)
+    return result
+
+
+def collect_global_skills(root: Path | None = None) -> dict[str, SkillSource]:
+    base = root or agent_dir()
+    roots = all_skill_source_roots(base)
+    result: dict[str, SkillSource] = {}
+    for name in load_global_skill_names(base):
+        matches = [
+            SkillSource(name, skill_root, skill_root / name)
+            for skill_root in roots
+            if (skill_root / name).is_dir()
+            and (skill_root / name / "SKILL.md").is_file()
+        ]
+        if not matches:
+            raise SyncError(
+                f"Global skill {name!r} must exist under one {rel(base)}/skills-* "
+                "directory with a SKILL.md file."
+            )
+        if len(matches) > 1:
+            locations = ", ".join(rel(source.path) for source in matches)
+            raise SyncError(f"Global skill {name!r} has multiple sources: {locations}.")
+        result[name] = matches[0]
+    return result
+
+
+def agent_is_detected(name: str) -> bool:
+    home = user_home()
+    config_dirs = {
+        "codex": home / ".codex",
+        "claude": home / ".claude",
+        "kimi": home / ".kimi-code",
+    }
+    commands = {"codex": "codex", "claude": "claude", "kimi": "kimi"}
+    return config_dirs[name].exists() or shutil.which(commands[name]) is not None
+
+
+def global_target_specs() -> list[GlobalTargetSpec]:
+    home = user_home()
+    specs: list[GlobalTargetSpec] = []
+    shared_agents = tuple(name for name in ("codex", "kimi") if agent_is_detected(name))
+    if shared_agents or (home / ".agents").exists():
+        specs.append(GlobalTargetSpec("agents", home / ".agents" / "skills", shared_agents))
+    if agent_is_detected("claude"):
+        specs.append(GlobalTargetSpec("claude", home / ".claude" / "skills", ("claude",)))
+    return specs
+
+
+def global_skills_dir_for_target(target: str) -> Path:
+    home = user_home()
+    if target in {"codex", "kimi"}:
+        return home / ".agents" / "skills"
+    if target == "claude":
+        return home / ".claude" / "skills"
+    raise SyncError(f"Unknown target {target!r}.")
+
+
+def collect_project_skills(env: str, target: str) -> dict[str, SkillSource]:
+    skills = collect_skills(env)
+    global_skills = collect_global_skills()
+    global_dir = global_skills_dir_for_target(target)
+    return {
+        name: source
+        for name, source in skills.items()
+        if name not in global_skills
+        or not global_skill_available(global_dir / name, source)
+    }
 
 
 def matches_any(name: str, patterns: list[str]) -> bool:
@@ -318,6 +458,321 @@ def same_target(entry: Path, source: Path) -> bool:
         return False
 
 
+def linked_skill_provider(entry: Path, name: str) -> Path | None:
+    if not (entry.is_symlink() or is_windows_reparse_point(entry)):
+        return None
+    try:
+        resolved = entry.resolve(strict=True)
+    except OSError:
+        return None
+    if (
+        resolved.name != name
+        or not resolved.parent.name.startswith("skills-")
+        or not (resolved / "SKILL.md").is_file()
+    ):
+        return None
+
+    provider_agent_dir = resolved.parent.parent
+    try:
+        if repository_id(provider_agent_dir) != repository_id():
+            return None
+        provider_source = collect_global_skills(provider_agent_dir).get(name)
+        if provider_source is None or provider_source.path.resolve(strict=True) != resolved:
+            return None
+    except SyncError:
+        return None
+    return resolved
+
+
+def global_skill_available(entry: Path, source: SkillSource) -> bool:
+    return same_target(entry, source.path) or linked_skill_provider(entry, source.name) is not None
+
+
+def git_checkout_label(root: Path) -> str:
+    branch = subprocess.run(
+        ["git", "-C", str(root), "branch", "--show-current"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if commit.returncode != 0:
+        return "not a Git checkout"
+    branch_name = branch.stdout.strip() if branch.returncode == 0 else ""
+    return f"{branch_name or 'detached'}@{commit.stdout.strip()}"
+
+
+def global_link_mode(os_name: str | None = None) -> str:
+    return "junction" if (os_name or os.name) == "nt" else "symlink"
+
+
+def create_global_link(source: Path, dest: Path, dry_run: bool) -> None:
+    mode = global_link_mode()
+    if dry_run:
+        print(f"DRY-RUN {mode}: {dest} -> {source}")
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if mode == "junction":
+            create_junction(dest, source.resolve(strict=True))
+        else:
+            dest.symlink_to(source.resolve(strict=True), target_is_directory=True)
+    except OSError as exc:
+        raise SyncError(
+            f"Failed to create global {mode} {dest} -> {source}: {exc}. "
+            "Global skills require a link and will not fall back to copying."
+        ) from exc
+
+
+def relink_global_skill(source: Path, dest: Path, provider: Path, dry_run: bool) -> None:
+    if dry_run:
+        print(f"DRY-RUN relink: {dest}: {provider} -> {source}")
+        return
+    if linked_skill_provider(dest, source.name) != provider:
+        raise SyncError(f"Global provider changed while preparing to relink {dest}.")
+
+    token = uuid.uuid4().hex
+    pending = dest.with_name(f".{dest.name}.agent-sync-new-{token}")
+    backup = dest.with_name(f".{dest.name}.agent-sync-old-{token}")
+    ensure_inside(pending, dest.parent)
+    ensure_inside(backup, dest.parent)
+    create_global_link(source, pending, dry_run=False)
+    try:
+        dest.rename(backup)
+        pending.rename(dest)
+        remove_path(backup, dry_run=False)
+    except OSError as exc:
+        if not path_entry_exists(dest) and path_entry_exists(backup):
+            backup.rename(dest)
+        if path_entry_exists(pending):
+            remove_path(pending, dry_run=False)
+        raise SyncError(f"Failed to relink global skill {dest}: {exc}") from exc
+
+
+def is_repo_skill_link(entry: Path) -> bool:
+    if not (entry.is_symlink() or is_windows_reparse_point(entry)):
+        return False
+    try:
+        resolved = entry.resolve(strict=True)
+    except OSError:
+        return False
+    for root in all_skill_source_roots():
+        try:
+            relative = resolved.relative_to(root.resolve(strict=True))
+        except (OSError, ValueError):
+            continue
+        return (
+            len(relative.parts) == 1
+            and relative.name == entry.name
+            and (resolved / "SKILL.md").is_file()
+        )
+    return False
+
+
+def build_global_plan(specs: list[GlobalTargetSpec] | None = None) -> GlobalPlan:
+    linked: list[tuple[GlobalTargetSpec, SkillSource, Path]] = []
+    provided: list[tuple[GlobalTargetSpec, SkillSource, Path, Path]] = []
+    missing: list[tuple[GlobalTargetSpec, SkillSource, Path]] = []
+    blocked: list[tuple[GlobalTargetSpec, SkillSource, Path, str]] = []
+    stale: list[tuple[GlobalTargetSpec, Path]] = []
+    conflicts: list[tuple[GlobalTargetSpec, SkillSource, Path]] = []
+    sources = collect_global_skills()
+    targets = specs if specs is not None else global_target_specs()
+    provider_roots: set[Path] = set()
+
+    for spec in targets:
+        if not spec.skills_dir.exists() or not spec.skills_dir.is_dir():
+            continue
+        for entry in spec.skills_dir.iterdir():
+            provider = linked_skill_provider(entry, entry.name)
+            if provider is not None:
+                provider_roots.add(provider.parent.parent.resolve(strict=True))
+
+    selected_provider = next(iter(provider_roots)) if len(provider_roots) == 1 else None
+    provider_sources: dict[str, SkillSource] = {}
+    if selected_provider is not None:
+        try:
+            provider_sources = collect_global_skills(selected_provider)
+        except SyncError:
+            provider_sources = {}
+
+    for spec in targets:
+        for source in sources.values():
+            dest = spec.skills_dir / source.name
+            if not path_entry_exists(dest):
+                if selected_provider is None and provider_roots:
+                    blocked.append((spec, source, dest, "multiple provider checkouts are active"))
+                    continue
+                provider_source = source
+                if selected_provider is not None and selected_provider != agent_dir().resolve():
+                    provider_source = provider_sources.get(source.name)
+                    if provider_source is None:
+                        blocked.append(
+                            (spec, source, dest, "the provider checkout does not expose this skill")
+                        )
+                        continue
+                missing.append((spec, provider_source, dest))
+            elif same_target(dest, source.path):
+                linked.append((spec, source, dest))
+            else:
+                provider = linked_skill_provider(dest, source.name)
+                if provider is not None:
+                    provided.append((spec, source, dest, provider))
+                else:
+                    conflicts.append((spec, source, dest))
+
+        if spec.skills_dir.exists() and spec.skills_dir.is_dir():
+            for entry in sorted(spec.skills_dir.iterdir(), key=lambda path: path.name):
+                if entry.name not in sources and is_repo_skill_link(entry):
+                    stale.append((spec, entry))
+
+    return GlobalPlan(
+        targets=targets,
+        provider_roots=sorted(provider_roots, key=str),
+        linked=linked,
+        provided=provided,
+        missing=missing,
+        blocked=blocked,
+        stale=stale,
+        conflicts=conflicts,
+    )
+
+
+def print_global_plan(plan: GlobalPlan) -> None:
+    print("== global ==")
+    if not plan.targets:
+        print("detected targets: <none>")
+        return
+    print("detected targets:")
+    for spec in plan.targets:
+        agents = ", ".join(spec.agents) if spec.agents else "generic"
+        print(f"  - {spec.name}: {spec.skills_dir} ({agents})")
+    print("provider checkout:")
+    if not plan.provider_roots:
+        print("  - <not selected>")
+    for provider_agent_dir in plan.provider_roots:
+        checkout_root = provider_agent_dir.parent.parent
+        print(f"  - {checkout_root} [{git_checkout_label(checkout_root)}]")
+    for label, group in (
+        ("linked", plan.linked),
+        ("missing", plan.missing),
+        ("conflicts", plan.conflicts),
+    ):
+        print(f"{label}:")
+        if not group:
+            print("  - <none>")
+        for spec, source, dest in group:
+            print(f"  - {spec.name}/{source.name}: {dest} -> {source.path}")
+    print("provided by other checkout:")
+    if not plan.provided:
+        print("  - <none>")
+    for spec, source, dest, provider in plan.provided:
+        provider_root = provider.parent.parent.parent.parent
+        print(
+            f"  - {spec.name}/{source.name}: {dest} -> {provider} "
+            f"[{git_checkout_label(provider_root)}]"
+        )
+    print("blocked:")
+    if not plan.blocked:
+        print("  - <none>")
+    for spec, source, dest, reason in plan.blocked:
+        print(f"  - {spec.name}/{source.name}: {dest} ({reason})")
+    print("stale:")
+    if not plan.stale:
+        print("  - <none>")
+    for spec, entry in plan.stale:
+        print(f"  - {spec.name}/{entry.name}: {entry}")
+
+
+def apply_global(dry_run: bool, relink: bool = False) -> None:
+    plan = build_global_plan()
+    print_global_plan(plan)
+    if plan.conflicts:
+        names = ", ".join(f"{spec.name}/{source.name}" for spec, source, _ in plan.conflicts)
+        raise SyncError(f"Refusing to overwrite conflicting global skills: {names}.")
+    if not relink and (len(plan.provider_roots) > 1 or plan.blocked):
+        raise SyncError(
+            "Global provider checkout is inconsistent or missing required skills. "
+            "Update the current provider, or explicitly switch with --relink."
+        )
+
+    current_sources = collect_global_skills()
+    for spec, source, dest in plan.missing:
+        ensure_inside(dest, spec.skills_dir)
+        link_source = current_sources[source.name] if relink else source
+        create_global_link(link_source.path, dest, dry_run)
+    if relink:
+        for spec, source, dest, _reason in plan.blocked:
+            ensure_inside(dest, spec.skills_dir)
+            create_global_link(current_sources[source.name].path, dest, dry_run)
+    if relink:
+        for spec, source, dest, provider in plan.provided:
+            ensure_inside(dest, spec.skills_dir)
+            relink_global_skill(source.path, dest, provider, dry_run)
+    for spec, entry in plan.stale:
+        ensure_inside(entry, spec.skills_dir)
+        if not is_repo_skill_link(entry):
+            raise SyncError(f"Refusing to remove unrecognized global skill link: {entry}")
+        if dry_run:
+            print(f"DRY-RUN remove stale global skill: {entry}")
+        else:
+            print(f"remove stale global skill: {entry}")
+            remove_path(entry, dry_run=False)
+
+
+def report_global() -> None:
+    print_global_plan(build_global_plan())
+
+
+def classify_global() -> tuple[list[str], list[str]]:
+    plan = build_global_plan()
+    warnings = [
+        f"global: missing {spec.name}/{source.name}"
+        for spec, source, _dest in plan.missing
+    ]
+    warnings.extend(f"global: stale {spec.name}/{entry.name}" for spec, entry in plan.stale)
+    errors = [
+        f"global: conflict {spec.name}/{source.name} at {dest}"
+        for spec, source, dest in plan.conflicts
+    ]
+    if len(plan.provider_roots) > 1:
+        errors.append("global: skills are split across multiple provider checkouts")
+    errors.extend(
+        f"global: blocked {spec.name}/{source.name}: {reason}"
+        for spec, source, _dest, reason in plan.blocked
+    )
+    return warnings, errors
+
+
+def print_global_advisory() -> None:
+    plan = build_global_plan()
+    if (
+        not plan.missing
+        and not plan.stale
+        and not plan.conflicts
+        and not plan.blocked
+        and len(plan.provider_roots) <= 1
+    ):
+        print("global: ok")
+        return
+    parts: list[str] = []
+    if plan.missing:
+        parts.append(f"{len(plan.missing)} missing")
+    if plan.stale:
+        parts.append(f"{len(plan.stale)} stale")
+    if plan.conflicts:
+        parts.append(f"{len(plan.conflicts)} conflicts")
+    provider_issues = len(plan.blocked) + (1 if len(plan.provider_roots) > 1 else 0)
+    if provider_issues:
+        parts.append(f"{provider_issues} provider issues")
+    print(f"global: {', '.join(parts)}; inspect with `sync.py report global`")
+
+
 def is_legacy_skill_link(entry: Path, name: str) -> bool:
     if not entry.is_symlink():
         return False
@@ -366,8 +821,9 @@ def cleanup_legacy_rule_files(spec: TargetSpec, dry_run: bool) -> None:
 
 
 def sync_skills(spec: TargetSpec, config: Config, dry_run: bool) -> dict[str, Any]:
-    skills = collect_skills(config.env)
-    ignored_conflicts = [name for name in skills if matches_any(name, config.ignore_skills)]
+    all_skills = collect_skills(config.env)
+    skills = collect_project_skills(config.env, spec.name)
+    ignored_conflicts = [name for name in all_skills if matches_any(name, config.ignore_skills)]
     if ignored_conflicts:
         raise SyncError(
             "ignore.skills conflicts with managed skills: " + ", ".join(sorted(ignored_conflicts))
@@ -549,8 +1005,14 @@ def apply_target(target: str, env_arg: str | None, dry_run: bool, link_mode: str
     for rule in spec.rule_files:
         print(f"  - {rel(rule)}")
     print("skills:")
-    for skill in sorted(collect_skills(config.env)):
+    project_skills = collect_project_skills(config.env, target)
+    for skill in sorted(project_skills):
         print(f"  - {skill}")
+    global_skills = sorted(set(collect_skills(config.env)) - set(project_skills))
+    if global_skills:
+        print("skills provided globally:")
+        for skill in global_skills:
+            print(f"  - {skill}")
     if config.ignore_skills:
         print("ignored skill patterns:")
         for pattern in config.ignore_skills:
@@ -585,7 +1047,7 @@ def classify_target(target: str, env_arg: str | None) -> tuple[list[str], list[s
         config = resolve_config(env_arg, target)
         validate_env(config.env)
         spec = target_spec(target)
-        skills = collect_skills(config.env)
+        skills = collect_project_skills(config.env, target)
     except SyncError as exc:
         return [], [str(exc)]
 
@@ -642,7 +1104,8 @@ def report_target(target: str, env_arg: str | None) -> None:
     config = resolve_config(env_arg, target)
     validate_env(config.env)
     spec = target_spec(target)
-    skills = collect_skills(config.env)
+    all_skills = collect_skills(config.env)
+    skills = collect_project_skills(config.env, target)
     state = load_state(spec)
     old_managed = state.get("managedSkills", {})
     if not isinstance(old_managed, dict):
@@ -672,6 +1135,11 @@ def report_target(target: str, env_arg: str | None) -> None:
     print("managed source skills:")
     for name, source in sorted(skills.items()):
         print(f"  - {name}: {rel(source.path)}")
+    globally_provided = sorted(set(all_skills) - set(skills))
+    if globally_provided:
+        print("globally provided skills:")
+        for name in globally_provided:
+            print(f"  - {name}: {global_skills_dir_for_target(target) / name}")
     if config.ignore_skills:
         print("ignored skill patterns:")
         for pattern in config.ignore_skills:
@@ -715,6 +1183,8 @@ Purpose:
   Synchronize docs/agent rules and skills into local agent tool directories.
   The source of truth is docs/agent; .codex/.claude/.kimi-code are working
   directories managed by this script.
+  Skills listed in {MANIFEST_FILE} global.skills can also be linked from the
+  repository into user-level agent skill directories.
 
 Environment:
   The local environment is read from {rel(agent_dir() / ENV_FILE)} unless --env is passed.
@@ -742,10 +1212,12 @@ Environment:
     }}
 
 Directory convention:
+  manifest.json        stable repository ID and repository-tracked global skill list
   rules/common.md      shared rules
   rules/<env>.md       environment-specific rules
   skills-common/       skills exposed in every environment
   skills-<env>/        skills exposed only in that environment
+  Any unique skill under skills-* may also be selected for user-level global sync.
   platforms/           platform-specific extras; currently claude-linux settings/hooks
 
 Optional peer paths:
@@ -758,6 +1230,7 @@ Targets:
   claude  -> .claude/CLAUDE.md, .claude/skills/
   kimi    -> .kimi-code/AGENTS.md, .kimi-code/skills/
   all     -> all targets above
+  global  -> user-level shared skills for detected agents
 
 Commands:
   help      Show this self-description.
@@ -769,11 +1242,36 @@ Commands:
             mismatches.
   apply     Generate rule files and synchronize managed skills for a target.
 
+Global workflow:
+  report/doctor/apply on project targets also reports global status as an
+  advisory. Project sync keeps a local skill projection until the matching
+  global link exists, then removes the duplicate local projection.
+
+  sync.py report global
+  sync.py apply global --dry-run
+  sync.py apply global
+  sync.py doctor global
+
+  If another checkout of the same repository already provides a skill, its link
+  remains authoritative and is reported as provided-by-other-checkout. To move
+  all such links to the current checkout after user confirmation:
+
+  sync.py apply global --relink --dry-run
+  sync.py apply global --relink
+
 Notes:
   - apply preserves target skills matching ignore.skills.
   - apply only removes stale skills previously recorded in {STATE_FILE}.
   - On Windows, linkMode auto prefers junctions. On Linux/macOS it prefers symlinks.
   - If linking fails, auto falls back to copying and records that in sync state.
+  - Global skills never fall back to copying. Windows uses junctions;
+    Linux/macOS uses directory symlinks.
+  - Global apply never overwrites conflicts. Running it is explicit approval to
+    add missing links and remove stale links that point into this repository's
+    skills-* source directories.
+  - manifest.json repository identifies dev, prod, and worktree checkouts of the
+    same repository. The first linked checkout remains the provider until an
+    explicit --relink operation.
   - Claude Linux settings are merged conservatively; existing unrelated settings
     are preserved, and conflicting existing settings are reported instead of
     overwritten.
@@ -792,11 +1290,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     for command in ("report", "doctor", "apply"):
         p = sub.add_parser(command)
-        p.add_argument("target", choices=(*TARGETS, "all"))
+        p.add_argument("target", choices=(*TARGETS, "all", "global"))
         p.add_argument("--env", choices=None)
         if command == "apply":
             p.add_argument("--dry-run", action="store_true")
             p.add_argument("--link-mode", choices=("auto", "symlink", "junction", "copy"))
+            p.add_argument(
+                "--relink",
+                action="store_true",
+                help="move same-repository global links to the current checkout",
+            )
 
     return parser
 
@@ -810,22 +1313,38 @@ def main(argv: list[str]) -> int:
 
     try:
         if args.command == "apply":
+            if args.target == "global":
+                if args.link_mode:
+                    raise SyncError("Global skills use a fixed link-only mode; omit --link-mode.")
+                apply_global(args.dry_run, relink=args.relink)
+                return 0
+            if args.relink:
+                raise SyncError("--relink is only valid with the global target.")
             for target in expand_targets(args.target):
                 apply_target(target, args.env, args.dry_run, args.link_mode)
+            print_global_advisory()
             return 0
 
         if args.command == "report":
+            if args.target == "global":
+                report_global()
+                return 0
             for target in expand_targets(args.target):
                 report_target(target, args.env)
+            print_global_advisory()
             return 0
 
         if args.command == "doctor":
-            all_warnings: list[str] = []
-            all_errors: list[str] = []
-            for target in expand_targets(args.target):
-                warnings, errors = classify_target(target, args.env)
-                all_warnings.extend(warnings)
-                all_errors.extend(errors)
+            if args.target == "global":
+                all_warnings, all_errors = classify_global()
+            else:
+                all_warnings = []
+                all_errors = []
+                for target in expand_targets(args.target):
+                    warnings, errors = classify_target(target, args.env)
+                    all_warnings.extend(warnings)
+                    all_errors.extend(errors)
+                print_global_advisory()
             if not all_warnings and not all_errors:
                 print("doctor: ok")
                 return 0

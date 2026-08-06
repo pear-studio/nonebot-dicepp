@@ -1,110 +1,64 @@
 ---
 name: agent-sync
-description: 管理 DicePP agent 配置同步、环境识别、首次接管、后续同步、工作目录检查、rules/skills 投影与平台差异处理。需要调整或排查 .codex、.claude、.kimi-code 中的 agent rules、skills、Claude Linux settings/hooks，新增、移动、重命名、删除 agent skill/rule，检查环境是否暴露了错误技能，或汇报当前 agent 配置状态时使用。
+description: 管理 DicePP agent rules、项目技能与全局技能的同步和检查。新增、移动、重命名、删除 skill/rule，排查 .codex、.claude、.kimi-code 的同步状态，或调整 docs/agent 配置时使用。
 ---
 
 # Agent Sync
 
-使用本技能处理 DicePP agent 配置的同步、接管、检查和汇报。
+使用本技能处理 `docs/agent` 到各 agent 工作目录及用户全局技能目录的同步。
 
 ## 核心原则
 
-- 先读取并遵循 `docs/agent/sync.py` 的 help 输出；具体命令、参数和配置格式以脚本为准。
-- 以 `docs/agent` 为项目 agent 配置源目录，`.codex`、`.claude` 和 `.kimi-code` 是同步后的工作目录。
-- 不在本技能中复制具体命令或参数细节。
-- 同步前先判断当前是首次接管、后续同步、环境切换还是故障排查。
-- 每次写入前先运行 report/doctor，明确源技能、旧同步状态与目标目录之间的新增、stale managed、broken managed、unknown 差异。
-- 每次写入后再次运行 doctor；只有目标返回 `doctor: ok` 才算同步完成。
+- 先读取 `docs/agent/sync.py help`，命令和配置格式以脚本为准。
+- `docs/agent` 是事实来源；目标目录只是投影。
+- 写入前运行 report/doctor，写入后再次 doctor。
+- unknown 或 conflict 不自动覆盖、移动或删除。
+- 生产环境只投影 common + prod 技能。
 
-## 场景判定
+## 项目同步
 
-### 首次接管
+- 首次接管先区分受管内容、个人内容、旧链接和未知内容，再说明 apply 会改什么。
+- 后续同步先 dry-run；新增与 stale 同时出现时，按可能的重命名或拆分检查，不凭名称猜测。
+- 源 skill 重命名时，同时检查目录名、frontmatter `name`、相关引用和 `agents/openai.yaml`。
+- apply 后 stale 若变成 unknown，按同步器异常处理，不直接清理。
 
-适用于目标目录没有同步状态、存在旧链接脚本遗留、旧 `docs/agent/skills` 链接、手工创建的 skill，或无法确定 `.codex` / `.claude` / `.kimi-code` 当前来源的情况。
+## 全局技能
 
-处理重点：
+`docs/agent/manifest.json` 使用稳定的 `repository` 标识同一仓库的 dev、prod 和 worktree，并在 `global.skills` 跟踪全局技能。全局技能可来自任意 `skills-*` 源目录，但名称必须唯一；原有环境分类不变。Codex、Kimi 和兼容 agent 使用 `~/.agents/skills`，Claude 使用 `~/.claude/skills`。同步器在 Windows 创建 junction，在 Linux/macOS 创建 symlink，不复制技能。
 
-- 读取 help 并检查当前本地环境配置。
-- 汇报目标目录现状，包括规则文件、技能目录、旧链接、断链、未知内容和本地忽略项。
-- 区分项目将同步的 skill、可能的开发者本地 skill、旧同步遗留和未知内容。
-- 执行会改动目标目录的同步前，先向用户说明会写入哪些 rules、会同步哪些 skills、哪些目标目录内容不会被同步工具处理，以及是否会替换旧链接。
-- 生产环境首次接管时，特别确认目标环境是 `prod`，且不会暴露开发专用 skills。
+正常 report/doctor/apply 会提示全局状态，但不会修改用户全局目录。发现 missing 或 stale 时：
 
-### 后续同步
+1. 向用户说明本次会为所有已检测 agent 新增或删除哪些全局链接，并询问是否同步。
+2. 用户同意后，先执行 `apply global --dry-run`，确认无 conflict，再执行 `apply global`。
+3. 随后重新 apply 项目目标，移除已经由全局目录提供的重复项目投影；最后检查 global 和项目目标。
 
-适用于目标目录已有同步状态，只需要刷新 rules、同步新增或删除的 skill、或确认环境没有漂移的情况。
+用户拒绝时保持现状，不记录选择；项目本地投影继续可用，下次仍可询问。conflict 只汇报，不覆盖。显式执行 `apply global` 视为用户已确认计划中的新增和删除。
 
-处理重点：
-
-- 检查当前环境和同步状态是否一致。
-- 同步 `skills-common` 与当前 `skills-<env>` 中的新增、移动、重命名和删除。
-- 同时出现新增与 stale managed 时，先报告为可能的重命名或拆分；可读取 Git rename 记录确认映射，但不要仅凭名称猜测多对多关系。
-- 对 stale managed、broken managed 这类已同步项，可按脚本建议修复。正式 apply 前先执行 dry-run，并确认计划明确包含所有 stale 项的删除；若缺失，停止 apply 并按同步器故障排查。
-- 对 unknown 内容不要擅自删除；先判断是否是开发者本地 skill、历史遗留或错误暴露，必要时让用户决定是否加入本地 ignore 或迁回 `docs/agent`。
-- 重命名源 skill 时，检查旧目录名、frontmatter `name`、相关文档/脚本引用，以及存在时的 `agents/openai.yaml` 是否一致更新。
-- 同步后再次检查并汇报结果。若 stale 在 apply 后变成 unknown，视为同步器异常而不是完成；保留现场并继续诊断，未经用户确认不要删除该 unknown 项。
-
-### 环境切换
-
-适用于开发/生产目录切换、`.agent-env.json` 变更，或显式指定 env 的情况。
-
-处理重点：
-
-- 确认当前目标环境和用户意图一致。
-- 检查 prod 环境只暴露 common + prod skills，dev 环境暴露 common + dev skills。
-- 若发现 prod 目标目录仍有 dev 同步 skills，先汇报风险，再按脚本能力清理。
-
-### 故障排查
-
-适用于 skill 未加载、规则未更新、链接断裂、同步状态异常、目标目录内容和 `docs/agent` 不一致的情况。
-
-处理重点：
-
-- 先收集 report/doctor 结果，再定位具体问题。
-- 区分脚本可自动修复的问题和需要用户判断的问题。
-- 修复后再次检查，并说明剩余风险。
+同一设备存在多个相同仓库副本时，首个全局链接指向的副本保持为提供者；其他副本将其视为 `provided-by-other-checkout`，不重复投影，也不自动争抢链接。只有用户明确要求切换并确认旧、新 checkout 后，才 dry-run 并执行 `apply global --relink`。
 
 ## 汇报格式
 
-最终向用户汇报时，使用以下结构；没有的项写“无”或省略该小节，不要把原始命令输出整段贴回。
+不要粘贴整段原始输出。按实际情况简要汇报：
 
 ```text
 环境：
 - 当前 env：
 - 目标：
-- peer 路径：
 
 已同步：
 - rules：
-- skills：
-
-未同步但保留：
-- 目标目录内容：
-- 匹配的忽略规则：
+- 项目 skills：
+- 全局 skills：
 
 发现的问题：
-- 过期的已同步项：
-- 断开的链接：
-- 未知内容：
-- 环境不一致：
-- 其他：
-
-本次处理：
-- 写入/刷新：
-- 新增/删除/替换：
-- 未处理：
+- stale / broken / unknown / conflict：
 
 验证：
-- doctor：必须明确写出 `doctor: ok`；否则列出剩余 warning/error，并将本次同步标记为未完成。
-- 其他验证：
-
-后续建议：
-- ...
+- doctor：
 ```
 
 ## 安全边界
 
-- 首次接管或发现 unknown 内容时，不要直接清理；先向用户说明它们可能是个人 skill、旧工具遗留或错误暴露。
-- “未同步但保留”表示目标目录中存在本次同步不处理的内容，通常是 `.agent-env.json` 中 ignore 规则匹配的个人/本地专用 skill；未匹配 ignore 的未知内容应作为问题汇报。
-- 生产环境同步前，确认目标 env 为 `prod`，并确认暴露技能集合符合生产边界。
-- 不把 `.codex`、`.claude` 或 `.kimi-code` 中的临时内容当成项目事实来源；需要纳入项目时，应迁回 `docs/agent` 下对应目录。
+- 不清理未被同步器明确识别的内容。
+- 不把目标目录中的临时内容反向当成项目事实；需要纳入项目时迁回 `docs/agent`。
+- 全局同步只处理当前仓库或同 `repository` 仓库副本的已识别链接；普通目录、其他来源链接和无法识别的断链都保留并报告。

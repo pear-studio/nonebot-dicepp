@@ -1,0 +1,10 @@
+{
+  "repository": "pear-studio/nonebot-dicepp",
+  "global": {
+    "skills": [
+      "grill-pear",
+      "peel-pear",
+      "toolchain-review"
+    ]
+  }
+}
