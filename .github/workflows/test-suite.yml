@@ -55,6 +55,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit_sha || github.sha }}
       - name: Lint — forbid datetime.now() in tests
         run: |
           if grep -rn 'datetime\.now()' tests/ --include="*.py" | grep -v '# allow: datetime.now'; then
@@ -91,6 +93,14 @@ jobs:
       candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit_sha || github.sha }}
+      - name: Verify checked-out source identity
+        if: inputs.release_commit_sha != ''
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA"
       - name: Seed stale Python build artifacts in Docker context
         run: |
           mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
@@ -237,6 +247,14 @@ jobs:
       candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit_sha || github.sha }}
+      - name: Verify checked-out source identity
+        if: inputs.release_commit_sha != ''
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA"
       - name: Seed stale Python build artifacts in Docker context
         run: |
           mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
@@ -330,6 +348,18 @@ jobs:
       candidate_digest: ${{ steps.record-candidate.outputs.package_tree_sha256 }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit_sha || github.sha }}
+      - name: Verify checked-out source identity
+        if: inputs.release_commit_sha != ''
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
+        run: |
+          $actualCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:EXPECTED_COMMIT_SHA) {
+            throw "Checked-out commit differs from the requested candidate"
+          }
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -459,6 +489,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit_sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

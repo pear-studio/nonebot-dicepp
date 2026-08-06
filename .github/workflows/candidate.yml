@@ -1,0 +1,378 @@
+# Build immutable final release candidates before a tag or GitHub Release exists.
+# The resulting Actions artifact is the input boundary for upgrade evidence and
+# a future same-bytes promotion workflow; this workflow never publishes a Release.
+
+name: Final Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact PEP 440 project version to build (without v prefix)
+        required: true
+        type: string
+      commit_sha:
+        description: Full lowercase 40-character source commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-metadata:
+    name: Bind Candidate Target
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      commit_sha: ${{ steps.metadata.outputs.commit_sha }}
+      velopack_version: ${{ steps.metadata.outputs.velopack_version }}
+      velopack_channel: ${{ steps.metadata.outputs.velopack_channel }}
+      channel: ${{ steps.metadata.outputs.channel }}
+    steps:
+      - name: Reject an ambiguous target commit
+        env:
+          INPUT_COMMIT_SHA: ${{ inputs.commit_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          if [[ ! "$INPUT_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Candidate commit must be a full lowercase Git SHA-1"
+            exit 1
+          fi
+          if [ "$WORKFLOW_SHA" != "$INPUT_COMMIT_SHA" ]; then
+            echo "Dispatch the candidate workflow from the exact target commit/ref"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install release metadata dependency
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            -r scripts/build/release-metadata-requirements.txt
+      - name: Derive metadata from the checked-out source
+        id: metadata
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          actual_commit="$(git rev-parse HEAD)"
+          if [ "$actual_commit" != "$INPUT_COMMIT_SHA" ]; then
+            echo "Checked-out commit differs from requested candidate"
+            exit 1
+          fi
+          python scripts/build/release_build_metadata.py derive \
+            --ref "refs/tags/v${INPUT_VERSION}" \
+            --commit-sha "$actual_commit" \
+            --github-output "$GITHUB_OUTPUT"
+
+  quality-gate:
+    name: Build and Test Source Candidates
+    needs: candidate-metadata
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/test-suite.yml
+    with:
+      release_tag: ${{ needs.candidate-metadata.outputs.tag }}
+      release_version: ${{ needs.candidate-metadata.outputs.version }}
+      release_commit_sha: ${{ needs.candidate-metadata.outputs.commit_sha }}
+
+  windows-final:
+    name: Build Final Windows Candidate Bytes
+    runs-on: windows-latest
+    needs: [candidate-metadata, quality-gate]
+    permissions:
+      contents: read
+    outputs:
+      python_version: ${{ steps.toolchain.outputs.python_version }}
+      uv_version: ${{ steps.toolchain.outputs.uv_version }}
+      velopack_version: ${{ steps.install-toolchain.outputs.velopack_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.24"
+      - name: Install build dependencies
+        id: install-toolchain
+        shell: pwsh
+        run: |
+          uv sync --frozen --group dev
+          ./scripts/build/install_velopack_tool.ps1
+      - name: Download tested Windows package tree
+        uses: actions/download-artifact@v4
+        with:
+          name: dicepp-windows-candidate
+          path: dist
+      - name: Validate source and tested package identity
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT_SHA: ${{ needs.candidate-metadata.outputs.commit_sha }}
+        run: |
+          $actualCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:EXPECTED_COMMIT_SHA) {
+            throw "Checked-out commit differs from requested candidate"
+          }
+          uv run --frozen python scripts/build/release_build_metadata.py validate-windows-candidate `
+            --path dist/windows-candidate.json `
+            --tag "${{ needs.candidate-metadata.outputs.tag }}" `
+            --version "${{ needs.candidate-metadata.outputs.version }}" `
+            --commit-sha "$env:EXPECTED_COMMIT_SHA" `
+            --package-root dist/DicePP
+      - name: Build final Velopack artifacts
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId DicePP `
+            --packVersion "${{ needs.candidate-metadata.outputs.velopack_version }}" `
+            --packDir dist/DicePP `
+            --mainExe DicePP.exe `
+            --channel "${{ needs.candidate-metadata.outputs.velopack_channel }}"
+          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
+          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
+          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
+          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
+            throw "Velopack output set is incomplete or ambiguous"
+          }
+          Move-Item $portable[0].FullName "DicePP-${{ needs.candidate-metadata.outputs.tag }}-win64-Portable.zip"
+          Move-Item $setup[0].FullName "DicePP-${{ needs.candidate-metadata.outputs.tag }}-win64-Setup.exe"
+          $env:PYTHONPATH = "src"
+          uv run --frozen python scripts/build/generate_velopack_bundle.py `
+            --version "${{ needs.candidate-metadata.outputs.version }}" `
+            --velopack-version "${{ needs.candidate-metadata.outputs.velopack_version }}" `
+            --channel "${{ needs.candidate-metadata.outputs.channel }}" `
+            --nupkg $full[0].FullName `
+            --output velopack.win-x64.zip
+      - name: Validate final Windows candidate bytes
+        shell: pwsh
+        run: |
+          ./scripts/build/validate_windows_final_candidate.ps1 `
+            -Tag "${{ needs.candidate-metadata.outputs.tag }}" `
+            -Version "${{ needs.candidate-metadata.outputs.version }}" `
+            -ArtifactRoot .
+      - name: Record Windows toolchain
+        id: toolchain
+        shell: pwsh
+        run: |
+          "python_version=$(python --version)" >> $env:GITHUB_OUTPUT
+          "uv_version=$(uv --version)" >> $env:GITHUB_OUTPUT
+      - name: Upload final Windows candidate bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicepp-final-windows-candidate
+          path: |
+            DicePP-*-win64-Portable.zip
+            DicePP-*-win64-Setup.exe
+            velopack.win-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-final:
+    name: Build Final Linux Candidate Bytes
+    runs-on: ubuntu-latest
+    needs: [candidate-metadata, quality-gate]
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      docker_version: ${{ steps.toolchain.outputs.docker_version }}
+      zstd_version: ${{ steps.toolchain.outputs.zstd_version }}
+      runner_version: ${{ steps.toolchain.outputs.runner_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.24"
+      - name: Install packaging dependencies
+        run: |
+          uv sync --frozen
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip zstd
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull exact tested container candidates
+        env:
+          RUNTIME_REF: ${{ needs.quality-gate.outputs.runtime_candidate_ref }}
+          RUNTIME_DIGEST: ${{ needs.quality-gate.outputs.runtime_candidate_digest }}
+          RUNTIME_IMAGE_ID: ${{ needs.quality-gate.outputs.runtime_candidate_image_id }}
+          DASHBOARD_REF: ${{ needs.quality-gate.outputs.dashboard_candidate_ref }}
+          DASHBOARD_DIGEST: ${{ needs.quality-gate.outputs.dashboard_candidate_digest }}
+          DASHBOARD_IMAGE_ID: ${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}
+          TAG: ${{ needs.candidate-metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.candidate-metadata.outputs.commit_sha }}"
+          for value in "$RUNTIME_REF" "$RUNTIME_DIGEST" "$RUNTIME_IMAGE_ID" "$DASHBOARD_REF" "$DASHBOARD_DIGEST" "$DASHBOARD_IMAGE_ID"; do
+            test -n "$value"
+          done
+          docker pull "${RUNTIME_REF%@*}@${RUNTIME_DIGEST}"
+          docker pull "${DASHBOARD_REF%@*}@${DASHBOARD_DIGEST}"
+          test "$(docker image inspect --format '{{.Id}}' "${RUNTIME_REF%@*}@${RUNTIME_DIGEST}")" = "$RUNTIME_IMAGE_ID"
+          test "$(docker image inspect --format '{{.Id}}' "${DASHBOARD_REF%@*}@${DASHBOARD_DIGEST}")" = "$DASHBOARD_IMAGE_ID"
+          docker tag "${RUNTIME_REF%@*}@${RUNTIME_DIGEST}" "ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
+          docker tag "${DASHBOARD_REF%@*}@${DASHBOARD_DIGEST}" "ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+      - name: Package final Linux bundle
+        env:
+          TAG: ${{ needs.candidate-metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
+          DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+          BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$BOT_IMAGE")"
+          DASHBOARD_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$DASHBOARD_IMAGE")"
+          ARCHIVE="DicePP-${TAG}-linux-amd64-images.tar"
+          COMPRESSED="${ARCHIVE}.zst"
+          PACKAGE_DIR="DicePP-${TAG}-linux-amd64"
+          PACKAGE_ZIP="${PACKAGE_DIR}.zip"
+          docker save "$BOT_IMAGE" "$DASHBOARD_IMAGE" -o "$ARCHIVE"
+          zstd -19 -T0 --rm "$ARCHIVE" -o "$COMPRESSED"
+          zstd -t "$COMPRESSED"
+          mkdir -p "${PACKAGE_DIR}/images" "${PACKAGE_DIR}/docs"
+          mv "$COMPRESSED" "${PACKAGE_DIR}/images/${COMPRESSED}"
+          cp docker-compose.yml "${PACKAGE_DIR}/docker-compose.yml"
+          cp docs/linux.md docs/configuration.md docs/persona.md docs/persona-character-card.md "${PACKAGE_DIR}/docs/"
+          cat > "${PACKAGE_DIR}/使用说明.md" <<EOF
+          # DicePP Linux 发布包使用说明
+
+          请先阅读 docs/linux.md。本包包含 DicePP Linux amd64 Docker 镜像与对应版本部署文件。
+          EOF
+          PYTHONPATH=src uv run --frozen python scripts/build/generate_linux_package_manifest.py \
+            --version "$TAG" \
+            --package-root "$PACKAGE_DIR" \
+            --compose "${PACKAGE_DIR}/docker-compose.yml" \
+            --image-archive "${PACKAGE_DIR}/images/${COMPRESSED}" \
+            --image "$BOT_IMAGE" --image "$DASHBOARD_IMAGE" \
+            --image-id "$BOT_IMAGE_ID" --image-id "$DASHBOARD_IMAGE_ID" \
+            --release-notes "docs/releases/${TAG}.md" \
+            --output "${PACKAGE_DIR}/dicepp-package.json"
+          (
+            cd "$PACKAGE_DIR"
+            sha256sum images/* docker-compose.yml docs/* 使用说明.md dicepp-package.json > checksums.sha256
+            zip -r "../${PACKAGE_ZIP}" .
+          )
+      - name: Validate final Linux bundle bytes
+        env:
+          TAG: ${{ needs.candidate-metadata.outputs.tag }}
+          RUNTIME_IMAGE_ID: ${{ needs.quality-gate.outputs.runtime_candidate_image_id }}
+          DASHBOARD_IMAGE_ID: ${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}
+        run: |
+          bash scripts/build/validate_linux_final_candidate.sh \
+            "$TAG" \
+            "DicePP-${TAG}-linux-amd64.zip" \
+            "$RUNTIME_IMAGE_ID" \
+            "$DASHBOARD_IMAGE_ID"
+      - name: Record Linux toolchain
+        id: toolchain
+        run: |
+          echo "docker_version=$(docker --version)" >> "$GITHUB_OUTPUT"
+          echo "zstd_version=$(zstd --version | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "runner_version=${ImageOS}/${ImageVersion}" >> "$GITHUB_OUTPUT"
+      - name: Upload final Linux candidate bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicepp-final-linux-candidate
+          path: DicePP-*-linux-amd64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  receipt:
+    name: Seal Final Candidate Receipt
+    runs-on: ubuntu-latest
+    needs: [candidate-metadata, quality-gate, windows-final, linux-final]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install release metadata dependency
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            -r scripts/build/release-metadata-requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: dicepp-final-windows-candidate
+          path: dist/final
+      - uses: actions/download-artifact@v4
+        with:
+          name: dicepp-final-linux-candidate
+          path: dist/final
+      - name: Generate immutable candidate receipt
+        env:
+          VERSION: ${{ needs.candidate-metadata.outputs.version }}
+          COMMIT_SHA: ${{ needs.candidate-metadata.outputs.commit_sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          PACKAGE_TREE_SHA256: ${{ needs.quality-gate.outputs.windows_candidate_digest }}
+          RUNTIME_REF: ${{ needs.quality-gate.outputs.runtime_candidate_ref }}
+          RUNTIME_DIGEST: ${{ needs.quality-gate.outputs.runtime_candidate_digest }}
+          RUNTIME_IMAGE_ID: ${{ needs.quality-gate.outputs.runtime_candidate_image_id }}
+          DASHBOARD_REF: ${{ needs.quality-gate.outputs.dashboard_candidate_ref }}
+          DASHBOARD_DIGEST: ${{ needs.quality-gate.outputs.dashboard_candidate_digest }}
+          DASHBOARD_IMAGE_ID: ${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}
+          PYTHON_VERSION: ${{ needs.windows-final.outputs.python_version }}
+          UV_VERSION: ${{ needs.windows-final.outputs.uv_version }}
+          VELOPACK_VERSION: ${{ needs.windows-final.outputs.velopack_version }}
+          DOCKER_VERSION: ${{ needs.linux-final.outputs.docker_version }}
+          ZSTD_VERSION: ${{ needs.linux-final.outputs.zstd_version }}
+          RUNNER_VERSION: ${{ needs.linux-final.outputs.runner_version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
+          python scripts/build/candidate_receipt.py \
+            --artifact-root dist/final \
+            --output dist/final/dicepp-candidate.json \
+            --version "$VERSION" \
+            --commit-sha "$COMMIT_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --workflow-sha "$WORKFLOW_SHA" \
+            --package-tree-sha256 "$PACKAGE_TREE_SHA256" \
+            --container "runtime|$RUNTIME_REF|$RUNTIME_DIGEST|$RUNTIME_IMAGE_ID" \
+            --container "dashboard|$DASHBOARD_REF|$DASHBOARD_DIGEST|$DASHBOARD_IMAGE_ID" \
+            --toolchain "python=$PYTHON_VERSION" \
+            --toolchain "uv=$UV_VERSION" \
+            --toolchain "velopack=$VELOPACK_VERSION" \
+            --toolchain "docker=$DOCKER_VERSION" \
+            --toolchain "zstd=$ZSTD_VERSION" \
+            --toolchain "ubuntu-runner=$RUNNER_VERSION"
+      - name: Upload sealed final candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: dicepp-final-candidate-${{ needs.candidate-metadata.outputs.commit_sha }}
+          path: dist/final
+          if-no-files-found: error
+          retention-days: 30

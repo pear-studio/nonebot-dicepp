@@ -95,6 +95,12 @@ def velopack_version(version: str) -> str:
     )
 
 
+def validate_release_version(version: str) -> str:
+    """Validate an unprefixed version against the canonical release tag grammar."""
+    _match_release_tag(f"v{version}")
+    return version
+
+
 def velopack_channel(channel: str, arch: str) -> str:
     if channel not in {"stable", "prerelease"}:
         raise ValueError("channel must be stable or prerelease")
