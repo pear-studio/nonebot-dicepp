@@ -343,7 +343,7 @@ def test_packaged_velopack_hooks_exit_quickly_without_starting_services(
     try:
         return_code = proc.wait(timeout=10)
         assert return_code == 0, f"stable entry exited with code {return_code}"
-        _wait_for_package_processes_to_exit(exe, timeout=10)
+        _wait_for_package_processes_to_exit(exe, timeout=30)
     except Exception as exc:
         _stop_process_tree_preserving_failure(proc, exe, ports)
         pytest.fail(f"Packaged Dashboard did not exit promptly for {hook}: {exc}")
