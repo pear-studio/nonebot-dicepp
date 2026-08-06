@@ -21,90 +21,52 @@ permissions:
   packages: write     # 推送 GHCR 镜像
 
 jobs:
-  quality-gate:
-    name: Quality Gate
-    uses: ./.github/workflows/test-suite.yml
-
-  build-docker:
-    name: Build Docker Image
+  release-metadata:
+    name: Resolve Release Metadata
     runs-on: ubuntu-latest
-    needs: quality-gate
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit_sha: ${{ steps.release.outputs.commit_sha }}
+      is_prerelease: ${{ steps.release.outputs.is_prerelease }}
+      channel: ${{ steps.release.outputs.channel }}
+      velopack_version: ${{ steps.release.outputs.velopack_version }}
+      velopack_channel: ${{ steps.release.outputs.velopack_channel }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Extract version info
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build image (local only)
-        uses: docker/build-push-action@v5
+      - uses: actions/setup-python@v5
         with:
-          context: .
-          push: false
-          load: true
-          tags: |
-            ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
-
-      - name: Smoke test image
+          python-version: "3.11"
+      - name: Derive and validate release metadata
+        id: release
         run: |
-          IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
-          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
-          ACTUAL="$(docker run --rm --network=none "$IMAGE" python bot.py --version)"
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
-            exit 1
-          fi
-          docker run --rm --network=none "$IMAGE" python bot.py --smoke-check
+          python scripts/build/release_build_metadata.py derive \
+            --ref "$GITHUB_REF" \
+            --commit-sha "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Build Dashboard image (local only)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.dashboard
-          push: false
-          load: true
-          tags: |
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
+  quality-gate:
+    name: Quality Gate
+    needs: release-metadata
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/test-suite.yml
+    with:
+      release_tag: ${{ needs.release-metadata.outputs.tag }}
+      release_version: ${{ needs.release-metadata.outputs.version }}
+      release_commit_sha: ${{ needs.release-metadata.outputs.commit_sha }}
 
-      - name: Smoke test Dashboard image
-        run: |
-          docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 \
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          ready=false
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != "true" ]; then
-            docker logs dicepp-dashboard-smoke
-            docker rm -f dicepp-dashboard-smoke
-            exit 1
-          fi
-          docker cp scripts/smoke_dashboard_control_channel.py \
-            dicepp-dashboard-smoke:/tmp/smoke_dashboard_control_channel.py
-          docker exec dicepp-dashboard-smoke \
-            python /tmp/smoke_dashboard_control_channel.py
-          docker rm -f dicepp-dashboard-smoke
-
+  promote-docker:
+    name: Promote Tested Container Candidates
+    runs-on: ubuntu-latest
+    needs: [release-metadata, quality-gate]
+    outputs:
+      runtime_digest: ${{ steps.promote.outputs.runtime_digest }}
+      runtime_image_id: ${{ steps.promote.outputs.runtime_image_id }}
+      dashboard_digest: ${{ steps.promote.outputs.dashboard_digest }}
+      dashboard_image_id: ${{ steps.promote.outputs.dashboard_image_id }}
+    steps:
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -112,80 +74,137 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push images
+      - name: Promote candidates without rebuilding
+        id: promote
         run: |
-          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-              ghcr.io/pear-studio/nonebot-dicepp:latest
-            docker push ghcr.io/pear-studio/nonebot-dicepp:latest
-            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }} \
-              ghcr.io/pear-studio/dicepp-dashboard:latest
-            docker push ghcr.io/pear-studio/dicepp-dashboard:latest
+          set -euo pipefail
+
+          RUNTIME_REPOSITORY="ghcr.io/pear-studio/nonebot-dicepp"
+          DASHBOARD_REPOSITORY="ghcr.io/pear-studio/dicepp-dashboard"
+          TAG="${{ needs.release-metadata.outputs.tag }}"
+          RUNTIME_CANDIDATE="${{ needs.quality-gate.outputs.runtime_candidate_ref }}"
+          RUNTIME_DIGEST="${{ needs.quality-gate.outputs.runtime_candidate_digest }}"
+          RUNTIME_IMAGE_ID="${{ needs.quality-gate.outputs.runtime_candidate_image_id }}"
+          DASHBOARD_CANDIDATE="${{ needs.quality-gate.outputs.dashboard_candidate_ref }}"
+          DASHBOARD_DIGEST="${{ needs.quality-gate.outputs.dashboard_candidate_digest }}"
+          DASHBOARD_IMAGE_ID="${{ needs.quality-gate.outputs.dashboard_candidate_image_id }}"
+
+          for value in \
+            "$RUNTIME_CANDIDATE" "$RUNTIME_DIGEST" "$RUNTIME_IMAGE_ID" \
+            "$DASHBOARD_CANDIDATE" "$DASHBOARD_DIGEST" "$DASHBOARD_IMAGE_ID"; do
+            if [ -z "$value" ]; then
+              echo "Quality Gate did not return a complete tested container identity"
+              exit 1
+            fi
+          done
+
+          promote_exact_digest() {
+            local candidate_ref="$1"
+            local candidate_digest="$2"
+            local target_ref="$3"
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --tag "$target_ref" \
+              "${candidate_ref%@*}@${candidate_digest}"
+            local promoted_digest
+            promoted_digest="$(
+              docker buildx imagetools inspect "$target_ref" --format '{{.Manifest.Digest}}'
+            )"
+            if [ "$promoted_digest" != "$candidate_digest" ]; then
+              echo "Container promotion changed digest: $candidate_digest -> $promoted_digest"
+              exit 1
+            fi
+          }
+
+          promote_exact_digest \
+            "$RUNTIME_CANDIDATE" "$RUNTIME_DIGEST" "${RUNTIME_REPOSITORY}:${TAG}"
+          promote_exact_digest \
+            "$DASHBOARD_CANDIDATE" "$DASHBOARD_DIGEST" "${DASHBOARD_REPOSITORY}:${TAG}"
+
+          if [ "${{ needs.release-metadata.outputs.is_prerelease }}" = "false" ]; then
+            promote_exact_digest \
+              "$RUNTIME_CANDIDATE" "$RUNTIME_DIGEST" "${RUNTIME_REPOSITORY}:latest"
+            promote_exact_digest \
+              "$DASHBOARD_CANDIDATE" "$DASHBOARD_DIGEST" "${DASHBOARD_REPOSITORY}:latest"
           else
-            echo "Prerelease tag detected; skipping latest tag"
+            echo "Prerelease tag detected; latest remains unchanged"
           fi
+
+          echo "runtime_digest=$RUNTIME_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "runtime_image_id=$RUNTIME_IMAGE_ID" >> "$GITHUB_OUTPUT"
+          echo "dashboard_digest=$DASHBOARD_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "dashboard_image_id=$DASHBOARD_IMAGE_ID" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Promoted container identities"
+            echo
+            echo "- Runtime: \`${RUNTIME_REPOSITORY}:${TAG}@${RUNTIME_DIGEST}\`"
+            echo "- Runtime Image ID: \`$RUNTIME_IMAGE_ID\`"
+            echo "- Dashboard/Manager: \`${DASHBOARD_REPOSITORY}:${TAG}@${DASHBOARD_DIGEST}\`"
+            echo "- Dashboard/Manager Image ID: \`$DASHBOARD_IMAGE_ID\`"
+            echo "- Candidate tags are retained as run provenance; no destructive GHCR cleanup is performed"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   windows-build:
-    name: Windows EXE
+    name: Package Windows Candidate
     runs-on: windows-latest
-    needs: quality-gate
+    needs: [release-metadata, quality-gate]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Extract version info
-        id: version
-        shell: bash
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
-          fi
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - uses: astral-sh/setup-uv@v4
+      - name: Download tested Windows candidate
+        uses: actions/download-artifact@v4
         with:
-          version: "latest"
+          name: dicepp-windows-candidate
+          path: dist
 
-      - name: Install dependencies
-        run: uv sync --frozen --group dev
-
-      - name: Compute Velopack version and channel
-        id: velopack
-        shell: bash
-        run: |
-          CHANNEL=stable
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
-            CHANNEL=prerelease
-          fi
-          VELOPACK_VERSION="$(PYTHONPATH=src uv run --frozen python -c \
-            "from scripts.build.generate_release_manifest import velopack_version; print(velopack_version('${{ steps.version.outputs.version }}'))")"
-          VELOPACK_CHANNEL="$(PYTHONPATH=src uv run --frozen python -c \
-            "from scripts.build.generate_release_manifest import velopack_channel; print(velopack_channel('${CHANNEL}', 'amd64'))")"
-          echo "version=${VELOPACK_VERSION}" >> $GITHUB_OUTPUT
-          echo "channel=${VELOPACK_CHANNEL}" >> $GITHUB_OUTPUT
-
-      - name: Build Windows executables with PyInstaller
-        run: |
-          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/update_guard.spec --clean --noconfirm
-
-      - name: Assemble Windows directory
+      - name: Validate tested Windows candidate
         shell: pwsh
         run: |
-          ./scripts/build/assemble_windows_package.ps1
+          python scripts/build/release_build_metadata.py validate-windows-candidate `
+            --path dist/windows-candidate.json `
+            --tag "${{ needs.release-metadata.outputs.tag }}" `
+            --version "${{ needs.release-metadata.outputs.version }}" `
+            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}"
 
-      - name: Smoke test
+          $requiredExecutables = @(
+            "dist/DicePP/DicePP.exe",
+            "dist/DicePP/DicePP-Runtime.exe",
+            "dist/DicePP/DicePP-UpdateGuard.exe"
+          )
+          foreach ($path in $requiredExecutables) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Tested Windows candidate is incomplete: $path"
+            }
+          }
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk --version 1.2.0
+          vpk pack `
+            --packId DicePP `
+            --packVersion "${{ needs.release-metadata.outputs.velopack_version }}" `
+            --packDir dist/DicePP `
+            --mainExe DicePP.exe `
+            --channel "${{ needs.release-metadata.outputs.velopack_channel }}"
+
+          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
+          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
+          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
+          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
+            throw "Velopack output set is incomplete or ambiguous"
+          }
+          Move-Item $portable[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
+          Move-Item $setup[0].FullName "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe"
+          Copy-Item $full[0].FullName .
+          Copy-Item "Releases/releases.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
+          Copy-Item "Releases/assets.${{ needs.release-metadata.outputs.velopack_channel }}.json" .
+
+      - name: Smoke test final Windows Portable
         shell: pwsh
         run: |
           function Invoke-PackagedExe {
@@ -225,43 +244,65 @@ jobs:
             }
           }
 
-          $expected = "DicePP v${{ steps.version.outputs.version }}"
-          $actual = Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--version")
-          if ($actual -ne $expected) {
-            throw "Version mismatch: expected '$expected', got '$actual'"
-          }
-          Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--smoke-check") | Out-Null
+          $portablePath = "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "dicepp-portable-$([guid]::NewGuid())"
+          try {
+            Expand-Archive -LiteralPath $portablePath -DestinationPath $extractRoot
+            $runtimeMatches = @(
+              Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "DicePP-Runtime.exe"
+            )
+            if ($runtimeMatches.Count -ne 1) {
+              throw "Portable must contain exactly one DicePP-Runtime.exe"
+            }
+            $programRoot = $runtimeMatches[0].Directory.FullName
+            $runtime = Join-Path $programRoot "DicePP-Runtime.exe"
+            $dashboard = Join-Path $programRoot "DicePP.exe"
+            $updateGuard = Join-Path $programRoot "DicePP-UpdateGuard.exe"
 
-          $dashboardExpected = "DicePP Dashboard v${{ steps.version.outputs.version }}"
-          $dashboardActual = Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")
-          if ($dashboardActual -ne $dashboardExpected) {
-            throw "Dashboard version mismatch: expected '$dashboardExpected', got '$dashboardActual'"
-          }
-          Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
-          Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" @("--smoke-check") | Out-Null
+            $expectedRuntime = "DicePP v${{ needs.release-metadata.outputs.version }}"
+            $actualRuntime = Invoke-PackagedExe $runtime @("--version")
+            if ($actualRuntime -ne $expectedRuntime) {
+              throw "Portable Runtime version mismatch: expected '$expectedRuntime', got '$actualRuntime'"
+            }
+            Invoke-PackagedExe $runtime @("--smoke-check") | Out-Null
 
-      - name: Package artifact
+            $expectedDashboard = "DicePP Dashboard v${{ needs.release-metadata.outputs.version }}"
+            $actualDashboard = Invoke-PackagedExe $dashboard @("--version")
+            if ($actualDashboard -ne $expectedDashboard) {
+              throw "Portable Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
+            }
+            Invoke-PackagedExe $dashboard @("--smoke-check") | Out-Null
+
+            $expectedGuard = "${{ needs.release-metadata.outputs.version }}"
+            $actualGuard = Invoke-PackagedExe $updateGuard @("--version")
+            if ($actualGuard -ne $expectedGuard) {
+              throw "Portable UpdateGuard version mismatch: expected '$expectedGuard', got '$actualGuard'"
+            }
+            Invoke-PackagedExe $updateGuard @("--smoke-check") | Out-Null
+          } finally {
+            if (Test-Path -LiteralPath $extractRoot) {
+              Remove-Item -LiteralPath $extractRoot -Recurse -Force
+            }
+          }
+
+      - name: Validate final Windows asset set
         shell: pwsh
         run: |
-          dotnet tool install -g vpk --version 1.2.0
-          vpk pack `
-            --packId DicePP `
-            --packVersion "${{ steps.velopack.outputs.version }}" `
-            --packDir dist/DicePP `
-            --mainExe DicePP.exe `
-            --channel "${{ steps.velopack.outputs.channel }}"
-
-          $portable = @(Get-ChildItem -Path Releases -Filter "*Portable.zip")
-          $setup = @(Get-ChildItem -Path Releases -Filter "*Setup.exe")
-          $full = @(Get-ChildItem -Path Releases -Filter "*-full.nupkg")
-          if ($portable.Count -ne 1 -or $setup.Count -ne 1 -or $full.Count -ne 1) {
-            throw "Velopack output set is incomplete or ambiguous"
+          $expected = @(
+            "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip",
+            "DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe",
+            "releases.${{ needs.release-metadata.outputs.velopack_channel }}.json",
+            "assets.${{ needs.release-metadata.outputs.velopack_channel }}.json"
+          )
+          foreach ($path in $expected) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing Windows release asset: $path"
+            }
           }
-          Move-Item $portable[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip"
-          Move-Item $setup[0].FullName "DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe"
-          Copy-Item $full[0].FullName .
-          Copy-Item "Releases/releases.${{ steps.velopack.outputs.channel }}.json" .
-          Copy-Item "Releases/assets.${{ steps.velopack.outputs.channel }}.json" .
+          $full = @(Get-ChildItem -Path . -Filter "*-full.nupkg" -File)
+          if ($full.Count -ne 1) {
+            throw "Expected exactly one full Velopack package, found $($full.Count)"
+          }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -272,12 +313,13 @@ jobs:
             *-full.nupkg
             releases.win-*.json
             assets.win-*.json
+          if-no-files-found: error
           retention-days: 7
 
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [build-docker, windows-build]
+    needs: [release-metadata, promote-docker, windows-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -293,31 +335,52 @@ jobs:
         with:
           name: dicepp-windows
 
-      - name: Extract version info
-        id: version
+      - name: Pull and verify promoted images from GHCR
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_prerelease=false" >> $GITHUB_OUTPUT
-          else
-            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          TAG="${{ needs.release-metadata.outputs.tag }}"
+          BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
+          DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+          EXPECTED_BOT_DIGEST="${{ needs.promote-docker.outputs.runtime_digest }}"
+          EXPECTED_BOT_IMAGE_ID="${{ needs.promote-docker.outputs.runtime_image_id }}"
+          EXPECTED_DASHBOARD_DIGEST="${{ needs.promote-docker.outputs.dashboard_digest }}"
+          EXPECTED_DASHBOARD_IMAGE_ID="${{ needs.promote-docker.outputs.dashboard_image_id }}"
+
+          ACTUAL_BOT_DIGEST="$(
+            docker buildx imagetools inspect "$BOT_IMAGE" --format '{{.Manifest.Digest}}'
+          )"
+          ACTUAL_DASHBOARD_DIGEST="$(
+            docker buildx imagetools inspect "$DASHBOARD_IMAGE" --format '{{.Manifest.Digest}}'
+          )"
+          if [ "$ACTUAL_BOT_DIGEST" != "$EXPECTED_BOT_DIGEST" ]; then
+            echo "Published Runtime digest differs from the tested candidate"
+            exit 1
+          fi
+          if [ "$ACTUAL_DASHBOARD_DIGEST" != "$EXPECTED_DASHBOARD_DIGEST" ]; then
+            echo "Published Dashboard digest differs from the tested candidate"
+            exit 1
           fi
 
-      - name: Pull published images from GHCR
-        run: |
-          docker pull ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker pull ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          docker pull "$BOT_IMAGE"
+          docker pull "$DASHBOARD_IMAGE"
+          ACTUAL_BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$BOT_IMAGE")"
+          ACTUAL_DASHBOARD_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$DASHBOARD_IMAGE")"
+          if [ "$ACTUAL_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]; then
+            echo "Published Runtime Image ID differs from the tested candidate"
+            exit 1
+          fi
+          if [ "$ACTUAL_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]; then
+            echo "Published Dashboard Image ID differs from the tested candidate"
+            exit 1
+          fi
 
       - name: Package Linux amd64 release bundle
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zip zstd
 
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG="${{ needs.release-metadata.outputs.tag }}"
           BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
           DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
           BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${BOT_IMAGE}")"
@@ -389,34 +452,190 @@ jobs:
             zip -r "../${PACKAGE_ZIP}" .
           )
 
+      - name: Verify final Linux bundle offline round trip
+        run: |
+          set -euo pipefail
+
+          TAG="${{ needs.release-metadata.outputs.tag }}"
+          BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
+          DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+          EXPECTED_BOT_IMAGE_ID="${{ needs.promote-docker.outputs.runtime_image_id }}"
+          EXPECTED_DASHBOARD_IMAGE_ID="${{ needs.promote-docker.outputs.dashboard_image_id }}"
+          PACKAGE_ZIP="DicePP-${TAG}-linux-amd64.zip"
+          SMOKE_ROOT="$(mktemp -d "${RUNNER_TEMP}/dicepp-linux-bundle.XXXXXX")"
+          SMOKE_PROJECT="dicepp-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          SMOKE_COMPOSE="${SMOKE_ROOT}/smoke-compose.json"
+          {
+            echo "BUNDLE_SMOKE_ROOT=$SMOKE_ROOT"
+            echo "BUNDLE_SMOKE_PROJECT=$SMOKE_PROJECT"
+            echo "BUNDLE_SMOKE_COMPOSE=$SMOKE_COMPOSE"
+            echo "BUNDLE_SMOKE_BOT_IMAGE=$BOT_IMAGE"
+            echo "BUNDLE_SMOKE_DASHBOARD_IMAGE=$DASHBOARD_IMAGE"
+          } >> "$GITHUB_ENV"
+
+          # Remove the images used to create the archive. Every identity checked
+          # below must therefore come back through the final zip and docker load.
+          docker image rm "$BOT_IMAGE" "$DASHBOARD_IMAGE"
+          if docker image inspect "$BOT_IMAGE" >/dev/null 2>&1 \
+            || docker image inspect "$DASHBOARD_IMAGE" >/dev/null 2>&1; then
+            echo "Pre-package image tags still exist before offline round trip"
+            exit 1
+          fi
+
+          unzip -q "$PACKAGE_ZIP" -d "$SMOKE_ROOT"
+          (
+            cd "$SMOKE_ROOT"
+            sha256sum -c checksums.sha256
+          )
+          IMAGE_ARCHIVE_ZST="$(
+            python scripts/build/validate_linux_bundle_candidate.py \
+              --package-root "$SMOKE_ROOT" \
+              --manifest "${SMOKE_ROOT}/dicepp-package.json" \
+              --expected-image bot "$BOT_IMAGE" "$EXPECTED_BOT_IMAGE_ID" \
+              --expected-image \
+                dashboard "$DASHBOARD_IMAGE" "$EXPECTED_DASHBOARD_IMAGE_ID"
+          )"
+          IMAGE_ARCHIVE="${IMAGE_ARCHIVE_ZST%.zst}"
+          zstd -d "$IMAGE_ARCHIVE_ZST" -o "$IMAGE_ARCHIVE"
+          docker load -i "$IMAGE_ARCHIVE"
+
+          LOADED_BOT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$BOT_IMAGE")"
+          LOADED_DASHBOARD_IMAGE_ID="$(
+            docker image inspect --format '{{.Id}}' "$DASHBOARD_IMAGE"
+          )"
+          if [ "$LOADED_BOT_IMAGE_ID" != "$EXPECTED_BOT_IMAGE_ID" ]; then
+            echo "Offline Runtime Image ID differs from the tested candidate"
+            exit 1
+          fi
+          if [ "$LOADED_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]; then
+            echo "Offline Dashboard Image ID differs from the tested candidate"
+            exit 1
+          fi
+
+          RESOLVED_COMPOSE="${SMOKE_ROOT}/resolved-compose.json"
+          DICEPP_IMAGE_TAG="$TAG" docker compose \
+            --project-name "$SMOKE_PROJECT" \
+            -f "${SMOKE_ROOT}/docker-compose.yml" \
+            config --format json > "$RESOLVED_COMPOSE"
+          python - \
+            "$RESOLVED_COMPOSE" \
+            "$SMOKE_COMPOSE" \
+            "$BOT_IMAGE" \
+            "$DASHBOARD_IMAGE" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          source = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          bot_image, dashboard_image = sys.argv[3:]
+          compose = json.loads(source.read_text(encoding="utf-8"))
+          compose.get("networks", {}).pop("dice-net", None)
+          services = compose["services"]
+          if services["bot"]["image"] != bot_image:
+              raise SystemExit("Compose Runtime service does not use the Runtime image")
+          for role in ("dashboard", "manager"):
+              if services[role]["image"] != dashboard_image:
+                  raise SystemExit(
+                      f"Compose {role} service does not use the Dashboard/Manager image"
+                  )
+          services["bot"].get("networks", {}).pop("dice-net", None)
+          for service in services.values():
+              for key in ("build", "container_name", "ports"):
+                  service.pop(key, None)
+              service["restart"] = "no"
+          services["manager"]["environment"][
+              "DICEPP_MANAGER_RELEASE_SCHEDULER"
+          ] = "false"
+          destination.write_text(
+              json.dumps(compose, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          mapfile -t COMPOSE_IMAGES < <(
+            docker compose \
+              --project-name "$SMOKE_PROJECT" \
+              -f "$SMOKE_COMPOSE" \
+              config --images | sort -u
+          )
+          if [ "${COMPOSE_IMAGES[*]}" != "$DASHBOARD_IMAGE $BOT_IMAGE" ]; then
+            echo "Offline Compose does not resolve to the two loaded release images"
+            printf 'Resolved image: %s\n' "${COMPOSE_IMAGES[@]}"
+            exit 1
+          fi
+
+          docker compose \
+            --project-name "$SMOKE_PROJECT" \
+            -f "$SMOKE_COMPOSE" \
+            up -d --pull never --wait --wait-timeout 180
+          for service in bot dashboard manager; do
+            if [ -z "$(
+              docker compose \
+                --project-name "$SMOKE_PROJECT" \
+                -f "$SMOKE_COMPOSE" \
+                ps --status running -q "$service"
+            )" ]; then
+              echo "Offline Compose service is not running: $service"
+              exit 1
+            fi
+          done
+          for service in dashboard manager; do
+            CONTAINER_ID="$(
+              docker compose \
+                --project-name "$SMOKE_PROJECT" \
+                -f "$SMOKE_COMPOSE" \
+                ps -q "$service"
+            )"
+            HEALTH="$(docker inspect --format '{{.State.Health.Status}}' "$CONTAINER_ID")"
+            if [ "$HEALTH" != "healthy" ]; then
+              echo "Offline Compose service is not healthy: $service ($HEALTH)"
+              exit 1
+            fi
+          done
+
+      - name: Clean up Linux bundle offline smoke
+        if: always()
+        run: |
+          if [ -n "${BUNDLE_SMOKE_COMPOSE:-}" ] \
+            && [ -f "$BUNDLE_SMOKE_COMPOSE" ] \
+            && [ -n "${BUNDLE_SMOKE_PROJECT:-}" ]; then
+            docker compose \
+              --project-name "$BUNDLE_SMOKE_PROJECT" \
+              -f "$BUNDLE_SMOKE_COMPOSE" \
+              down --volumes --remove-orphans || true
+          fi
+          if [ -n "${BUNDLE_SMOKE_BOT_IMAGE:-}" ]; then
+            docker image rm "$BUNDLE_SMOKE_BOT_IMAGE" 2>/dev/null || true
+          fi
+          if [ -n "${BUNDLE_SMOKE_DASHBOARD_IMAGE:-}" ]; then
+            docker image rm "$BUNDLE_SMOKE_DASHBOARD_IMAGE" 2>/dev/null || true
+          fi
+
       - name: Generate release machine contract
         run: |
-          CHANNEL=stable
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
-            CHANNEL=prerelease
-          fi
           FULL_NUPKG="$(find . -maxdepth 1 -name '*-full.nupkg' -print -quit)"
           RELEASES_JSON="$(find . -maxdepth 1 -name 'releases.win-*.json' -print -quit)"
           ASSETS_JSON="$(find . -maxdepth 1 -name 'assets.win-*.json' -print -quit)"
           PYTHONPATH=src uv run --frozen python scripts/build/generate_release_manifest.py \
-            --version "${{ steps.version.outputs.version }}" \
-            --channel "${CHANNEL}" \
-            --release-notes "docs/releases/${{ steps.version.outputs.tag }}.md" \
-            --artifact "windows:amd64:portable:DicePP-${{ steps.version.outputs.tag }}-win64-Portable.zip" \
-            --artifact "windows:amd64:setup:DicePP-${{ steps.version.outputs.tag }}-win64-Setup.exe" \
+            --version "${{ needs.release-metadata.outputs.version }}" \
+            --channel "${{ needs.release-metadata.outputs.channel }}" \
+            --release-notes "docs/releases/${{ needs.release-metadata.outputs.tag }}.md" \
+            --artifact "windows:amd64:portable:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip" \
+            --artifact "windows:amd64:setup:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe" \
             --artifact "windows:amd64:velopack-full:${FULL_NUPKG}" \
             --artifact "windows:amd64:velopack-releases:${RELEASES_JSON}" \
             --artifact "windows:amd64:velopack-assets:${ASSETS_JSON}" \
-            --artifact "linux:amd64:linux-bundle:DicePP-${{ steps.version.outputs.tag }}-linux-amd64.zip"
+            --artifact "linux:amd64:linux-bundle:DicePP-${{ needs.release-metadata.outputs.tag }}-linux-amd64.zip"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG="${{ needs.release-metadata.outputs.tag }}"
           RELEASE_MD="docs/releases/${TAG}.md"
           RELEASE_FLAGS=()
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+          if [ "${{ needs.release-metadata.outputs.is_prerelease }}" = "true" ]; then
             RELEASE_FLAGS+=(--prerelease)
           fi
 
