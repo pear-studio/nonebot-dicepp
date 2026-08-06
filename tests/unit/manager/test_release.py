@@ -87,14 +87,44 @@ def test_manifest_rejects_unknown_schema_and_invalid_digest() -> None:
         validate_release_manifest(payload)
 
 
-def test_manifest_rejects_automatic_manager_change_scope() -> None:
+def test_manifest_accepts_manager_scope_without_handoff_protocol() -> None:
+    # Manager scope alone no longer means "must be manual": eligibility is
+    # decided by the Linux handoff protocol gate (see
+    # test_linux_manager_handoff_gate in test_release_storage.py).
     payload = _manifest(
         [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
     )
     payload["change_scope"] = ["runtime", "manager"]
 
+    validated = validate_release_manifest(payload)
+
+    assert "linux_manager_handoff_protocol" not in validated
+
+
+def test_manifest_accepts_supported_linux_manager_handoff_protocol() -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["change_scope"] = ["runtime", "manager"]
+    payload["linux_manager_handoff_protocol"] = 1
+
+    validated = validate_release_manifest(payload)
+
+    assert validated["linux_manager_handoff_protocol"] == 1
+
+
+@pytest.mark.parametrize("value", [True, "1", 0, -1, 1.0, []])
+def test_manifest_rejects_malformed_linux_manager_handoff_protocol(
+    value,
+) -> None:
+    payload = _manifest(
+        [_artifact("DicePP-v3.1.0-linux-amd64.zip", b"bundle")]
+    )
+    payload["linux_manager_handoff_protocol"] = value
+
     with pytest.raises(
-        ReleaseContractError, match="change_scope includes manager"
+        ReleaseContractError,
+        match="linux_manager_handoff_protocol must be a positive integer",
     ):
         validate_release_manifest(payload)
 
