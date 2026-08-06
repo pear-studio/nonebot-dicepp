@@ -129,7 +129,10 @@ Linux 自动安装只处理当前部署结构兼容的 Bot/Dashboard 发布。Ma
 
 Windows 由当前 Manager 发起检查、下载和安装，Velopack 负责版本化程序目录切换，独立 UpdateGuard 监督切换握手和超时/健康失败时的指定版本降级。Manager 保留旧版完整包和 pre-upgrade 归档，只有匹配 transaction、版本和进程身份的本地健康结果才可提交；数据恢复仍由 Manager 执行。
 
-自动安装只接受与当前架构和频道匹配、同时具备 Velopack full package、release feed 和 UpdateGuard 的发布，并要求当前安装布局受 Velopack 支持且可保留旧程序。缺少任何条件时会在数据切换前拒绝。
+自动安装只接受与当前架构和频道匹配、具备 `velopack.win-x64.zip` 与 UpdateGuard
+的发布，并要求当前安装布局受 Velopack 支持且可保留旧程序。Manager 按外层
+Release contract 校验 bundle，再按内层 manifest 校验并提取唯一 full nupkg；
+缺少任何条件时会在数据切换前拒绝。
 
 ### 必须人工处理的情形
 

@@ -15,7 +15,7 @@ version-release (skill)               version-deploy (skill)
        → dicepp-dashboard:vX.Y.Z
        → latest（正式版）
        → linux-amd64 release zip
-       → Windows Portable / Setup / Velopack feed
+       → Windows Portable / Setup / velopack.win-x64.zip
        → dicepp-release.json
 ```
 
@@ -31,6 +31,7 @@ version-release (skill)               version-deploy (skill)
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR、Windows Velopack、Linux 发布包和 machine contract 构建，并创建 GitHub Release |
 | `dicepp-release.json` | Manager 消费的严格 machine contract；声明频道、兼容性、平台/架构和 artifact size/SHA-256 |
+| `velopack.win-x64.zip` 内 `manifest.json` | Windows 更新层 contract；声明 DicePP/Velopack 版本、频道、目标及唯一 full nupkg 的 size/SHA-256 |
 | Linux 包内 `dicepp-package.json` | Linux 安装层 contract；声明 Compose、image archive、镜像引用及内部文件摘要 |
 
 ## 版本号
@@ -49,7 +50,8 @@ version-release (skill)               version-deploy (skill)
 - **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
 - **构建触发**: push `v*.*.*` tag
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
-- **分发**: `docker-compose.yml`、Windows Portable/Setup/Velopack feed、
+- **分发**: `docker-compose.yml`、Windows Portable/Setup、
+  `velopack.win-x64.zip`、
   `DicePP-vX.Y.Z-linux-amd64.zip` 和 `dicepp-release.json` 作为 GitHub
   Release assets；`docs/releases/vX.Y.Z.md` 作为 Release body
 
@@ -80,7 +82,7 @@ version-release (skill)               version-deploy (skill)
 4. `bump-my-version` 递增版本号 + 自动 commit + tag
 5. 在当前 HEAD 上运行完整回归 `uv run pytest`
 6. `git push origin master --tags`
-7. GHA 自动构建镜像、Windows Portable/Setup/Velopack feed、Linux amd64
+7. GHA 自动构建镜像、Windows Portable/Setup/`velopack.win-x64.zip`、Linux amd64
    发布包和 `dicepp-release.json`，再创建 GitHub Release
 
 ### 基线建立

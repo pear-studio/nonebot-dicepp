@@ -91,24 +91,27 @@ volume、network、部署 schema 等当前 Manager 不能安全迁移的拓扑�
 
 ### Windows 边界
 
-Windows 后续更新使用 Release 中与当前架构、频道匹配的 Velopack full package
-和 feed。Velopack 切换版本化程序目录；Manager 在切换前把独立 UpdateGuard
+Windows 后续更新只使用 Release 中固定命名的 `velopack.win-x64.zip`。Manager
+先按外层 Release contract 校验整个 bundle，再安全解包并按内层 `manifest.json`
+复核 DicePP/Velopack 版本、频道、平台、架构以及唯一 full nupkg 的名称、大小和
+SHA-256，最后才把该 nupkg 交给 UpdateGuard。Velopack 切换版本化程序目录；
+Manager 在切换前把独立 UpdateGuard
 准备到版本目录之外并写入升级计划。新 Manager 只有在 migration、Dashboard、
 RuntimeUnit 和本地控制通道全部通过后才写入成功健康标记。超时或失败时，
-UpdateGuard 使用切换前按摘要保留的旧版 Velopack full package 请求降级，不手工
+UpdateGuard 使用从旧版 bundle 校验解出的 full nupkg 请求降级，不手工
 删除或替换 `current/`；再由旧 Manager 按同一事务恢复 pre-upgrade 数据。新程序
 必须发布绑定事务、目标版本和真实进程身份的 started marker，并在带认证的本地
 `/v1/health` 已可访问且硬性健康检查完成后发布 health marker。
 
 实例数据始终留在稳定 DicePP 根目录，不随 `current/` 切换。Portable 和 Setup
 都是首次部署入口，后续都使用同一更新事务；Setup 不依赖 Portable ZIP。若发布
-产物缺少 UpdateGuard、Velopack feed/full package，或当前目录不是受支持的
+产物缺少 UpdateGuard 或 Velopack bundle，或当前目录不是受支持的
 Velopack 安装布局，Manager 会在修改程序或数据之前拒绝自动安装，并给出手工
 升级提示。
 
 ## Release contract
 
-`dicepp-release.json` 使用 contract version 1。顶层声明 DicePP 版本与频道、
+`dicepp-release.json` 使用 contract version 2。顶层声明 DicePP 版本与频道、
 部署 schema、最低 Manager 版本、DataAsset Catalog version/digest、变更范围和
 `automatic_upgrade`；每个 artifact 分别声明 platform、arch、用途、文件名、
 字节数和 SHA-256。GitHub Release API 返回的 machine-contract asset 本身也会
@@ -124,10 +127,18 @@ Windows amd64 Release 包含：
 
 - `DicePP-vX.Y.Z-win64-Portable.zip`
 - `DicePP-vX.Y.Z-win64-Setup.exe`
-- Velopack full package 和按架构、频道隔离的 feed，例如
-  `releases.win-x64-stable.json` / `assets.win-x64-stable.json`
+- `velopack.win-x64.zip`
 
-Portable 与 Setup 是两个独立的首次部署入口，Setup 不依赖 Portable zip。
+`velopack.win-x64.zip` 恰好包含根目录 `manifest.json` 与一个 Velopack full
+nupkg，不包含 feed；nupkg 不作为独立 Release asset。内层 manifest 严格声明
+format version、DicePP/Velopack version、channel、platform、arch 和 nupkg
+filename/size/SHA-256。bundle 拒绝路径穿越、POSIX/Windows 绝对路径、反斜杠、
+符号链接/重解析点、重复或额外成员和超出成员数、解压大小、单文件大小、压缩比
+上限的输入；nupkg 内部版本也必须与两层清单一致。Portable 与 Setup 是两个独立
+的首次部署入口，Setup 不依赖 Portable zip。
+
+GitHub Release 最终固定为六个 assets：上述三个 Windows/Linux 用户发行包、
+`velopack.win-x64.zip`、`dicepp-release.json` 和 `docker-compose.yml`。
 
 Linux amd64 Release 包含 `DicePP-vX.Y.Z-linux-amd64.zip`。外层
 `dicepp-release.json` 验证整个 zip；zip 内的 `dicepp-package.json` 是第二层
@@ -146,7 +157,9 @@ Manager 只在已有 `.part` 同时具备 ETag/Last-Modified，服务器对 Rang
 完全一致时续传。任一条件不满足都会丢弃旧 partial 并从零下载。最终 size 或
 SHA-256 不匹配时，partial 会被删除且不会标记为可安装。
 
-下载缓存以实例根、`manager/packages` 和版本目录的固定身份作为轻量安全边界，
-并拒绝符号链接、目录替换及多链接文件。能够以同一系统用户权限在最后一次身份
-检查与单个文件系统调用之间持续制造纳秒级竞态的本地进程不属于本项目威胁模型；
-若未来需要抵御该场景，应改用各平台的目录句柄 API，而不是继续增加路径检查。
+下载缓存以实例根、`manager/packages` 和版本目录的固定身份作为安全边界，
+逐级拒绝符号链接、Windows reparse/junction、目录替换及多链接文件。bundle 的
+外层摘要与 ZIP 内容必须从同一个 no-follow 文件句柄校验；提取时重新打开
+no-follow 句柄，先在该句柄复核已授权的整包摘要，再从同一句柄读取 payload。
+因此路径在校验、发布或提取之间被替换时会失败关闭，不会把替换后的内容标记为
+可安装。

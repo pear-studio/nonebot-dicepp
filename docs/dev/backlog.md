@@ -12,26 +12,136 @@
 
 ---
 
-## dev
+## config
 
-### [B-260731-a4e8ea] 硬切 Velopack 单 bundle Windows 更新契约
+### [B-260731-90cfb8] 取消通用配置热重载，改为保存后明确重启
 - 创建: 2026-07-31
-- 优先级: P2
+- 优先级: P1
 - 类型: refactor
 - 改动量: XL
 - 问题表现:
-  - rc16 GitHub Release 的 8 个 assets 中，full nupkg、`releases.win-x64-prerelease.json`、`assets.win-x64-prerelease.json` 是 Manager/Velopack 机器组件，却与三个用户发行包并列展示，容易让普通用户误以为需要手动下载
-  - rc16 `assets.win-x64-prerelease.json` 仍引用 Velopack 原始的 `DicePP-win-x64-prerelease-Setup.exe` / `Portable.zip`，但 Release 实际上传的是带 `v3.0.0rc16` 的重命名文件，feed 与公开 assets 不自洽
-  - 当前 Manager 自行通过 `dicepp-release.json` 发现版本，并调用 `Update.exe apply -p <full.nupkg>` 安装；Velopack 官方说明 `assets.json` 仅供部署命令使用可删除，`releases.json` 用于 `UpdateManager` 发现版本，这两项都不是 DicePP 当前安装路径的必要输入
-  - v3 尚未正式发布，无需为现有 RC 的旧三文件更新契约保留自动升级兼容；旧 RC 到硬切版本允许要求手动安装
+  - `Bot.reload_config` 在日志、Persona、本地化和 HealthMonitor 全部更新成功前就替换 `self.config`；后续失败可能留下部分新配置、部分旧状态
+  - `.reload` 失败回复声称“已保留旧配置”，但在配置对象已经替换后该承诺不一定成立
+  - Bot 直接修改 HealthMonitor 私有字段，绕过其自身配置校验和状态管理
+  - Dashboard 保存配置后自动请求 Manager 通知 Bot reload；Manager 只能报告成功或失败，无法识别部分生效
 - 开发备忘:
-  - 直接升级 Windows release contract，使用单一机器资产 `velopack.win-x64.zip`；文件名不带 `DicePP-vX.Y.Z` 用户发行包前缀，也不重复写 version/channel
-  - bundle 仅包含 `manifest.json` 与 Velopack full nupkg；内层 manifest 严格声明格式版本、DicePP/Velopack 版本、channel、平台、架构、nupkg 文件名、size 和 SHA-256，外层 `dicepp-release.json` 再校验整个 bundle
-  - Manager 改为下载、安全解压和校验 bundle，再把经过版本/摘要验证的 nupkg 交给 UpdateGuard/`Update.exe apply -p`；回滚包获取和本地 packages 维护同步改用 bundle 契约
-  - 删除旧的独立 full nupkg、`releases.json`、`assets.json` 发布、下载及校验路径，不实现双格式读取；使用新的 release contract version 让旧 Manager 明确拒绝而不是误解析
-  - 安全验收覆盖路径穿越、绝对路径、符号链接/重解析点、重复成员、额外成员、压缩炸弹边界、nupkg 版本/摘要冲突、下载中断、升级失败回滚；发布验收覆盖硬切后相邻版本自动升级和回滚
-  - 最终 GitHub Release assets 固定为三个 `DicePP-vX.Y.Z-*` 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、`docker-compose.yml`
-  - 关键位置: `.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`src/dicepp_manager/release.py`、`src/dicepp_manager/upgrade.py`、相关 release/upgrade tests 与发布文档
+  - 取消通用配置热重载；完整配置只在 Bot Runtime 启动时加载并应用
+  - Dashboard 保存配置时继续执行模型校验和原子写入，但不再自动请求 Bot reload
+  - 保存成功后返回并展示“需要重启”，提供调用 Manager 重启整个 RuntimeUnit 的明确操作
+  - Dashboard 必须提示一个 RuntimeUnit 可能承载多个 QQ 账号，重启会使这些账号一起短暂离线
+  - 删除 `.reload` 命令，或在兼容阶段明确回复“通用热重载已停用，请在 Dashboard 重启 Bot”，不得继续执行部分更新
+  - Manager control reload 路径暂时保留兼容响应，但退出 Dashboard 正常流程；后续协议升级时再决定删除
+  - 删除生产路径中对 `Bot.reload_config` 的依赖以及对 HealthMonitor 私有字段的直接修改
+  - Persona 角色卡等内容第一版允许保存后要求重启；以后有明确需求时，为具体 Module 单独实现专用重载
+  - 不建立通用“部分字段可热重载”名单；专用重载需求另行新增 backlog
+  - 验证配置保存不会改变运行中 Bot、重启后完整生效、Dashboard 待重启状态准确、`.reload` 不再造成部分更新，并覆盖多账号 RuntimeUnit 提示
+
+## dashboard
+
+### [B-260731-cf6a1d] 设计 Dashboard 查询库与群私设管理
+- 创建: 2026-07-31
+- 优先级: P2
+- 类型: feature
+- 改动量: XL
+- 问题表现:
+    - Dashboard 当前只能只读浏览查询数据库，使用 SQLite `mode=ro`，不能创建、编辑、删除或导入资料
+    - 查询库管理与群私设管理仍依赖 Bot 命令、手工文件或本机工具
+    - 当前架构文档只允许 Dashboard 对 Persona 角色卡进行类型受限写入，尚未定义查询库写入、安全事务和 Bot 在线刷新规则
+- 开发备忘:
+    - 将普通查询库管理和群私设管理作为同一个 Dashboard 产品功能重新设计
+    - 设计查询条目、重定向、数据库创建和 XLSX 导入的页面流程，批量导入需预览和确认
+    - 设计群私设库与群号的关联、启用/停用、按来源导入和清理流程
+    - 只提供类型受限的查询库操作，不提供任意 SQL、任意表写入或通用 `content/` 写入
+    - 所有写操作需要登录鉴权、输入校验、事务保护和审计记录
+    - 明确 Dashboard 提交后 Bot 如何看到变更，以及新建、替换、删除数据库时的连接刷新规则
+    - 明确完整归档与 Dashboard 并发写入时的一致性策略
+    - Dashboard 功能达到替代条件后，再决定是否禁用 `HomebrewCommand`
+    - 按最终写入归属更新 Manager 架构文档
+
+## dice_hub
+
+### [B-260731-4c8f69] 暂时禁用过时的 DiceHub 命令
+- 创建: 2026-07-31
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - `.hub` 命令已经过时，当前不应继续向用户开放
+    - `.hub online` 调用了不存在的 `HubManager.heartbeat()`
+    - 命令在已有异步调用链中使用 `run_async` 创建额外线程和事件循环，并同步等待结果
+- 开发备忘:
+    - 停止导入和注册 `HubCommand`，使 `.hub` 不再被命令分发处理
+    - 暂时保留仍可能被其他调用者使用的 `HubManager`、配置数据和远端访问代码，不删除已有用户数据
+    - 补充命令注册与实际消息行为测试，确认 `.hub` 已禁用且不影响其他命令
+    - 不调用真实 DiceHub 或其他外部网络
+
+### [B-260731-93a733] 重新设计并实现 DiceHub 命令
+- 创建: 2026-07-31
+- 优先级: P2
+- 类型: feature
+- 改动量: XL
+- 问题表现:
+    - 旧 DiceHub 命令被禁用后，用户将暂时无法通过机器人完成注册、查看节点、心跳或连接配置
+    - 旧实现把命令解析、远端调用、配置持久化和回复生成混在一起，且现有测试没有覆盖完整命令调用链
+    - 当前尚未确定重新实现时需要保留的 DiceHub 使用场景和远端契约
+- 开发备忘:
+    - 实现前重新确认 DiceHub 的实际用途、远端协议、认证方式、隐私要求和失败语义，不默认兼容旧命令行为
+    - 使用现有异步调用链完成远端操作，不恢复 `run_async`
+    - 集中命令执行、错误转换和用户回复，避免命令 Adapter 了解远端调用细节
+    - 明确旧 DiceHub 配置和数据的保留、迁移或废弃策略
+    - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
+
+## manager
+
+### [B-260731-b6f811] 深化 Manager 维护事务 Module
+- 创建: 2026-07-31
+- 优先级: P1
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+  - `UpgradeCoordinator` 当前有 19 处对 `ArchiveCoordinator` 私有 Implementation 的直接调用，包括 `_quiesce`、`_restart`、`_hard_health`、`_migrate_and_validate_schema`、`_best_effort_restart`、`_capture_control_baseline`、`_cleanup_inprogress` 和 `_apply_retention_if_safe`
+  - 升级与归档恢复分别实现维护锁上下文、事务 journal、重启恢复和 `rollback_failed` 终态判定；共同的数据安全政策没有集中归属
+  - `docs/dev/manager-architecture.md` 已明确 terminal rollback adjudication rule 由升级与归档恢复共用，但两条代码路径仍分别解释 journal 状态；后续新增或调整状态时存在只更新一侧的风险
+  - 当前尚未确认已有生产数据损坏；本条处理的是高风险事务规则的 Locality、可验证性和长期分歧风险
+- 开发备忘:
+  - 目标:
+    - 建立升级与归档恢复共用的 Manager 维护事务 Module
+    - 消除 `UpgradeCoordinator` 对 `ArchiveCoordinator` 私有 Implementation 的调用
+    - 集中维护锁、RuntimeUnit 停写与恢复、迁移、健康检查、共同 journal 生命周期和回退终态政策
+  - 必须保持的不变量:
+    - 现有归档格式和 manifest 格式不变
+    - 现有 Manager HTTP Interface 和 operation 响应不变
+    - 已持久化的旧 journal 仍可读取和恢复
+    - 破坏性回退已失败的终态 journal 不会在 Manager 重启后重复执行
+    - UpdateGuard 已提供可靠回退证据的例外路径保持可恢复
+    - 成功、失败和 Manager 重启后均恢复原先运行的 RuntimeUnit 集合
+    - system 安全归档的保护与保留策略不变
+    - Linux Docker 与 Windows Velopack/UpdateGuard 的平台行为不变
+  - 不在本条范围:
+    - 不修改归档 payload、Catalog 或 schema migration 契约
+    - 不改变自动升级支持范围或部署拓扑
+    - 不重写 Docker、Velopack 或 UpdateGuard Adapter
+    - 不新增用户可见能力
+  - 建议提交顺序:
+    1. 补齐共同事务状态、故障阶段和旧 journal 的行为护栏
+    2. 提取 RuntimeUnit 停写、重启、迁移和健康检查等共同行为，替换 Upgrade → Archive 私有调用
+    3. 集中可重试回退与 terminal rollback 判定
+    4. 集中共同 journal 字段、阶段和 commit point 解释
+    5. 删除失去调用者的私有方法和重复规则，更新架构文档
+  - 提交要求:
+    - 在同一个 PR 中完成
+    - 每个提交均应可独立运行并通过其相关测试
+    - 不允许依赖后续提交才能恢复可运行状态
+    - 不得先完成整体重构，再事后机械拆分不可运行的提交
+  - 重点验证:
+    - 正常归档创建与恢复
+    - 正常 Linux/Windows 升级
+    - 停写、程序切换、数据切换、迁移、重启和健康检查各阶段失败
+    - 回退成功、回退失败及 terminal rollback
+    - Manager 在各 commit point 重启后的恢复
+    - Windows UpdateGuard handoff 与可靠 marker 例外
+    - 改动前生成的 journal 兼容读取
+    - Manager 相关测试与完整离线回归
 
 ## persona
 
@@ -68,6 +178,28 @@
     - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
+
+## query
+
+### [B-260731-731553] 将 Bot 资料查询命令收缩为只读
+- 创建: 2026-07-31
+- 优先级: P1
+- 类型: refactor
+- 改动量: L
+- 问题表现:
+    - 玩家仍需要 `.查询`、`.搜索`、结果选择和翻页，但 `QueryCommand` 同时承担骰主创建、编辑、删除、重定向写入和数据库管理
+    - 编辑状态跨 `can_process_msg` 与 `process_msg` 传递，依赖 `pending_db_action` 等隐藏状态
+    - 英文 `create` 分支判断英文命令后按中文“创建”切分，已存在明确错误
+    - 当前产品方向不再需要骰主通过群指令管理资料库
+- 开发备忘:
+    - 保留玩家查询、全文搜索、结果选择、翻页和只读重定向解析
+    - 删除条目创建、编辑、删除及 `DELETE` 密文流程
+    - 删除重定向创建和删除，只保留查询时的重定向读取
+    - 删除数据库创建、加载、卸载、导入和列表等管理指令
+    - 清理 `editing`、`edit_index`、`edit_new`、`edit_flag`、`pending_db_action` 等写入状态
+    - `HomebrewCommand` 和 `.私设` / `.hb` 本条不改
+    - 不在本条增加 Dashboard 写入能力；接受过渡期内没有内建单条资料 CRUD
+    - 更新帮助文本，并验证现有玩家查询行为不变、旧管理命令不再执行写入
 
 ## statistics
 
