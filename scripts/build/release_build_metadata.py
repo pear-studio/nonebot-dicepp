@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
 
 
 WINDOWS_CANDIDATE_CONTRACT_VERSION = 2
-WINDOWS_CANDIDATE_PYTHON = "3.11"
+WINDOWS_CANDIDATE_PYTHON = "3.13"
 _TAG_PATTERN = re.compile(
     r"^v(?P<base>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"
     r"(?:(?P<pre>a|b|rc)(?P<pre_number>0|[1-9]\d*))?$"

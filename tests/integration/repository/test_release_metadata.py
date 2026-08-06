@@ -9,8 +9,6 @@ from scripts.build.release_metadata import parse_release_metadata
 
 def _notes(**overrides: str) -> str:
     fields = {
-        "镜像": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
-        "Windows": "DicePP-v3.1.0-win64-Portable.zip",
         "数据变更": "no",
         "配置变更": "no",
         "变更范围": "runtime, dashboard",
@@ -20,6 +18,18 @@ def _notes(**overrides: str) -> str:
     fields.update(overrides)
     bullets = "\n".join(f"- {key}: {value}" for key, value in fields.items())
     return f"# v3.1.0\n\n{bullets}\n\n## Changed\n- example\n"
+
+
+def test_release_metadata_accepts_notes_without_artifact_display_fields(
+    tmp_path: Path,
+) -> None:
+    notes = tmp_path / "release.md"
+    notes.write_text(_notes(), encoding="utf-8")
+
+    metadata = parse_release_metadata(notes, expected_version="v3.1.0")
+
+    assert metadata.change_scope == ("runtime", "dashboard")
+    assert metadata.automatic_upgrade is False
 
 
 def test_real_rc9_notes_drive_machine_upgrade_metadata() -> None:

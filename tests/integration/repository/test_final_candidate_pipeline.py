@@ -1,4 +1,5 @@
 import re
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -10,6 +11,7 @@ ROOT = next(
     if (parent / "pyproject.toml").is_file()
 )
 CANDIDATE_WORKFLOW = ROOT / ".github" / "workflows" / "candidate.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 WINDOWS_VALIDATOR = (
     ROOT / "scripts" / "build" / "validate_windows_final_candidate.ps1"
 )
@@ -33,6 +35,31 @@ def _workflow() -> dict:
 
 def _step(job: dict, name: str) -> dict:
     return next(step for step in job["steps"] if step.get("name") == name)
+
+
+def test_project_and_packaged_runtimes_share_python_313_baseline() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    lock_header = (ROOT / "uv.lock").read_text(encoding="utf-8").splitlines()[:3]
+
+    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == "3.13"
+    assert project["project"]["requires-python"] == ">=3.13,<3.14"
+    assert lock_header == [
+        "version = 1",
+        "revision = 3",
+        'requires-python = "==3.13.*"',
+    ]
+    for dockerfile in ("Dockerfile", "Dockerfile.dashboard"):
+        dockerfile_text = (ROOT / dockerfile).read_text(encoding="utf-8")
+        from_lines = [
+            line
+            for line in dockerfile_text.splitlines()
+            if line.startswith("FROM python:")
+        ]
+        assert from_lines == [
+            "FROM python:3.13-slim AS builder",
+            "FROM python:3.13-slim",
+        ]
+        assert "RUN pip install uv==0.11.16 " in dockerfile_text
 
 
 def test_candidate_is_bound_to_an_explicit_current_master_head() -> None:
@@ -106,10 +133,11 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     assert '"contract_version": 1' in linux
 
 
-def test_candidate_and_test_suite_pin_every_external_action_and_uv_version() -> None:
+def test_release_workflows_pin_actions_and_toolchain_versions() -> None:
     sha_pattern = re.compile(r"^[0-9a-f]{40}$")
     for workflow_path in (
         CANDIDATE_WORKFLOW,
+        RELEASE_WORKFLOW,
         ROOT / ".github" / "workflows" / "test-suite.yml",
     ):
         workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
@@ -124,8 +152,38 @@ def test_candidate_and_test_suite_pin_every_external_action_and_uv_version() -> 
                 assert "/" in repository
                 assert sha_pattern.fullmatch(revision), action
                 assert revision == PINNED_ACTIONS[repository]
+                if repository == "actions/setup-python":
+                    assert step["with"]["python-version"] == "3.13"
                 if repository == "astral-sh/setup-uv":
-                    assert step["with"]["version"] == "0.5.24"
+                    assert step["with"]["version"] == "0.11.16"
+
+
+def test_critical_python_jobs_pin_python_before_their_first_invocation() -> None:
+    targets = (
+        (CANDIDATE_WORKFLOW, "upgrade-evidence"),
+        (RELEASE_WORKFLOW, "verify-candidate"),
+        (RELEASE_WORKFLOW, "promote"),
+    )
+    for workflow_path, job_name in targets:
+        job = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))["jobs"][
+            job_name
+        ]
+        setup_indices = [
+            index
+            for index, step in enumerate(job["steps"])
+            if str(step.get("uses", "")).startswith("actions/setup-python@")
+        ]
+        python_indices = [
+            index
+            for index, step in enumerate(job["steps"])
+            if re.search(r"\bpython\b", str(step.get("run", "")))
+        ]
+
+        assert len(setup_indices) == 1, f"{job_name} must set up Python exactly once"
+        assert python_indices, f"{job_name} must invoke Python"
+        setup = job["steps"][setup_indices[0]]
+        assert setup["with"]["python-version"] == "3.13"
+        assert setup_indices[0] < min(python_indices)
 
 
 def test_windows_package_and_final_validator_share_the_real_process_runner() -> None:

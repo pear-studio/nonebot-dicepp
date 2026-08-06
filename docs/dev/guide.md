@@ -44,7 +44,11 @@ rg "Repository|key_fields|migrations" src/plugins/DicePP/core/data src/plugins/D
 
 ## 运行和测试
 
-安装依赖：
+项目开发、测试和源码运行统一使用 Python 3.13；仓库根目录的
+`.python-version` 是本地与 worktree 的解释器基线。官方 Windows/Linux 包已经
+内置解释器，最终用户不需要另行安装 Python。
+
+安装依赖（CI 使用 uv 0.11.16）：
 
 ```bash
 uv sync --group dev

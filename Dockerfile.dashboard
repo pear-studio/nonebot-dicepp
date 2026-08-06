@@ -26,7 +26,7 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     fi
 
 # Install uv
-RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
+RUN pip install uv==0.11.16 --index-url ${PIP_INDEX_URL} --no-cache-dir
 
 # Copy dependency files first (cache layer: only re-fetch when deps change)
 COPY pyproject.toml uv.lock ./

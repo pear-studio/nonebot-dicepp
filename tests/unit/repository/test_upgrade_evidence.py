@@ -211,8 +211,6 @@ def _evidence(matrix: dict) -> dict:
 def _notes(automatic_upgrade: str) -> str:
     return f"""# v3.1.0
 
-- 镜像: ghcr.io/pear-studio/nonebot-dicepp:v3.1.0
-- Windows: DicePP-v3.1.0-win64-Portable.zip
 - 数据变更: no
 - 配置变更: no
 - 变更范围: runtime

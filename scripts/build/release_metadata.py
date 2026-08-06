@@ -9,8 +9,6 @@ from packaging.version import InvalidVersion, Version
 
 
 _REQUIRED_FIELDS = {
-    "镜像",
-    "Windows",
     "数据变更",
     "配置变更",
     "变更范围",
@@ -75,11 +73,6 @@ def parse_release_metadata(
     if missing:
         raise ValueError(f"Missing release metadata fields: {sorted(missing)}")
     normalized = str(expected)
-    expected_image = (
-        f"ghcr.io/pear-studio/nonebot-dicepp:v{normalized}"
-    )
-    if fields["镜像"] != expected_image:
-        raise ValueError("Release image tag does not match release version")
     data_changed = _yes_no(fields["数据变更"], "数据变更")
     config_changed = _yes_no(fields["配置变更"], "配置变更")
     automatic_upgrade = _yes_no(fields["自动升级"], "自动升级")

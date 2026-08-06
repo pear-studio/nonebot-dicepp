@@ -54,6 +54,9 @@ jobs:
       dashboard_manifest_digest: ${{ steps.candidate.outputs.dashboard_manifest_digest }}
       dashboard_image_id: ${{ steps.candidate.outputs.dashboard_image_id }}
     steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
       - name: Validate run, workflow, attempt, head, and artifact ownership
         id: selection
         env:
@@ -248,6 +251,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
 
       - name: Re-download the immutable selected artifact
         env:

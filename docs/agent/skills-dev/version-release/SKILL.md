@@ -63,9 +63,6 @@ metadata:
 ```markdown
 # vX.Y.Z
 
-- 镜像: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
-- Windows: `DicePP-vX.Y.Z-win64-Portable.zip`、独立
-  `DicePP-vX.Y.Z-win64-Setup.exe` 和 `velopack.win-x64.zip`
 - 数据变更: no
 - 配置变更: no
 - 变更范围: runtime, dashboard, deployment
@@ -99,7 +96,6 @@ metadata:
 
 字段含义：
 
-- `镜像`: 生产部署使用的 GHCR 镜像 tag。
 - `数据变更`: 是否影响 `data/`、数据库 schema、持久化数据结构或需要执行迁移脚本。
 - `配置变更`: 是否影响运行环境变量、`config/`、配置 schema 或配置加载行为。
 - `变更范围`: 逗号分隔的实际变更域；必须显式声明 `data` / `config`，并与

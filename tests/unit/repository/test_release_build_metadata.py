@@ -45,8 +45,6 @@ def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
     (notes / f"v{version}.md").write_text(
         f"""# v{version}
 
-- 镜像: ghcr.io/pear-studio/nonebot-dicepp:v{version}
-- Windows: DicePP-v{version}-win64-Portable.zip
 - 数据变更: no
 - 配置变更: no
 - 变更范围: runtime
@@ -100,7 +98,7 @@ def test_windows_candidate_provenance_round_trip_rejects_another_commit(
         version="3.1.0rc7",
         expected_commit_sha=COMMIT_SHA,
         actual_commit_sha=COMMIT_SHA,
-        python_version="3.11",
+        python_version="3.13",
         package_tree_digest=package_tree_sha256(package_root),
     )
     path = tmp_path / "windows-candidate.json"
@@ -134,7 +132,7 @@ def test_windows_candidate_rejects_a_different_checked_out_commit() -> None:
             version="3.1.0",
             expected_commit_sha=COMMIT_SHA,
             actual_commit_sha="2" * 40,
-            python_version="3.11",
+            python_version="3.13",
             package_tree_digest="3" * 64,
         )
 
@@ -151,7 +149,7 @@ def test_windows_candidate_rejects_package_changed_after_quality_gate(
         version="3.1.0",
         expected_commit_sha=COMMIT_SHA,
         actual_commit_sha=COMMIT_SHA,
-        python_version="3.11",
+        python_version="3.13",
         package_tree_digest=package_tree_sha256(package_root),
     )
     path = tmp_path / "windows-candidate.json"

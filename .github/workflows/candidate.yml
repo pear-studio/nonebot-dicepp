@@ -64,7 +64,7 @@ jobs:
           ref: ${{ inputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - name: Install release metadata dependency
         run: |
           python -m pip install \
@@ -118,10 +118,10 @@ jobs:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "0.5.24"
+          version: "0.11.16"
       - name: Install build dependencies
         id: install-toolchain
         shell: pwsh
@@ -260,10 +260,10 @@ jobs:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "0.5.24"
+          version: "0.11.16"
       - name: Install packaging dependencies
         run: |
           uv sync --frozen
@@ -407,7 +407,7 @@ jobs:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dicepp-final-windows-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -456,7 +456,7 @@ jobs:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - name: Install zstd for image archive decompression
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
       - name: Diagnose Docker and zstd toolchain
@@ -522,6 +522,12 @@ jobs:
           inputs.exercise_upgrade_matrix == true
         with:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: >-
+          needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+          inputs.exercise_upgrade_matrix == true
+        with:
+          python-version: "3.13"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: >-
           needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
@@ -578,10 +584,10 @@ jobs:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          version: "0.5.24"
+          version: "0.11.16"
       - name: Install project dependencies
         run: uv sync --frozen
       - name: Install release metadata dependency

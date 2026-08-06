@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 uv（使用指定 pip 源）
-RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
+RUN pip install uv==0.11.16 --index-url ${PIP_INDEX_URL} --no-cache-dir
 
 # 复制依赖文件（uv.lock 保证可复现构建）
 COPY pyproject.toml uv.lock ./

@@ -38,9 +38,9 @@ WORKFLOW_REF = (
 ARTIFACT_NAME = "dicepp-final-candidate-10-1"
 TOOLCHAINS = {
     "docker": "Docker version 27.0.0",
-    "python": "Python 3.11.9",
+    "python": "Python 3.13.3",
     "ubuntu-runner": "ubuntu24/20260801.1",
-    "uv": "uv 0.5.24",
+    "uv": "uv 0.11.16",
     "velopack": "vpk 1.2.0",
     "zstd": "zstd 1.5.6",
 }
