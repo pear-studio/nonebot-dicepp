@@ -29,8 +29,10 @@ try:
         normalize_final_asset_identities,
         parse_candidate_identity,
         required_scenarios_for,
+        source_scenarios_for,
         validate_upgrade_evidence,
         validate_upgrade_matrix,
+        validate_upgrade_matrix_coverage,
         validate_upgrade_matrix_platform_coverage,
         validate_scenario_result,
     )
@@ -45,8 +47,10 @@ except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
         normalize_final_asset_identities,
         parse_candidate_identity,
         required_scenarios_for,
+        source_scenarios_for,
         validate_upgrade_evidence,
         validate_upgrade_matrix,
+        validate_upgrade_matrix_coverage,
         validate_upgrade_matrix_platform_coverage,
         validate_scenario_result,
     )
@@ -252,9 +256,7 @@ def run_platform(
             for asset in source["assets"]
         ]
         scenarios = []
-        for scenario in required_scenarios_for(
-            matrix, platform=platform, arch=arch
-        ):
+        for scenario in source_scenarios_for(matrix, source):
             context = {
                 "contract_version": 1,
                 "platform": platform,
@@ -345,6 +347,7 @@ def assemble_evidence(
     matrix = validate_upgrade_matrix(
         load_json_object(matrix_path, label="upgrade matrix")
     )
+    validate_upgrade_matrix_coverage(matrix)
     fragments = [
         load_json_object(path, label="platform matrix result")
         for path in platform_results

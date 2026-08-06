@@ -38,6 +38,7 @@ EXPECTED_PROTOCOLS = {
     "release_manifest": (2,),
     "windows_bundle_manifest": (1,),
     "linux_bundle_manifest": (1,),
+    "linux_manager_handoff": (1,),
     "deployment_schema": (2,),
 }
 SCENARIO_ASSERTIONS = {
@@ -87,6 +88,33 @@ SCENARIO_ASSERTIONS = {
             "journal_manually_restored",
         }
     ),
+    "manager_handoff_commit": frozenset(
+        {
+            "manager_handoff_completed",
+            "target_containers_started",
+            "local_health_passed",
+            "commit_decision_written",
+        }
+    ),
+    "manager_handoff_rollback": frozenset(
+        {
+            "target_manager_failed",
+            "source_manager_restored",
+            "program_restored",
+            "data_restored",
+            "dashboard_db_restored",
+            "source_restarted",
+            "journal_rolled_back",
+        }
+    ),
+    "manager_handoff_commit_crash_window": frozenset(
+        {
+            "crash_before_commit_allowed_source_restore",
+            "crash_after_commit_never_rolled_back",
+            "recovery_material_preserved",
+            "terminal_state_recorded",
+        }
+    ),
 }
 SCENARIO_OBSERVATION_FIELDS = {
     "healthy_commit": frozenset(
@@ -129,12 +157,40 @@ SCENARIO_OBSERVATION_FIELDS = {
             "program_restore_mode",
         }
     ),
+    "manager_handoff_commit": frozenset(
+        {
+            "source_version_before",
+            "target_version_after",
+            "handoff_protocol",
+            "journal_status",
+            "health_status",
+        }
+    ),
+    "manager_handoff_rollback": frozenset(
+        {
+            "target_version_observed",
+            "restored_version",
+            "result_status",
+            "journal_status",
+            "rollback_marker_status",
+        }
+    ),
+    "manager_handoff_commit_crash_window": frozenset(
+        {
+            "crash_before_commit_final_state",
+            "crash_after_commit_final_state",
+            "decision_status",
+        }
+    ),
 }
 LINUX_REQUIRED_SCENARIOS = (
     "healthy_commit",
     "target_health_failure_rollback",
     "retry_after_rollback",
     "apply_failure_before_target_execution",
+    "manager_handoff_commit",
+    "manager_handoff_rollback",
+    "manager_handoff_commit_crash_window",
 )
 WINDOWS_REQUIRED_SCENARIOS = (
     "healthy_commit",
@@ -452,6 +508,27 @@ def validate_scenario_result(
         or observations["program_restore_mode"] != "whole_current_directory"
     ):
         raise ValueError("manual restore observations are inconsistent")
+    if expected_name == "manager_handoff_commit" and (
+        observations["source_version_before"] != expected_source_version
+        or observations["target_version_after"] != expected_target_version
+        or observations["journal_status"] != "committed"
+        or observations["health_status"] != "healthy"
+    ):
+        raise ValueError("manager handoff commit observations are inconsistent")
+    if expected_name == "manager_handoff_rollback" and (
+        observations["target_version_observed"] != expected_target_version
+        or observations["restored_version"] != expected_source_version
+        or observations["result_status"] != "source-restored"
+        or observations["journal_status"] != "rolled_back"
+        or observations["rollback_marker_status"] != "restored"
+    ):
+        raise ValueError("manager handoff rollback observations are inconsistent")
+    if expected_name == "manager_handoff_commit_crash_window" and (
+        observations["crash_before_commit_final_state"] != "source_restored"
+        or observations["crash_after_commit_final_state"] != "cleanup_pending"
+        or observations["decision_status"] != "committed"
+    ):
+        raise ValueError("manager handoff crash window observations are inconsistent")
     return value
 
 
@@ -498,7 +575,7 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
         raise ValueError("supported_sources must be a list")
     source_keys: list[tuple[str, str, str]] = []
     for source in sources:
-        _validate_matrix_source(source, set(platform_keys))
+        _validate_matrix_source(source, payload)
         source_keys.append(
             (source["platform"], source["arch"], source["source_version"])
         )
@@ -509,23 +586,48 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
 
 def _validate_matrix_source(
     source: Any,
-    required_platforms: set[tuple[str, str]],
+    matrix: dict[str, Any],
 ) -> None:
-    if not isinstance(source, dict) or set(source) != {
-        "platform",
-        "arch",
-        "source_version",
-        "assets",
-    }:
+    required = {"platform", "arch", "source_version", "assets"}
+    if (
+        not isinstance(source, dict)
+        or not required <= set(source)
+        or not set(source) <= required | {"scenarios"}
+    ):
         raise ValueError("invalid supported source entry")
     platform_key = (source["platform"], source["arch"])
-    if platform_key not in required_platforms:
+    if platform_key not in {
+        (item["platform"], item["arch"])
+        for item in matrix["required_platforms"]
+    }:
         raise ValueError("supported source uses an undeclared platform")
     if (
         not isinstance(source["source_version"], str)
         or not source["source_version"]
     ):
         raise ValueError("supported source version is invalid")
+    if "scenarios" in source:
+        scenarios = source["scenarios"]
+        if (
+            not isinstance(scenarios, list)
+            or not scenarios
+            or any(
+                type(item) is not str or not item for item in scenarios
+            )
+            or len(set(scenarios)) != len(scenarios)
+        ):
+            raise ValueError("supported source scenarios are invalid")
+        allowed = set(
+            required_scenarios_for(
+                matrix,
+                platform=source["platform"],
+                arch=source["arch"],
+            )
+        )
+        if not set(scenarios) <= allowed:
+            raise ValueError(
+                "supported source scenarios exceed its required platform set"
+            )
     assets = source["assets"]
     if not isinstance(assets, list) or not assets:
         raise ValueError("supported source must pin at least one asset")
@@ -636,11 +738,7 @@ def validate_upgrade_evidence(
         ]
         if result["source_assets"] != expected_assets:
             raise ValueError("upgrade evidence source asset digests differ from matrix")
-        required_scenarios = required_scenarios_for(
-            matrix,
-            platform=result["platform"],
-            arch=result["arch"],
-        )
+        required_scenarios = source_scenarios_for(matrix, source)
         scenarios = result["scenarios"]
         if not isinstance(scenarios, list) or len(scenarios) != len(
             required_scenarios
@@ -668,7 +766,37 @@ def required_scenarios_for(
     raise ValueError(f"upgrade matrix does not require {platform}/{arch}")
 
 
+def source_scenarios_for(
+    matrix: dict[str, Any], source: Mapping[str, Any]
+) -> tuple[str, ...]:
+    """Return the scenarios a supported source row must prove.
+
+    A source row may pin a smaller ``scenarios`` subset (for example the
+    legacy pre-handoff source only proves the classic four scenarios).  When
+    the field is absent the full platform requirement applies, so old rows
+    keep meaning "all platform scenarios".  The platform-level
+    ``required_scenarios_for`` stays the fail-closed full set.
+    """
+
+    declared = source.get("scenarios")
+    if declared is None:
+        return required_scenarios_for(
+            matrix,
+            platform=source["platform"],
+            arch=source["arch"],
+        )
+    return tuple(declared)
+
+
 def validate_upgrade_matrix_coverage(matrix: dict[str, Any]) -> None:
+    """Require release-grade coverage for every supported source row.
+
+    ``run-platform`` may exercise an explicitly declared scenario subset for a
+    manual-migration candidate.  Such validation-only coverage must never be
+    promotable: release evidence has to prove the complete canonical scenario
+    sequence for every source version it claims to support.
+    """
+
     required_platforms = {
         (item["platform"], item["arch"])
         for item in matrix["required_platforms"]
@@ -684,6 +812,35 @@ def validate_upgrade_matrix_coverage(matrix: dict[str, Any]) -> None:
             for platform, arch in sorted(missing_platforms)
         )
         raise ValueError(f"upgrade matrix has no supported source for: {missing}")
+
+    incomplete_sources: list[str] = []
+    for source in matrix["supported_sources"]:
+        required_scenarios = required_scenarios_for(
+            matrix,
+            platform=source["platform"],
+            arch=source["arch"],
+        )
+        declared_scenarios = source_scenarios_for(matrix, source)
+        if declared_scenarios == required_scenarios:
+            continue
+        missing_scenarios = [
+            scenario
+            for scenario in required_scenarios
+            if scenario not in declared_scenarios
+        ]
+        if missing_scenarios:
+            problem = "missing " + ", ".join(missing_scenarios)
+        else:
+            problem = "scenario order differs from the platform requirement"
+        incomplete_sources.append(
+            f"{source['platform']}/{source['arch']} "
+            f"source {source['source_version']} ({problem})"
+        )
+    if incomplete_sources:
+        raise ValueError(
+            "upgrade matrix source scenarios are incomplete for release evidence: "
+            + "; ".join(incomplete_sources)
+        )
 
 
 def validate_upgrade_matrix_platform_coverage(

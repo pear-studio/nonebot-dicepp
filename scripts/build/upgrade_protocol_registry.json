@@ -56,6 +56,19 @@
       "compatibility_fixtures": []
     },
     {
+      "name": "linux_manager_handoff",
+      "medium": "json-files-in-recovery-directory",
+      "producer": "LinuxBundleUpgradeAdapter",
+      "consumers": [
+        "DockerHandoffExecutor / linux_update_helper",
+        "UpgradeCoordinator"
+      ],
+      "format_versions": [1],
+      "verification_status": "awaiting_published_source",
+      "support_window": "previous published handoff release to current",
+      "compatibility_fixtures": []
+    },
+    {
       "name": "deployment_schema",
       "medium": "integer-in-health-and-manifests",
       "producer": "Manager and release build",

@@ -15,6 +15,7 @@ from dicepp_manager.deployment import (
 )
 from dicepp_manager.release import (
     RELEASE_CONTRACT_VERSION,
+    SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL,
     validate_release_manifest,
 )
 try:
@@ -104,6 +105,20 @@ def build_manifest(
             ]
         },
     }
+    if metadata.linux_manager_handoff_protocol is not None:
+        payload["linux_manager_handoff_protocol"] = (
+            metadata.linux_manager_handoff_protocol
+        )
+    if (
+        metadata.automatic_upgrade
+        and "manager" in metadata.change_scope
+        and metadata.linux_manager_handoff_protocol
+        != SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL
+    ):
+        raise ValueError(
+            "automatic_upgrade with a Manager change requires a supported "
+            "linux_manager_handoff_protocol in the release metadata"
+        )
     validated = validate_release_manifest(payload)
     if metadata.automatic_upgrade:
         if None in {commit_sha, upgrade_matrix, upgrade_evidence, release_notes}:

@@ -16,7 +16,10 @@
         "healthy_commit",
         "target_health_failure_rollback",
         "retry_after_rollback",
-        "apply_failure_before_target_execution"
+        "apply_failure_before_target_execution",
+        "manager_handoff_commit",
+        "manager_handoff_rollback",
+        "manager_handoff_commit_crash_window"
       ]
     }
   ],
@@ -25,6 +28,12 @@
       "platform": "linux",
       "arch": "amd64",
       "source_version": "3.0.0rc19",
+      "scenarios": [
+        "healthy_commit",
+        "target_health_failure_rollback",
+        "retry_after_rollback",
+        "apply_failure_before_target_execution"
+      ],
       "assets": [
         {
           "purpose": "linux-bundle",

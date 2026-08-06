@@ -15,6 +15,7 @@ _REQUIRED_FIELDS = {
     "自动升级",
     "最低 Manager 版本",
 }
+_OPTIONAL_FIELDS = {"Linux Manager handoff 协议"}
 _DECLARED_SCOPES = {
     "runtime",
     "dashboard",
@@ -36,6 +37,9 @@ class ReleaseMetadata:
     change_scope: tuple[str, ...]
     automatic_upgrade: bool
     minimum_manager_version: str
+    #: Linux Manager handoff 协议代数；``None`` 表示本 Release 不声明该协议
+    #: （任何 Manager 变更在 Linux 上都按手工迁移处理）。
+    linux_manager_handoff_protocol: int | None = None
 
 
 def parse_release_metadata(
@@ -64,7 +68,7 @@ def parse_release_metadata(
             continue
         key, value = line.removeprefix("- ").split(":", 1)
         key = key.strip()
-        if key not in _REQUIRED_FIELDS:
+        if key not in _REQUIRED_FIELDS and key not in _OPTIONAL_FIELDS:
             continue
         if key in fields:
             raise ValueError(f"Duplicate release metadata field: {key}")
@@ -76,6 +80,9 @@ def parse_release_metadata(
     data_changed = _yes_no(fields["数据变更"], "数据变更")
     config_changed = _yes_no(fields["配置变更"], "配置变更")
     automatic_upgrade = _yes_no(fields["自动升级"], "自动升级")
+    linux_manager_handoff_protocol = _parse_handoff_protocol(
+        fields.get("Linux Manager handoff 协议")
+    )
     raw_scopes = [item.strip() for item in fields["变更范围"].split(",")]
     if not raw_scopes or any(not item for item in raw_scopes):
         raise ValueError("变更范围 must be a comma-separated non-empty list")
@@ -100,7 +107,26 @@ def parse_release_metadata(
         change_scope=tuple(raw_scopes),
         automatic_upgrade=automatic_upgrade,
         minimum_manager_version=minimum_manager_version,
+        linux_manager_handoff_protocol=linux_manager_handoff_protocol,
     )
+
+
+def _parse_handoff_protocol(value: str | None) -> int | None:
+    if value is None:
+        return None
+    if value == "no":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Linux Manager handoff 协议 must be a positive integer or no"
+        ) from exc
+    if parsed < 1:
+        raise ValueError(
+            "Linux Manager handoff 协议 must be a positive integer or no"
+        )
+    return parsed
 
 
 def _yes_no(value: str, field: str) -> bool:
