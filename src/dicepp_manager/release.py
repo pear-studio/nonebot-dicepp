@@ -47,6 +47,11 @@ from .velopack_bundle import (
 
 RELEASE_CONTRACT_VERSION = 2
 RELEASE_MANIFEST_NAME = "dicepp-release.json"
+#: Linux bundle/release manifest 中表达的 Linux Manager handoff 协议代数。
+#: 与 ``src/dicepp_manager/upgrade.py`` 的 LINUX_MANAGER_HANDOFF_FORMAT 保持一致；
+#: 缺失或不等于该值的 Manager 变更 Release 在 Linux 上 fail closed 为手工迁移。
+SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL = 1
+LINUX_MANAGER_HANDOFF_PROTOCOL_FIELD = "linux_manager_handoff_protocol"
 DEFAULT_GITHUB_API = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
 _GITHUB_API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON_BYTES = 2 * 1024 * 1024
@@ -223,7 +228,8 @@ def validate_release_manifest(payload: Any) -> dict[str, Any]:
         "fallbacks",
         "automatic_upgrade",
     }
-    unknown = set(payload) - required
+    optional = {LINUX_MANAGER_HANDOFF_PROTOCOL_FIELD}
+    unknown = set(payload) - required - optional
     missing = required - set(payload)
     if missing or unknown:
         raise ReleaseContractError(
@@ -266,9 +272,13 @@ def validate_release_manifest(payload: Any) -> dict[str, Any]:
         or not all(type(item) is str and bool(item.strip()) for item in payload["change_scope"])
     ):
         raise ReleaseContractError("change_scope must be a non-empty string list")
-    if payload["automatic_upgrade"] and "manager" in payload["change_scope"]:
+    handoff_protocol = payload.get(LINUX_MANAGER_HANDOFF_PROTOCOL_FIELD)
+    if (
+        handoff_protocol is not None
+        and (type(handoff_protocol) is not int or handoff_protocol < 1)
+    ):
         raise ReleaseContractError(
-            "automatic_upgrade cannot be enabled when change_scope includes manager"
+            "linux_manager_handoff_protocol must be a positive integer"
         )
     artifacts = payload["artifacts"]
     if not isinstance(artifacts, list) or not artifacts:
@@ -1035,10 +1045,22 @@ class ReleaseManager:
             )
         if not manifest["automatic_upgrade"]:
             problems.append("Release requires a manual deployment migration")
+        handoff_protocol = manifest.get(LINUX_MANAGER_HANDOFF_PROTOCOL_FIELD)
+        if (
+            manifest["automatic_upgrade"]
+            and "manager" in manifest["change_scope"]
+            and self.target[0] == "linux"
+            and handoff_protocol != SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL
+        ):
+            problems.append(
+                "Release changes Manager without the supported Linux Manager "
+                "handoff protocol; manual deployment is required"
+            )
         return {
             "version": manifest["version"],
             "channel": manifest["channel"],
             "change_scope": manifest["change_scope"],
+            "linux_manager_handoff_protocol": handoff_protocol,
             "compatible": not problems,
             "compatibility": {
                 "deployment_schema_version": manifest["deployment_schema_version"],
@@ -2043,6 +2065,7 @@ def _validate_cached_latest(
         "version",
         "channel",
         "change_scope",
+        "linux_manager_handoff_protocol",
         "compatible",
         "compatibility",
         "release_url",
@@ -2066,6 +2089,12 @@ def _validate_cached_latest(
         or not all(type(item) is str and item for item in latest["change_scope"])
     ):
         raise ReleaseContractError("Persisted change scope is invalid")
+    handoff_protocol = latest.get("linux_manager_handoff_protocol")
+    if (
+        handoff_protocol is not None
+        and (type(handoff_protocol) is not int or handoff_protocol < 1)
+    ):
+        raise ReleaseContractError("Persisted Linux Manager handoff protocol is invalid")
     compatibility = latest["compatibility"]
     if (
         not isinstance(compatibility, dict)
@@ -2767,10 +2796,12 @@ def _parse_iso(value: str) -> datetime:
 
 
 __all__ = [
+    "LINUX_MANAGER_HANDOFF_PROTOCOL_FIELD",
     "MAX_LINUX_BUNDLE_BYTES",
     "MAX_RELEASE_JSON_BYTES",
     "RELEASE_CONTRACT_VERSION",
     "RELEASE_MANIFEST_NAME",
+    "SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL",
     "ReleaseContractError",
     "ReleaseDownloadError",
     "ReleaseError",
