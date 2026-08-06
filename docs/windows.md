@@ -44,9 +44,14 @@ DicePP/
 ├─ dashboard/data/
 └─ manager/
    ├─ state/
+   ├─ control/        # 仅 Bot Runtime 与 Manager 使用的控制凭据
    ├─ packages/
    └─ backups/
 ```
+
+`content/` 是同一用户的工作区：Bot 读取它，认证后的 Dashboard 仅通过 Persona
+角色卡页面编辑 `content/characters/`，同机 Agent 也可直接编辑内容文件；Manager
+不是其独占写入者。
 
 Velopack 激活版本时，程序文件实际位于 `DicePP/current/`；Manager 会把
 `DicePP/` 识别为稳定实例根，因此 `config/`、`content/`、`data/` 和 `manager/`
@@ -76,8 +81,8 @@ Portable 和 Setup 都保留稳定根入口、`Update.exe` 与 `current/` 布局
 创建或恢复时会暂停整个 Bot RuntimeUnit，完成后只恢复操作前原本正在运行的单元。
 
 恢复失败时 Manager 会自动应用恢复前创建的安全归档；若程序在事务中途退出，
-下次启动会先启动 Dashboard、确认其本地数据库可用，再恢复未完成事务，最后才
-进入正常托盘运行。不要在 `manager/backups/` 中手动删除活跃事务引用的归档。
+下次启动由 Manager 根据自身状态恢复未完成事务，Dashboard 的启动或健康不构成
+前提。不要在 `manager/backups/` 中手动删除活跃事务引用的归档。
 
 ## 准备
 

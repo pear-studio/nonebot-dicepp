@@ -14,13 +14,24 @@
 
 ## dev
 
-### [B-260728-82b7c7] release 流水线产物命名不统一且存在重复构建
-- 创建: 2026-07-28
+### [B-260731-a4e8ea] 硬切 Velopack 单 bundle Windows 更新契约
+- 创建: 2026-07-31
 - 优先级: P2
 - 类型: refactor
-- 改动量: M
-- 问题表现: release 全流程约 10-11 分钟, 其中 quality gate 与 release 各完整构建一遍镜像和 PyInstaller EXE(规格相同, 串行相接, 合计约 4-5 分钟重复); 产物命名三种版本格式混用: Portable/Setup/linux zip 用 tag 格式(v3.0.0rc16, workflow 重命名), nupkg 和 releases/assets feed 用 Velopack SemVer2(3.0.0-rc.16, 原样保留), dicepp-release.json 内 version 又是去 v 的 3.0.0rc16; publish 阶段 docker save ~1.2GB + zstd -19 重压缩约 1 分多钟。
-- 开发备忘: 调查于 2026-07-28(基于 rc15 run 30355233453 / rc16 run 30373296372 实测)。关键位置: .github/workflows/test-suite.yml:111-113 与 release.yml:177-181 的重复 PyInstaller; release.yml:258-264 只重命名 Portable/Setup 不重命名 nupkg; 版本派生逻辑散在 generate_release_manifest.py(velopack_version/velopack_channel)与各 job 的 Extract version info。方向: gate 产物经 artifact 复用或 release 触发时跳过重复 job; 版本派生收进单一脚本统一输出; build-push-action 配 GHA 缓存; zstd 降档或多线程。优化时注意 nupkg/feed 命名是 Velopack 更新 contract 的一部分, 改名需确认 Manager 侧消费兼容。
+- 改动量: XL
+- 问题表现:
+  - rc16 GitHub Release 的 8 个 assets 中，full nupkg、`releases.win-x64-prerelease.json`、`assets.win-x64-prerelease.json` 是 Manager/Velopack 机器组件，却与三个用户发行包并列展示，容易让普通用户误以为需要手动下载
+  - rc16 `assets.win-x64-prerelease.json` 仍引用 Velopack 原始的 `DicePP-win-x64-prerelease-Setup.exe` / `Portable.zip`，但 Release 实际上传的是带 `v3.0.0rc16` 的重命名文件，feed 与公开 assets 不自洽
+  - 当前 Manager 自行通过 `dicepp-release.json` 发现版本，并调用 `Update.exe apply -p <full.nupkg>` 安装；Velopack 官方说明 `assets.json` 仅供部署命令使用可删除，`releases.json` 用于 `UpdateManager` 发现版本，这两项都不是 DicePP 当前安装路径的必要输入
+  - v3 尚未正式发布，无需为现有 RC 的旧三文件更新契约保留自动升级兼容；旧 RC 到硬切版本允许要求手动安装
+- 开发备忘:
+  - 直接升级 Windows release contract，使用单一机器资产 `velopack.win-x64.zip`；文件名不带 `DicePP-vX.Y.Z` 用户发行包前缀，也不重复写 version/channel
+  - bundle 仅包含 `manifest.json` 与 Velopack full nupkg；内层 manifest 严格声明格式版本、DicePP/Velopack 版本、channel、平台、架构、nupkg 文件名、size 和 SHA-256，外层 `dicepp-release.json` 再校验整个 bundle
+  - Manager 改为下载、安全解压和校验 bundle，再把经过版本/摘要验证的 nupkg 交给 UpdateGuard/`Update.exe apply -p`；回滚包获取和本地 packages 维护同步改用 bundle 契约
+  - 删除旧的独立 full nupkg、`releases.json`、`assets.json` 发布、下载及校验路径，不实现双格式读取；使用新的 release contract version 让旧 Manager 明确拒绝而不是误解析
+  - 安全验收覆盖路径穿越、绝对路径、符号链接/重解析点、重复成员、额外成员、压缩炸弹边界、nupkg 版本/摘要冲突、下载中断、升级失败回滚；发布验收覆盖硬切后相邻版本自动升级和回滚
+  - 最终 GitHub Release assets 固定为三个 `DicePP-vX.Y.Z-*` 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、`docker-compose.yml`
+  - 关键位置: `.github/workflows/release.yml`、`scripts/build/generate_release_manifest.py`、`src/dicepp_manager/release.py`、`src/dicepp_manager/upgrade.py`、相关 release/upgrade tests 与发布文档
 
 ## persona
 
