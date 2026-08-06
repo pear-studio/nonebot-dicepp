@@ -100,7 +100,6 @@ def _coordinator(
     coordinator = ArchiveCoordinator(
         layout=layout,
         service=service,
-        dashboard_probe=lambda: {"ok": True, "status": "ok"},
         control_probe=lambda: {
             "ok": True,
             "status": "ok",
@@ -425,36 +424,12 @@ async def test_rollback_health_gate_uses_real_control_probe_contract(
     (legacy).  A rollback that restored data and restarted the runtime
     must not be misjudged as rollback_failed by the control probe.
     """
-    from dicepp_manager import factory as manager_factory
-
-    def heartbeat() -> str:
-        if heartbeat_style == "epoch":
-            return str(time.time())
-        return datetime.now(timezone.utc).isoformat()
-
-    class Response:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def read(self, _limit):
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "component": "dashboard",
-                    "control": {"latest_heartbeat": heartbeat()},
-                }
-            ).encode()
-
-    monkeypatch.setattr(
-        manager_factory.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: Response(),
-    )
+    def control_probe() -> dict:
+        return {
+            "ok": True,
+            "status": "ok",
+            "heartbeat": datetime.now(timezone.utc).isoformat(),
+        }
     armed = {"value": True}
 
     def fault(phase: str) -> None:
@@ -465,7 +440,7 @@ async def test_rollback_health_gate_uses_real_control_probe_contract(
     layout, runtime, service, coordinator = _coordinator(
         tmp_path, fault_hook=fault
     )
-    coordinator.control_probe = manager_factory._control_channel_probe
+    coordinator.control_probe = control_probe
     _write(layout.config_user, '{"value": "target"}')
     target, _ = create_archive(layout=layout)
     _write(layout.config_user, '{"value": "before"}')
@@ -1104,19 +1079,25 @@ async def test_restore_plan_to_execution_toctou_finishes_operation_failed(
 
 
 @pytest.mark.asyncio
-async def test_runtime_must_still_live_after_dashboard_and_control_probes(
+async def test_runtime_must_still_live_after_control_probe(
     tmp_path: Path,
 ) -> None:
     layout, runtime, service, coordinator = _coordinator(tmp_path)
     probe_calls = {"count": 0}
 
-    def dashboard_probe():
+    def control_probe():
         probe_calls["count"] += 1
-        if probe_calls["count"] == 1:
+        # The first call captures the pre-restart heartbeat; the second runs
+        # during hard health and simulates a runtime that dies afterwards.
+        if probe_calls["count"] == 2:
             runtime.state = "stopped"
-        return {"ok": True, "status": "ok"}
+        return {
+            "ok": True,
+            "status": "ok",
+            "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
+        }
 
-    coordinator.dashboard_probe = dashboard_probe
+    coordinator.control_probe = control_probe
     _write(layout.config_user, '{"target": true}')
     target, _ = create_archive(layout=layout)
     _write(layout.config_user, '{"before": true}')
@@ -1131,6 +1112,41 @@ async def test_runtime_must_still_live_after_dashboard_and_control_probes(
     assert service.store.get_journal(
         raised.value.detail["transaction_id"]
     )["status"] == "rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_hard_health_uses_manager_control_without_dashboard_probe(
+    tmp_path: Path,
+) -> None:
+    """A valid Manager-held heartbeat is sufficient without Dashboard I/O."""
+    _layout, runtime, _service, coordinator = _coordinator(tmp_path)
+    calls = {"control": 0}
+
+    def control_probe() -> dict:
+        calls["control"] += 1
+        return {
+            "ok": True,
+            "status": "ok",
+            "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
+        }
+
+    def legacy_dashboard_probe() -> dict:
+        raise AssertionError("Manager health must not probe Dashboard")
+
+    coordinator.control_probe = control_probe
+    # Preserve a legacy attribute as a tripwire: pre-migration hard health
+    # invoked it unconditionally.  The Manager-only health contract must not.
+    coordinator.dashboard_probe = legacy_dashboard_probe
+
+    health = await coordinator._hard_health(
+        ["dicepp-runtime"],
+        control_baseline="2026-07-23T00:00:00+00:00",
+    )
+
+    assert calls["control"] == 1
+    assert health["control"]["status"] == "ok"
+    assert health["runtime_units"] == ["dicepp-runtime"]
+    assert "dashboard" not in health
 
 
 @pytest.mark.asyncio
@@ -1158,7 +1174,7 @@ async def test_control_heartbeat_must_advance_after_target_restart(
 
 
 def _no_heartbeat_control_probe() -> dict:
-    """The Dashboard contract when no bot ever connected the control channel."""
+    """The Manager control contract when no bot ever connected."""
     return {
         "ok": False,
         "status": "failed",

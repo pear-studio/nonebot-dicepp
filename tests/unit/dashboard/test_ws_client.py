@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import threading
 from importlib.metadata import version as package_version
 
 import pytest
@@ -11,40 +12,36 @@ from plugins.DicePP.module.dashboard_reporter.protocol import auth_result, encod
 
 
 @pytest.mark.quick
-def test_source_runtime_requires_explicit_dashboard_host(monkeypatch):
-    monkeypatch.delenv("DPP_ADMIN_HOST", raising=False)
-    monkeypatch.delenv("DPP_ADMIN_PORT", raising=False)
+def test_source_runtime_requires_explicit_manager_url(monkeypatch):
+    monkeypatch.delenv("DICEPP_MANAGER_URL", raising=False)
     monkeypatch.setattr(ws_client, "is_frozen", lambda: False)
 
-    assert ws_client.resolve_dashboard_url() is None
+    assert ws_client.resolve_manager_url() is None
 
 
 @pytest.mark.quick
-def test_windows_executable_defaults_to_local_dashboard(monkeypatch):
-    monkeypatch.delenv("DPP_ADMIN_HOST", raising=False)
-    monkeypatch.delenv("DPP_ADMIN_PORT", raising=False)
+def test_windows_executable_defaults_to_local_manager(monkeypatch):
+    monkeypatch.delenv("DICEPP_MANAGER_URL", raising=False)
     monkeypatch.setattr(ws_client, "is_frozen", lambda: True)
 
-    assert ws_client.resolve_dashboard_url() == "ws://127.0.0.1:4090/ws/control"
+    assert ws_client.resolve_manager_url() == "ws://127.0.0.1:4091/v1/control/ws"
 
 
 @pytest.mark.quick
-def test_explicit_dashboard_address_overrides_runtime_default(monkeypatch):
-    monkeypatch.setenv("DPP_ADMIN_HOST", "dashboard.internal")
-    monkeypatch.setenv("DPP_ADMIN_PORT", "5090")
+def test_explicit_manager_address_overrides_runtime_default(monkeypatch):
+    monkeypatch.setenv("DICEPP_MANAGER_URL", "http://manager.internal:5091")
     monkeypatch.setattr(ws_client, "is_frozen", lambda: True)
 
-    assert ws_client.resolve_dashboard_url() == (
-        "ws://dashboard.internal:5090/ws/control"
+    assert ws_client.resolve_manager_url() == (
+        "ws://manager.internal:5091/v1/control/ws"
     )
 
 
 @pytest.mark.quick
-def test_ipv6_dashboard_address_is_bracketed(monkeypatch):
-    monkeypatch.setenv("DPP_ADMIN_HOST", "::1")
-    monkeypatch.setenv("DPP_ADMIN_PORT", "4090")
+def test_explicit_secure_manager_address_preserves_websocket_security(monkeypatch):
+    monkeypatch.setenv("DICEPP_MANAGER_URL", "https://[::1]:4091")
 
-    assert ws_client.resolve_dashboard_url() == "ws://[::1]:4090/ws/control"
+    assert ws_client.resolve_manager_url() == "wss://[::1]:4091/v1/control/ws"
 
 
 class _FakeWebSocket:
@@ -92,7 +89,7 @@ class _FakeSession:
 def _client():
     return ws_client.ControlChannelClient(
         bot_id="test-bot",
-        dashboard_url="ws://dashboard:4090/ws/control",
+        manager_url="ws://manager:4091/v1/control/ws",
         token="test-token",
         on_reload=lambda: None,
     )
@@ -134,6 +131,69 @@ async def test_auth_rejection_is_a_connection_failure(monkeypatch):
 
     with pytest.raises(ConnectionError, match="auth rejected: bad token"):
         await _client()._connect_and_loop()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_foreign_loop_task_without_awaiting_it(monkeypatch):
+    """Debug/launcher teardown can occur on a loop different from startup."""
+    client = _client()
+    started = threading.Event()
+    stopped = threading.Event()
+    owner_loop: list[asyncio.AbstractEventLoop] = []
+
+    async def wait_forever(_self):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ws_client.ControlChannelClient, "_run", wait_forever)
+
+    def run_owner_loop() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        owner_loop.append(loop)
+        loop.run_until_complete(client.connect())
+        assert client._task is not None
+        client._task.add_done_callback(lambda _task: loop.stop())
+        started.set()
+        loop.run_forever()
+        loop.close()
+        stopped.set()
+
+    thread = threading.Thread(target=run_owner_loop)
+    thread.start()
+    await asyncio.to_thread(started.wait, 1)
+    assert started.is_set()
+    try:
+        await client.stop()
+    finally:
+        if owner_loop and not stopped.is_set():
+            owner_loop[0].call_soon_threadsafe(owner_loop[0].stop)
+        await asyncio.to_thread(thread.join, 1)
+
+    assert stopped.is_set()
+    assert client._task is None
+    assert client._running is False
+
+
+def test_foreign_task_cancellation_is_queued_on_a_stopped_owner_loop():
+    """A stopped loop owns cancellation until it is resumed by its launcher."""
+    owner_loop = asyncio.new_event_loop()
+    task = owner_loop.create_task(asyncio.Event().wait())
+    try:
+        ws_client.ControlChannelClient._cancel_foreign_task(task)
+
+        assert not task.cancelled()
+        resumed = threading.Thread(
+            target=lambda: owner_loop.run_until_complete(asyncio.sleep(0))
+        )
+        resumed.start()
+        resumed.join(timeout=1)
+        assert not resumed.is_alive()
+        assert task.cancelled()
+    finally:
+        if not task.done():
+            task.cancel()
+            owner_loop.run_until_complete(asyncio.sleep(0))
+        owner_loop.close()
 
 
 # ── WS reconnection loop contract tests ──────────────────────────────────────

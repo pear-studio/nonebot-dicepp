@@ -44,9 +44,14 @@ DicePP/
 ├─ dashboard/data/
 └─ manager/
    ├─ state/
+   ├─ control/        # 仅 Bot Runtime 与 Manager 使用的控制凭据
    ├─ packages/
    └─ backups/
 ```
+
+`content/` 是同一用户的工作区：Bot 读取它，认证后的 Dashboard 仅通过 Persona
+角色卡页面编辑 `content/characters/`，同机 Agent 也可直接编辑内容文件；Manager
+不是其独占写入者。
 
 Velopack 激活版本时，程序文件实际位于 `DicePP/current/`；Manager 会把
 `DicePP/` 识别为稳定实例根，因此 `config/`、`content/`、`data/` 和 `manager/`
@@ -76,8 +81,8 @@ Portable 和 Setup 都保留稳定根入口、`Update.exe` 与 `current/` 布局
 创建或恢复时会暂停整个 Bot RuntimeUnit，完成后只恢复操作前原本正在运行的单元。
 
 恢复失败时 Manager 会自动应用恢复前创建的安全归档；若程序在事务中途退出，
-下次启动会先启动 Dashboard、确认其本地数据库可用，再恢复未完成事务，最后才
-进入正常托盘运行。不要在 `manager/backups/` 中手动删除活跃事务引用的归档。
+下次启动由 Manager 根据自身状态恢复未完成事务，Dashboard 的启动或健康不构成
+前提。不要在 `manager/backups/` 中手动删除活跃事务引用的归档。
 
 ## 准备
 
@@ -181,11 +186,14 @@ data/logs/dicepp-runtime.log
 
 升级或迁移前，建议先在网页管理面板中创建存档。
 
-Manager 自身的 token、operation 和维护状态保存在：
+Manager 的 HTTP API token、operation 和维护状态保存在：
 
 ```text
 manager/state/
 ```
+
+Bot↔Manager 控制凭据单独位于 `manager/control/control-token`，与 HTTP API token
+完全独立，且不会写入 `data/dicepp.db`。
 
 网页管理面板通过本机 Manager API 执行运行控制。若 Manager 不可用，面板会明确显示运行管理不受支持，不会直接接管子进程。
 

@@ -80,14 +80,18 @@ uv run pytest tests/unit/persona/ -v
 uv run python bot.py
 ```
 
-无 QQ 的测试和联调使用隔离 Shell Runtime：
+无 QQ 的测试和 Dashboard/Manager 联调使用隔离 Shell Runtime。不要手动把
+`serve --manager` 指向尚未启动的 `4091`：推荐使用下列脚本，它会在同一个
+`dashboard-dev` workspace 中依次启动 Manager、通过带 token 的 `/v1/health`
+确认就绪、启动 Dashboard 和 Bot Runtime：
 
 ```bash
-uv run dicepp-shell init dashboard-dev
-uv run dicepp-shell serve dashboard-dev --dashboard http://127.0.0.1:4090
+python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py start
+# 结束联调：
+python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 ```
 
-该入口只监听本机，用于指令 E2E、Dashboard 控制通道和真实 Bot 生命周期
+该入口只监听本机，用于指令 E2E、Manager 控制通道和真实 Bot 生命周期
 验收，不作为生产部署方式。历史 standalone 实现仅归档为
 [archive/standalone_bot_legacy.py](archive/standalone_bot_legacy.py)。
 

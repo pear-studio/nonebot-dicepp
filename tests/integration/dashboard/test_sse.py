@@ -1,4 +1,4 @@
-"""Tests for the /api/events SSE endpoint and _broadcast_status mechanism."""
+"""Tests for Dashboard's browser SSE forwarding of Manager state."""
 
 import asyncio
 import json
@@ -6,7 +6,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from dashboard.src.websocket import _broadcast_status
+from dashboard.src.app import _publish_manager_bot_statuses
 from tests.support.dashboard.app import setup_auth
 
 
@@ -151,16 +151,16 @@ class TestSSEEndpoint:
 
 
 class TestBroadcast:
-    """Test the _broadcast_status function."""
+    """Test Manager status forwarding to browser subscribers."""
 
     def test_broadcast_delivers_to_subscribers(self, test_client: TestClient):
-        """_broadcast_status sends bot status data to all subscriber queues."""
+        """Manager-originated statuses are sent to all subscriber queues."""
         setup_auth(test_client)
         queue: asyncio.Queue = asyncio.Queue()
         test_client.app.state.status_subscribers.append(queue)
 
         try:
-            asyncio.run(_broadcast_status())
+            asyncio.run(_publish_manager_bot_statuses(test_client.app, [{"bot_id": "b"}]))
             data = queue.get_nowait()
             payload = json.loads(data)
             assert "bots" in payload
@@ -177,11 +177,11 @@ class TestBroadcast:
                 raise RuntimeError("queue closed")
 
         test_client.app.state.status_subscribers.append(_DeadQueue())
-        asyncio.run(_broadcast_status())
+        asyncio.run(_publish_manager_bot_statuses(test_client.app, []))
         assert len(test_client.app.state.status_subscribers) == 0
 
     def test_broadcast_no_subscribers_is_noop(self, test_client: TestClient):
         """_broadcast_status with empty subscriber list does nothing."""
         setup_auth(test_client)
         test_client.app.state.status_subscribers.clear()
-        asyncio.run(_broadcast_status())  # should not raise
+        asyncio.run(_publish_manager_bot_statuses(test_client.app, []))  # should not raise

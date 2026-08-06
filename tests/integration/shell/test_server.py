@@ -18,7 +18,7 @@ class FakeBotRunner:
         self.session_dir = session_dir
         self._started = False
         self.tick = False
-        self.dashboard_control_enabled = False
+        self.manager_control_enabled = False
         self.bot = None
         self._stop_called = False
         self._concurrent_sends = 0

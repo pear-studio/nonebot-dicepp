@@ -292,7 +292,9 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
             assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
             assert page.locator("text=运行时重载：").first.is_visible()
-            assert page.locator("text=Bot 离线，将在下次启动时加载").first.is_visible()
+            expect(page.get_by_test_id("config-reload-result")).to_have_text(
+                "test_bot: 离线，将在下次启动时加载"
+            )
             _wait_for_json_value(
                 tmp_path / "config" / "user.json", expected_user_config
             )

@@ -291,7 +291,7 @@ def test_dashboard_health_is_independent_and_archive_ui_reconnects_operations(
     assert health.status_code == 200
     assert health.json()["component"] == "dashboard"
     assert health.json()["status"] == "ok"
-    assert health.json()["control"]["latest_heartbeat"] is None
+    assert "control" not in health.json()
     assert "reconnectArchiveOperation()" in source
     assert "item.action.startsWith('archive.')" in source
     assert "dicepp_archive_operation" in source

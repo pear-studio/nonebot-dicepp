@@ -83,11 +83,11 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 |---|---|---|
 | `bot` | 承载一个可以包含多个 QQ 账号的 RuntimeUnit | 不映射；在 `dice-net` 暴露 `8080` |
 | `dashboard` | 用户登录、配置和操作界面 | `4090` |
-| `manager` | RuntimeUnit 生命周期、operation 和维护操作 | 不映射；只在内部网络暴露 `4091` |
+| `manager` | RuntimeUnit 生命周期、operation 和维护操作 | `127.0.0.1:4091`（仅本机，不向公网暴露） |
 
 `bot` 服务由 Compose 显式设置 `DICEPP_ONEBOT_HOST=0.0.0.0`，监听全部网卡——NapCat/LLOneBot 作为独立容器经 `ws://dicepp:8080/onebot/v11/ws` 跨容器连入，这是硬性要求，行为与既往版本一致。（未设置该环境变量的非 Docker 场景，如 Windows 桌面版，默认只监听 `127.0.0.1`。）
 
-Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一文件。不要把 `4091` 映射到公网。启动时 Dashboard 先通过独立的 `/api/health` 完成数据库语义检查，随后 Manager 才启动并执行未完成事务恢复。该端点同时报告最新 Bot 控制心跳；没有心跳只表示 Bot 尚未运行，不会让 Dashboard 自身 readiness 失败，Manager 会在启动 RuntimeUnit 后单独判断心跳。
+Dashboard 通过 `http://manager:4091` 调用 Manager。Manager 首次启动会在 `manager/state/api-token` 生成内部 API token，Dashboard 只读挂载同一目录。Bot↔Manager 的 WebSocket 凭据则位于 `manager/control/control-token`，只挂载给 Bot 和 Manager，绝不落入 `data/dicepp.db` 或 Dashboard 容器。两枚 token 完全独立。不要把 `4091` 映射到公网。Dashboard 的 `/api/health` 仅检查自身数据库；Manager 的启动恢复、归档和升级只依赖自身 store、配置/schema、RuntimeUnit 和 Bot 控制心跳，不会探测 Dashboard。
 
 只有 Manager 挂载 `/var/run/docker.sock`。它仅执行固定的状态、启动、停止、重启和日志操作，并且只接受带有匹配 DicePP managed、RuntimeUnit 和 deployment schema 标签的 Bot 容器。Dashboard 不挂载 Docker Socket，也不直接控制容器。
 Manager 还会把当前 `docker-compose.yml` 只读挂载到实例根，用于自动升级前比较
@@ -99,15 +99,16 @@ service、volume 和 network 拓扑；它不会修改或替换该文件。
 ~/dicepp/
 ├─ config/            # DicePP 配置
 ├─ data/              # 运行数据
-├─ content/           # 用户内容
+├─ content/           # 同一用户工作区（Bot 读取；Dashboard Persona 角色卡和本机 Agent 可直接编辑）
 ├─ dashboard/data/    # Dashboard 账号与会话
 └─ manager/
    ├─ state/          # token、operation store、维护状态
+   ├─ control/        # 仅 Bot 与 Manager 共享的控制凭据
    ├─ packages/       # 后续版本下载缓存
    └─ backups/        # 用户归档与事务安全归档
 ```
 
-Manager 对 `config/`、`data/`、`content/` 和 `manager/` 读写；Dashboard 只保留配置编辑、业务数据读取、Dashboard 本地状态写入以及 Manager token 只读权限。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
+Manager 对 `config/`、`data/` 和 `manager/` 读写；`content/` 是同一用户的共享工作区，Bot 读取，Dashboard 的认证 Persona 角色卡路由和同机 Agent 可直接编辑。Dashboard 对 `config/`、`data/` 只读，只读获取 Manager API token，不挂载 `manager/control`、可写 Manager state 或 Docker Socket。网页归档操作始终由 Manager 执行：普通归档不包含 `content/`，完整归档才包含 `content/`，创建和恢复期间会暂停整个 Bot RuntimeUnit。
 
 ## 从 GitHub Release 使用 Linux 发布包
 
@@ -640,7 +641,7 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
 
 标准 Compose 已默认启用独立 Manager。网页管理面板通过 Manager 查询 RuntimeUnit 状态、启动、停止、重启和读取日志；这些操作会作用于整个 Bot 容器，包括其中共享进程的所有 QQ 账号。
 
-旧版把 Docker Compose runtime 配在 Dashboard 中的方式不再受支持。升级旧部署时，保留现有 `config/`、`data/`、`content/` 和 `dashboard/data/`，创建 `manager/state`、`manager/packages`、`manager/backups`，然后使用当前 Release 附带的完整三服务 `docker-compose.yml`。不要把 Docker Socket 重新挂回 Dashboard。
+旧版把 Docker Compose runtime 配在 Dashboard 中的方式不再受支持。升级旧部署时，保留现有 `config/`、`data/`、`content/` 和 `dashboard/data/`，创建 `manager/state`、`manager/control`、`manager/packages`、`manager/backups`，然后使用当前 Release 附带的完整三服务 `docker-compose.yml`。不要把 Docker Socket 或 `manager/control` 重新挂回 Dashboard。
 
 如果 Manager 不可用或容器标签、deployment schema 不匹配，Dashboard 会显示运行管理不受支持，不会退回到直接操作 Docker。Manager 不会替你同步目标 Release 的 Compose 拓扑；如果 Release 调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 Compose。
 

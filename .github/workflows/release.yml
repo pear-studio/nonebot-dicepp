@@ -99,11 +99,38 @@ jobs:
             docker rm -f dicepp-dashboard-smoke
             exit 1
           fi
-          docker cp scripts/smoke_dashboard_control_channel.py \
-            dicepp-dashboard-smoke:/tmp/smoke_dashboard_control_channel.py
-          docker exec dicepp-dashboard-smoke \
-            python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-smoke
+
+      - name: Smoke test Manager image
+        run: |
+          SMOKE_VOLUME=dicepp-manager-smoke
+          IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}"
+          cleanup() {
+            docker rm -f dicepp-manager-smoke 2>/dev/null || true
+            docker volume rm -f "$SMOKE_VOLUME" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          docker volume create "$SMOKE_VOLUME"
+          docker run -d --name dicepp-manager-smoke -p 127.0.0.1:4091:4091 \
+            -e DICEPP_MANAGER_HOST=0.0.0.0 \
+            -e DICEPP_MANAGER_RELEASE_SCHEDULER=false \
+            -v "$SMOKE_VOLUME:/app/manager" \
+            "$IMAGE" python -m dicepp_manager
+          ready=false
+          for i in $(seq 1 30); do
+            token="$(docker exec dicepp-manager-smoke cat /app/manager/state/api-token 2>/dev/null || true)"
+            if [ -n "$token" ] && curl --fail --silent \
+              -H "Authorization: Bearer $token" \
+              http://127.0.0.1:4091/v1/health >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "true" ]; then
+            docker logs dicepp-manager-smoke
+            exit 1
+          fi
 
       - name: Login to GHCR
         uses: docker/login-action@v3

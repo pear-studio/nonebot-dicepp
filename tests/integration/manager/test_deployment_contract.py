@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import inspect
-import io
 import json
 import hashlib
 import time
-import urllib.error
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -167,12 +164,22 @@ def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
     assert not any("docker.sock" in volume for volume in services["dashboard"]["volumes"])
     assert "manager-net" in services["manager"]["networks"]
     assert "manager-net" in services["dashboard"]["networks"]
-    assert services["manager"]["depends_on"]["dashboard"]["condition"] == "service_healthy"
-    assert "healthcheck" in services["dashboard"]
-    assert (
-        "DICEPP_DASHBOARD_HEALTH_URL=http://dashboard:4090/api/health"
-        in services["manager"]["environment"]
+    assert "manager-net" in services["bot"]["networks"]
+    assert "./manager/control:/app/manager/control:ro" in services["bot"]["volumes"]
+    assert not any(
+        "manager/control" in volume for volume in services["dashboard"]["volumes"]
     )
+    assert "depends_on" not in services["manager"]
+    assert services["dashboard"]["depends_on"]["manager"]["condition"] == "service_healthy"
+    assert services["bot"]["depends_on"]["manager"]["condition"] == "service_healthy"
+    assert "healthcheck" in services["dashboard"]
+    assert "healthcheck" in services["manager"]
+    assert not any(
+        item.startswith("DICEPP_DASHBOARD_HEALTH_URL=")
+        for item in services["manager"]["environment"]
+    )
+    assert "DICEPP_MANAGER_URL=http://manager:4091" in services["bot"]["environment"]
+    assert not any(item.startswith("DPP_ADMIN_") for item in services["bot"]["environment"])
     assert not any("dashboard/data" in volume for volume in services["manager"]["volumes"])
     assert services["bot"]["labels"] == {
         "io.dicepp.managed": "true",
@@ -227,101 +234,27 @@ def test_windows_factory_restarts_stable_launcher_in_background(
         service.close()
 
 
-def test_dashboard_probe_requires_semantic_health_and_rejects_404(monkeypatch) -> None:
-    error = urllib.error.HTTPError(
-        "http://dashboard/api/health",
-        404,
-        "not found",
-        {},
-        io.BytesIO(b"{}"),
+def test_factory_binds_archive_control_health_to_manager_service(tmp_path: Path) -> None:
+    service = manager_factory.create_manager_service(
+        ManagerSettings(
+            layout=InstanceLayout.from_root(tmp_path),
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        )
     )
-    monkeypatch.setattr(
-        manager_factory.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
-    )
-
-    assert manager_factory._dashboard_probe()["status"] == "failed"
-
-
-def test_control_probe_reads_semantic_dashboard_health_over_http(monkeypatch) -> None:
-    heartbeat = datetime.now(timezone.utc).isoformat()
-
-    class Response:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def read(self, _limit):
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "component": "dashboard",
-                    "control": {"latest_heartbeat": heartbeat},
-                }
-            ).encode()
-
-    monkeypatch.setattr(
-        manager_factory.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: Response(),
-    )
-
-    assert manager_factory._dashboard_probe()["status"] == "ok"
-    assert manager_factory._control_channel_probe()["heartbeat"] == heartbeat
+    try:
+        assert service.control_service is not None
+        assert service.archive_coordinator.control_probe.__self__ is service.control_service
+        assert service.archive_coordinator.control_probe()["message"] == "No Bot control heartbeat"
+    finally:
+        service.close()
 
 
-def _stub_health_heartbeat(monkeypatch, heartbeat: str) -> None:
-    class Response:
-        status = 200
+def test_factory_has_no_dashboard_health_recovery_dependency() -> None:
+    source = inspect.getsource(manager_factory)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def read(self, _limit):
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "component": "dashboard",
-                    "control": {"latest_heartbeat": heartbeat},
-                }
-            ).encode()
-
-    monkeypatch.setattr(
-        manager_factory.urllib.request,
-        "urlopen",
-        lambda *_args, **_kwargs: Response(),
-    )
-
-
-def test_control_probe_tolerates_legacy_epoch_heartbeat(monkeypatch) -> None:
-    """Dashboards older than the ISO contract persist epoch seconds."""
-    _stub_health_heartbeat(monkeypatch, str(time.time()))
-
-    result = manager_factory._control_channel_probe()
-
-    assert result["status"] == "ok"
-    assert result["ok"] is True
-    # The probe normalizes any accepted heartbeat to ISO-8601 UTC.
-    parsed = datetime.fromisoformat(result["heartbeat"])
-    assert (datetime.now(timezone.utc) - parsed).total_seconds() < 120
-
-
-def test_control_probe_rejects_unparseable_heartbeat(monkeypatch) -> None:
-    _stub_health_heartbeat(monkeypatch, "not-a-timestamp")
-
-    result = manager_factory._control_channel_probe()
-
-    assert result["status"] == "failed"
-    assert result["ok"] is False
-    assert result["message"] == "Invalid Bot control heartbeat"
+    assert "DICEPP_DASHBOARD_HEALTH_URL" not in source
+    assert "_dashboard_probe" not in source
 
 
 def test_stable_update_guard_refreshes_atomically_by_digest_when_idle(

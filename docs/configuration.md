@@ -18,6 +18,7 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 | `data/` | 运行时数据 | 不提交 |
 | `dashboard/data/` | Dashboard 账号和会话数据 | 不提交 |
 | `manager/state/` | Manager token、operation 和维护状态 | 不提交 |
+| `manager/control/` | Bot↔Manager 专用控制凭据；Dashboard 不挂载 | 不提交 |
 | `manager/packages/` | Manager 已下载并校验的更新包缓存 | 不提交 |
 | `manager/backups/` | 用户归档与事务安全归档 | 不提交 |
 | `templates/characters/default/` | 随版本发布的只读角色模板，供未来 Dashboard 新建角色使用 | 可以 |
@@ -129,8 +130,7 @@ API Key 放在 `config/user.json`：
 | `DICE_PERSONA` | 覆盖默认人设 | |
 | `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 | |
 | `DICEPP_DATA_DIR` | 兼容旧部署：只覆盖运行时 `data/` 目录；Bot 与 Dashboard 使用同一解析规则 | |
-| `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
-| `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
+| `DICEPP_MANAGER_URL` | Manager 地址（Bot 控制 WebSocket 与 Dashboard API 代理） | 本机 `http://127.0.0.1:4091`；源码 Bot 必须显式设置 |
 | `DICEPP_ONEBOT_HOST` | OneBot 监听地址；远程 OneBot 客户端需显式设为 `0.0.0.0` | `127.0.0.1`（Compose 部署显式设为 `0.0.0.0`） |
 
 ### Manager 环境变量
@@ -139,8 +139,9 @@ API Key 放在 `config/user.json`：
 
 | 变量 | 使用方 | 作用 | 默认值/标准部署值 |
 |---|---|---|---|
-| `DICEPP_MANAGER_URL` | Dashboard | Manager 内部 API 地址 | 本机 `http://127.0.0.1:4091`；Compose `http://manager:4091` |
-| `DICEPP_MANAGER_TOKEN_FILE` | Manager、Dashboard | 共享 API token 文件 | `<instance>/manager/state/api-token` |
+| `DICEPP_MANAGER_URL` | Bot、Dashboard | Manager 地址；Bot 将其转换为 `/v1/control/ws`，Dashboard 调用 HTTP API | 本机 `http://127.0.0.1:4091`；Compose `http://manager:4091` |
+| `DICEPP_MANAGER_TOKEN_FILE` | Manager、Dashboard | 私有 HTTP API token 文件；Bot 不读取、不使用 | `<instance>/manager/state/api-token` |
+| `manager/control/control-token` | Bot、Manager | Bot WebSocket 控制凭据；与 HTTP API token 独立，Dashboard 不读取 | `<instance>/manager/control/control-token` |
 | `DICEPP_MANAGER_CLIENT_TIMEOUT` | Dashboard | 调用 Manager 的超时秒数 | `10` |
 | `DICEPP_MANAGER_HOST` | Manager | API 监听地址 | 本机 `127.0.0.1`；Compose `0.0.0.0` |
 | `DICEPP_MANAGER_PORT` | Manager | API 监听端口 | `4091` |
@@ -148,9 +149,10 @@ API Key 放在 `config/user.json`：
 | `DICEPP_MANAGER_RUNTIME_UNIT_ID` | Manager | 默认运行单元标识 | `dicepp-runtime` |
 | `DICEPP_MANAGER_DOCKER_COMMAND` | Linux Manager | Docker 控制端点；标准部署使用 Unix Socket，测试/兼容环境可指定单一 CLI 路径 | `unix:///var/run/docker.sock` |
 | `DICEPP_MANAGER_DOCKER_TIMEOUT` | Linux Manager | Docker 固定操作超时秒数 | `30` |
-| `DICEPP_DASHBOARD_HEALTH_URL` | Manager | 独立 Dashboard 语义健康与控制心跳端点 | 本机 `http://127.0.0.1:4090/api/health`；Compose `http://dashboard:4090/api/health` |
+| `DICEPP_MANAGER_CONTROL_HEARTBEAT_TIMEOUT` | Manager | Bot status/pong 心跳超时秒数 | `120` |
+| `DICEPP_MANAGER_CONTROL_RELOAD_TIMEOUT` | Manager | 等待 Bot 热重载结果的秒数 | `5` |
 
-Manager API、operation store 和部署拓扑分别带有独立的兼容版本。当前标准部署使用 Manager API `2`、operation schema `2` 和 deployment schema `2`。这些值由程序与发布包共同声明，用户不应通过环境变量强行覆盖。Linux Bot 容器使用以下标签声明可管理范围：
+Manager API、operation store 和部署拓扑分别带有独立的兼容版本。当前标准部署使用 Manager API `3`、operation schema `2` 和 deployment schema `2`。这些值由程序与发布包共同声明，用户不应通过环境变量强行覆盖。Linux Bot 容器使用以下标签声明可管理范围：
 
 ```yaml
 labels:
