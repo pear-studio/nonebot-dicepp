@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
@@ -27,8 +28,24 @@ from packaging.version import InvalidVersion, Version
 from dicepp_meta import get_version
 
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
+from ._path_security import (
+    UnsafePathError,
+    assert_contained_no_reparse,
+    assert_directory_no_reparse,
+    delete_path_entry_no_follow,
+    is_reparse_point,
+    open_regular_binary_no_follow,
+)
+from .velopack_bundle import (
+    MAX_VELOPACK_BUNDLE_BYTES,
+    VELOPACK_BUNDLE_NAME,
+    VelopackBundleError,
+    extract_verified_nupkg,
+    validate_velopack_bundle,
+    validate_velopack_bundle_manifest,
+)
 
-RELEASE_CONTRACT_VERSION = 1
+RELEASE_CONTRACT_VERSION = 2
 RELEASE_MANIFEST_NAME = "dicepp-release.json"
 DEFAULT_GITHUB_API = "https://api.github.com/repos/pear-studio/nonebot-dicepp"
 _GITHUB_API_VERSION = "2022-11-28"
@@ -36,6 +53,12 @@ MAX_RELEASE_JSON_BYTES = 2 * 1024 * 1024
 MAX_LINUX_BUNDLE_BYTES = 16 * 1024**3
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$")
+_VELOPACK_GENERATION_RE = re.compile(
+    r"^velopack-([0-9a-f]{32})\.win-x64\.zip$"
+)
+_VELOPACK_PAYLOAD_GENERATION_RE = re.compile(
+    r"^payload-([0-9a-f]{32})\.nupkg$"
+)
 _CONTENT_RANGE_RE = re.compile(r"^bytes ([0-9]+)-([0-9]+)/([0-9]+)$")
 # Bounded download retry budget: consecutive failures that left no new bytes
 # abort the download; any attempt that grows the .part file resets both the
@@ -87,6 +110,18 @@ class TrustedDirectory:
     device: int
     inode: int
     parent: "TrustedDirectory | None" = None
+
+
+class _PublishedGenerationState(Enum):
+    CONFIRMED_ABSENT = "confirmed_absent"
+    VALID_CURRENT = "valid_current"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class _PublishedGeneration:
+    state: _PublishedGenerationState
+    token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +278,7 @@ def validate_release_manifest(payload: Any) -> dict[str, Any]:
     normalized["artifacts"] = [
         _validate_artifact(artifact, seen) for artifact in artifacts
     ]
+    _validate_artifact_set(normalized)
     fallbacks = payload["fallbacks"]
     if (
         not isinstance(fallbacks, dict)
@@ -288,6 +324,15 @@ def _validate_artifact(
         raise ReleaseContractError(
             "Linux bundle exceeds the automatic-upgrade size limit"
         )
+    if (
+        artifact["platform"] == "windows"
+        and artifact["purpose"] == "velopack-bundle"
+        and (
+            artifact["filename"] != VELOPACK_BUNDLE_NAME
+            or artifact["size"] > MAX_VELOPACK_BUNDLE_BYTES
+        )
+    ):
+        raise ReleaseContractError("Invalid Windows Velopack bundle artifact")
     digest = artifact["sha256"]
     if type(digest) is not str or not _SHA256_RE.fullmatch(digest):
         raise ReleaseContractError("Invalid artifact SHA-256")
@@ -296,6 +341,39 @@ def _validate_artifact(
         raise ReleaseContractError(f"Duplicate artifact target/purpose: {key}")
     seen.add(key)
     return dict(artifact)
+
+
+def _validate_artifact_set(manifest: dict[str, Any]) -> None:
+    windows = [
+        item for item in manifest["artifacts"] if item["platform"] == "windows"
+    ]
+    if any(
+        item["purpose"] not in {"portable", "setup", "velopack-bundle"}
+        for item in windows
+    ):
+        raise ReleaseContractError(
+            "Unsupported Windows release artifact purpose"
+        )
+    bundles = [
+        item for item in manifest["artifacts"]
+        if item["purpose"] == "velopack-bundle"
+    ]
+    if (
+        len(bundles) != 1
+        or (
+            bundles[0]["platform"],
+            bundles[0]["arch"],
+            bundles[0]["filename"],
+        )
+        != (
+            "windows",
+            "amd64",
+            VELOPACK_BUNDLE_NAME,
+        )
+    ):
+        raise ReleaseContractError(
+            "Release contract requires the single Windows Velopack bundle"
+        )
 
 
 class UrlResponse:
@@ -366,6 +444,7 @@ class ReleaseManager:
         self.scheduler_error_delay = scheduler_error_delay
         self.protected_versions_loader = protected_versions_loader or set
         self._lock = threading.RLock()
+        self._generation_lock = threading.RLock()
         self._latest: dict[str, Any] | None = None
         self._latest_channel: str | None = None
         self._active: ReleaseOperation | None = None
@@ -531,12 +610,18 @@ class ReleaseManager:
             selected_artifacts: list[dict[str, Any]]
             if purpose is None:
                 preferred = (
-                    "linux-bundle" if self.target[0] == "linux" else "velopack-full"
+                    "linux-bundle"
+                    if self.target[0] == "linux"
+                    else "velopack-bundle"
                 )
                 artifact = next(
                     (item for item in artifacts if item["purpose"] == preferred),
-                    artifacts[0],
+                    None,
                 )
+                if artifact is None:
+                    raise ReleaseDownloadError(
+                        f"No automatic-update artifact for {self.target[0]}"
+                    )
             else:
                 artifact = next(
                     (item for item in artifacts if item["purpose"] == purpose),
@@ -546,18 +631,7 @@ class ReleaseManager:
                     raise ReleaseDownloadError(
                         f"No {purpose!r} artifact for current target"
                     )
-            if self.target[0] == "windows" and artifact["purpose"] == "velopack-full":
-                companion_purposes = {"velopack-releases", "velopack-assets"}
-                companions = [
-                    item for item in artifacts if item["purpose"] in companion_purposes
-                ]
-                if {item["purpose"] for item in companions} != companion_purposes:
-                    raise ReleaseDownloadError(
-                        "Velopack update feed assets are incomplete"
-                    )
-                selected_artifacts = [artifact, *companions]
-            else:
-                selected_artifacts = [artifact]
+            selected_artifacts = [artifact]
             total_size = sum(item["size"] for item in selected_artifacts)
             with self._lock:
                 self._require_operation_locked(operation, "download")
@@ -569,23 +643,44 @@ class ReleaseManager:
                     "size": total_size,
                 }
                 self._persist_state_locked()
-            downloaded: list[tuple[dict[str, Any], Path]] = []
-            for selected in selected_artifacts:
-                target_path = self._download_artifact(
+            payload_path: Path | None = None
+            bundle_manifest: dict[str, Any] | None = None
+            if artifact["purpose"] == "velopack-bundle":
+                with self._generation_lock:
+                    target = self._download_artifact(
+                        release["version"],
+                        artifact,
+                        operation=operation,
+                    )
+                    payload_path, bundle_manifest = (
+                        self._materialize_velopack_bundle(
+                            release,
+                            artifact,
+                            target,
+                        )
+                    )
+                    completed_at = _iso(self.now())
+                    metadata = self._write_verified_metadata(
+                        release,
+                        artifact,
+                        target,
+                        payload_path=payload_path,
+                        bundle_manifest=bundle_manifest,
+                        completed_at=completed_at,
+                    )
+            else:
+                target = self._download_artifact(
                     release["version"],
-                    selected,
+                    artifact,
                     operation=operation,
                 )
-                downloaded.append((selected, target_path))
-            target = downloaded[0][1]
-            completed_at = _iso(self.now())
-            metadata = self._write_verified_metadata(
-                release,
-                artifact,
-                target,
-                companions=downloaded[1:],
-                completed_at=completed_at,
-            )
+                completed_at = _iso(self.now())
+                metadata = self._write_verified_metadata(
+                    release,
+                    artifact,
+                    target,
+                    completed_at=completed_at,
+                )
             self._prune(
                 settings.cache_versions,
                 protected_version=release["version"],
@@ -771,8 +866,8 @@ class ReleaseManager:
             )
         return None, errors[:20]
 
-    def fetch_rollback_package(self, version: str) -> tuple[Path, str]:
-        """Download the verified Velopack full package for *version*.
+    def fetch_rollback_bundle(self, version: str) -> tuple[Path, str]:
+        """Download the verified Velopack bundle for *version*.
 
         Supplies Windows rollback material for the currently installed
         version when the local packages directory does not hold it (first
@@ -794,15 +889,29 @@ class ReleaseManager:
             (
                 item
                 for item in release["artifacts"]
-                if item.get("purpose") == "velopack-full"
+                if item.get("purpose") == "velopack-bundle"
             ),
             None,
         )
         if artifact is None:
             raise ReleaseContractError(
-                f"Release {wanted} has no Velopack full package artifact"
+                f"Release {wanted} has no Velopack bundle artifact"
             )
-        path = self._download_artifact(str(wanted), artifact)
+        with self._generation_lock:
+            path = self._download_artifact(str(wanted), artifact)
+            payload_path, bundle_manifest = self._materialize_velopack_bundle(
+                release,
+                artifact,
+                path,
+            )
+            self._write_verified_metadata(
+                release,
+                artifact,
+                path,
+                payload_path=payload_path,
+                bundle_manifest=bundle_manifest,
+                completed_at=_iso(self.now()),
+            )
         return path, str(artifact["sha256"])
 
     def _find_release_by_version(self, wanted: Version) -> dict[str, Any]:
@@ -845,6 +954,10 @@ class ReleaseManager:
             for item in assets
             if isinstance(item, dict) and type(item.get("name")) is str
         }
+        if len(by_name) != len(assets):
+            raise ReleaseContractError(
+                "GitHub Release has duplicate or malformed assets"
+            )
         manifest_asset = by_name.get(RELEASE_MANIFEST_NAME)
         if not isinstance(manifest_asset, dict):
             raise ReleaseContractError(f"{RELEASE_MANIFEST_NAME} is missing")
@@ -999,7 +1112,18 @@ class ReleaseManager:
             root=self.layout.root,
             parent=packages_guard,
         )
-        target = version_dir / artifact["filename"]
+        if _is_windows_velopack_artifact(artifact):
+            with self._generation_lock:
+                generation = os.urandom(16).hex()
+                target = version_dir / _velopack_bundle_generation_name(
+                    generation
+                )
+                _cleanup_velopack_orphans(
+                    version_guard,
+                    in_progress_generation=generation,
+                )
+        else:
+            target = version_dir / artifact["filename"]
         part = version_dir / f"{artifact['filename']}.part"
         metadata_path = version_dir / f"{artifact['filename']}.part.json"
         _require_regular_children(target, part, metadata_path)
@@ -1236,13 +1360,83 @@ class ReleaseManager:
                 _fsync_trusted_directory(version_guard)
             raise
 
+    def _materialize_velopack_bundle(
+        self,
+        release: dict[str, Any],
+        artifact: dict[str, Any],
+        target: Path,
+    ) -> tuple[Path, dict[str, Any]]:
+        packages_guard = _capture_trusted_directory(
+            self.layout.manager_packages_dir,
+            root=self.layout.root,
+        )
+        version_guard = _capture_trusted_directory(
+            target.parent,
+            root=self.layout.root,
+            parent=packages_guard,
+        )
+        target_info = _validate_regular_path(
+            target,
+            version_guard,
+            allow_missing=False,
+        )
+        generation = _velopack_generation_from_bundle_name(target.name)
+        payload = target.parent / _velopack_payload_generation_name(generation)
+        payload_identity: tuple[int, int] | None = None
+        try:
+            bundle = validate_velopack_bundle(
+                target,
+                expected_dicepp_version=release["version"],
+                expected_channel=release["channel"],
+                expected_size=artifact["size"],
+                expected_sha256=artifact["sha256"],
+            )
+            _require_regular_children(payload)
+            extract_verified_nupkg(
+                bundle,
+                target.parent,
+                destination_name=payload.name,
+            )
+            payload_info = _validate_regular_path(
+                payload,
+                version_guard,
+                allow_missing=False,
+            )
+            if payload_info is None:
+                raise ReleaseDownloadError(
+                    "Velopack payload disappeared after extraction"
+                )
+            payload_identity = (payload_info.st_dev, payload_info.st_ino)
+            _fsync_trusted_directory(version_guard)
+            return payload, bundle.manifest
+        except (OSError, VelopackBundleError, ReleaseError) as exc:
+            if payload_identity is not None:
+                _unlink_trusted_file_if_identity(
+                    payload,
+                    version_guard,
+                    payload_identity,
+                )
+            if target_info is not None:
+                _unlink_trusted_file_if_identity(
+                    target,
+                    version_guard,
+                    (target_info.st_dev, target_info.st_ino),
+                )
+            _fsync_trusted_directory(version_guard)
+            if isinstance(exc, ReleaseDownloadError):
+                raise
+            raise ReleaseDownloadError(
+                f"Downloaded Velopack bundle is invalid: {exc}"
+            ) from exc
+
     def _write_verified_metadata(
         self,
         release: dict[str, Any],
         artifact: dict[str, Any],
         target: Path,
         *,
-        companions: list[tuple[dict[str, Any], Path]] | None = None,
+        payload_path: Path | None = None,
+        bundle_manifest: dict[str, Any] | None = None,
         completed_at: str,
     ) -> Path:
         destination = target.parent / "verified-release.json"
@@ -1256,48 +1450,182 @@ class ReleaseManager:
             root=self.layout.root,
             parent=packages_guard,
         )
-        _validate_regular_path(target, version_guard, allow_missing=False)
-        _atomic_write_json(
-            destination,
-            {
-                "contract_version": RELEASE_CONTRACT_VERSION,
-                "version": release["version"],
-                "channel": release["channel"],
-                "change_scope": release["change_scope"],
-                "compatibility": release["compatibility"],
-                "artifact": {
-                    key: artifact[key]
-                    for key in (
-                        "platform",
-                        "arch",
-                        "filename",
-                        "purpose",
-                        "size",
-                        "sha256",
-                    )
-                },
-                "verified_path": target.name,
-                "companions": [
-                    {
-                        "artifact": {
-                            key: companion[key]
-                            for key in (
-                                "platform",
-                                "arch",
-                                "filename",
-                                "purpose",
-                                "size",
-                                "sha256",
-                            )
-                        },
-                        "verified_path": companion_path.name,
-                    }
-                    for companion, companion_path in (companions or [])
-                ],
-                "completed_at": completed_at,
-            },
-            trusted_parent=version_guard,
+        windows_bundle = (
+            artifact.get("platform") == "windows"
+            and artifact.get("purpose") == "velopack-bundle"
         )
+        target_info: os.stat_result | None = None
+        payload_info: os.stat_result | None = None
+        previous_generation = _read_managed_velopack_generation(
+            destination,
+            version_guard,
+        )
+        previous_paths = {
+            path.name for path, _identity in previous_generation
+        }
+        try:
+            target_info = _validate_regular_path(
+                target,
+                version_guard,
+                allow_missing=False,
+            )
+            if windows_bundle:
+                if payload_path is None or not isinstance(bundle_manifest, dict):
+                    raise ReleaseDownloadError(
+                        "Windows bundle manifest and payload are required"
+                    )
+                generation = _velopack_generation_from_bundle_name(target.name)
+                if (
+                    payload_path.name
+                    != _velopack_payload_generation_name(generation)
+                ):
+                    raise ReleaseDownloadError(
+                        "Windows bundle and payload generations differ"
+                    )
+                normalized_manifest = validate_velopack_bundle_manifest(
+                    bundle_manifest,
+                    expected_dicepp_version=release["version"],
+                    expected_channel=release["channel"],
+                )
+                payload_info = _validate_regular_path(
+                    payload_path,
+                    version_guard,
+                    allow_missing=False,
+                )
+                with (
+                    open_regular_binary_no_follow(target) as authorized_bundle,
+                    open_regular_binary_no_follow(
+                        payload_path
+                    ) as authorized_payload,
+                ):
+                    opened_bundle = os.fstat(authorized_bundle.fileno())
+                    opened_payload = os.fstat(authorized_payload.fileno())
+                    bundle_digest = _sha256_handle(authorized_bundle)
+                    payload_digest = _sha256_handle(authorized_payload)
+                    validated_bundle = validate_velopack_bundle(
+                        target,
+                        expected_dicepp_version=release["version"],
+                        expected_channel=release["channel"],
+                        expected_size=artifact["size"],
+                        expected_sha256=artifact["sha256"],
+                    )
+                    rebound_target = _validate_regular_path(
+                        target,
+                        version_guard,
+                        allow_missing=False,
+                    )
+                    rebound_payload = _validate_regular_path(
+                        payload_path,
+                        version_guard,
+                        allow_missing=False,
+                    )
+                    if (
+                        normalized_manifest != bundle_manifest
+                        or validated_bundle.manifest != bundle_manifest
+                        or target_info is None
+                        or payload_info is None
+                        or rebound_target is None
+                        or rebound_payload is None
+                        or opened_bundle.st_nlink != 1
+                        or opened_bundle.st_size != artifact["size"]
+                        or bundle_digest != artifact["sha256"]
+                        or opened_payload.st_nlink != 1
+                        or opened_payload.st_size
+                        != bundle_manifest["nupkg"]["size"]
+                        or payload_digest
+                        != bundle_manifest["nupkg"]["sha256"]
+                        or not _same_file_identity(
+                            opened_bundle,
+                            target_info,
+                            rebound_target,
+                        )
+                        or not _same_file_identity(
+                            opened_payload,
+                            payload_info,
+                            rebound_payload,
+                        )
+                        or (
+                            validated_bundle.device,
+                            validated_bundle.inode,
+                        )
+                        != (opened_bundle.st_dev, opened_bundle.st_ino)
+                    ):
+                        raise ReleaseDownloadError(
+                            "Windows bundle generation changed before metadata publish"
+                        )
+                    _atomic_publish_json(
+                        destination,
+                        _verified_metadata_payload(
+                            release,
+                            artifact,
+                            target,
+                            payload_path=payload_path,
+                            bundle_manifest=bundle_manifest,
+                            generation=generation,
+                            completed_at=completed_at,
+                        ),
+                        trusted_parent=version_guard,
+                    )
+            elif payload_path is not None or bundle_manifest is not None:
+                raise ReleaseDownloadError(
+                    "Non-Windows artifact has unexpected bundle metadata"
+                )
+            else:
+                _atomic_write_json(
+                    destination,
+                    _verified_metadata_payload(
+                        release,
+                        artifact,
+                        target,
+                        payload_path=None,
+                        bundle_manifest=None,
+                        generation=None,
+                        completed_at=completed_at,
+                    ),
+                    trusted_parent=version_guard,
+                )
+        except Exception as exc:
+            if windows_bundle:
+                if (
+                    payload_path is not None
+                    and payload_info is not None
+                    and payload_path.name not in previous_paths
+                ):
+                    _unlink_trusted_file_if_identity(
+                        payload_path,
+                        version_guard,
+                        (payload_info.st_dev, payload_info.st_ino),
+                    )
+                if target_info is not None and target.name not in previous_paths:
+                    _unlink_trusted_file_if_identity(
+                        target,
+                        version_guard,
+                        (target_info.st_dev, target_info.st_ino),
+                    )
+                try:
+                    _fsync_trusted_directory(version_guard)
+                except OSError:
+                    pass
+            if isinstance(exc, VelopackBundleError):
+                raise ReleaseDownloadError(
+                    f"Windows bundle generation is invalid: {exc}"
+                ) from exc
+            raise
+        if windows_bundle:
+            current = {target.name}
+            if payload_path is not None:
+                current.add(payload_path.name)
+            for old_path, old_identity in previous_generation:
+                if old_path.name not in current:
+                    _unlink_trusted_file_if_identity(
+                        old_path,
+                        version_guard,
+                        old_identity,
+                    )
+            try:
+                _fsync_trusted_directory(version_guard)
+            except OSError:
+                pass
         return destination
 
     def _local_packages(self) -> list[dict[str, Any]]:
@@ -1338,15 +1666,22 @@ class ReleaseManager:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 artifact = metadata.get("artifact")
                 completed_at = metadata.get("completed_at")
-                filename = artifact.get("filename") if isinstance(artifact, dict) else None
+                filename = (
+                    artifact.get("filename")
+                    if isinstance(artifact, dict)
+                    else None
+                )
+                verified_name = metadata.get("verified_path")
                 if (
                     type(completed_at) is not str
                     or type(filename) is not str
                     or not _SAFE_FILENAME_RE.fullmatch(filename)
+                    or type(verified_name) is not str
+                    or not _SAFE_FILENAME_RE.fullmatch(verified_name)
                 ):
                     continue
                 _parse_iso(completed_at)
-                package = trusted / filename
+                package = trusted / verified_name
                 if not package.is_file() or package.is_symlink():
                     continue
                 _validate_regular_path(
@@ -1354,35 +1689,44 @@ class ReleaseManager:
                     version_guard,
                     allow_missing=False,
                 )
-                files = [filename, metadata_path.name]
-                companions = metadata.get("companions", [])
-                if not isinstance(companions, list):
-                    continue
-                companion_valid = True
-                for companion in companions:
-                    companion_name = (
-                        companion.get("verified_path")
-                        if isinstance(companion, dict)
-                        else None
-                    )
+                files = [verified_name, metadata_path.name]
+                if artifact.get("purpose") == "velopack-bundle":
+                    bundle_manifest = metadata.get("bundle_manifest")
+                    payload_name = metadata.get("payload_verified_path")
+                    generation = metadata.get("generation")
                     if (
-                        type(companion_name) is not str
-                        or not _SAFE_FILENAME_RE.fullmatch(companion_name)
+                        not isinstance(bundle_manifest, dict)
+                        or type(payload_name) is not str
+                        or not _SAFE_FILENAME_RE.fullmatch(payload_name)
+                        or type(generation) is not str
+                        or verified_name
+                        != _velopack_bundle_generation_name(generation)
+                        or payload_name
+                        != _velopack_payload_generation_name(generation)
                     ):
-                        companion_valid = False
-                        break
-                    companion_path = trusted / companion_name
-                    if not companion_path.is_file() or companion_path.is_symlink():
-                        companion_valid = False
-                        break
+                        continue
+                    payload_path = trusted / payload_name
+                    if not payload_path.is_file() or payload_path.is_symlink():
+                        continue
                     _validate_regular_path(
-                        companion_path,
+                        payload_path,
                         version_guard,
                         allow_missing=False,
                     )
-                    files.append(companion_name)
-                if not companion_valid:
-                    continue
+                    validated = validate_velopack_bundle(
+                        package,
+                        expected_dicepp_version=metadata.get("version"),
+                        expected_channel=metadata.get("channel"),
+                        expected_size=artifact.get("size"),
+                        expected_sha256=artifact.get("sha256"),
+                    )
+                    if (
+                        validated.manifest != bundle_manifest
+                        or payload_path.stat().st_size != validated.nupkg_size
+                        or _sha256_file(payload_path) != validated.nupkg_sha256
+                    ):
+                        continue
+                    files.append(payload_name)
                 result.append(
                     {
                         "version": directory.name,
@@ -1498,33 +1842,49 @@ class ReleaseManager:
             self._trusted_version_dir(root, protected, create=False)
 
     def _trusted_packages_root(self, *, create: bool) -> Path:
-        base = self.layout.root.resolve()
+        base = Path(os.path.abspath(self.layout.root))
         if create:
             base.mkdir(parents=True, exist_ok=True)
+        try:
+            assert_contained_no_reparse(
+                base,
+                root=base,
+                allow_missing=False,
+            )
+            assert_directory_no_reparse(base)
+        except (OSError, UnsafePathError) as exc:
+            raise ReleaseDownloadError(
+                f"Untrusted instance root for package storage: {base}"
+            ) from exc
         manager = base / "manager"
         packages = manager / "packages"
         for path in (manager, packages):
-            if path.is_symlink():
+            try:
+                assert_contained_no_reparse(
+                    path,
+                    root=base,
+                    allow_missing=True,
+                )
+            except (OSError, UnsafePathError) as exc:
                 raise ReleaseDownloadError(
                     f"Untrusted Manager package directory: {path}"
-                )
-            if not path.exists():
+                ) from exc
+            if not os.path.lexists(path):
                 if not create:
                     raise FileNotFoundError(path)
                 path.mkdir()
                 _fsync_directory(path.parent)
-            if path.is_symlink() or not path.is_dir():
+            try:
+                assert_contained_no_reparse(
+                    path,
+                    root=base,
+                    allow_missing=False,
+                )
+                assert_directory_no_reparse(path)
+            except (OSError, UnsafePathError) as exc:
                 raise ReleaseDownloadError(
                     f"Untrusted Manager package directory: {path}"
-                )
-            if path.resolve() != path.absolute():
-                raise ReleaseDownloadError(
-                    f"Manager package directory is redirected: {path}"
-                )
-            if not path.resolve().is_relative_to(base):
-                raise ReleaseDownloadError(
-                    "Manager package directory escapes the instance root"
-                )
+                ) from exc
         return packages
 
     def _trusted_version_dir(
@@ -1538,20 +1898,32 @@ class ReleaseManager:
         if trusted_root != root:
             raise ReleaseDownloadError("Manager package root changed")
         path = trusted_root / _safe_version_segment(version)
-        if path.is_symlink():
-            raise ReleaseDownloadError("Untrusted release version directory")
-        if not path.exists():
+        try:
+            assert_contained_no_reparse(
+                path,
+                root=trusted_root,
+                allow_missing=True,
+            )
+        except (OSError, UnsafePathError) as exc:
+            raise ReleaseDownloadError(
+                "Untrusted release version directory"
+            ) from exc
+        if not os.path.lexists(path):
             if not create:
                 raise FileNotFoundError(path)
             path.mkdir()
             _fsync_directory(trusted_root)
-        if (
-            path.is_symlink()
-            or not path.is_dir()
-            or path.resolve() != path.absolute()
-            or not path.resolve().is_relative_to(trusted_root.resolve())
-        ):
-            raise ReleaseDownloadError("Untrusted release version directory")
+        try:
+            assert_contained_no_reparse(
+                path,
+                root=trusted_root,
+                allow_missing=False,
+            )
+            assert_directory_no_reparse(path)
+        except (OSError, UnsafePathError) as exc:
+            raise ReleaseDownloadError(
+                "Untrusted release version directory"
+            ) from exc
         return path
 
     def _sync_channel(self, channel: str) -> None:
@@ -1794,17 +2166,238 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _sha256_file(path: Path) -> str:
+    with open_regular_binary_no_follow(path) as handle:
+        return _sha256_handle(handle)
+
+
+def _sha256_handle(handle) -> str:
+    handle.seek(0)
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_windows_velopack_artifact(artifact: Mapping[str, Any]) -> bool:
+    return (
+        artifact.get("platform") == "windows"
+        and artifact.get("arch") == "amd64"
+        and artifact.get("purpose") == "velopack-bundle"
+        and artifact.get("filename") == VELOPACK_BUNDLE_NAME
+    )
+
+
+def _velopack_bundle_generation_name(generation: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", generation):
+        raise ReleaseDownloadError("Invalid Velopack generation identifier")
+    return f"velopack-{generation}.win-x64.zip"
+
+
+def _velopack_payload_generation_name(generation: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", generation):
+        raise ReleaseDownloadError("Invalid Velopack generation identifier")
+    return f"payload-{generation}.nupkg"
+
+
+def _velopack_generation_from_bundle_name(filename: str) -> str:
+    match = _VELOPACK_GENERATION_RE.fullmatch(filename)
+    if match is None:
+        raise ReleaseDownloadError(
+            "Velopack bundle is not stored in an isolated generation"
+        )
+    return match.group(1)
+
+
+def _verified_metadata_payload(
+    release: Mapping[str, Any],
+    artifact: Mapping[str, Any],
+    target: Path,
+    *,
+    payload_path: Path | None,
+    bundle_manifest: dict[str, Any] | None,
+    generation: str | None,
+    completed_at: str,
+) -> dict[str, Any]:
+    return {
+        "contract_version": RELEASE_CONTRACT_VERSION,
+        "version": release["version"],
+        "channel": release["channel"],
+        "change_scope": release["change_scope"],
+        "compatibility": release["compatibility"],
+        "artifact": {
+            key: artifact[key]
+            for key in (
+                "platform",
+                "arch",
+                "filename",
+                "purpose",
+                "size",
+                "sha256",
+            )
+        },
+        "generation": generation,
+        "verified_path": target.name,
+        "bundle_manifest": bundle_manifest,
+        "payload_verified_path": (
+            payload_path.name if payload_path is not None else None
+        ),
+        "completed_at": completed_at,
+    }
+
+
+def _same_file_identity(
+    *records: os.stat_result,
+) -> bool:
+    first = records[0]
+    identity = (first.st_dev, first.st_ino)
+    return all(
+        stat.S_ISREG(record.st_mode)
+        and record.st_nlink == 1
+        and (record.st_dev, record.st_ino) == identity
+        for record in records
+    )
+
+
+def _read_managed_velopack_generation(
+    metadata_path: Path,
+    version_guard: TrustedDirectory,
+) -> list[tuple[Path, tuple[int, int]]]:
+    """Capture only files from a previously published managed generation."""
+
+    try:
+        metadata_info = _validate_regular_path(
+            metadata_path,
+            version_guard,
+            allow_missing=True,
+        )
+        if metadata_info is None:
+            return []
+        with open_regular_binary_no_follow(metadata_path) as handle:
+            raw = handle.read(MAX_RELEASE_JSON_BYTES + 1)
+        if len(raw) > MAX_RELEASE_JSON_BYTES:
+            return []
+        metadata = json.loads(raw.decode("utf-8"))
+        generation = metadata.get("generation")
+        bundle_name = metadata.get("verified_path")
+        payload_name = metadata.get("payload_verified_path")
+        if (
+            type(generation) is not str
+            or bundle_name != _velopack_bundle_generation_name(generation)
+            or payload_name != _velopack_payload_generation_name(generation)
+        ):
+            return []
+        result: list[tuple[Path, tuple[int, int]]] = []
+        for name in (bundle_name, payload_name):
+            path = version_guard.path / name
+            info = _validate_regular_path(
+                path,
+                version_guard,
+                allow_missing=False,
+            )
+            if info is None:
+                return []
+            result.append((path, (info.st_dev, info.st_ino)))
+        return result
+    except (
+        OSError,
+        ReleaseError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ):
+        return []
+
+
+def _published_velopack_generation(
+    metadata_path: Path,
+    version_guard: TrustedDirectory,
+) -> _PublishedGeneration:
+    try:
+        info = _validate_regular_path(
+            metadata_path,
+            version_guard,
+            allow_missing=True,
+        )
+        if info is None:
+            return _PublishedGeneration(
+                _PublishedGenerationState.CONFIRMED_ABSENT
+            )
+        with open_regular_binary_no_follow(metadata_path) as handle:
+            raw = handle.read(MAX_RELEASE_JSON_BYTES + 1)
+        if len(raw) > MAX_RELEASE_JSON_BYTES:
+            return _PublishedGeneration(_PublishedGenerationState.UNKNOWN)
+        metadata = json.loads(raw.decode("utf-8"))
+        if not isinstance(metadata, dict):
+            return _PublishedGeneration(_PublishedGenerationState.UNKNOWN)
+        generation = metadata.get("generation")
+        if (
+            type(generation) is str
+            and metadata.get("verified_path")
+            == _velopack_bundle_generation_name(generation)
+            and metadata.get("payload_verified_path")
+            == _velopack_payload_generation_name(generation)
+        ):
+            return _PublishedGeneration(
+                _PublishedGenerationState.VALID_CURRENT,
+                generation,
+            )
+    except (
+        OSError,
+        ReleaseError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ):
+        pass
+    return _PublishedGeneration(_PublishedGenerationState.UNKNOWN)
+
+
+def _cleanup_velopack_orphans(
+    version_guard: TrustedDirectory,
+    *,
+    in_progress_generation: str,
+) -> None:
+    """Best-effort cleanup of exact managed names not referenced by metadata."""
+
+    published = _published_velopack_generation(
+        version_guard.path / "verified-release.json",
+        version_guard,
+    )
+    if published.state is _PublishedGenerationState.UNKNOWN:
+        return
+    protected = {in_progress_generation}
+    if published.state is _PublishedGenerationState.VALID_CURRENT:
+        if published.token is None:
+            return
+        protected.add(published.token)
+    try:
+        entries = list(os.scandir(version_guard.path))
+    except OSError:
+        return
+    for entry in entries:
+        bundle_match = _VELOPACK_GENERATION_RE.fullmatch(entry.name)
+        payload_match = _VELOPACK_PAYLOAD_GENERATION_RE.fullmatch(entry.name)
+        match = bundle_match or payload_match
+        if match is None or match.group(1) in protected:
+            continue
+        try:
+            candidate = version_guard.path / entry.name
+            info = candidate.lstat()
+        except OSError:
+            continue
+        _unlink_trusted_file_if_identity(
+            candidate,
+            version_guard,
+            (info.st_dev, info.st_ino),
+        )
 
 
 def _require_regular_children(*paths: Path) -> None:
     for path in paths:
-        if path.is_symlink() or (
-            path.exists() and not path.is_file()
+        if (
+            os.path.lexists(path)
+            and (
+                is_reparse_point(path)
+                or not path.is_file()
+            )
         ):
             raise ReleaseDownloadError(
                 f"Release package path is not a regular file: {path.name}"
@@ -1817,18 +2410,15 @@ def _capture_trusted_directory(
     root: Path,
     parent: TrustedDirectory | None = None,
 ) -> TrustedDirectory:
-    """Capture a lightweight cross-platform directory identity.
-
-    This rejects deterministic ancestor replacement and link attacks. A
-    privileged/same-user actor racing between the final identity check and one
-    filesystem syscall is outside this small-project threat model; eliminating
-    that nanosecond window would require platform-specific directory handles.
-    """
+    """Capture a non-reparse directory identity inside the trusted root."""
     if parent is not None:
         _assert_trusted_directory(parent)
+    try:
+        assert_contained_no_reparse(path, root=root, allow_missing=False)
+        assert_directory_no_reparse(path)
+    except (OSError, UnsafePathError) as exc:
+        raise ReleaseDownloadError(f"Untrusted package directory: {path}") from exc
     root_resolved = root.resolve(strict=True)
-    if path.is_symlink():
-        raise ReleaseDownloadError(f"Untrusted package directory: {path}")
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode):
         raise ReleaseDownloadError(f"Untrusted package directory: {path}")
@@ -1850,10 +2440,17 @@ def _capture_trusted_directory(
 def _assert_trusted_directory(directory: TrustedDirectory) -> None:
     if directory.parent is not None:
         _assert_trusted_directory(directory.parent)
-    if directory.path.is_symlink():
+    try:
+        assert_contained_no_reparse(
+            directory.path,
+            root=directory.root,
+            allow_missing=False,
+        )
+        assert_directory_no_reparse(directory.path)
+    except (OSError, UnsafePathError) as exc:
         raise ReleaseDownloadError(
             f"Trusted package directory was replaced: {directory.path}"
-        )
+        ) from exc
     info = directory.path.lstat()
     resolved = directory.path.resolve(strict=True)
     if (
@@ -1887,10 +2484,20 @@ def _validate_regular_path(
         raise ReleaseDownloadError(
             f"Release package path has an unexpected parent: {path.name}"
         )
-    if path.is_symlink():
-        raise ReleaseDownloadError(
-            f"Release package path is a symbolic link: {path.name}"
+    try:
+        assert_contained_no_reparse(
+            path,
+            root=directory.path,
+            allow_missing=allow_missing,
         )
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise
+    except (OSError, UnsafePathError) as exc:
+        raise ReleaseDownloadError(
+            f"Release package path is a symbolic link or reparse point: {path.name}"
+        ) from exc
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -1984,6 +2591,49 @@ def _unlink_trusted_file(
     path.unlink()
 
 
+def _unlink_trusted_file_if_identity(
+    path: Path,
+    trusted_parent: Path | TrustedDirectory,
+    identity: tuple[int, int],
+) -> bool:
+    """Best-effort removal that never unlinks a replacement generation."""
+
+    try:
+        directory = _coerce_trusted_directory(trusted_parent)
+        if path.parent != directory.path:
+            return False
+        _assert_trusted_directory(directory)
+        return delete_path_entry_no_follow(
+            path,
+            expected_identity=identity,
+        )
+    except (OSError, ReleaseError):
+        return False
+
+
+def _discard_trusted_child(
+    path: Path,
+    trusted_parent: Path | TrustedDirectory,
+) -> None:
+    """Remove one direct child without following a link or reparse point."""
+
+    directory = _coerce_trusted_directory(trusted_parent)
+    if path.parent != directory.path:
+        raise ReleaseDownloadError(
+            f"Refusing to discard path outside trusted directory: {path}"
+        )
+    _assert_trusted_directory(directory)
+    if not os.path.lexists(path):
+        return
+    if is_reparse_point(path):
+        try:
+            path.unlink()
+        except (IsADirectoryError, PermissionError):
+            os.rmdir(path)
+        return
+    _unlink_trusted_file(path, directory, missing_ok=True)
+
+
 def _replace_trusted_file(
     source: Path,
     target: Path,
@@ -2025,6 +2675,64 @@ def _atomic_write_json(
         except ReleaseDownloadError:
             pass
         raise
+
+
+def _atomic_publish_json(
+    path: Path,
+    payload: Any,
+    *,
+    trusted_parent: Path | TrustedDirectory,
+) -> None:
+    """Publish a final pointer without removing the previous pointer first.
+
+    No exception is raised after the atomic replace commits, so callers never
+    mistake a published generation for a failed one and delete its files.
+    """
+
+    directory = _coerce_trusted_directory(trusted_parent)
+    temporary = path.with_name(
+        f"{path.stem}-{os.urandom(8).hex()}.publish.tmp"
+    )
+    _require_regular_children(path, temporary)
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    committed = False
+    try:
+        with _open_regular_binary(
+            temporary,
+            directory,
+            append=False,
+        ) as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _validate_regular_path(temporary, directory, allow_missing=False)
+        _validate_regular_path(path, directory, allow_missing=True)
+        _assert_trusted_directory(directory)
+        os.replace(temporary, path)
+        committed = True
+    finally:
+        if not committed:
+            _unlink_trusted_file_if_identity(
+                temporary,
+                directory,
+                _path_identity_or_impossible(temporary),
+            )
+    try:
+        _fsync_trusted_directory(directory)
+    except (OSError, ReleaseError):
+        # The pointer is already atomically committed. Reporting failure here
+        # would make the caller delete the generation it now references.
+        pass
+
+
+def _path_identity_or_impossible(path: Path) -> tuple[int, int]:
+    try:
+        info = path.lstat()
+        return (info.st_dev, info.st_ino)
+    except OSError:
+        return (-1, -1)
 
 
 def _fsync_directory(path: Path) -> None:
