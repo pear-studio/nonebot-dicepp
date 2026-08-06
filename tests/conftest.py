@@ -17,7 +17,9 @@ from tests.support.aiosqlite_lifecycle import AiosqliteConnectionTracker
 from tests.support.paths import find_repository_root
 from tests.support.pollution import (
     assert_repository_unchanged,
+    assert_retired_runtime_unchanged,
     capture_repository_snapshot,
+    capture_retired_runtime_state,
 )
 from tests.support.xdist import (
     calculate_xdist_worker_count,
@@ -104,7 +106,25 @@ def aiosqlite_connection_tracker():
 
 
 @pytest.fixture(autouse=True)
-def _guard_aiosqlite_connection_lifecycle(aiosqlite_connection_tracker):
+def _guard_retired_runtime_pollution(request: pytest.FixtureRequest):
+    """Attribute legacy plugin-local writes to the test that caused them."""
+    baseline = capture_retired_runtime_state(_REAL_PROJECT)
+    yield
+    try:
+        assert_retired_runtime_unchanged(
+            _REAL_PROJECT,
+            baseline,
+            nodeid=request.node.nodeid,
+        )
+    except AssertionError as exc:
+        pytest.fail(str(exc), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _guard_aiosqlite_connection_lifecycle(
+    aiosqlite_connection_tracker,
+    _guard_retired_runtime_pollution,
+):
     """在 function-scoped fixture 清理完成后归因本测试遗留的连接。"""
     baseline = aiosqlite_connection_tracker.snapshot()
     yield

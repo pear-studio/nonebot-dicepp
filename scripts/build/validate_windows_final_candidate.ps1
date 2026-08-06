@@ -2,10 +2,13 @@ param(
     [Parameter(Mandatory = $true)][string]$Tag,
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$ArtifactRoot = ".",
-    [string]$RepositoryRoot = (Join-Path $PSScriptRoot "..\..")
+    [string]$RepositoryRoot = (Join-Path $PSScriptRoot "..\.."),
+    [string]$ValidatedSummaryPath = "",
+    [string]$ProcessDiagnosticsRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "windows_process_runner.ps1")
 $artifactRootPath = (Resolve-Path -LiteralPath $ArtifactRoot).Path
 $repositoryRootPath = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 $portableName = "DicePP-${Tag}-win64-Portable.zip"
@@ -32,35 +35,6 @@ foreach ($name in $expectedNames) {
     }
     if ((Get-Item -LiteralPath $path).Length -lt 1) {
         throw "Final Windows asset is empty: $name"
-    }
-}
-
-function Invoke-PackagedExe {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [string[]]$Arguments = @()
-    )
-    $stdout = New-TemporaryFile
-    $stderr = New-TemporaryFile
-    try {
-        $process = Start-Process `
-            -FilePath (Resolve-Path -LiteralPath $Path) `
-            -ArgumentList $Arguments `
-            -Wait `
-            -PassThru `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -WindowStyle Hidden
-        $out = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
-        $err = Get-Content $stderr -Raw -ErrorAction SilentlyContinue
-        $out = if ($null -eq $out) { "" } else { $out.Trim() }
-        $err = if ($null -eq $err) { "" } else { $err.Trim() }
-        if ($process.ExitCode -ne 0) {
-            throw "$Path $($Arguments -join ' ') exited $($process.ExitCode). stdout: '$out' stderr: '$err'"
-        }
-        return $out
-    } finally {
-        Remove-Item -LiteralPath $stdout, $stderr -ErrorAction SilentlyContinue
     }
 }
 
@@ -91,18 +65,30 @@ try {
     $dashboard = Join-Path $programRoot "DicePP.exe"
     $updateGuard = Join-Path $programRoot "DicePP-UpdateGuard.exe"
     $expectedRuntime = "DicePP v${Version}"
-    if ((Invoke-PackagedExe $runtime @("--version")) -ne $expectedRuntime) {
+    if ((Invoke-DicePPProcess -FilePath $runtime -Arguments @("--version") `
+        -Scenario "final-portable-runtime-version" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot) -ne $expectedRuntime) {
         throw "Portable Runtime version mismatch"
     }
-    Invoke-PackagedExe $runtime @("--smoke-check") | Out-Null
-    if ((Invoke-PackagedExe $dashboard @("--version")) -ne "DicePP Dashboard v${Version}") {
+    Invoke-DicePPProcess -FilePath $runtime -Arguments @("--smoke-check") `
+        -Scenario "final-portable-runtime-smoke" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
+    if ((Invoke-DicePPProcess -FilePath $dashboard -Arguments @("--version") `
+        -Scenario "final-portable-dashboard-version" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot) -ne "DicePP Dashboard v${Version}") {
         throw "Portable Dashboard version mismatch"
     }
-    Invoke-PackagedExe $dashboard @("--smoke-check") | Out-Null
-    if ((Invoke-PackagedExe $updateGuard @("--version")) -ne $Version) {
+    Invoke-DicePPProcess -FilePath $dashboard -Arguments @("--smoke-check") `
+        -Scenario "final-portable-dashboard-smoke" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
+    if ((Invoke-DicePPProcess -FilePath $updateGuard -Arguments @("--version") `
+        -Scenario "final-portable-update-guard-version" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot) -ne $Version) {
         throw "Portable UpdateGuard version mismatch"
     }
-    Invoke-PackagedExe $updateGuard @("--smoke-check") | Out-Null
+    Invoke-DicePPProcess -FilePath $updateGuard -Arguments @("--smoke-check") `
+        -Scenario "final-portable-update-guard-smoke" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
     $stableDashboard = Join-Path $extractRoot "DicePP.exe"
     if (-not (Test-Path -LiteralPath $stableDashboard -PathType Leaf)) {
         throw "Portable stable DicePP.exe is missing"
@@ -116,20 +102,13 @@ try {
 
 $setupPath = Join-Path $artifactRootPath $setupName
 $installRoot = Join-Path $env:RUNNER_TEMP "dicepp-setup-$([guid]::NewGuid())"
-$installer = $null
 try {
-    $installer = Start-Process `
-        -FilePath (Resolve-Path -LiteralPath $setupPath) `
-        -ArgumentList @("--silent", "--installto", $installRoot) `
-        -PassThru `
-        -WindowStyle Hidden
-    if (-not $installer.WaitForExit(20000)) {
-        taskkill /PID $installer.Id /T /F | Out-Null
-        throw "Setup did not finish within 20 seconds; lifecycle hook may be blocked"
-    }
-    if ($installer.ExitCode -ne 0) {
-        throw "Setup exited with code $($installer.ExitCode)"
-    }
+    Invoke-DicePPProcess `
+        -FilePath $setupPath `
+        -Arguments @("--silent", "--installto", $installRoot) `
+        -TimeoutSeconds 20 `
+        -Scenario "final-setup-install" `
+        -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
     $stableDashboard = Join-Path $installRoot "DicePP.exe"
     $payloadDashboard = Join-Path $installRoot "current\DicePP.exe"
     foreach ($path in @($stableDashboard, $payloadDashboard)) {

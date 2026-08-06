@@ -3,7 +3,9 @@ from pathlib import Path
 import pytest
 
 from tests.support.pollution import (
+    assert_retired_runtime_unchanged,
     assert_repository_unchanged,
+    capture_retired_runtime_state,
     capture_repository_snapshot,
 )
 
@@ -54,3 +56,49 @@ def test_repository_guard_accepts_an_unchanged_snapshot(
     baseline = capture_repository_snapshot(repository_root)
 
     assert_repository_unchanged(repository_root, baseline)
+
+
+def test_repository_guard_rejects_legacy_plugin_data_that_predates_baseline(
+    repository_root: Path,
+) -> None:
+    legacy_data = repository_root / "src" / "plugins" / "DicePP" / "Data"
+    legacy_data.mkdir(parents=True)
+    baseline = capture_repository_snapshot(repository_root)
+
+    with pytest.raises(AssertionError, match="retired runtime path exists") as error:
+        assert_repository_unchanged(repository_root, baseline)
+
+    assert str(Path("src/plugins/DicePP/Data")) in str(error.value)
+
+
+def test_function_guard_attributes_legacy_plugin_data_creation_to_nodeid(
+    repository_root: Path,
+) -> None:
+    baseline = capture_retired_runtime_state(repository_root)
+    legacy_data = repository_root / "src" / "plugins" / "DicePP" / "Data"
+    legacy_data.mkdir(parents=True)
+
+    with pytest.raises(AssertionError, match="test_writer_nodeid"):
+        assert_retired_runtime_unchanged(
+            repository_root,
+            baseline,
+            nodeid="tests/example.py::test_writer_nodeid",
+        )
+
+
+def test_function_guard_attributes_legacy_plugin_data_modification_to_nodeid(
+    repository_root: Path,
+) -> None:
+    legacy_data = repository_root / "src" / "plugins" / "DicePP" / "Data"
+    legacy_data.mkdir(parents=True)
+    marker = legacy_data / "state.txt"
+    marker.write_text("before", encoding="utf-8")
+    baseline = capture_retired_runtime_state(repository_root)
+    marker.write_text("after with different size", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="test_modifier_nodeid"):
+        assert_retired_runtime_unchanged(
+            repository_root,
+            baseline,
+            nodeid="tests/example.py::test_modifier_nodeid",
+        )

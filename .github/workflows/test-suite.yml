@@ -381,60 +381,53 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build/assemble_windows_package.ps1
-
-          function Invoke-PackagedExe {
-            param(
-              [Parameter(Mandatory = $true)][string]$Path,
-              [string[]]$Arguments = @()
-            )
-            $stdout = New-TemporaryFile
-            $stderr = New-TemporaryFile
-            try {
-              $process = Start-Process `
-                -FilePath (Resolve-Path $Path) `
-                -ArgumentList $Arguments `
-                -Wait `
-                -PassThru `
-                -RedirectStandardOutput $stdout `
-                -RedirectStandardError $stderr `
-                -WindowStyle Hidden
-              $out = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
-              $err = Get-Content $stderr -Raw -ErrorAction SilentlyContinue
-              if ($null -eq $out) {
-                $out = ""
-              } else {
-                $out = $out.Trim()
-              }
-              if ($null -eq $err) {
-                $err = ""
-              } else {
-                $err = $err.Trim()
-              }
-              if ($process.ExitCode -ne 0) {
-                throw "$Path $($Arguments -join ' ') exited $($process.ExitCode). stdout: '$out' stderr: '$err'"
-              }
-              return $out
-            } finally {
-              Remove-Item $stdout, $stderr -ErrorAction SilentlyContinue
-            }
-          }
+          . ./scripts/build/windows_process_runner.ps1
 
           $versionLine = (Get-Content pyproject.toml | Select-String '^version =').Line
           $version = [regex]::Match($versionLine, '"([^"\r\n]+)"').Groups[1].Value
           $expectedBot = "DicePP v$version"
-          $actualBot = Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--version")
+          $diagnostics = "dist/windows-process-diagnostics"
+          $actualBot = Invoke-DicePPProcess `
+            -FilePath "dist/DicePP/DicePP-Runtime.exe" `
+            -Arguments @("--version") `
+            -Scenario "assembled-runtime-version" `
+            -DiagnosticsRoot $diagnostics
           if ($actualBot -ne $expectedBot) {
             throw "Bot version mismatch: expected '$expectedBot', got '$actualBot'"
           }
-          Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--smoke-check") | Out-Null
+          Invoke-DicePPProcess `
+            -FilePath "dist/DicePP/DicePP-Runtime.exe" `
+            -Arguments @("--smoke-check") `
+            -Scenario "assembled-runtime-smoke" `
+            -DiagnosticsRoot $diagnostics | Out-Null
 
           $expectedDashboard = $expectedBot.Replace("DicePP v", "DicePP Dashboard v")
-          $actualDashboard = Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")
+          $actualDashboard = Invoke-DicePPProcess `
+            -FilePath "dist/DicePP/DicePP.exe" `
+            -Arguments @("--version") `
+            -Scenario "assembled-dashboard-version" `
+            -DiagnosticsRoot $diagnostics
           if ($actualDashboard -ne $expectedDashboard) {
             throw "Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
           }
-          Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
-          Invoke-PackagedExe "dist/DicePP/DicePP-UpdateGuard.exe" @("--smoke-check") | Out-Null
+          Invoke-DicePPProcess `
+            -FilePath "dist/DicePP/DicePP.exe" `
+            -Arguments @("--smoke-check") `
+            -Scenario "assembled-dashboard-smoke" `
+            -DiagnosticsRoot $diagnostics | Out-Null
+          Invoke-DicePPProcess `
+            -FilePath "dist/DicePP/DicePP-UpdateGuard.exe" `
+            -Arguments @("--smoke-check") `
+            -Scenario "assembled-update-guard-smoke" `
+            -DiagnosticsRoot $diagnostics | Out-Null
+      - name: Upload Windows process diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-windows-process-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/windows-process-diagnostics
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Run Windows package smokes
         env:
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"

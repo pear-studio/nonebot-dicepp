@@ -4,12 +4,63 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
+
+
+_RETIRED_RUNTIME_PATHS = (Path("src/plugins/DicePP/Data"),)
 
 
 @dataclass(frozen=True)
 class RepositorySnapshot:
     files: dict[str, str]
+
+
+@dataclass(frozen=True)
+class RetiredRuntimeState:
+    entries: tuple[tuple[str, int, int, int], ...]
+
+
+def capture_retired_runtime_state(root: Path) -> RetiredRuntimeState | None:
+    """Capture cheap metadata for the small retired plugin-local data tree."""
+    retired_root = root / _RETIRED_RUNTIME_PATHS[0]
+    if not retired_root.exists():
+        return None
+    entries: list[tuple[str, int, int, int]] = []
+    for directory, child_dirs, filenames in os.walk(
+        retired_root, followlinks=False
+    ):
+        directory_path = Path(directory)
+        names = [*child_dirs, *filenames]
+        for name in names:
+            path = directory_path / name
+            stat = path.lstat()
+            entries.append(
+                (
+                    str(path.relative_to(retired_root)),
+                    stat.st_mode,
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                )
+            )
+        child_dirs[:] = [
+            name for name in child_dirs if not (directory_path / name).is_symlink()
+        ]
+    return RetiredRuntimeState(entries=tuple(sorted(entries)))
+
+
+def assert_retired_runtime_unchanged(
+    root: Path,
+    baseline: RetiredRuntimeState | None,
+    *,
+    nodeid: str,
+) -> None:
+    current = capture_retired_runtime_state(root)
+    if current != baseline:
+        raise AssertionError(
+            "Test created or modified retired runtime path "
+            f"src/plugins/DicePP/Data: {nodeid}"
+        )
 
 
 def _hash_file(path: Path) -> str:
@@ -66,6 +117,12 @@ def assert_repository_unchanged(
 ) -> None:
     """Raise when a test changed the checkout's real config/ or data/ trees."""
     changes = _describe_changes(baseline, capture_repository_snapshot(root))
+    for relative_path in _RETIRED_RUNTIME_PATHS:
+        if (root / relative_path).exists():
+            changes.append(
+                "retired runtime path exists in the repository: "
+                f"{relative_path}"
+            )
     if changes:
         raise AssertionError(
             "Test pollution detected in the real repository.\n"
