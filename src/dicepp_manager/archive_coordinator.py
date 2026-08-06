@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-import json
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 from uuid import uuid4
-from datetime import datetime
 
-from dicepp_data import DATA_CATALOG, InstanceLayout
+from dicepp_data import InstanceLayout
 
 from .archive import (
     ArchiveError,
     apply_archive,
     create_archive,
     delete_archive,
-    enforce_system_retention,
     estimate_archive,
     export_archive_path,
     import_archive,
@@ -27,23 +23,20 @@ from .archive import (
     read_archive_detail,
     verify_archive,
 )
+from .archive_housekeeping import ArchiveHousekeeping
+from .maintenance_policy import is_terminal_rollback_failure
+from .maintenance_runtime import (
+    CONTROL_GATE_ENFORCED,
+    CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL,
+    CONTROL_GATE_SKIPPED_NO_BOUND_BOTS,
+    HealthProbe,
+    MaintenanceRuntimeSupport,
+)
 from .models import ManagerOperation
 from .service import MaintenanceReservation, ManagerService
 
 
-HealthProbe = Callable[[], bool | dict[str, Any] | Awaitable[bool | dict[str, Any]]]
 FaultHook = Callable[[str], None]
-
-CONTROL_GATE_ENFORCED = "enforced"
-CONTROL_GATE_SKIPPED_NO_BOUND_BOTS = "skipped_no_bound_bots"
-CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL = (
-    "skipped_no_active_control_channel"
-)
-
-_CONTROL_GATE_SKIP_REASONS = {
-    CONTROL_GATE_SKIPPED_NO_BOUND_BOTS: "no_bound_bots",
-    CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL: "no_active_control_channel",
-}
 
 
 class ArchiveTransactionError(ArchiveError):
@@ -69,11 +62,50 @@ class ArchiveCoordinator:
         self.layout = layout
         self.service = service
         self.store = service.store
-        self.control_probe = control_probe
         self.fault_hook = fault_hook
-        self.health_timeout = health_timeout
-        self.health_interval = health_interval
-        self.health_consecutive = health_consecutive
+        self.runtime_support = MaintenanceRuntimeSupport(
+            layout=layout,
+            service=service,
+            control_probe=control_probe,
+            health_timeout=health_timeout,
+            health_interval=health_interval,
+            health_consecutive=health_consecutive,
+        )
+        self.housekeeping = ArchiveHousekeeping(layout=layout, store=self.store)
+        service.maintenance_runtime_support = self.runtime_support
+        service.archive_housekeeping = self.housekeeping
+
+    @property
+    def control_probe(self) -> HealthProbe | None:
+        return self.runtime_support.control_probe
+
+    @control_probe.setter
+    def control_probe(self, value: HealthProbe | None) -> None:
+        self.runtime_support.control_probe = value
+
+    @property
+    def health_timeout(self) -> float:
+        return self.runtime_support.health_timeout
+
+    @health_timeout.setter
+    def health_timeout(self, value: float) -> None:
+        self.runtime_support.health_timeout = value
+
+    @property
+    def health_interval(self) -> float:
+        return self.runtime_support.health_interval
+
+    @health_interval.setter
+    def health_interval(self, value: float) -> None:
+        self.runtime_support.health_interval = value
+
+    @property
+    def health_consecutive(self) -> int:
+        return self.runtime_support.health_consecutive
+
+    @health_consecutive.setter
+    def health_consecutive(self, value: int) -> None:
+        self.runtime_support.health_consecutive = value
 
     def _fault(self, phase: str) -> None:
         if self.fault_hook is not None:
@@ -171,7 +203,7 @@ class ArchiveCoordinator:
                         detail=create_detail,
                     )
 
-                original_running, stopped = await self._quiesce(
+                original_running, stopped = await self.runtime_support.quiesce(
                     maintenance,
                     state_callback=record_runtime_state,
                 )
@@ -200,9 +232,9 @@ class ArchiveCoordinator:
                 )
                 create_detail["archive"] = archive["filename"]
                 self._fault("restart")
-                await self._restart(maintenance, original_running)
+                await self.runtime_support.restart(maintenance, original_running)
                 stopped = []
-            deleted = self._apply_retention_if_safe()
+            deleted = self.housekeeping.apply_retention()
             operation.transition(
                 "succeeded",
                 message="Archive created",
@@ -224,7 +256,7 @@ class ArchiveCoordinator:
             )
             return operation
         except Exception as exc:
-            restart_error = await self._best_effort_restart(
+            restart_error = await self.runtime_support.best_effort_restart(
                 stopped or original_running,
                 maintenance_lease=maintenance_lease,
             )
@@ -247,7 +279,7 @@ class ArchiveCoordinator:
                 detail={**create_detail, **detail},
             )
             if restart_error is None:
-                self._apply_retention_if_safe()
+                self.housekeeping.apply_retention()
             raise ArchiveTransactionError(str(exc), detail=detail) from exc
 
     async def restore(
@@ -301,7 +333,7 @@ class ArchiveCoordinator:
         }
         self._journal(transaction_id, operation, "preparing", detail)
         try:
-            baseline, control_gate = await self._capture_control_baseline()
+            baseline, control_gate = await self.runtime_support.capture_control_baseline()
             detail["control_heartbeat_baseline"] = baseline
             detail["control_gate"] = control_gate
             self._journal(transaction_id, operation, "preparing", detail)
@@ -310,7 +342,7 @@ class ArchiveCoordinator:
                     detail["original_running"] = running
                     self._journal(transaction_id, operation, "quiescing", detail)
 
-                original_running, _stopped = await self._quiesce(
+                original_running, _stopped = await self.runtime_support.quiesce(
                     maintenance,
                     state_callback=record_restore_state,
                 )
@@ -350,15 +382,15 @@ class ArchiveCoordinator:
                 self._journal(transaction_id, operation, "migrating", detail)
                 self._fault("migration")
                 migrations = await asyncio.to_thread(
-                    self._migrate_and_validate_schema,
+                    self.runtime_support.migrate_and_validate_schema,
                     set(detail["opaque_sqlite"]["files"]),
                 )
 
                 self._fault("restart")
-                await self._restart(maintenance, original_running)
+                await self.runtime_support.restart(maintenance, original_running)
                 self._journal(transaction_id, operation, "health_check", detail)
                 self._fault("health")
-                health = await self._hard_health(
+                health = await self.runtime_support.hard_health(
                     original_running,
                     control_baseline=detail.get("control_heartbeat_baseline"),
                     control_gate=control_gate,
@@ -375,7 +407,7 @@ class ArchiveCoordinator:
                     detail,
                     status="committed",
                 )
-            self._apply_retention_if_safe()
+            self.housekeeping.apply_retention()
             operation.transition(
                 "succeeded",
                 message="Archive restore committed",
@@ -409,7 +441,7 @@ class ArchiveCoordinator:
             )
             self.store.save(operation)
             if rollback.get("succeeded", False):
-                self._apply_retention_if_safe()
+                self.housekeeping.apply_retention()
             raise ArchiveTransactionError(
                 failed_detail["error"],
                 detail=failed_detail,
@@ -433,8 +465,8 @@ class ArchiveCoordinator:
                 )
                 if operation is None:
                     operation = self.new_operation("archive.create.recovery")
-                self._cleanup_inprogress()
-                restart_error = await self._best_effort_restart(
+                self.housekeeping.cleanup_inprogress()
+                restart_error = await self.runtime_support.best_effort_restart(
                     [
                         value
                         for value in detail.get("original_running", [])
@@ -469,9 +501,7 @@ class ArchiveCoordinator:
                 continue
             detail = dict(journal.get("detail") or {})
             transaction_id = str(journal["transaction_id"])
-            if journal.get("status") == "rollback_failed" and detail.get(
-                "commit_point"
-            ) not in (None, "not_started"):
+            if is_terminal_rollback_failure(journal):
                 # Terminal rollback adjudication rule (shared with
                 # upgrade.UpgradeCoordinator.recover): the rollback already
                 # re-applied the pre-restore archive and was adjudicated
@@ -496,8 +526,8 @@ class ArchiveCoordinator:
             if operation is None:
                 operation = self.new_operation("archive.restore.recovery")
             if phase in {"preparing", "quiescing", "quiesced", "pre_restore_verified"}:
-                self._cleanup_inprogress()
-                restart_error = await self._best_effort_restart(
+                self.housekeeping.cleanup_inprogress()
+                restart_error = await self.runtime_support.best_effort_restart(
                     [
                         value
                         for value in detail.get("original_running", [])
@@ -530,7 +560,7 @@ class ArchiveCoordinator:
                 )
                 self.store.save(operation)
                 if restart_error is None:
-                    self._apply_retention_if_safe()
+                    self.housekeeping.apply_retention()
                 continue
             if phase in {"healthy", "committed"} or detail.get("commit_point") == "health_passed":
                 self._journal(
@@ -585,7 +615,7 @@ class ArchiveCoordinator:
     ) -> dict[str, Any]:
         pre_name = detail.get("pre_restore_filename")
         if detail.get("commit_point") == "not_started" or not isinstance(pre_name, str):
-            restart_error = await self._best_effort_restart(
+            restart_error = await self.runtime_support.best_effort_restart(
                 [
                     value
                     for value in detail.get("original_running", [])
@@ -609,7 +639,7 @@ class ArchiveCoordinator:
         self._journal(transaction_id, operation, "rolling_back", detail)
         try:
             rollback_baseline, rollback_control_gate = (
-                await self._capture_control_baseline()
+                await self.runtime_support.capture_control_baseline()
             )
             detail["rollback_control_heartbeat_baseline"] = rollback_baseline
             detail["rollback_control_gate"] = rollback_control_gate
@@ -618,7 +648,7 @@ class ArchiveCoordinator:
                 timeout=1,
                 allow_startup_recovery=allow_startup_recovery,
             ) as maintenance:
-                await self._quiesce(maintenance)
+                await self.runtime_support.quiesce(maintenance)
                 rollback_result = await asyncio.to_thread(
                     apply_archive,
                     pre_name,
@@ -637,10 +667,10 @@ class ArchiveCoordinator:
                 )
                 detail["pre_restore_opaque_sqlite"] = rollback_opaque_sqlite
                 migrations = await asyncio.to_thread(
-                    self._migrate_and_validate_schema,
+                    self.runtime_support.migrate_and_validate_schema,
                     set(rollback_opaque_sqlite["files"]),
                 )
-                await self._restart(
+                await self.runtime_support.restart(
                     maintenance,
                     [
                         value
@@ -648,7 +678,7 @@ class ArchiveCoordinator:
                         if isinstance(value, str)
                     ],
                 )
-                health = await self._hard_health(
+                health = await self.runtime_support.hard_health(
                     detail.get("original_running", []),
                     control_baseline=rollback_baseline,
                     control_gate=rollback_control_gate,
@@ -678,277 +708,6 @@ class ArchiveCoordinator:
             )
             return {"succeeded": False, "error": detail["rollback_error"]}
 
-    async def _quiesce(
-        self,
-        maintenance,
-        *,
-        state_callback: Callable[[list[str]], None] | None = None,
-    ) -> tuple[list[str], list[str]]:
-        units = self.service.units()
-        ids = [unit.runtime_unit_id for unit in units]
-        statuses = await self.service.runtime_adapter.status(ids)
-        original_running = [
-            unit_id
-            for unit_id, status in statuses.items()
-            if status.runtime_state == "running"
-        ]
-        if state_callback is not None:
-            state_callback(list(original_running))
-        stopped: list[str] = []
-        for unit_id in original_running:
-            await maintenance.operate_runtime_unit(unit_id, "stop")
-            stopped.append(unit_id)
-        return original_running, stopped
-
-    async def _restart(self, maintenance, runtime_unit_ids: list[str]) -> None:
-        for unit_id in runtime_unit_ids:
-            await maintenance.operate_runtime_unit(unit_id, "start")
-
-    async def _best_effort_restart(
-        self,
-        runtime_unit_ids: list[str],
-        *,
-        maintenance_lease: MaintenanceReservation | None = None,
-        allow_startup_recovery: bool = False,
-    ) -> str | None:
-        if not runtime_unit_ids:
-            return None
-        try:
-            with self._maintenance_context(
-                maintenance_lease,
-                timeout=1,
-                allow_startup_recovery=allow_startup_recovery,
-            ) as maintenance:
-                await self._restart(maintenance, runtime_unit_ids)
-        except Exception as exc:
-            return str(exc) or type(exc).__name__
-        return None
-
-    def _migrate_and_validate_schema(
-        self,
-        skip_paths: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        targets = _schema_targets()
-        applied: list[dict[str, Any]] = []
-        skipped = skip_paths or set()
-        for match in DATA_CATALOG.collect(self.layout, "full"):
-            if match.logical_path in skipped:
-                continue
-            asset = DATA_CATALOG.find_for_logical_path(match.logical_path)
-            if asset is None or asset.schema is None:
-                continue
-            target = targets.get(asset.schema.name)
-            if target is None:
-                raise ArchiveError(f"SchemaTarget is unavailable: {asset.schema.name}")
-            asset.schema.validate_target(target)
-            from plugins.DicePP.core.data.schema.lifecycle import apply_schema_target
-
-            result = apply_schema_target(match.path, target)
-            applied.append(
-                {
-                    "path": match.logical_path,
-                    "schema": asset.schema.name,
-                    "from": result.current_version,
-                    "to": result.target_version,
-                    "applied_versions": result.applied_versions,
-                }
-            )
-        return applied
-
-    async def _hard_health(
-        self,
-        expected_running: list[str],
-        *,
-        control_baseline: str | None = None,
-        control_gate: str = CONTROL_GATE_ENFORCED,
-        control_failure_is_warning: bool = False,
-    ) -> dict[str, Any]:
-        self.store.ensure_schema()
-        config = self._validate_config()
-        runtime = await self._wait_runtime_healthy(expected_running)
-        warnings = [
-            "External NapCat/QQ/GitHub/LLM services are not hard health checks"
-        ]
-        control_skip_reason = _CONTROL_GATE_SKIP_REASONS.get(control_gate)
-        observe_optional_control = (
-            control_failure_is_warning
-            and control_gate == CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
-        )
-        if expected_running and (
-            control_skip_reason is None or observe_optional_control
-        ):
-            effective_baseline = (
-                None if observe_optional_control else control_baseline
-            )
-            try:
-                control = await self._run_probe(
-                    self.control_probe,
-                    "control",
-                    predicate=lambda result: _heartbeat_is_newer(
-                        result.get("heartbeat"),
-                        effective_baseline,
-                    ),
-                    failure_message=(
-                        "Bot control channel did not reconnect after restart"
-                        if observe_optional_control
-                        else "Bot control heartbeat did not advance after restart"
-                    ),
-                )
-            except Exception as exc:
-                if not control_failure_is_warning:
-                    raise
-                warning = str(exc)
-                control = {
-                    "ok": False,
-                    "status": "degraded",
-                    "warning": warning,
-                }
-                warnings.append(warning)
-        elif expected_running:
-            # No enforceable control baseline existed, so requiring a newer
-            # heartbeat would always fail.  Rollback still observes an
-            # optional channel above when Bots are bound but disconnected.
-            control = {
-                "status": "not_applicable",
-                "reason": control_skip_reason,
-            }
-        else:
-            control = {"status": "not_applicable"}
-        # The runtime must still be healthy after the slower endpoint/control
-        # merely at the beginning of the health window.
-        runtime = await self._wait_runtime_healthy(expected_running)
-        return {
-            "manager_store": "ok",
-            "config": config,
-            "schema": "ok",
-            "runtime_units": runtime,
-            "control": control,
-            "warnings": warnings,
-        }
-
-    def _validate_config(self) -> dict[str, Any]:
-        files: list[str] = []
-        candidates = [self.layout.config_user]
-        if self.layout.config_bots_dir.exists():
-            candidates.extend(sorted(self.layout.config_bots_dir.glob("*.json")))
-        for path in candidates:
-            if not path.exists():
-                continue
-            if path.is_symlink() or not path.is_file():
-                raise ArchiveError(f"Configuration is not a regular file: {path.name}")
-            try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ArchiveError(f"Configuration cannot be loaded: {path.name}") from exc
-            if not isinstance(value, dict):
-                raise ArchiveError(f"Configuration root must be an object: {path.name}")
-            files.append(path.relative_to(self.layout.root).as_posix())
-        return {"status": "ok", "files": files}
-
-    async def _wait_runtime_healthy(
-        self,
-        expected_running: list[str],
-    ) -> list[str]:
-        if not expected_running:
-            return []
-        deadline = asyncio.get_running_loop().time() + self.health_timeout
-        consecutive = 0
-        last_error = "Runtime status unavailable"
-        while asyncio.get_running_loop().time() < deadline:
-            manager = await self.service.status()
-            runtime_rows = {
-                row["runtime_unit_id"]: row
-                for row in manager.get("runtime_units", [])
-                if isinstance(row, dict)
-            }
-            healthy = True
-            for unit_id in expected_running:
-                row = runtime_rows.get(unit_id)
-                runtime = row.get("runtime") if isinstance(row, dict) else None
-                if not isinstance(runtime, dict) or runtime.get("runtime_state") != "running":
-                    healthy = False
-                    last_error = f"RuntimeUnit did not remain running: {unit_id}"
-                    break
-                if runtime.get("health") in {"failed", "unhealthy", "unavailable"}:
-                    healthy = False
-                    last_error = f"RuntimeUnit health failed: {unit_id}"
-                    break
-            consecutive = consecutive + 1 if healthy else 0
-            if consecutive >= self.health_consecutive:
-                return expected_running
-            await asyncio.sleep(self.health_interval)
-        raise ArchiveError(last_error)
-
-    async def _capture_control_baseline(self) -> tuple[Any, str]:
-        """Capture the control heartbeat baseline and decide the health gate.
-
-        The gate decision is anchored at baseline time: without any bound
-        bot, or without a currently authenticated session whose heartbeat
-        is fresh, no control heartbeat can be required to advance across
-        the restart.  Historical heartbeats from disconnected transports
-        are deliberately insufficient.
-        """
-        baseline = await self._probe_once(self.control_probe)
-        heartbeat = baseline.get("heartbeat") if isinstance(baseline, dict) else None
-        status = await self.service.status()
-        bots = status.get("bots") if isinstance(status, dict) else None
-        if not bots:
-            return heartbeat, CONTROL_GATE_SKIPPED_NO_BOUND_BOTS
-        active_sessions = (
-            baseline.get("active_authenticated_sessions")
-            if isinstance(baseline, dict)
-            else None
-        )
-        if (
-            not isinstance(active_sessions, int)
-            or isinstance(active_sessions, bool)
-            or active_sessions <= 0
-            or baseline.get("ok") is not True
-        ):
-            return heartbeat, CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
-        return heartbeat, CONTROL_GATE_ENFORCED
-
-    async def _probe_once(self, probe: HealthProbe | None) -> dict[str, Any]:
-        if probe is None:
-            return {
-                "status": "warning",
-                "message": "health probe is not configured",
-            }
-        if inspect.iscoroutinefunction(probe):
-            result = await probe()
-        else:
-            result = await asyncio.to_thread(probe)
-        if inspect.isawaitable(result):
-            result = await result
-        if isinstance(result, dict):
-            return result
-        return {"status": "ok" if result is not False else "failed", "ok": result is not False}
-
-    async def _run_probe(
-        self,
-        probe: HealthProbe | None,
-        name: str,
-        *,
-        predicate: Callable[[dict[str, Any]], bool] | None = None,
-        failure_message: str | None = None,
-    ) -> dict[str, Any]:
-        deadline = asyncio.get_running_loop().time() + self.health_timeout
-        consecutive = 0
-        last: dict[str, Any] = {}
-        while asyncio.get_running_loop().time() < deadline:
-            last = await self._probe_once(probe)
-            healthy = not (
-                last.get("ok") is False
-                or last.get("status") in {"failed", "unhealthy"}
-            )
-            if healthy and predicate is not None:
-                healthy = predicate(last)
-            consecutive = consecutive + 1 if healthy else 0
-            if consecutive >= self.health_consecutive:
-                return last
-            await asyncio.sleep(self.health_interval)
-        raise ArchiveError(failure_message or f"{name} health probe failed")
-
     def _journal(
         self,
         transaction_id: str,
@@ -966,53 +725,3 @@ class ArchiveCoordinator:
             operation_id=operation.operation_id,
             detail=detail,
         )
-
-    def _cleanup_inprogress(self) -> None:
-        directory = self.layout.manager_backups_dir
-        if not directory.exists():
-            return
-        for path in directory.iterdir():
-            if path.is_file() and path.name.endswith((".inprogress", ".importing")):
-                try:
-                    path.unlink()
-                except OSError:
-                    continue
-
-    def _apply_retention_if_safe(self) -> list[str]:
-        return enforce_system_retention(
-            layout=self.layout,
-            protected=self.store.protected_archive_names(),
-        )
-
-
-def _schema_targets() -> dict[str, Any]:
-    """Load the existing SchemaTarget definitions without duplicating migrations."""
-    from plugins.DicePP.core.data.schema.bot_core import BOT_CORE_TARGET
-    from plugins.DicePP.core.data.schema.bot_log import BOT_LOG_TARGET
-    from plugins.DicePP.core.data.schema.instance import INSTANCE_TARGET
-    from plugins.DicePP.module.persona.data.schema import PERSONA_TARGET
-
-    return {
-        target.name: target
-        for target in (
-            INSTANCE_TARGET,
-            BOT_CORE_TARGET,
-            BOT_LOG_TARGET,
-            PERSONA_TARGET,
-        )
-    }
-
-
-def _heartbeat_is_newer(value: Any, baseline: str | None) -> bool:
-    if not isinstance(value, str):
-        return False
-    try:
-        current = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        previous = (
-            datetime.fromisoformat(baseline.replace("Z", "+00:00"))
-            if baseline
-            else None
-        )
-    except ValueError:
-        return False
-    return previous is None or current > previous

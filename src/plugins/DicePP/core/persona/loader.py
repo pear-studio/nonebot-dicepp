@@ -52,7 +52,8 @@ class PersonaLoader:
     def set_character_path(self, path: str) -> None:
         """Update the character directory and reload all personas.
 
-        Called from reload_config() when persona_ai.character_path changes.
+        Available to explicit Persona lifecycle code; general configuration
+        changes are applied by restarting the RuntimeUnit.
         """
         self._dir = Path(path)
         self.reload()

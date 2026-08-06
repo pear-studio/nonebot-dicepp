@@ -29,6 +29,10 @@ from dicepp_control.protocol import (
 
 logger = logging.getLogger("bot.control_channel")
 
+CONFIG_RELOAD_DISABLED_MESSAGE = (
+    "通用配置热重载已停用；请重启 Bot RuntimeUnit 使配置生效"
+)
+
 _STATUS_INTERVAL = 5
 _PING_TIMEOUT = 60
 _RECONNECT_BASE = 1.0
@@ -74,7 +78,6 @@ class ControlChannelClient:
             # This is manager/control/control-token, not the Manager HTTP
             # api-token or the legacy data/dicepp.db value.
             token="manager-owned-token",
-            on_reload=bot.reload_config,
         )
         await client.connect()
         # ... bot runs ...
@@ -89,7 +92,6 @@ class ControlChannelClient:
             bot_id="123456",
             manager_url="ws://manager:4091/v1/control/ws",
             token_provider=lambda: ensure_token(project_root),
-            on_reload=bot.reload_config,
         )
     """
 
@@ -100,7 +102,7 @@ class ControlChannelClient:
         manager_url: str,
         token: str | None = None,
         token_provider: Callable[[], str | None] | None = None,
-        on_reload: Callable[[], object],
+        on_reload: Callable[[], object] | None = None,
     ) -> None:
         if (token is None) == (token_provider is None):
             raise ValueError("provide exactly one of token or token_provider")
@@ -109,7 +111,10 @@ class ControlChannelClient:
         self._manager_url = manager_url
         self._token = token
         self._token_provider = token_provider
-        self._on_reload = on_reload
+        # Retain the keyword only for mixed-version constructor compatibility.
+        # General configuration reload is retired; callbacks are never stored
+        # or invoked because any mutation here could partially apply config.
+        del on_reload
 
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._running = False
@@ -332,14 +337,9 @@ class ControlChannelClient:
             self._fire(self._handle_reload(rid))
 
     async def _handle_reload(self, rid: str) -> None:
-        """Handle a reload request without blocking the message loop."""
-        try:
-            await asyncio.to_thread(self._on_reload)
-            errors: list[str] = []
-            ok = True
-        except Exception as exc:
-            errors = [f"{type(exc).__name__}: {exc}"]
-            ok = False
+        """Keep the v1 reload response shape without changing Bot state."""
+        errors = [CONFIG_RELOAD_DISABLED_MESSAGE]
+        ok = False
         try:
             await self._ws.send_str(encode(reload_result_msg(self._bot_id, ok, errors, reply_to=rid)))
         except Exception as exc:

@@ -97,6 +97,36 @@ def _client():
     )
 
 
+@pytest.mark.asyncio
+async def test_legacy_control_reload_never_invokes_compatibility_callback():
+    sent: list[str] = []
+    mutated_state: list[str] = []
+
+    class RecordingWebSocket:
+        async def send_str(self, message: str) -> None:
+            sent.append(message)
+
+    client = ws_client.ControlChannelClient(
+        bot_id="test-bot",
+        manager_url="ws://manager:4091/v1/control/ws",
+        token="test-token",
+        on_reload=lambda: mutated_state.append("mutated"),
+    )
+    client._ws = RecordingWebSocket()
+
+    await client._handle_reload("request-1")
+
+    result = decode(sent[0])
+    assert result["type"] == "reload_result"
+    assert result["reply_to"] == "request-1"
+    assert result["payload"] == {
+        "bot_id": "test-bot",
+        "success": False,
+        "errors": [ws_client.CONFIG_RELOAD_DISABLED_MESSAGE],
+    }
+    assert mutated_state == []
+
+
 def test_client_reports_installed_package_version():
     assert _client()._version == package_version("dicepp")
 

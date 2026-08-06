@@ -4,7 +4,9 @@ from typing import Optional, TYPE_CHECKING
 from fastapi import FastAPI, HTTPException, Request
 
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender
-from plugins.DicePP.core.config.loader import ConfigValidationError
+from plugins.DicePP.module.dashboard_reporter.ws_client import (
+    CONFIG_RELOAD_DISABLED_MESSAGE,
+)
 
 if TYPE_CHECKING:
     from plugins.DicePP.core.bot import Bot
@@ -98,14 +100,10 @@ async def execute_command(request: Request):
 
 @dpp_api.post("/reload")
 async def reload_config():
-    """Reload bot configuration from disk (user.json, global.json, bots/*.json).
-
-    On validation error the old config is preserved and the error is returned
-    so the dashboard can display it without crashing the bot.
-    """
-    bot, _ = _require_runtime()
-    try:
-        bot.reload_config()
-    except ConfigValidationError as exc:
-        return {"ok": False, "message": str(exc)}
-    return {"ok": True, "message": "配置已重载"}
+    """Retain the legacy route while refusing unsafe partial application."""
+    _require_runtime()
+    return {
+        "ok": False,
+        "message": CONFIG_RELOAD_DISABLED_MESSAGE,
+        "restart_required": True,
+    }

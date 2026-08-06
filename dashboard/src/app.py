@@ -223,19 +223,14 @@ def _is_xlsx(path: Path) -> bool:
         return False
 
 
-async def _notify_reload(request: Request, bot_id: Optional[str] = None) -> list[dict]:
-    """Request reload exclusively through Manager's control API."""
-    try:
-        return await _get_manager_client(request).reload_bots(bot_id)
-    except ManagerClientError as exc:
-        # Saving the configuration has already completed through Manager.  Do
-        # not hide a mixed-version or unavailable-control failure behind an
-        # empty result: the Dashboard can show a safe retryable outcome.
-        return [{
-            "bot_id": bot_id or "*",
-            "status": "error",
-            "error": str(exc),
-        }]
+def _config_save_result(result: dict, **extra: object) -> dict:
+    """Expose Manager's deferred-application contract to the Dashboard."""
+    return _ok({
+        **extra,
+        "saved": bool(result.get("saved", True)),
+        "application": result.get("application", "deferred"),
+        "restart_required": bool(result.get("restart_required", True)),
+    })
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -1208,7 +1203,7 @@ async def config_set(request: Request):
 
     _apply_deep(user_cfg, path, value)
     try:
-        await _get_manager_client(request).save_user_config(user_cfg)
+        save_result = await _get_manager_client(request).save_user_config(user_cfg)
     except ManagerClientError as exc:
         return _manager_error_response(exc)
 
@@ -1217,10 +1212,7 @@ async def config_set(request: Request):
     audit_log(db_path, "config.set", path, audit_detail,
               ip=request.client.host if request.client else "")
 
-    # Notify all bots
-    reload_results = await _notify_reload(request)
-
-    return _ok({"saved": True, "reload": reload_results})
+    return _config_save_result(save_result)
 
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
@@ -1241,7 +1233,7 @@ async def config_reset(request: Request):
 
     removed = _remove_deep(user_cfg, path)
     try:
-        await _get_manager_client(request).save_user_config(user_cfg)
+        save_result = await _get_manager_client(request).save_user_config(user_cfg)
     except ManagerClientError as exc:
         return _manager_error_response(exc)
 
@@ -1249,9 +1241,7 @@ async def config_reset(request: Request):
     audit_log(db_path, "config.reset", path, "reset to default",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(request) if removed else []
-
-    return _ok({"removed": removed, "reload": reload_results})
+    return _config_save_result(save_result, removed=removed)
 
 
 # NOTE: Not consumed by Dashboard frontend; retained for external API consumers
@@ -1269,14 +1259,14 @@ async def config_bot_get(bot_id: str, request: Request):
 
 @app.post("/api/config/bots/{bot_id}/save", dependencies=[Depends(require_auth)])
 async def config_bot_save(bot_id: str, request: Request):
-    """Validate JSON, persist bot config through Manager, audit, notify reload."""
+    """Validate JSON, persist bot config through Manager, and audit the save."""
     _validate_identifier(bot_id, "bot_id")
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
 
     try:
-        await _get_manager_client(request).save_bot_config(bot_id, body)
+        save_result = await _get_manager_client(request).save_bot_config(bot_id, body)
     except ManagerClientError as exc:
         return _manager_error_response(exc)
 
@@ -1284,9 +1274,7 @@ async def config_bot_save(bot_id: str, request: Request):
     audit_log(db_path, "config.bot.save", f"bots/{bot_id}", "",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(request, bot_id)
-
-    return _ok({"saved": True, "reload": reload_results})
+    return _config_save_result(save_result)
 
 
 @app.get("/api/config/user", dependencies=[Depends(require_auth)])
@@ -1301,13 +1289,13 @@ async def config_user_get(request: Request):
 
 @app.post("/api/config/user/save", dependencies=[Depends(require_auth)])
 async def config_user_save(request: Request):
-    """Validate then overwrite user.json through Manager, audit and reload."""
+    """Validate then overwrite user.json through Manager and audit the save."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
 
     try:
-        await _get_manager_client(request).save_user_config(body)
+        save_result = await _get_manager_client(request).save_user_config(body)
     except ManagerClientError as exc:
         return _manager_error_response(exc)
 
@@ -1315,8 +1303,7 @@ async def config_user_save(request: Request):
     audit_log(db_path, "config.user.save", "user.json", "",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(request)
-    return _ok({"saved": True, "reload": reload_results})
+    return _config_save_result(save_result)
 
 
 # ── Persona character cards ──────────────────────────────────────────────────

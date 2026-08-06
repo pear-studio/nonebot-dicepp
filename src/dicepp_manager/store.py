@@ -8,6 +8,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from .maintenance_policy import is_terminal_rollback_failure
 from .models import ManagerOperation, utc_now
 
 OPERATIONS_SQL = """CREATE TABLE IF NOT EXISTS manager_operations (
@@ -198,9 +199,7 @@ class ManagerOperationStore:
         retired: list[str] = []
         for journal in self.list_recoverable_journals():
             detail = journal.get("detail") or {}
-            if journal.get("status") != "rollback_failed":
-                continue
-            if detail.get("commit_point") in (None, "not_started"):
+            if not is_terminal_rollback_failure(journal):
                 continue
             transaction_id = str(journal["transaction_id"])
             self.write_journal(

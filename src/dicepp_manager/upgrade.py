@@ -31,10 +31,13 @@ from dicepp_meta import get_version
 from packaging.version import Version
 
 from .archive import ArchiveError, apply_archive, create_archive, estimate_archive
-from .archive_coordinator import CONTROL_GATE_ENFORCED, ArchiveCoordinator
+from .archive_housekeeping import ArchiveHousekeeping
+from .archive_coordinator import ArchiveCoordinator
 from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
+from .maintenance_policy import is_terminal_rollback_failure
+from .maintenance_runtime import CONTROL_GATE_ENFORCED, MaintenanceRuntimeSupport
 from ._path_security import (
     UnsafePathError,
     assert_contained_no_reparse,
@@ -1198,7 +1201,28 @@ class UpgradeCoordinator:
         self.layout = layout
         self.service = service
         self.store = service.store
-        self.archive = archive_coordinator
+        runtime_support = service.maintenance_runtime_support or getattr(
+            archive_coordinator,
+            "runtime_support",
+            None,
+        )
+        if runtime_support is None:
+            runtime_support = MaintenanceRuntimeSupport(
+                layout=layout,
+                service=service,
+                control_probe=getattr(archive_coordinator, "control_probe", None),
+            )
+            service.maintenance_runtime_support = runtime_support
+        archive_housekeeping = service.archive_housekeeping or getattr(
+            archive_coordinator,
+            "housekeeping",
+            None,
+        )
+        if archive_housekeeping is None:
+            archive_housekeeping = ArchiveHousekeeping(layout=layout, store=self.store)
+            service.archive_housekeeping = archive_housekeeping
+        self.runtime_support = runtime_support
+        self.archive_housekeeping = archive_housekeeping
         self.release_manager = release_manager
         self.platform_adapter = platform_adapter
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -1363,11 +1387,11 @@ class UpgradeCoordinator:
             preflight = await self.platform_adapter.preflight(package)
             detail["preflight"] = preflight
             self._phase(operation, detail, "pre_upgrade_archive", 15)
-            baseline, control_gate = await self.archive._capture_control_baseline()
+            baseline, control_gate = await self.runtime_support.capture_control_baseline()
             detail["control_heartbeat_baseline"] = baseline
             detail["control_gate"] = control_gate
             with self._maintenance_context(maintenance_lease) as maintenance:
-                original, _ = await self.archive._quiesce(
+                original, _ = await self.runtime_support.quiesce(
                     maintenance,
                     state_callback=lambda running: self._record_running(
                         operation, detail, running
@@ -1421,14 +1445,14 @@ class UpgradeCoordinator:
                 self._phase(operation, detail, "migration", 65)
                 self._fault("migration")
                 migrations = await asyncio.to_thread(
-                    self.archive._migrate_and_validate_schema
+                    self.runtime_support.migrate_and_validate_schema
                 )
                 detail["migrations"] = migrations
                 self._phase(operation, detail, "runtime_start", 75)
-                await self.archive._restart(maintenance, original)
+                await self.runtime_support.restart(maintenance, original)
                 self._fault("runtime_start")
                 self._phase(operation, detail, "health", 85)
-                health = await self.archive._hard_health(
+                health = await self.runtime_support.hard_health(
                     original,
                     control_baseline=detail.get("control_heartbeat_baseline"),
                     control_gate=control_gate,
@@ -1447,7 +1471,7 @@ class UpgradeCoordinator:
                 detail["phase"] = "committed"
                 detail["progress"] = 100
                 self._journal(operation, detail, phase="committed", status="committed")
-            self.archive._apply_retention_if_safe()
+            self.archive_housekeeping.apply_retention()
             operation.transition(
                 "succeeded",
                 message=f"Upgrade to {package.version} committed",
@@ -1533,14 +1557,9 @@ class UpgradeCoordinator:
             # failed; retrying via _recover_update_guard_handoff never
             # replays the destructive phase, so the journal stays
             # recoverable instead of terminal.
-            if (
-                journal.get("status") == "rollback_failed"
-                and detail.get("commit_point") not in (None, "not_started")
-                and not (
-                    isinstance(authoritative_rollback, dict)
-                    and authoritative_rollback.get("status")
-                    == "program_rolled_back"
-                )
+            if is_terminal_rollback_failure(
+                journal,
+                authoritative_rollback=authoritative_rollback,
             ):
                 recovered.append(
                     {
@@ -1725,9 +1744,9 @@ class UpgradeCoordinator:
                 )
                 continue
             if detail.get("commit_point") == "not_started":
-                self.archive._cleanup_inprogress()
+                self.archive_housekeeping.cleanup_inprogress()
                 cleanup_error = await self._cleanup_platform_staging(detail)
-                restart_error = await self.archive._best_effort_restart(
+                restart_error = await self.runtime_support.best_effort_restart(
                     _string_list(detail.get("original_running")),
                     allow_startup_recovery=recovery_allowed,
                 )
@@ -1943,12 +1962,12 @@ class UpgradeCoordinator:
                 allow_startup_recovery=allow_startup_recovery,
             ) as maintenance:
                 migrations = await asyncio.to_thread(
-                    self.archive._migrate_and_validate_schema
+                    self.runtime_support.migrate_and_validate_schema
                 )
-                await self.archive._restart(
+                await self.runtime_support.restart(
                     maintenance, _string_list(detail.get("original_running"))
                 )
-                health = await self.archive._hard_health(
+                health = await self.runtime_support.hard_health(
                     _string_list(detail.get("original_running")),
                     control_baseline=detail.get("control_heartbeat_baseline"),
                     control_gate=str(
@@ -1997,7 +2016,7 @@ class UpgradeCoordinator:
             self.store.save(operation)
             self.store.retire_terminal_rollback_journals()
             self._prune_external_guard_cache(operation, detail)
-            self.archive._apply_retention_if_safe()
+            self.archive_housekeeping.apply_retention()
             self.service.set_startup_maintenance_gate(False)
             return {"action": "committed"}
         except Exception as exc:
@@ -2183,7 +2202,7 @@ class UpgradeCoordinator:
         original = _string_list(detail.get("original_running"))
         if detail.get("commit_point") == "not_started":
             cleanup_error = await self._cleanup_platform_staging(detail)
-            restart_error = await self.archive._best_effort_restart(
+            restart_error = await self.runtime_support.best_effort_restart(
                 original,
                 maintenance_lease=maintenance_lease,
                 allow_startup_recovery=allow_startup_recovery,
@@ -2211,7 +2230,7 @@ class UpgradeCoordinator:
             }
         detail["rollback_status"] = "running"
         rollback_baseline, rollback_control_gate = (
-            await self.archive._capture_control_baseline()
+            await self.runtime_support.capture_control_baseline()
         )
         detail["rollback_control_heartbeat_baseline"] = rollback_baseline
         detail["rollback_control_gate"] = rollback_control_gate
@@ -2222,7 +2241,7 @@ class UpgradeCoordinator:
                 timeout=1,
                 allow_startup_recovery=allow_startup_recovery,
             ) as maintenance:
-                await self.archive._quiesce(maintenance)
+                await self.runtime_support.quiesce(maintenance)
                 if program_already_restored:
                     program = {"already_restored_by_update_guard": True}
                 else:
@@ -2250,10 +2269,10 @@ class UpgradeCoordinator:
                         )
                     )
                 migrations = await asyncio.to_thread(
-                    self.archive._migrate_and_validate_schema
+                    self.runtime_support.migrate_and_validate_schema
                 )
-                await self.archive._restart(maintenance, original)
-                health = await self.archive._hard_health(
+                await self.runtime_support.restart(maintenance, original)
+                health = await self.runtime_support.hard_health(
                     original,
                     control_baseline=rollback_baseline,
                     control_gate=rollback_control_gate,
@@ -2284,7 +2303,7 @@ class UpgradeCoordinator:
             "health": health,
         }
         try:
-            self.archive._apply_retention_if_safe()
+            self.archive_housekeeping.apply_retention()
         except Exception as exc:
             result["warnings"] = [
                 "Rollback retention cleanup failed: "

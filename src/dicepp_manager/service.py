@@ -106,6 +106,11 @@ class ManagerService:
         self._startup_maintenance_active = False
         self._lock = threading.RLock()
         self.archive_coordinator = None
+        # Coordinator-neutral boundaries shared by archive and upgrade flows.
+        # ArchiveCoordinator initializes them before UpgradeCoordinator is
+        # composed by the existing factory and API roots.
+        self.maintenance_runtime_support = None
+        self.archive_housekeeping = None
         # Created by the composition root.  Keeping it on the Manager service
         # makes the API, health gates and deployment factory share one owner.
         self.control_service = None

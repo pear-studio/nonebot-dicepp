@@ -11,7 +11,7 @@ from plugins.DicePP.utils.logger import logger, get_exception_info, configure_lo
 from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from plugins.DicePP.core.config import Paths
-from plugins.DicePP.core.config.loader import ConfigLoader, ConfigValidationError
+from plugins.DicePP.core.config.loader import ConfigLoader
 from plugins.DicePP.core.config.pydantic_models import BotConfig
 from plugins.DicePP.core.bot.task_scheduler import TaskScheduler
 from plugins.DicePP.core.persona import PersonaLoader
@@ -147,7 +147,6 @@ class Bot:
                     bot_id=self.account,
                     manager_url=ws_url,
                     token_provider=lambda: ensure_token(project_root),
-                    on_reload=self.reload_config,
                 )
         except ImportError:
             logger.warning("[Bot] Control channel unavailable, skipping Manager connection")
@@ -519,7 +518,7 @@ class Bot:
 
         await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
-        # config is read-only at runtime; hot-reload is triggered via .reload command
+        # Configuration is read-only for the lifetime of this RuntimeUnit.
 
     def reboot(self):
         """重启bot"""
@@ -566,50 +565,6 @@ class Bot:
             os.execl(python, python, *sys.argv)
         # self.start_up()
         # await self.delay_init_command()
-
-    def reload_config(self):
-        """Reload all configuration subsystems and return the new BotConfig.
-
-        Called by the dashboard /reload endpoint and the in-chat .reload
-        command.  Refreshes config, log level, persona data, localization
-        overrides, health monitor thresholds, and persona character path
-        in a single atomic operation.
-
-        Subsystems covered by hot-reload:
-          - BotConfig self.config
-          - log level       (configure_log_level)
-          - Persona data    (PersonaLoader, including character_path changes)
-          - Localization    (reset_to_default + set_persona)
-          - HealthMonitor   (heartbeat_timeout, fail_threshold, log_interval)
-          - Log Web provider (provider, endpoint, token, timeout)
-
-        Subsystems NOT covered (require full restart):
-          - ControlChannelClient address (sourced from env vars at startup)
-        """
-        new_cfg = self._cfg_loader.reload()
-        self.config = new_cfg
-        configure_log_level(self.config.log.level)
-
-        if self.log_runtime is not None:
-            self.log_runtime.refresh_publication_provider()
-
-        # Refresh subsystems that capture config at construction time
-        self._persona_loader.reload()
-        self.loc_helper.reset_to_default()
-        self.loc_helper.set_persona(new_cfg.persona)
-
-        # Health monitor thresholds
-        hc = new_cfg.health_monitor
-        self.health_monitor._heartbeat_timeout = hc.heartbeat_timeout_seconds
-        self.health_monitor._fail_threshold = hc.consecutive_fail_threshold
-        self.health_monitor._log_interval = hc.failure_log_interval_seconds
-
-        # Persona character directory (may change independently of persona name)
-        new_path = new_cfg.persona_ai.character_path
-        if hasattr(self._persona_loader, "set_character_path"):
-            self._persona_loader.set_character_path(new_path)
-
-        return new_cfg
 
     def register_command(self, registry=None):
         from plugins.DicePP.core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY
