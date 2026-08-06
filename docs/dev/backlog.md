@@ -71,12 +71,14 @@
     - `.github/workflows/test-suite.yml` 与 `.github/workflows/release.yml` 各自包含 Windows executable 启动、标准流重定向和制品检查逻辑，已经发生 Windows 建链权限、进程树清理及 onefile payload 等待窗口导致的门禁失败。
     - 影响后果是打包与启动缺陷直到推 tag 后才暴露，发版需要撤回或移动 tag，失败定位还要区分产品缺陷与测试 harness 缺陷。
 - 开发备忘:
-    - 建立按 commit SHA 或 workflow_dispatch 运行的 Windows 最终候选流水线，在创建 tag 前生成 Portable、Setup、Velopack bundle 和 release manifest。
-    - 对候选资产执行 stable stub 无控制台启动、Velopack hooks、silent Setup 安装、安装后启动、资产布局、版本、digest 和 provenance 校验；全部通过后才允许创建 tag。
-    - Release workflow 只按 digest 晋升并发布已经验证的同一字节资产，不重新打包；禁止 force-move 已用于候选或发布的 tag。
-    - 将两份 workflow 中重复的 Windows 构建、启动、进程清理和诊断逻辑提取为仓库内可本地与 CI 共用的版本化 PowerShell/Python runner。
-    - 将候选资格检查设为 master/tag required check，并保留失败时的进程树、端口、启动耗时、日志和安装目录清单。
-    - 先验证 GitHub artifact retention、跨 workflow provenance、GHCR/Release 权限和候选缓存成本；不得重写已公开 release assets。
+    - 当前状态（2026-08-03）：本地 `master` 已实现并拆分提交 Windows 有界进程 runner、仓库污染守卫、Final Candidate/Receipt v2、Promotion 原字节晋升和 Gitee 停用；全量测试为 `4162 passed, 67 skipped`，但提交尚未 push，新流程也尚未在 GitHub/GHCR 上运行。后续 agent 不应重新设计或重复实现本地代码，除非真实验收暴露缺陷。
+    - 当前设计：Final Candidate 绑定当前 `master` 的精确 SHA，封存 Windows、Linux、release manifest、条件性 upgrade evidence、容器身份和 `dicepp-candidate.json`；Promotion 必须显式选择 run ID 与 artifact ID，复核同一字节和镜像 digest 后按 draft-first 流程发布，不重新构建、压缩或打包。
+    - 当前有意不做：Gitee 同步、额外发布 token、release environment/第二位 reviewer、每次 Promotion 读取管理员配置、自动 GHCR candidate 清理。不得在没有新决策的情况下重新加入这些复杂度。
+    - 验收时机：先完成 `B-260802-3e3e23`、`B-260731-b6f811` 及本轮准备纳入发布的其他代码修改；随后冻结最终 `master` SHA。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
+    - 冻结后一次性确认远端最小配置：启用 Immutable Releases、建立受保护的 `refs/tags/v*` ruleset、授予仓库 Actions 对两个 GHCR package 的 Write access；发布运行时只使用 `GITHUB_TOKEN`。
+    - 验收顺序：push 冻结 SHA 并等待普通 CI → 先完成 `B-260802-eb74ca` 的 Linux 故障回退验收及 `B-260802-3e3e23` 的跨版本矩阵/evidence → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。
+    - Promotion 会真实创建 tag、GitHub Release、正式 GHCR version tag 并最后更新 `latest`，不得作为无副作用的试运行；应使用计划公开的 RC 或正式版本。
+    - 关闭条件：记录成功的 Candidate run ID、run attempt、artifact ID/digest 和 Promotion run；确认公开 tag、Release metadata/assets、版本镜像及 `latest` 均与 Receipt 一致，且冲突状态 fail closed、精确同身份中断状态可幂等恢复。全部满足后才删除本条。
 
 ## dice_hub
 
@@ -114,7 +116,12 @@
     - 分离 restoration 与 post-rollback control health：程序、数据、schema 和 Runtime 本地恢复成功时记录 `rollback_status=succeeded`、`rolled_back=true`；控制通道未恢复单独记录 degraded/failed warning。只有程序、数据、schema 或 Runtime 本地恢复失败才进入 `rollback_failed/manual_recovery_required`。
     - 保持首次目标升级后的 control gate fail-closed；切换前存在 active session 而目标未重连时，升级仍必须失败并触发回退。
     - 补充 fresh heartbeat 后断开、多 Bot session 切换、回退后重连并产生新心跳、永久断开但本地恢复成功、本地恢复真实失败等回归测试。
-    - 关联 `B-260802-3e3e23` 的跨版本矩阵与 `B-260731-b6f811` 的长期事务重构，但本 bug 应独立优先修复并在 v3.0 正式版前完成 Linux 定向复验。
+    - 当前状态（2026-08-03）：active-session snapshot、断开后撤销健康、回退本地恢复与 post-rollback control health 分离、Manager 凭据就绪后重连及对应回归测试均已实现；本条代码主体完成，当前只保留真实跨版本故障注入验收。后续 agent 不应重新实现已有修复，除非验收失败。
+    - 验收时机：完成 `B-260802-3e3e23` 与 `B-260731-b6f811` 对升级、回退和 journal 路径的修改后，在最终冻结的 `master` SHA 上独立执行；它是 `B-260802-6fdfcc` Final Candidate/Promotion 之前的第一个系统验收。
+    - Linux 定向场景：从受支持旧版本 fresh 部署升级到冻结 SHA，在 confirm 前保持 fresh heartbeat 后主动断开控制通道并触发目标失败；确认程序镜像、配置、数据、schema、Runtime、marker/request 均恢复，operation journal 记录 `rollback_status=succeeded` 与 `rolled_back=true`，控制通道未恢复只产生 degraded warning。
+    - 同次验收还要确认切换前存在 active session 而目标未重连时仍会 fail closed，并覆盖多 Bot session 切换、回退后重连产生新心跳、永久断开但本地恢复成功、本地恢复真实失败。
+    - 若验收触发任何代码修复，必须重新冻结 SHA，并重跑本条、跨版本 evidence 和后续 Final Candidate/Promotion；不得沿用旧 Candidate。
+    - 关闭条件：保存 Linux fresh 跨版本故障注入的版本、冻结 SHA、日志/journal 和恢复结果证据；上述恢复状态与控制健康语义全部符合预期后删除本条。
 
 ### [B-260802-3e3e23] 建立持久化升级协议契约与跨版本升级回退矩阵
 - 创建: 2026-08-02

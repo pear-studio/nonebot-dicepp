@@ -7,16 +7,14 @@ dev (开发环境)                         prod (生产环境)
 ─────────────                         ─────────────
 version-release (skill)               version-deploy (skill)
   │                                     │
-  ├─ bump version + tag vX.Y.Z          ├─ gh release view vX.Y.Z
-  ├─ write docs/releases/vX.Y.Z.md        → 从 Release body 读取风险元数据
-  ├─ create GitHub Release               → 展示给用户确认
-  └─ tag triggers GHA → build images     └─ deploy-docker → compose sync + pull/load + up
-       → nonebot-dicepp:vX.Y.Z
-       → dicepp-dashboard:vX.Y.Z
-       → latest（正式版）
-       → linux-amd64 release zip
-       → Windows Portable / Setup / velopack.win-x64.zip
-       → dicepp-release.json
+  ├─ bump version + release commit       ├─ gh release view vX.Y.Z
+  ├─ write docs/releases/vX.Y.Z.md         → 从 Release body 读取风险元数据
+  ├─ Final Candidate(run + artifact)      → 展示给用户确认
+  │    → 构建/测试/封存全部最终字节       └─ deploy-docker → compose sync + pull/load + up
+  └─ Promote(explicit run + artifact)
+       → 校验 receipt / 每个文件 / manifest digest
+       → 先建 draft Release，上传并复验原字节
+       → 晋升 vX.Y.Z 镜像，发布时创建 tag；正式版最后更新 latest
 ```
 
 ## 关键文件
@@ -29,7 +27,9 @@ version-release (skill)               version-deploy (skill)
 | `docker-compose.yml` | 部署入口；包含 bot、dashboard 与 manager 三个标准 service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
 | `docs/linux.md` | Linux Docker 部署说明；打入 Linux 发布包，也可从 tag 内容读取 |
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
-| `.github/workflows/release.yml` | tag push 触发 GHCR、Windows Velopack、Linux 发布包和 machine contract 构建，并创建 GitHub Release |
+| `.github/workflows/candidate.yml` | 对精确的 master commit 构建、测试并封存最终发布字节，输出唯一 run/attempt artifact 与 receipt |
+| `.github/workflows/release.yml` | 显式选择 candidate run ID + artifact ID，验证来源和摘要后原字节晋升；不重建或重新打包 |
+| `dicepp-candidate.json` | 候选 receipt；绑定 workflow/run/attempt/commit、工具链、容器 identities 和全部 Release asset 的 size/SHA-256 |
 | `dicepp-release.json` | Manager 消费的严格 machine contract；声明频道、兼容性、平台/架构和 artifact size/SHA-256 |
 | `velopack.win-x64.zip` 内 `manifest.json` | Windows 更新层 contract；声明 DicePP/Velopack 版本、频道、目标及唯一 full nupkg 的 size/SHA-256 |
 | Linux 包内 `dicepp-package.json` | Linux 安装层 contract；声明 Compose、image archive、镜像引用及内部文件摘要 |
@@ -47,13 +47,15 @@ version-release (skill)               version-deploy (skill)
 - **Registry**:
   - `ghcr.io/pear-studio/nonebot-dicepp`
   - `ghcr.io/pear-studio/dicepp-dashboard`
-- **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
-- **构建触发**: push `v*.*.*` tag
+- **Tags**: Candidate 使用 `:candidate-{run_id}-{run_attempt}`；正式版打 `:vX.Y.Z`
+  和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
+- **构建触发**: 对精确 master commit 手工 dispatch Final Candidate；构建阶段不存在版本 tag 或 GitHub Release
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
 - **分发**: `docker-compose.yml`、Windows Portable/Setup、
   `velopack.win-x64.zip`、
-  `DicePP-vX.Y.Z-linux-amd64.zip` 和 `dicepp-release.json` 作为 GitHub
-  Release assets；`docs/releases/vX.Y.Z.md` 作为 Release body
+  `DicePP-vX.Y.Z-linux-amd64.zip`、`dicepp-release.json` 和
+  `dicepp-candidate.json` 作为 GitHub Release assets；未来允许自动升级时再条件附加
+  `dicepp-upgrade-evidence.json`。`docs/releases/vX.Y.Z.md` 作为 Release body
 
 ## Docker Compose 模式
 
@@ -72,6 +74,25 @@ version-release (skill)               version-deploy (skill)
 
 手工 Docker 更新前应先确认当前 `docker-compose.yml` 是否与目标 Release 的部署拓扑一致。新增 service、环境变量、volume 或端口映射时，必须先同步 Release 附带的完整三服务 `docker-compose.yml` 或按 `docs/linux.md` 的部署说明合并标准块，再执行 `pull` / `up -d`。Manager 不会自动改写这份文件。
 
+## 远端仓库启用契约
+
+启用 Promotion 前，仓库管理员只需完成以下一次性配置：
+
+- 启用 GitHub Immutable Releases，使公开后的 Release、assets 和关联 tag 不可变。
+- 为 `refs/tags/v*` 建立 active tag ruleset，同时限制 creation、update 和 deletion，
+  并允许 GitHub Actions 创建发布 tag。
+- 分别为 `pear-studio/nonebot-dicepp` 和 `pear-studio/dicepp-dashboard` 两个 GHCR
+  package 授予本仓库 Write access，使 workflow 的 `GITHUB_TOKEN` 可以推送候选镜像
+  并按已验证 digest 添加正式 tag。
+
+这些设置由管理员一次性启用，不在每次 Promotion 中重复读取管理配置。除 workflow
+自动获得的 `GITHUB_TOKEN` 外，发布不要求额外凭据、管理员设置 ID 变量或人工审批门禁。
+“本地实现与测试通过”不表示远端已经启用；首次真实晋升前仍应确认以上三项已经完成。
+本次仓库代码变更不会创建或修改这些远端设置。
+
+Workflow 内所有关键 actions 都固定完整 commit SHA。维护时先解析受信版本 tag、审查
+release notes 与目标 commit，再更新 SHA 及相邻版本注释；不得退回浮动 major tag 或分支。
+
 ## Release 流程
 
 ### 正常发布 (version-release 技能)
@@ -79,11 +100,37 @@ version-release (skill)               version-deploy (skill)
 1. 确认工作区干净，在 master 分支
 2. 选择递增级别 (patch/minor/major)
 3. 创建 `docs/releases/vX.Y.Z.md`（风险元数据）
-4. `bump-my-version` 递增版本号 + 自动 commit + tag
-5. 在当前 HEAD 上运行完整回归 `uv run pytest`
-6. `git push origin master --tags`
-7. GHA 自动构建镜像、Windows Portable/Setup/`velopack.win-x64.zip`、Linux amd64
-   发布包和 `dicepp-release.json`，再创建 GitHub Release
+4. 以 `--no-commit --no-tag` 运行 `bump-my-version`，同步 `uv.lock` 后创建一个
+   不含 tag 的 release commit
+5. 在当前 HEAD 上运行完整回归 `uv run pytest`，只推送 `master` commit
+6. 对该 commit dispatch `.github/workflows/candidate.yml`；等待成功后记录
+   `candidate_run_id`、`run_attempt`、`candidate_artifact_id` 和 artifact digest
+7. 使用相同 version、显式 run ID 和 artifact ID dispatch `.github/workflows/release.yml`
+8. Promotion 验证 run/workflow/event/conclusion/head SHA/attempt、artifact 归属与摘要、
+   receipt、每个文件和容器 identity；然后先创建 draft Release，上传并复验候选原字节，
+   晋升版本镜像，在 publish 紧邻时点重验 HEAD/draft/assets/tag/digests，最后
+   发布 Release（此时创建 tag），并在正式版最后更新 `latest`
+
+Candidate artifact 名为 `dicepp-final-candidate-{run_id}-{run_attempt}`，扁平包含
+Windows Portable/Setup、Velopack bundle、Linux amd64 bundle、`docker-compose.yml`、
+`dicepp-release.json`、receipt，以及 `自动升级: yes` 时与该候选绑定的
+`dicepp-upgrade-evidence.json`。Promotion 不执行构建、`vpk`、`docker save` 或 zip。
+
+在 backlog `B-260802-3e3e23` 完成并通过明确验收前，所有 release metadata 的
+`自动升级` 必须填写 `no`；现有证据链能力不等于该 backlog 已完成。
+
+Sealed candidate artifact 的 retention 是 30 天，因此 Promotion 必须在 candidate
+run 完成后 30 天内执行；同时还要求 candidate `head_sha` 仍是当前 default branch
+HEAD，所以 master 前进会让候选提前失效，必须重新生成 candidate。
+
+当前不自动清理候选 GHCR 镜像。
+
+已有 tag、Release 或 GHCR tag 的身份、目标 commit、metadata/assets 或 digest 任一
+不一致时立即停止。精确同身份的中断 draft、已上传资产或同 digest 镜像仅为失败恢复
+允许幂等续传或复核成功，不覆盖或改写已发布资源。
+
+Promotion 全局串行，不按版本并发。GitHub Release 与 GHCR 是当前唯一发布目标。
+当前不做 Gitee 镜像同步，恢复需单独设计并经用户确认。
 
 ### 基线建立
 
@@ -92,8 +139,8 @@ version-release (skill)               version-deploy (skill)
 1. 确认 `docs/releases/vX.Y.Z.md` 就绪
 2. 确认所有代码已 commit
 3. 在当前 HEAD 上运行完整回归 `uv run pytest`
-4. `git tag vX.Y.Z` → `git push origin master --tags`
-5. 等待 GHA 完成
+4. 只推送 baseline commit，按正常发布步骤 6–8 生成并显式晋升候选
+5. 不手工创建或推送 tag；tag 只由 Promotion 在完整验证后创建
 
 ### 手工部署与回退（version-deploy 技能）
 

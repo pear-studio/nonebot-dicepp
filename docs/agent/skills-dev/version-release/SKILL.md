@@ -20,10 +20,16 @@ metadata:
 ## 核心约定
 
 - `pyproject.toml` 的 `[project].version` 是唯一手工维护的项目版本源。
-- Git tag 使用 `vX.Y.Z`, 由 `bump-my-version` 根据新版本号创建。
-- 发版测试可使用 `vX.Y.ZrcN` 预发布 tag（如 `v3.0.1rc1`）；RC 会创建 GitHub Prerelease 并推送同名镜像 tag，但不会更新 `latest`。
+- `bump-my-version` 默认 `commit = false`、`tag = false`：版本文件修改、`uv.lock`
+  和 release notes 必须先组成一个可审查的 release commit，不能产生缺少 lockfile
+  或 metadata 的自动 commit。
+- Git tag 使用 `vX.Y.Z`，但本地版本递增和候选构建都不得创建或推送 tag。
+  `.github/workflows/release.yml` 先建立 draft Release、上传并复验所有 assets、
+  晋升版本镜像，最后发布 Release 时才创建 tag。
+- 发版测试可使用 `vX.Y.ZrcN` 预发布版本（如 `v3.0.1rc1`）；RC 走同一候选与
+  晋升链，创建 GitHub Prerelease 和同名镜像 tag，但不会更新 `latest`。
 - `uv.lock` 必须与 `pyproject.toml` 的项目版本同步；tag 指向的 release commit 内不得出现 `pyproject.toml` 为新版本、`uv.lock` 仍记录旧 `dicepp` 版本的状态。
-- Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64.zip`，内含 Linux
+- Final Candidate workflow 会生成 `DicePP-vX.Y.Z-linux-amd64.zip`，内含 Linux
   amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用
   文档，用于国内或离线环境通过 `docker load` 导入镜像；兼容版本的 Manager
   自动安装也只使用该本地 image archive，不依赖 `docker pull`。
@@ -33,6 +39,8 @@ metadata:
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
+- 在 backlog `B-260802-3e3e23` 完成并通过明确验收前，release metadata 的
+  `自动升级` 必须填写 `no`；不得因为候选证据文件存在就提前填写 `yes`。
 
 ## Preconditions
 
@@ -42,6 +50,11 @@ metadata:
 - `uv lock` 可用且不会降级 lockfile 格式；如果本机 PATH 上的 `uv` 版本过旧或来自无关环境, 先更新或显式使用可保留当前 `uv.lock` `revision` 的 uv。
 - 目标分支为 `master` 的最新状态。
 - 工作区必须干净；存在未提交更改时拒绝执行 release。
+- 首次真实晋升前，管理员已经完成 `docs/releases/README.md` 的三项一次性配置：
+  Immutable Releases、限制 creation/update/deletion 且允许 GitHub Actions 创建 tag 的
+  `v*` tag ruleset，以及两个 GHCR package 对本仓库的 Write access。
+- 除 workflow 自动获得的 `GITHUB_TOKEN` 外，发布不要求额外凭据、管理员设置 ID
+  变量或人工审批门禁，也不在每次 Promotion 中重复读取管理员设置。
 
 ## Release Metadata
 
@@ -212,12 +225,12 @@ metadata:
 
    如果一项改动只能表述为“新增测试/CI/Skill/内部工具”，通常不要写入 `Added / Changed / Fixed`。把它保留给发版完成后的维护者汇报。
 
-7. **执行版本递增**
+7. **执行版本递增并创建无 tag 的 release commit**
 
    运行：
 
    ```bash
-   uv run bump-my-version bump <patch|minor|major>
+   uv run bump-my-version bump --no-commit --no-tag <patch|minor|major>
    ```
 
    成功后确认：
@@ -228,17 +241,18 @@ metadata:
      uv lock
      ```
      然后确认 diff 至少包含 `uv.lock` 中 `name = "dicepp"` 对应的 `version = "{new_version}"`，且没有不合理的大范围 lockfile 格式降级。如果本机 `uv` 会把 `revision` 写回旧值，先换用更新的 uv 再重新执行。
-   - 如果 `uv lock` 产生了变更, 必须让这些变更进入同一个 release commit。若 `bump-my-version` 已经因为 `commit = true` / `tag = true` 自动创建 commit 和 tag, 执行：
+   - 将 `pyproject.toml`、`uv.lock`、release metadata 和本次发布所需的其他改动
+     放入同一个 release commit：
      ```bash
-     git add uv.lock
-     git commit --amend --no-edit
-     git tag -f v{new_version}
+     git add pyproject.toml uv.lock docs/releases/v{new_version}.md
+     git commit -m "Bump version: {old_version} → {new_version}"
      ```
-     推送前再次确认 `git show v{new_version}:uv.lock` 中的 `dicepp` 版本等于 `{new_version}`。
+     提交后再次确认 `git show HEAD:uv.lock` 中 `dicepp` 版本等于 `{new_version}`。
    - release metadata 文件包含在版本 bump commit 中。
-   - Git tag 为 `v{new_version}`。
+   - 本地和远端都还不存在 `v{new_version}` tag；若已存在，停止并调查，不删除、
+     强制移动或覆盖它。
 
-8. **推送 release commit 与 tag**
+8. **验证并只推送 release commit**
 
    推送前必须在最终 release commit（即当前 HEAD）上成功运行完整离线回归：
 
@@ -246,29 +260,70 @@ metadata:
    uv run pytest
    ```
 
-   只有本次会话已在同一 HEAD 上成功运行且之后没有代码、配置或测试改动时可以复用结果。失败或未完成时不得推送 release commit/tag。
+   只有本次会话已在同一 HEAD 上成功运行且之后没有代码、配置或测试改动时可以复用结果。失败或未完成时不得推送 release commit。
 
    运行：
 
    ```bash
-   git push origin master --tags
+   git push origin master
    ```
 
-   如果 push 失败, 汇报错误和本地 commit/tag 状态, 提醒用户处理；仍执行切回原分支。
+   如果 push 失败，汇报错误和 release commit 状态，提醒用户处理；仍执行切回原分支。
 
-   push 成功后, GitHub Actions (release.yml) 将自动：
-   - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)，运行冒烟测试
-   - 将 bot/dashboard 镜像与 Linux 部署文档打包为
-     `DicePP-vX.Y.Z-linux-amd64.zip`，并在包内生成 `checksums.sha256`
-   - 在 Windows 上构建 DicePP EXE 与 UpdateGuard，运行可执行文件冒烟测试
-   - 生成独立 Windows Portable、Setup 和 Velopack package/feed
-   - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
-   - 上传 `docker-compose.yml`、`dicepp-release.json`、Windows artifacts 和
-     `DicePP-vX.Y.Z-linux-amd64.zip` 作为 release assets
+9. **生成并确认不可变 Final Candidate**
 
-9. **验证构建产物可用**
+   从 `master` 的精确 release commit 手工 dispatch candidate workflow：
 
-   等待 GitHub Actions 完成后, 确认：
+   ```bash
+   COMMIT_SHA=$(git rev-parse HEAD)
+   gh workflow run candidate.yml --ref master \
+     -f version={new_version} \
+     -f commit_sha=${COMMIT_SHA}
+   ```
+
+   等待 run 成功；记录 Actions 展示的 `candidate_run_id`、`run_attempt`、
+   `candidate_artifact_id`、artifact digest 和 URL。候选必须来自当前仓库的
+   `.github/workflows/candidate.yml`、`workflow_dispatch`、`master`，其
+   `head_sha` 必须等于 release commit。artifact 名必须是
+   `dicepp-final-candidate-{run_id}-{run_attempt}`，并包含 receipt 及 receipt
+   逐文件摘要声明的全部最终 Release 原字节。
+
+   当前在 backlog `B-260802-3e3e23` 完成并通过明确验收前，`自动升级` 必须为
+   `no`。未来解除该临时门禁后，`yes` 候选仍必须验证与该 commit 和 candidate
+   identities 绑定的 `dicepp-upgrade-evidence.json`，缺失或不匹配不得晋升。
+
+   Candidate artifact 只保留 30 天，且 Promotion 要求它的 `head_sha` 仍等于
+   当前 default branch HEAD。必须在 master 再次前进之前尽快晋升，30 天只是
+   最长上限；过期或失去 HEAD 身份后重新生成 candidate，不延长或复制旧 artifact。
+
+10. **显式晋升同一批候选字节**
+
+   使用上一步明确记录的 run ID 和 artifact ID dispatch promotion：
+
+   ```bash
+   gh workflow run release.yml --ref master \
+     -f version={new_version} \
+     -f candidate_run_id={candidate_run_id} \
+     -f candidate_artifact_id={candidate_artifact_id}
+   ```
+
+   Promotion 会在任何外部写入前验证 run/workflow/event/conclusion/head SHA/
+   run attempt、artifact 归属与外层 digest、receipt closed schema、逐文件 size/SHA-256、
+   自动升级证据和容器 manifest/Image ID。
+   验证通过后先创建 draft Release，上传并复验候选原字节，再以 manifest digest
+   晋升版本镜像；publish 紧邻时点重新验证 HEAD/tag/draft metadata/assets/digests/
+   候选身份，发布 Release 时才创建 tag，正式版最后再次
+   校验 HEAD 与 GitHub latest Release 后更新 `latest`。Promotion 全局串行，不按版本
+   并发。它不会重新构建、执行 `vpk`、`docker save` 或重新压缩发布包。
+
+   已有 tag、Release 或 GHCR tag 的身份、目标 commit、metadata/assets 或 digest 任一
+   不一致时立即停止。精确同身份的中断 draft、已上传资产或同 digest 镜像仅为失败恢复
+   允许幂等续传或复核成功，不覆盖或改写已发布资源。
+   当前不自动清理候选 GHCR 镜像。
+
+11. **验证发布资源可用**
+
+   等待 Promotion run 完成后，确认：
 
    - `gh release view v{new_version}` 返回 release 信息。
    - Release assets 包含:
@@ -276,7 +331,10 @@ metadata:
      - `DicePP-v{new_version}-win64-Portable.zip`
      - `DicePP-v{new_version}-win64-Setup.exe`
      - `DicePP-v{new_version}-linux-amd64.zip`
+     - `velopack.win-x64.zip`
      - `dicepp-release.json`
+     - `dicepp-candidate.json`
+     - 声明 `自动升级: yes` 时的 `dicepp-upgrade-evidence.json`
    - Windows Portable 解压后包含 `DicePP.exe`、`DicePP-Runtime.exe` 和
      `DicePP-UpdateGuard.exe`；Setup 安装后的程序目录具备相同三个入口。
    - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
@@ -291,13 +349,18 @@ metadata:
      UpdateGuard 降级；Linux 在临时 Compose project 中验证 bundle load、
      `--pull never` 切换和旧镜像回退。若当次发布没有完成这些平台烟测，不得把
      单元测试结果表述为“真实自动升级已验证”，应把未验边界写入发版摘要。
-   - 如任一产物缺失, 查看对应 GHA run 日志排查。
+   - Release asset digest 必须与 `dicepp-candidate.json` 中相应文件的 SHA-256
+     一致；GHCR 版本 tag 的 manifest digest 必须与 receipt 一致。
+   - 如任一产物缺失，查看 Final Candidate 与 Promotion run 日志排查；不要手工
+     补传、覆盖 asset 或移动 tag。
 
-10. **切回原分支**
+   GitHub Release 与 GHCR 是当前唯一发布目标。当前不做 Gitee 镜像同步，恢复需单独设计并经用户确认。
+
+12. **切回原分支**
 
    如果发布前不在 `master`, 切回原分支。
 
-11. **生成发版摘要**
+13. **生成发版摘要**
 
     汇报：
 
@@ -311,8 +374,9 @@ metadata:
    Linux 发布包: DicePP-vA.B.C-linux-amd64.zip
    数据变更: yes/no
    配置变更: yes/no
-   推送: 成功/失败
-   GitHub Actions: <run URL>
+   Commit 推送: 成功/失败
+   Candidate run / artifact: <run ID> / <artifact ID + digest>
+   Promotion run: <run URL>
    ```
 
 ## Baseline / Repair Notes
@@ -322,16 +386,12 @@ metadata:
 1. 确认当前版本号与目标 tag 一致。
 2. 确认 `docs/releases/vX.Y.Z.md` 已存在且内容完整。
 3. 确认 `.bot` 运行版本与包版本一致。
-4. 确认 GHCR workflow (release.yml) 与 `.dockerignore` 已准备好。
+4. 确认 Final Candidate 与 Promotion workflow 及 `.dockerignore` 已准备好。
 5. 确认工作区干净, 所有改动已提交到 master, 当前 commit 是想要固化的基线 commit。
 6. 在当前 HEAD 上运行 `uv run pytest`。只有本次会话已在同一 HEAD 上成功运行且
    之后没有代码、配置或测试改动时可以复用；失败或未完成时不得继续。
-7. 手工创建并推送 tag:
-   ```bash
-   git tag vX.Y.Z
-   git push origin master --tags
-   ```
-8. 等待 GitHub Actions 完成, 验证镜像和 GitHub Release。参考本技能 step 9。
+7. 只推送 commit，然后按本技能 step 9–11 生成候选并以显式 run ID + artifact ID
+   晋升；不得手工创建、强制移动或推送 tag。
 
 ## RC / Prerelease Test Notes
 
@@ -343,20 +403,19 @@ metadata:
 4. 在最终 RC commit（当前 HEAD）上运行 `uv run pytest`。只有本次会话已在同一
    HEAD 上成功运行且之后没有代码、配置或测试改动时可以复用；失败或未完成时
    不得继续。
-5. 创建并推送 tag:
-   ```bash
-   git tag vX.Y.ZrcN
-   git push origin master --tags
-   ```
-6. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
-7. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
-8. GitHub Release 会标记为 Prerelease。
+5. 只推送 RC commit，按本技能 step 9–11 先生成不可变候选，再用显式 run ID +
+   artifact ID 晋升；不得手工创建或推送 RC tag。
+6. Final Candidate workflow 构建 Docker 镜像和 Windows EXE，运行版本一致性检查和冒烟测试。
+7. Promotion 只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`，不更新 `latest`。
+8. GitHub Release 标记为 Prerelease。
 
 RC 测试通过后, 正式发布仍使用纯数字版本 `vX.Y.Z`。
 
 ## Important Notes
 
 - 工作区有未提交更改时直接拒绝, 不自动 stash。
-- release metadata 必须先于 bump 创建, 保证 tag 指向的 commit 内能读取 `docs/releases/vX.Y.Z.md`。
+- release metadata 必须先于 bump 创建，保证 candidate commit 内能读取
+  `docs/releases/vX.Y.Z.md`。
+- 任何人工强制移动/推送版本 tag 或覆盖 Release asset 都不属于发版流程。
 - 不在开发环境部署生产；生产更新或回退使用 `version-deploy`。
 - 不自动调用真实 LLM、外部 API 或付费服务。

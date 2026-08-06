@@ -4,6 +4,13 @@ DicePP Manager 以 GitHub Release 为版本事实来源。每个 Release 必须�
 `dicepp-release.json`；Manager 不根据文件名猜测版本或平台，也不解析 Release
 正文来决定能否升级。
 
+GitHub Release 与 GHCR 是当前唯一发布目标。当前不做 Gitee 镜像同步，恢复需单独设计并经用户确认。
+
+发布资产由 Final Candidate 一次构建、测试并封存，Promotion 必须显式选择同一候选的
+run ID 与 artifact ID，复核文件 SHA-256 和容器 digest 后原样晋升；它不重新构建或打包。
+Promotion 先创建 draft Release，遇到已有 tag、Release、asset 或镜像身份冲突即停止，
+正式版只在发布完成并复验后最后更新 `latest`。当前不自动清理候选 GHCR 镜像。
+
 ## 优先使用 Manager，何时手动
 
 对于当前的标准三服务 Linux 部署或受支持的 Windows 安装，Dashboard 的“版本更新”页是升级**兼容的最新版本**的首选入口。Manager 负责校验、pre-upgrade 归档、安装、本地健康检查和失败回退；用户只需确认安装。
@@ -152,8 +159,12 @@ filename/size/SHA-256。bundle 拒绝路径穿越、POSIX/Windows 绝对路径�
 上限的输入；nupkg 内部版本也必须与两层清单一致。Portable 与 Setup 是两个独立
 的首次部署入口，Setup 不依赖 Portable zip。
 
-GitHub Release 最终固定为六个 assets：上述三个 Windows/Linux 用户发行包、
-`velopack.win-x64.zip`、`dicepp-release.json` 和 `docker-compose.yml`。
+GitHub Release 在 `automatic_upgrade: no` 时固定为七个 assets：上述三个
+Windows/Linux 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、
+`docker-compose.yml` 和审计 receipt `dicepp-candidate.json`。未来 backlog
+`B-260802-3e3e23` 完成并允许 `automatic_upgrade: yes` 后，再额外发布已绑定候选
+identities 的 `dicepp-upgrade-evidence.json`，届时总数为八个；在该 backlog 验收前
+`automatic_upgrade: yes` 仍不可达。
 
 Linux amd64 Release 包含 `DicePP-vX.Y.Z-linux-amd64.zip`。外层
 `dicepp-release.json` 验证整个 zip；zip 内的 `dicepp-package.json` 是第二层
