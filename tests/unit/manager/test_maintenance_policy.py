@@ -23,15 +23,3 @@ def test_terminal_rollback_requires_failed_destructive_rollback(
     expected: bool,
 ) -> None:
     assert is_terminal_rollback_failure(journal) is expected
-
-
-def test_authoritative_program_rollback_keeps_manager_recovery_retryable() -> None:
-    journal = {
-        "status": "rollback_failed",
-        "detail": {"commit_point": "program_switch_started"},
-    }
-
-    assert not is_terminal_rollback_failure(
-        journal,
-        authoritative_rollback={"status": "program_rolled_back"},
-    )

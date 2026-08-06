@@ -35,6 +35,7 @@ from scripts.build.linux_upgrade_orchestrator import (
     _unavailable,
 )
 from scripts.build.upgrade_evidence import (
+    LINUX_REQUIRED_SCENARIOS,
     SCENARIO_ASSERTIONS as EVIDENCE_ASSERTIONS,
     SCENARIO_OBSERVATION_FIELDS as EVIDENCE_OBSERVATIONS,
 )
@@ -81,7 +82,7 @@ def test_docker_proxy_failpoint_rejects_one_container_create() -> None:
 
 def test_orchestrator_scenario_assertions_match_upgrade_evidence() -> None:
     """The orchestrator's assertion keys must match upgrade_evidence exactly."""
-    assert SCENARIO_ASSERTIONS.keys() == EVIDENCE_ASSERTIONS.keys()
+    assert tuple(SCENARIO_ASSERTIONS) == LINUX_REQUIRED_SCENARIOS
     for scenario in SCENARIO_ASSERTIONS:
         assert SCENARIO_ASSERTIONS[scenario] == EVIDENCE_ASSERTIONS[scenario], (
             f"Scenario {scenario!r} assertions differ from upgrade_evidence"
@@ -90,7 +91,7 @@ def test_orchestrator_scenario_assertions_match_upgrade_evidence() -> None:
 
 def test_orchestrator_scenario_observations_match_upgrade_evidence() -> None:
     """The orchestrator's observation keys must match upgrade_evidence exactly."""
-    assert SCENARIO_OBSERVATION_FIELDS.keys() == EVIDENCE_OBSERVATIONS.keys()
+    assert tuple(SCENARIO_OBSERVATION_FIELDS) == LINUX_REQUIRED_SCENARIOS
     for scenario in SCENARIO_OBSERVATION_FIELDS:
         assert (
             SCENARIO_OBSERVATION_FIELDS[scenario]

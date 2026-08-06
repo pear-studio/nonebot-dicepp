@@ -29,6 +29,29 @@ def _compatible_status() -> dict:
 
 
 @pytest.mark.asyncio
+async def test_health_reads_readiness_without_a_status_handshake(monkeypatch) -> None:
+    client = _client()
+    calls: list[tuple[str, str]] = []
+    expected = {
+        "dicepp_version": "3.0.0rc20",
+        "upgrade_handoff": {
+            "owns_runtime_state": True,
+            "pending": False,
+            "results": [{"action": "committed"}],
+        },
+    }
+
+    async def request(method: str, path: str):
+        calls.append((method, path))
+        return expected
+
+    monkeypatch.setattr(client, "_request", request)
+
+    assert await client.health() == expected
+    assert calls == [("GET", "/v1/health")]
+
+
+@pytest.mark.asyncio
 async def test_every_manager_client_entry_performs_compatibility_handshake(
     monkeypatch,
 ) -> None:

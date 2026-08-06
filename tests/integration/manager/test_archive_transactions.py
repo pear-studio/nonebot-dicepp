@@ -785,7 +785,7 @@ async def test_restart_recovery_cleans_inprogress_create_and_restarts_runtime(
 
 
 @pytest.mark.asyncio
-async def test_update_guard_recovery_can_restart_only_with_explicit_bypass(
+async def test_startup_recovery_can_restart_only_with_explicit_bypass(
     tmp_path: Path,
 ) -> None:
     layout, runtime, service, coordinator = _coordinator(tmp_path)

@@ -1394,8 +1394,30 @@ def test_updates_tab_confirms_verified_install_and_recovers_operation_status(
             expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
                 "常规 pre-upgrade 归档"
             )
+            expect(
+                page.locator('[data-testid="upgrade-windows-recovery-notice"]')
+            ).to_contain_text("运行安装目录根部的 DicePP-Recover.cmd")
             expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "自动完整回退程序和数据"
+                "Windows 失败时的人工恢复步骤"
+            )
+            expect(
+                page.locator('[data-testid="upgrade-linux-rollback-notice"]')
+            ).not_to_be_visible()
+
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.releaseState.target.platform = 'linux';
+                }"""
+            )
+            expect(
+                page.locator('[data-testid="upgrade-linux-rollback-notice"]')
+            ).to_be_visible()
+            expect(
+                page.locator('[data-testid="upgrade-windows-recovery-notice"]')
+            ).not_to_be_visible()
+            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
+                "Linux 失败自动完整回退"
             )
             expect(page.locator('[data-testid="upgrade-confirm-button"]')).to_be_disabled()
             page.locator('[data-testid="upgrade-risk-confirm"]').check()

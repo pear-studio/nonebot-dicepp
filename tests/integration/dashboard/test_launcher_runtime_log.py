@@ -66,6 +66,9 @@ class FakeManagerClient:
             "health": {"status": "ok"},
         }
 
+    async def health(self):
+        return {"upgrade_handoff": None}
+
     async def operate(self, runtime_unit_id: str, action: str):
         self.actions.append((runtime_unit_id, action))
         self.events.append(f"operate:{action}")
@@ -86,6 +89,47 @@ class FakeManagerClient:
         label = "terminal" if status == "succeeded" else status
         self.events.append(f"{label}:{operation_id}")
         return self.operations[operation_id]
+
+
+def test_manager_readiness_waits_for_durable_startup_recovery(monkeypatch) -> None:
+    class ReadinessClient:
+        def __init__(self) -> None:
+            self.health_calls = 0
+            self.status_calls = 0
+
+        async def health(self):
+            self.health_calls += 1
+            pending = self.health_calls == 1
+            return {
+                "upgrade_handoff": {
+                    "owns_runtime_state": True,
+                    "pending": pending,
+                    "results": [
+                        {
+                            "action": (
+                                "awaiting_api_bind" if pending else "committed"
+                            )
+                        }
+                    ],
+                }
+            }
+
+        async def status(self):
+            self.status_calls += 1
+            return {"health": {"status": "ok"}}
+
+    client = ReadinessClient()
+    monkeypatch.setattr(launcher.time, "sleep", lambda _seconds: None)
+
+    readiness = launcher._wait_for_manager_service(client, timeout=1)
+
+    assert readiness["upgrade_handoff"] == {
+        "owns_runtime_state": True,
+        "pending": False,
+        "results": [{"action": "committed"}],
+    }
+    assert client.health_calls == 2
+    assert client.status_calls == 1
 
 
 def test_runtime_log_path_uses_project_data_logs(tmp_dashboard_paths: Path) -> None:
@@ -222,9 +266,45 @@ def test_background_launcher_preserves_normal_exit_signals(
         assert exc_info.value.code == 0
 
 
-def test_background_launcher_runs_tray_without_opening_browser(
+@pytest.mark.parametrize(
+    ("manager_readiness", "expected_actions"),
+    [
+        (
+            {"upgrade_handoff": None},
+            [
+                (launcher.LAUNCHER_RUNTIME_KEY, "start"),
+                (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
+            ],
+        ),
+        (
+            {
+                "upgrade_handoff": {
+                    "owns_runtime_state": True,
+                    "pending": False,
+                    "results": [{"action": "committed"}],
+                }
+            },
+            [(launcher.LAUNCHER_RUNTIME_KEY, "stop")],
+        ),
+        (
+            {
+                "upgrade_handoff": {
+                    "pending": False,
+                    "results": [{"action": "ignored_legacy_windows_upgrade"}],
+                }
+            },
+            [
+                (launcher.LAUNCHER_RUNTIME_KEY, "start"),
+                (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
+            ],
+        ),
+    ],
+)
+def test_background_launcher_respects_startup_recovery_runtime_ownership(
     monkeypatch,
     tmp_dashboard_paths: Path,
+    manager_readiness: dict,
+    expected_actions: list[tuple[str, str]],
 ) -> None:
     events: list[str] = []
     client = FakeManagerClient(events)
@@ -281,7 +361,11 @@ def test_background_launcher_runs_tray_without_opening_browser(
         "_start_dashboard_server",
         lambda *_args, **_kwargs: FakeHandle("dashboard"),
     )
-    monkeypatch.setattr(launcher, "_wait_for_manager_service", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        launcher,
+        "_wait_for_manager_service",
+        lambda *_args, **_kwargs: manager_readiness,
+    )
     monkeypatch.setattr(launcher, "build_tray", lambda *_args, **_kwargs: FakeTray())
     monkeypatch.setattr(launcher, "should_open_browser", lambda: True)
     monkeypatch.setattr(
@@ -294,10 +378,7 @@ def test_background_launcher_runs_tray_without_opening_browser(
 
     assert tray_runs == [True]
     assert browser_opens == []
-    assert client.actions == [
-        (launcher.LAUNCHER_RUNTIME_KEY, "start"),
-        (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
-    ]
+    assert client.actions == expected_actions
     assert "background launch" in DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
 
 
@@ -715,7 +796,11 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
         "_start_dashboard_server",
         lambda *_args, **_kwargs: dashboard_handle,
     )
-    monkeypatch.setattr(launcher, "_wait_for_manager_service", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        launcher,
+        "_wait_for_manager_service",
+        lambda *_args, **_kwargs: {"upgrade_handoff": None},
+    )
     monkeypatch.setattr(
         launcher,
         "_auto_start_runtime",

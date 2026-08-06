@@ -27,6 +27,7 @@ from dicepp_manager.service import (
     UnknownRuntimeUnit,
 )
 from dicepp_manager.store import ManagerOperationStore
+from dicepp_manager.upgrade import SimpleWindowsVelopackUpgradeAdapter
 
 
 class FakeRuntimeAdapter:
@@ -848,6 +849,215 @@ async def test_manager_shutdown_drains_post_bind_handoff_recovery(
             await lifespan.__aexit__(None, None, None)
         elif not shutdown.done():
             await shutdown
+
+
+@pytest.mark.asyncio
+async def test_health_reports_windows_startup_recovery_until_durable_terminal(
+    tmp_path: Path,
+) -> None:
+    class HandoffRecoveryCoordinator:
+        install_supported = True
+
+        def __init__(self, service: ManagerService, layout: InstanceLayout) -> None:
+            self.service = service
+            self.platform_adapter = SimpleWindowsVelopackUpgradeAdapter(
+                layout=layout,
+                install_command=["Update.exe", "--waitPid", "{wait_pid}"],
+            )
+            self.api_ready = asyncio.Event()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def recover(
+            self,
+            *,
+            prepare_windows_handoff_only=False,
+            allow_startup_recovery=False,
+        ):
+            if prepare_windows_handoff_only:
+                self.service.set_startup_maintenance_gate(True)
+                return [{"action": "awaiting_api_bind", "owns_runtime_state": True}]
+            with self.service.maintenance(
+                allow_startup_recovery=allow_startup_recovery
+            ):
+                self.entered.set()
+                await self.release.wait()
+            self.service.set_startup_maintenance_gate(False)
+            return [{
+                "action": "committed",
+                "cleanup": "complete",
+                "owns_runtime_state": True,
+            }]
+
+        def mark_api_ready(self) -> None:
+            self.api_ready.set()
+
+        async def wait_api_ready(self) -> None:
+            await self.api_ready.wait()
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path)
+    coordinator = HandoffRecoveryCoordinator(service, layout)
+    service.upgrade_coordinator = coordinator
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://manager",
+            headers={"Authorization": "Bearer manager-secret"},
+        ) as client:
+            pending = (await client.get("/v1/health")).json()["upgrade_handoff"]
+            assert pending == {
+                "owns_runtime_state": True,
+                "pending": True,
+                "results": [
+                    {"action": "awaiting_api_bind", "owns_runtime_state": True}
+                ],
+            }
+            await asyncio.wait_for(coordinator.entered.wait(), timeout=1)
+
+            coordinator.release.set()
+            for _ in range(20):
+                terminal = (await client.get("/v1/health")).json()[
+                    "upgrade_handoff"
+                ]
+                if terminal["pending"] is False:
+                    break
+                await asyncio.sleep(0)
+
+            assert terminal == {
+                "owns_runtime_state": True,
+                "pending": False,
+                "results": [{
+                    "action": "committed",
+                    "cleanup": "complete",
+                    "owns_runtime_state": True,
+                }],
+            }
+            assert service._startup_maintenance_active is False
+    finally:
+        coordinator.api_ready.set()
+        coordinator.release.set()
+        await lifespan.__aexit__(None, None, None)
+
+
+def test_legacy_windows_journal_does_not_claim_runtime_startup(
+    tmp_path: Path,
+) -> None:
+    class LegacyCoordinator:
+        install_supported = True
+
+        def __init__(self, layout: InstanceLayout) -> None:
+            self.platform_adapter = SimpleWindowsVelopackUpgradeAdapter(
+                layout=layout,
+                install_command=["Update.exe", "--waitPid", "{wait_pid}"],
+            )
+
+        async def recover(self, *, prepare_windows_handoff_only=False, **_kwargs):
+            if prepare_windows_handoff_only:
+                return [{"action": "ignored_legacy_windows_upgrade"}]
+            return []
+
+        def mark_api_ready(self) -> None:
+            pass
+
+    layout = InstanceLayout.from_root(tmp_path)
+    service = _service(tmp_path)
+    service.upgrade_coordinator = LegacyCoordinator(layout)
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/health",
+            headers={"Authorization": "Bearer manager-secret"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["upgrade_handoff"] is None
+
+
+@pytest.mark.asyncio
+async def test_shutdown_retries_runtime_stop_behind_startup_recovery_gate(
+    tmp_path: Path,
+) -> None:
+    class FlakyStopRuntime(FakeRuntimeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.state = "running"
+            self.stop_attempts = 0
+
+        async def status(self, ids):
+            return {
+                unit_id: RuntimeUnitStatus(
+                    unit_id,
+                    self.state,
+                    "healthy" if self.state == "running" else "stopped",
+                )
+                for unit_id in ids
+            }
+
+        async def operate(self, runtime_unit_id, action):
+            self.actions.append((runtime_unit_id, action))
+            if action == "stop":
+                self.stop_attempts += 1
+                if self.stop_attempts == 1:
+                    raise RuntimeError("simulated target-health quiesce failure")
+                self.state = "stopped"
+            return RuntimeUnitStatus(
+                runtime_unit_id,
+                self.state,
+                "healthy" if self.state == "running" else "stopped",
+            )
+
+    layout = InstanceLayout.from_root(tmp_path)
+    runtime = FlakyStopRuntime()
+    service = _service(tmp_path, runtime)
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    service.set_startup_maintenance_gate(True)
+    with service.maintenance(
+        timeout=1,
+        allow_startup_recovery=True,
+    ) as maintenance:
+        with pytest.raises(RuntimeError, match="target-health quiesce failure"):
+            await service.archive_coordinator.runtime_support.quiesce(maintenance)
+
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    await lifespan.__aexit__(None, None, None)
+
+    assert runtime.stop_attempts == 2
+    assert runtime.state == "stopped"
+    assert runtime.actions == [
+        ("dicepp-runtime", "stop"),
+        ("dicepp-runtime", "stop"),
+    ]
 
 
 def test_release_scheduler_checks_immediately_and_survives_config_error(
