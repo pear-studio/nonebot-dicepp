@@ -109,6 +109,36 @@ class ManagerClient:
         await self._ensure_compatible()
         return (await self._request("GET", f"/v1/logs?lines={lines}")).get("logs", {})
 
+    async def control_bots(self) -> list[dict]:
+        await self._ensure_control_capable()
+        result = (await self._request("GET", "/v1/control/bots")).get("bots", [])
+        return result if isinstance(result, list) else []
+
+    async def reload_bots(self, bot_id: str | None = None) -> list[dict]:
+        await self._ensure_control_capable()
+        result = await self._request(
+            "POST",
+            "/v1/control/reload",
+            json_body={"bot_id": bot_id} if bot_id is not None else {},
+        )
+        rows = result.get("results", [])
+        return rows if isinstance(rows, list) else []
+
+    async def _ensure_control_capable(self) -> dict:
+        payload = await self._ensure_compatible()
+        control = payload.get("control")
+        if (
+            not isinstance(control, dict)
+            or control.get("available") is not True
+            or control.get("protocol") != "dicepp-control-v1"
+        ):
+            raise ManagerIncompatible(
+                "Manager control channel capability is unavailable; "
+                "upgrade Manager before using this Dashboard",
+                status_code=409,
+            )
+        return payload
+
     async def save_user_config(self, config: dict) -> dict:
         await self._ensure_compatible()
         return await self._request("PUT", "/v1/config/user", json_body=config)

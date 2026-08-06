@@ -7,7 +7,6 @@ import sqlite3
 import sys
 import tempfile
 import time
-import uuid
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Optional
@@ -15,7 +14,7 @@ from datetime import datetime, timezone
 
 import logging
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -66,7 +65,12 @@ async def lifespan(app: FastAPI):
     app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
     layout = DashboardPaths.instance_layout()
     app.state.manager_client = ManagerClient(ManagerClientSettings.from_layout(layout))
-    yield
+    control_poll_task = asyncio.create_task(_poll_manager_control_status(app))
+    try:
+        yield
+    finally:
+        control_poll_task.cancel()
+        await asyncio.gather(control_poll_task, return_exceptions=True)
 
 
 app = FastAPI(title="DicePP Dashboard", version=get_version(), lifespan=lifespan)
@@ -111,14 +115,6 @@ def _init_db(db_path: str) -> None:
             """CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
                 expires_at TEXT NOT NULL
-            )"""
-        )
-
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS bots_meta (
-                bot_id TEXT PRIMARY KEY,
-                last_heartbeat TEXT,
-                version TEXT DEFAULT ''
             )"""
         )
 
@@ -227,48 +223,19 @@ def _is_xlsx(path: Path) -> bool:
         return False
 
 
-async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dict]:
-    """Notify bot(s) to reload config via WebSocket Control Channel."""
-    from .websocket import send_reload_to_bot
-
-    # Fetch bot IDs and close the DB connection immediately — the async
-    # polling loop below may run for seconds per bot and must not hold
-    # the connection open.
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+async def _notify_reload(request: Request, bot_id: Optional[str] = None) -> list[dict]:
+    """Request reload exclusively through Manager's control API."""
     try:
-        if bot_id:
-            cursor = conn.execute(
-                "SELECT bot_id FROM bots_meta WHERE bot_id = ?", (bot_id,)
-            )
-        else:
-            cursor = conn.execute("SELECT bot_id FROM bots_meta")
-        bids = sorted({row["bot_id"] for row in cursor.fetchall()})
-    finally:
-        conn.close()
-
-    results = []
-    for bid in bids:
-        request_id = uuid.uuid4().hex
-        if await send_reload_to_bot(bid, request_id):
-            # Wait up to 5 s for a reload_result
-            for _ in range(50):
-                await asyncio.sleep(0.1)
-                pending = getattr(app.state, "pending_reload_results", {})
-                rr = pending.pop(request_id, None)
-                if rr is not None:
-                    results.append({
-                        "bot_id": bid,
-                        "status": "ok" if rr["success"] else "error",
-                        "error": "; ".join(rr.get("errors", [])) or None,
-                    })
-                    break
-            else:
-                results.append({"bot_id": bid, "status": "error", "error": "reload timed out"})
-            continue
-        results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
-
-    return results
+        return await _get_manager_client(request).reload_bots(bot_id)
+    except ManagerClientError as exc:
+        # Saving the configuration has already completed through Manager.  Do
+        # not hide a mixed-version or unavailable-control failure behind an
+        # empty result: the Dashboard can show a safe retryable outcome.
+        return [{
+            "bot_id": bot_id or "*",
+            "status": "error",
+            "error": str(exc),
+        }]
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -612,7 +579,7 @@ async def archives_export(filename: str, request: Request):
 
 @app.get("/api/health")
 async def dashboard_health(request: Request):
-    """Independent local readiness contract used by Manager recovery."""
+    """Dashboard's own readiness only; Bot control belongs to Manager."""
     db_path = getattr(request.app.state, "dashboard_db", None)
     if not isinstance(db_path, str):
         return JSONResponse(
@@ -625,16 +592,7 @@ async def dashboard_health(request: Request):
         )
     try:
         with sqlite3.connect(db_path) as connection:
-            # MAX() on a TEXT column is lexicographic: during the epoch →
-            # ISO-8601 transition window a stale ISO row outranks fresher
-            # epoch rows.  The window self-converges as each live bot's
-            # next heartbeat is written in the new format (same-format ISO
-            # strings order chronologically), so a Python-side parse+max is
-            # not worth a full bots_meta scan on every poll.
-            row = connection.execute(
-                """SELECT MAX(last_heartbeat) FROM bots_meta
-                   WHERE last_heartbeat IS NOT NULL AND last_heartbeat != ''"""
-            ).fetchone()
+            connection.execute("SELECT 1")
     except sqlite3.Error as exc:
         return JSONResponse(
             status_code=503,
@@ -648,12 +606,6 @@ async def dashboard_health(request: Request):
         "status": "ok",
         "component": "dashboard",
         "version": get_version(),
-        "control": {
-            # Lack of a heartbeat means the Bot is stopped, not that Dashboard
-            # readiness failed. Manager evaluates this field separately after
-            # it starts the RuntimeUnit.
-            "latest_heartbeat": row[0] if row is not None else None,
-        },
     }
 
 
@@ -1266,7 +1218,7 @@ async def config_set(request: Request):
               ip=request.client.host if request.client else "")
 
     # Notify all bots
-    reload_results = await _notify_reload(db_path)
+    reload_results = await _notify_reload(request)
 
     return _ok({"saved": True, "reload": reload_results})
 
@@ -1297,7 +1249,7 @@ async def config_reset(request: Request):
     audit_log(db_path, "config.reset", path, "reset to default",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(db_path) if removed else []
+    reload_results = await _notify_reload(request) if removed else []
 
     return _ok({"removed": removed, "reload": reload_results})
 
@@ -1332,7 +1284,7 @@ async def config_bot_save(bot_id: str, request: Request):
     audit_log(db_path, "config.bot.save", f"bots/{bot_id}", "",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(db_path, bot_id)
+    reload_results = await _notify_reload(request, bot_id)
 
     return _ok({"saved": True, "reload": reload_results})
 
@@ -1363,7 +1315,7 @@ async def config_user_save(request: Request):
     audit_log(db_path, "config.user.save", "user.json", "",
               ip=request.client.host if request.client else "")
 
-    reload_results = await _notify_reload(db_path)
+    reload_results = await _notify_reload(request)
     return _ok({"saved": True, "reload": reload_results})
 
 
@@ -1445,68 +1397,6 @@ async def persona_character_save(name: str, request: Request):
 
 
 # ── Shared bot status computation ──────────────────────────────────────────────
-
-
-def _heartbeat_to_epoch(value: object) -> float | None:
-    """Parse a stored heartbeat into epoch seconds.
-
-    New Dashboards persist ISO-8601 UTC strings; rows written by older
-    versions hold bare epoch-second numbers.  Both are accepted.
-    """
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.timestamp()
-
-
-def _compute_bot_statuses(db_path: str) -> list[dict]:
-    """Read bots_meta + discovered bots, compute online status.
-
-    Used by both the REST endpoint and the SSE broadcast path.
-    """
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    meta_bots = {}
-    try:
-        cursor = conn.execute("SELECT bot_id, version, last_heartbeat FROM bots_meta")
-        for row in cursor.fetchall():
-            meta_bots[row["bot_id"]] = {
-                "bot_id": row["bot_id"],
-                "version": row["version"] or "",
-                "last_heartbeat_ts": _heartbeat_to_epoch(row["last_heartbeat"]) or "",
-            }
-    finally:
-        conn.close()
-
-    discovered = set()
-    bots_dir = DashboardPaths.CONFIG_BOTS_DIR
-    if bots_dir.exists():
-        for f in bots_dir.iterdir():
-            if f.suffix == ".json" and f.stem != "_template":
-                discovered.add(f.stem)
-
-    all_ids = set(meta_bots.keys()) | discovered
-    now = time.time()
-    result = []
-    for bid in sorted(all_ids):
-        entry = meta_bots.get(bid, {
-            "bot_id": bid,
-            "version": "",
-            "last_heartbeat_ts": "",
-        })
-        last_hb = entry.get("last_heartbeat_ts", "")
-        entry["online"] = bool(last_hb) and (now - float(last_hb)) <= 15
-        result.append(entry)
-    return result
 
 
 _overview_logger = logging.getLogger("dashboard.overview")
@@ -1679,9 +1569,10 @@ def _compute_llm_usage(persona_db_path: Path, today: str) -> Optional[dict]:
 @app.get("/api/overview", dependencies=[Depends(require_auth)])
 async def overview(request: Request, bot_id: Optional[str] = Query(None)):
     """Aggregate overview: bot status, core stats, persona stats, LLM usage."""
-    result = {
-        "bots": _compute_bot_statuses(request.app.state.dashboard_db),
-    }
+    try:
+        result = {"bots": await _get_manager_client(request).control_bots()}
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
     if bot_id:
         _validate_identifier(bot_id, "bot_id")
@@ -1698,8 +1589,11 @@ async def overview(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.get("/api/bots/status", dependencies=[Depends(require_auth)])
 async def bot_status(request: Request):
-    """Return bot status: union of bots_meta and discovered bots."""
-    return _ok({"bots": _compute_bot_statuses(request.app.state.dashboard_db)})
+    """Return Manager-owned Bot control state."""
+    try:
+        return _ok({"bots": await _get_manager_client(request).control_bots()})
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
 
 
 # ── Manager API ───────────────────────────────────────────────────────────────
@@ -1716,6 +1610,42 @@ def _get_manager_client(request: Request) -> ManagerClient:
         )
         request.app.state.manager_client = client
     return client
+
+
+async def _publish_manager_bot_statuses(app: FastAPI, bots: list[dict]) -> None:
+    """Forward Manager state to Dashboard's browser-only SSE subscribers."""
+    subscribers = getattr(app.state, "status_subscribers", [])
+    payload = json.dumps({"bots": bots}, ensure_ascii=False, sort_keys=True)
+    dead = []
+    for queue in list(subscribers):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for queue in dead:
+        try:
+            subscribers.remove(queue)
+        except ValueError:
+            pass
+
+
+async def _poll_manager_control_status(app: FastAPI) -> None:
+    """Keep Dashboard SSE fresh by polling Manager, never Dashboard storage."""
+    previous: str | None = None
+    while True:
+        try:
+            client = app.state.manager_client
+            bots = await client.control_bots()
+            snapshot = json.dumps(bots, ensure_ascii=False, sort_keys=True)
+            if snapshot != previous:
+                previous = snapshot
+                await _publish_manager_bot_statuses(app, bots)
+        except (AttributeError, ManagerClientError):
+            # Manager may be starting or an old mixed-version Manager may be
+            # present. HTTP callers receive the explicit client error instead
+            # of falling back to Dashboard's former direct channel.
+            pass
+        await asyncio.sleep(2)
 
 
 def _audit_manager_operation(request: Request, operation: dict, status_code: int) -> None:
@@ -1859,10 +1789,9 @@ async def events_stream(request: Request):
 
     async def _generate():
         try:
-            db_path = request.app.state.dashboard_db
             try:
-                bots = _compute_bot_statuses(db_path)
-            except Exception:
+                bots = await _get_manager_client(request).control_bots()
+            except ManagerClientError:
                 bots = []
             yield f"data: {json.dumps({'bots': bots})}\n\n"
             while True:
@@ -2048,13 +1977,6 @@ async def dashboard_page():
     if static_file.exists():
         return FileResponse(str(static_file))
     return JSONResponse(_ok({"message": "Dashboard UI not found"}))
-
-
-@app.websocket("/ws/control")
-async def ws_control(ws: WebSocket):
-    """WebSocket endpoint for Bot Control Channel."""
-    from .websocket import control_endpoint
-    await control_endpoint(ws)
 
 
 @app.get("/")

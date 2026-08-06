@@ -1,5 +1,4 @@
-"""Dashboard Dev Serve — launch an isolated dev Dashboard on :5090 and link it
-to a long-running ``dicepp-shell serve`` Bot Runtime.
+"""Dashboard Dev Serve — launch isolated Manager, Dashboard and Bot processes.
 
 Usage:
     python dev_dashboard.py start [--no-tick] [--dashboard-port N] [--json]
@@ -11,9 +10,9 @@ Design constraints (see SKILL.md):
   0.0.0.0 for LAN access. NEVER 4090 (production docker dashboard port).
 - Workspace is the fixed ``dashboard-dev`` shell session (``.dicepp-shell/
   dashboard-dev``); production ./config ./data ./content are untouched.
-- Bot -> Dashboard goes through 127.0.0.1:5090 (test bot is not in a container).
-  ``serve --dashboard http://127.0.0.1:5090`` injects DPP_ADMIN_HOST/PORT; the
-  bot reads them via resolve_dashboard_url() at startup.
+- Manager listens at 127.0.0.1:4091; Dashboard and Bot both use it.  The Bot
+  starts with ``serve --manager http://127.0.0.1:4091``, which sets
+  DICEPP_MANAGER_URL for its Manager-owned control WebSocket.
 
 This script is pure ``uv run`` + ``dicepp-shell``. It does not touch docker.
 
@@ -28,6 +27,8 @@ Process lifecycle:
   PID that ACTUALLY listens on :5090 (resolved after spawn) and, on stop, also
   reverse-lookup :5090 to catch orphans. We never batch-kill processes by
   cmdline pattern — only recorded PIDs and the port's actual listener.
+- The Manager is a plain ``uv run python -m dicepp_manager`` on :4091.  It is
+  recorded with the Dashboard worker and stopped only after the Bot runtime.
 """
 
 from __future__ import annotations
@@ -51,12 +52,16 @@ def _find_project_root() -> Path:
 
 
 DEFAULT_PORT = 5090
+MANAGER_PORT = 4091
 SESSION_NAME = "dashboard-dev"
 WORKTREE_ROOT = _find_project_root()
 WORKSPACE = WORKTREE_ROOT / ".dicepp-shell" / SESSION_NAME
 PID_FILE = WORKSPACE / "dashboard" / "data" / ".dev-pids.json"
 RUNTIME_JSON = WORKSPACE / "runtime.json"        # published by dicepp-shell serve
 HEALTH_URL_TEMPLATE = "http://127.0.0.1:{port}/api/auth/status"
+MANAGER_URL = f"http://127.0.0.1:{MANAGER_PORT}"
+MANAGER_HEALTH_URL = f"{MANAGER_URL}/v1/health"
+MANAGER_TOKEN_FILE = WORKSPACE / "manager" / "state" / "api-token"
 READY_TIMEOUT = 30.0      # dashboard health
 SERVE_READY_TIMEOUT = 20.0  # wait for runtime.json to appear
 STOP_TIMEOUT = 15.0
@@ -175,6 +180,24 @@ def _wait_ready(port: int) -> bool:
     return False
 
 
+def _wait_manager_ready() -> bool:
+    """Wait for Manager's authenticated local health endpoint."""
+    deadline = time.monotonic() + READY_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            token = MANAGER_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            request = urllib.request.Request(
+                MANAGER_HEALTH_URL,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(request, timeout=2) as response:
+                if response.status == 200:
+                    return True
+        except OSError:
+            time.sleep(0.4)
+    return False
+
+
 def _wait_serve_ready(serve_parent_pid: int,
                       launch_floor: float,
                       parent_create_time: float) -> bool:
@@ -211,12 +234,17 @@ def _wait_serve_ready(serve_parent_pid: int,
     return False
 
 
-def _write_pids(dashboard_pid: int, *, port: int, bind_host: str) -> None:
-    """Atomically persist the dashboard worker identity.
+def _write_pids(
+    dashboard_pid: int,
+    manager_pid: int,
+    *,
+    port: int,
+    bind_host: str,
+) -> None:
+    """Atomically persist Dashboard and Manager worker identities.
 
-    Writes ``{dashboard: {pid, process_created_at, port, bind_host}}`` so that
-    stop/status can verify the process identity (not just the PID) before
-    acting on it.
+    The PID file includes both loopback listeners so stop/status can verify
+    process identity (not just a reused PID) before acting on either service.
     """
     import psutil as _psutil
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -229,7 +257,13 @@ def _write_pids(dashboard_pid: int, *, port: int, bind_host: str) -> None:
                     "process_created_at": _psutil.Process(dashboard_pid).create_time(),
                     "port": port,
                     "bind_host": bind_host,
-                }
+                },
+                "manager": {
+                    "pid": manager_pid,
+                    "process_created_at": _psutil.Process(manager_pid).create_time(),
+                    "port": MANAGER_PORT,
+                    "bind_host": "127.0.0.1",
+                },
             },
             indent=2,
         ),
@@ -248,6 +282,15 @@ def _read_dashboard_state() -> dict[str, object] | None:
     """Return the structured dashboard state from the PID file, or None."""
     data = _read_pids()
     entry = data.get("dashboard")
+    if isinstance(entry, dict):
+        return entry  # type: ignore[return-value]
+    return None
+
+
+def _read_manager_state() -> dict[str, object] | None:
+    """Return the structured Manager state from the PID file, or None."""
+    data = _read_pids()
+    entry = data.get("manager")
     if isinstance(entry, dict):
         return entry  # type: ignore[return-value]
     return None
@@ -276,8 +319,8 @@ def _same_recorded_process(state: dict[str, object]) -> bool:
         return False
 
 
-def _foreign_port_owner(port: int) -> int | None:
-    """A PID holding *port* that is not our verified dashboard worker.
+def _foreign_port_owner(port: int, *, service: str) -> int | None:
+    """A PID holding *port* that is not our verified service worker.
 
     Checks the recorded identity (pid+create_time), so a reused PID won't
     be mistaken for our own process.
@@ -285,7 +328,7 @@ def _foreign_port_owner(port: int) -> int | None:
     listener = _pid_from_port(port)
     if listener is None:
         return None
-    state = _read_dashboard_state()
+    state = _read_dashboard_state() if service == "dashboard" else _read_manager_state()
     if state is not None and _same_recorded_process(state):
         if int(state["pid"]) == listener:  # type: ignore[arg-type]
             return None
@@ -294,12 +337,20 @@ def _foreign_port_owner(port: int) -> int | None:
 
 def cmd_start(args) -> int:
     port = args.dashboard_port
-    owner = _foreign_port_owner(port)
+    owner = _foreign_port_owner(port, service="dashboard")
     if owner is not None:
         print(
             f"Error: port {port} already held by foreign pid {owner}. "
             f"Stop it first, or use --dashboard-port to pick a different port. "
             f"(Never use 4090 — that is the production dashboard port.)",
+            file=sys.stderr,
+        )
+        return 1
+    manager_owner = _foreign_port_owner(MANAGER_PORT, service="manager")
+    if manager_owner is not None:
+        print(
+            f"Error: Manager port {MANAGER_PORT} already held by foreign pid "
+            f"{manager_owner}. Stop it first.",
             file=sys.stderr,
         )
         return 1
@@ -315,16 +366,47 @@ def cmd_start(args) -> int:
     log_dir = WORKSPACE / "dashboard" / "data" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2) start the dev dashboard (source). Bind 127.0.0.1 by default; --expose
-    #    opts into 0.0.0.0 for LAN access. Started BEFORE serve so the bot's
-    #    ControlChannel can connect immediately instead of spinning on
-    #    connection-lost retries.
+    # 2) start Manager first.  It generates the Dashboard API token and owns
+    #    the Bot control WebSocket, so neither peer must connect to Dashboard
+    #    for runtime control.
+    manager_env = os.environ.copy()
+    manager_env.update(
+        {
+            "DICEPP_PROJECT_ROOT": str(WORKSPACE),
+            "DICEPP_APP_DIR": str(WORKSPACE),
+            "DICEPP_MANAGER_HOST": "127.0.0.1",
+            "DICEPP_MANAGER_PORT": str(MANAGER_PORT),
+            "DICEPP_MANAGER_RUNTIME": "unavailable",
+            "DICEPP_MANAGER_RELEASE_SCHEDULER": "false",
+            "DICEPP_MANAGER_TOKEN_FILE": str(MANAGER_TOKEN_FILE),
+        }
+    )
+    manager_parent_pid = _spawn_detached(
+        ["uv", "run", "python", "-m", "dicepp_manager"],
+        cwd=WORKTREE_ROOT,
+        env=manager_env,
+        stdout_file=log_dir / "manager.log",
+    )
+    if not _wait_manager_ready():
+        print(
+            f"Error: Manager did not become ready at {MANAGER_URL} within "
+            f"{READY_TIMEOUT:g}s. Check {log_dir / 'manager.log'}.",
+            file=sys.stderr,
+        )
+        _terminate_tree(manager_parent_pid)
+        return 2
+    manager_worker = _pid_from_port(MANAGER_PORT) or manager_parent_pid
+
+    # 3) start the dev Dashboard (source). Bind 127.0.0.1 by default;
+    #    --expose opts into 0.0.0.0 for LAN access.
     bind_host = "0.0.0.0" if args.expose else "127.0.0.1"
     dashboard_env = os.environ.copy()
     dashboard_env["DASHBOARD_HOST"] = bind_host
     dashboard_env["DASHBOARD_PORT"] = str(port)
     dashboard_env["DICEPP_PROJECT_ROOT"] = str(WORKSPACE)
     dashboard_env["DICEPP_APP_DIR"] = str(WORKSPACE)
+    dashboard_env["DICEPP_MANAGER_URL"] = MANAGER_URL
+    dashboard_env["DICEPP_MANAGER_TOKEN_FILE"] = str(MANAGER_TOKEN_FILE)
     uv_parent_pid = _spawn_detached(
         ["uv", "run", "python", "-m", "dashboard"],
         cwd=WORKTREE_ROOT, env=dashboard_env,
@@ -337,8 +419,9 @@ def cmd_start(args) -> int:
             f"Check {log_dir / 'dashboard.log'}.",
             file=sys.stderr,
         )
-        # best-effort cleanup of the half-started dashboard
+        # Best-effort cleanup of the half-started Dashboard and Manager.
         _terminate_tree(uv_parent_pid)
+        _terminate_tree(manager_worker)
         print(
             f"Hint: workspace '{WORKSPACE}' may be in an incomplete state. "
             f"Run `{sys.argv[0]} stop` to clear stale artifacts before retrying.",
@@ -349,9 +432,14 @@ def cmd_start(args) -> int:
     # The real listener PID (the uv worker), not the uv parent. This is what
     # we must kill on stop — killing the uv parent alone leaves an orphan.
     dashboard_worker = _pid_from_port(port) or uv_parent_pid
-    _write_pids(dashboard_worker, port=port, bind_host=bind_host)
+    _write_pids(
+        dashboard_worker,
+        manager_worker,
+        port=port,
+        bind_host=bind_host,
+    )
 
-    # 3) start the bot runtime, linked to this dashboard. dicepp-shell serve
+    # 4) start the Bot runtime, linked to Manager. dicepp-shell serve
     #    blocks forever (uvicorn server.run); spawn it detached. Its lifecycle
     #    is managed by ``dicepp-shell serve --stop`` (sends HTTP stop to the runtime
     #    registered in runtime.json), NOT by direct PID kill here.
@@ -359,8 +447,15 @@ def cmd_start(args) -> int:
     #    reclaims a crashed session via its pid-liveness check, and if a real
     #    runtime is still live, acquire() correctly refuses instead of letting
     #    two serves share one workspace.
-    serve_cmd = ["uv", "run", "dicepp-shell", "serve", SESSION_NAME,
-                 "--dashboard", f"http://127.0.0.1:{port}"]
+    serve_cmd = [
+        "uv",
+        "run",
+        "dicepp-shell",
+        "serve",
+        SESSION_NAME,
+        "--manager",
+        MANAGER_URL,
+    ]
     if not args.no_tick:
         serve_cmd.append("--tick")
 
@@ -401,6 +496,7 @@ def cmd_start(args) -> int:
         else:
             _terminate_tree(serve_parent_pid)
         _terminate_tree(dashboard_worker)
+        _terminate_tree(manager_worker)
         PID_FILE.unlink(missing_ok=True)
         return 3
 
@@ -413,6 +509,8 @@ def cmd_start(args) -> int:
         "bind_host": bind_host,
         "dashboard_url": access_url,
         "dashboard_pid": dashboard_worker,
+        "manager_url": MANAGER_URL,
+        "manager_pid": manager_worker,
         "serve_pid": serve_parent_pid,
         "serve": _serve_info,
         "tick": not args.no_tick,
@@ -427,6 +525,7 @@ def cmd_start(args) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print(f"Dashboard dev ready at {access_url} (bind={bind_host}, pid={dashboard_worker})")
+        print(f"Manager ready at {MANAGER_URL} (pid={manager_worker})")
         print(f"Bot runtime started: {_serve_info} (parent pid={serve_parent_pid}, tick={not args.no_tick})")
         print(f"Workspace: {WORKSPACE}")
         print(f"Logs: {log_dir}")
@@ -437,21 +536,30 @@ def cmd_start(args) -> int:
 
 
 def cmd_status(_args) -> int:
-    state = _read_dashboard_state()
-    d_verified = state is not None and _same_recorded_process(state)
-    d_port = int(state["port"]) if state is not None and "port" in state else DEFAULT_PORT  # type: ignore[arg-type]
+    dashboard_state = _read_dashboard_state()
+    manager_state = _read_manager_state()
+    d_verified = dashboard_state is not None and _same_recorded_process(dashboard_state)
+    m_verified = manager_state is not None and _same_recorded_process(manager_state)
+    d_port = int(dashboard_state["port"]) if dashboard_state is not None and "port" in dashboard_state else DEFAULT_PORT  # type: ignore[arg-type]
+    m_port = int(manager_state["port"]) if manager_state is not None and "port" in manager_state else MANAGER_PORT  # type: ignore[arg-type]
     listening = _probe_port(d_port)
+    manager_listening = _probe_port(m_port)
     # serve liveness is read from dicepp-shell's own runtime.json + lease.
     serve_status = _serve_status_text()
     print(f"Session:     {SESSION_NAME}")
     print(f"Workspace:   {WORKSPACE}")
-    if state is not None:
-        print(f"Dashboard:   pid={state.get('pid')} {'verified-alive' if d_verified else 'dead/unknown'}, "
+    if dashboard_state is not None:
+        print(f"Dashboard:   pid={dashboard_state.get('pid')} {'verified-alive' if d_verified else 'dead/unknown'}, "
               f"port {d_port} {'listening' if listening else 'free'}")
     else:
         print(f"Dashboard:   no state recorded, port {d_port} {'listening' if listening else 'free'}")
+    if manager_state is not None:
+        print(f"Manager:     pid={manager_state.get('pid')} {'verified-alive' if m_verified else 'dead/unknown'}, "
+              f"port {m_port} {'listening' if manager_listening else 'free'}")
+    else:
+        print(f"Manager:     no state recorded, port {m_port} {'listening' if manager_listening else 'free'}")
     print(f"Bot serve:   {serve_status}")
-    ok = d_verified and listening and serve_status.startswith("running")
+    ok = d_verified and listening and m_verified and manager_listening and serve_status.startswith("running")
     if not ok:
         print("Hint: run `start` to relaunch, or `stop` to clear stale state.")
     return 0 if ok else 1
@@ -476,21 +584,41 @@ def _serve_status_text() -> str:
 
 
 def cmd_stop(_args) -> int:
-    state = _read_dashboard_state()
-    d_verified = state is not None and _same_recorded_process(state)
-    d_port = int(state["port"]) if state is not None and "port" in state else DEFAULT_PORT  # type: ignore[arg-type]
+    dashboard_state = _read_dashboard_state()
+    manager_state = _read_manager_state()
+    d_verified = dashboard_state is not None and _same_recorded_process(dashboard_state)
+    m_verified = manager_state is not None and _same_recorded_process(manager_state)
+    d_port = int(dashboard_state["port"]) if dashboard_state is not None and "port" in dashboard_state else DEFAULT_PORT  # type: ignore[arg-type]
+    m_port = int(manager_state["port"]) if manager_state is not None and "port" in manager_state else MANAGER_PORT  # type: ignore[arg-type]
     # 1) stop serve via its OWN mechanism: dicepp-shell serve --stop sends HTTP stop to
     #    the runtime registered in runtime.json, which closes the lease. This
     #    avoids PID-kill fragility entirely for the serve side.
     serve_stop_msg = _stop_serve_via_shell()
+    serve_state = _serve_status_text()
+    if serve_state.startswith("running"):
+        print(f"{serve_stop_msg}\nWARNING: serve runtime is still alive after "
+              f"stop ({serve_state}); Manager and Dashboard were left running. "
+              f"Investigate before the next `start` to avoid a second runtime.",
+              file=sys.stderr)
+        return 1
     # 2) stop the dashboard — only if identity (pid + create_time) matches.
     if d_verified:
-        _terminate_tree(int(state["pid"]))  # type: ignore[arg-type]
-    elif state is not None:
+        _terminate_tree(int(dashboard_state["pid"]))  # type: ignore[arg-type]
+    elif dashboard_state is not None:
         print(
-            f"Dashboard: recorded pid={state.get('pid')} is not the current "
+            f"Dashboard: recorded pid={dashboard_state.get('pid')} is not the current "
             f"process at that pid — refusing to terminate. If a dashboard is "
             f"still listening on port {d_port}, stop it manually.",
+            file=sys.stderr,
+        )
+    # 3) stop Manager after its Bot peer and Dashboard have stopped.
+    if m_verified:
+        _terminate_tree(int(manager_state["pid"]))  # type: ignore[arg-type]
+    elif manager_state is not None:
+        print(
+            f"Manager: recorded pid={manager_state.get('pid')} is not the current "
+            f"process at that pid — refusing to terminate. If a Manager is "
+            f"still listening on port {m_port}, stop it manually.",
             file=sys.stderr,
         )
 
@@ -503,18 +631,12 @@ def cmd_stop(_args) -> int:
     # normally already gone. Only clear a lingering lease whose serve process is
     # already dead (stale); never delete a live serve's lease — that would let
     # the next `start` spin up a SECOND runtime on the same workspace.
-    serve_state = _serve_status_text()
     if serve_state.startswith("stale"):
         RUNTIME_JSON.unlink(missing_ok=True)
         (WORKSPACE / "runtime.lock").unlink(missing_ok=True)
 
     still_listening = _probe_port(d_port)
-    if serve_state.startswith("running"):
-        print(f"{serve_stop_msg}\nWARNING: serve runtime is still alive after "
-              f"stop ({serve_state}); its lease was left intact. Investigate "
-              f"before the next `start` to avoid a second runtime.",
-              file=sys.stderr)
-        return 1
+    manager_still_listening = _probe_port(m_port)
     if still_listening:
         leftover = _pid_from_port(d_port)
         print(f"{serve_stop_msg}\nPort {d_port} still listening "
@@ -522,7 +644,18 @@ def cmd_stop(_args) -> int:
               f"investigate manually.",
               file=sys.stderr)
         return 1
-    print(f"{serve_stop_msg}\nStopped. (dashboard pid={state.get('pid') if state else '?'})")
+    if manager_still_listening:
+        leftover = _pid_from_port(m_port)
+        print(f"{serve_stop_msg}\nManager port {m_port} still listening "
+              f"(pid={leftover}) — a foreign process may own it; "
+              f"investigate manually.",
+              file=sys.stderr)
+        return 1
+    print(
+        f"{serve_stop_msg}\nStopped. "
+        f"(dashboard pid={dashboard_state.get('pid') if dashboard_state else '?'}, "
+        f"manager pid={manager_state.get('pid') if manager_state else '?'})"
+    )
     return 0
 
 
@@ -542,11 +675,11 @@ def _stop_serve_via_shell() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="dev_dashboard",
-        description="Launch an isolated dev Dashboard on :5090 linked to "
+        description="Launch isolated Manager (:4091), Dashboard (:5090), and "
                     "dicepp-shell serve. Pure source; does not touch docker.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    p_start = sub.add_parser("start", help="Start dashboard-dev serve runtime")
+    p_start = sub.add_parser("start", help="Start Manager, Dashboard, and dashboard-dev runtime")
     p_start.add_argument("--no-tick", action="store_true",
                          help="Disable --tick (saves LLM quota; no background flow)")
     p_start.add_argument("--dashboard-port", type=int, default=DEFAULT_PORT,

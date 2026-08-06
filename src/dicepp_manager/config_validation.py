@@ -17,6 +17,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from dicepp_data import InstanceLayout
+from plugins.DicePP.core.config.loader import (
+    ConfigValidationError as RuntimeConfigValidationError,
+    canonicalize_config_layer,
+)
 from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
@@ -63,15 +67,49 @@ def validate_user_candidate(
     candidate_user: dict[str, Any],
 ) -> None:
     """Validate a user override against every current and future Bot candidate."""
-    global_config = read_config_object(layout.config_global)
+    global_raw = read_config_object(layout.config_global)
+    bot_candidates = list(_bot_candidates(layout))
+
+    # Retain the Manager's existing schema contract before applying the
+    # runtime-specific layer safety check below.  The runtime can discard
+    # non-critical unknown fields during canonicalization, but the Manager API
+    # must continue to report those invalid edits instead of accepting a save
+    # that does not take effect.
     errors: list[dict[str, str]] = []
-    for label, bot_config in _bot_candidates(layout):
+    for label, bot_config in bot_candidates:
+        prefix = ("bots", label)
+        errors.extend(
+            _validate_merged(
+                global_raw,
+                candidate_user,
+                bot_config,
+                prefix=prefix,
+            )
+        )
+    _raise_if_invalid(errors)
+
+    global_config = _canonicalize_layer(
+        global_raw,
+        prefix=("global",),
+        fill_missing_defaults=True,
+    )
+    canonical_user = _canonicalize_layer(
+        candidate_user,
+        prefix=("user",),
+        fill_missing_defaults=False,
+    )
+    for label, bot_config in bot_candidates:
+        prefix = ("bots", label)
         errors.extend(
             _validate_merged(
                 global_config,
-                candidate_user,
-                bot_config,
-                prefix=("bots", label),
+                canonical_user,
+                _canonicalize_layer(
+                    bot_config,
+                    prefix=prefix,
+                    fill_missing_defaults=False,
+                ),
+                prefix=prefix,
             )
         )
     _raise_if_invalid(errors)
@@ -83,10 +121,32 @@ def validate_bot_candidate(
     candidate_bot: dict[str, Any],
 ) -> None:
     """Validate one Bot override using the current global and user layers."""
+    global_raw = read_config_object(layout.config_global)
+    user_raw = read_config_object(layout.config_user)
     errors = _validate_merged(
-        read_config_object(layout.config_global),
-        read_config_object(layout.config_user),
+        global_raw,
+        user_raw,
         candidate_bot,
+        prefix=("bots", bot_id),
+    )
+    _raise_if_invalid(errors)
+
+    errors = _validate_merged(
+        _canonicalize_layer(
+            global_raw,
+            prefix=("global",),
+            fill_missing_defaults=True,
+        ),
+        _canonicalize_layer(
+            user_raw,
+            prefix=("user",),
+            fill_missing_defaults=False,
+        ),
+        _canonicalize_layer(
+            candidate_bot,
+            prefix=("bots", bot_id),
+            fill_missing_defaults=False,
+        ),
         prefix=("bots", bot_id),
     )
     _raise_if_invalid(errors)
@@ -123,6 +183,32 @@ def _validate_merged(
     except ValidationError as exc:
         return _field_errors(exc, prefix)
     return []
+
+
+def _canonicalize_layer(
+    raw: dict[str, Any],
+    *,
+    prefix: tuple[str, ...],
+    fill_missing_defaults: bool,
+) -> dict[str, Any]:
+    """Use runtime canonical validation without allowing it to touch files."""
+    try:
+        return canonicalize_config_layer(
+            raw,
+            fill_missing_defaults=fill_missing_defaults,
+        )
+    except RuntimeConfigValidationError as exc:
+        # Runtime errors contain a file path and can include Pydantic details.
+        # The Manager API exposes neither; its field marker is enough for users
+        # to identify the rejected document while keeping credentials private.
+        raise ConfigurationValidationError(
+            [
+                {
+                    "field": ".".join((*prefix, "configuration")),
+                    "message": "Invalid configuration value",
+                }
+            ]
+        ) from exc
 
 
 def _field_errors(

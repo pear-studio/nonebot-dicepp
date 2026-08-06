@@ -184,8 +184,8 @@ class BotRunner:
         return self._started
 
     @property
-    def dashboard_control_enabled(self) -> bool:
-        """Whether the running Bot has an open dashboard control channel."""
+    def manager_control_enabled(self) -> bool:
+        """Whether the Bot has initialized its Manager control channel."""
         return self.bot is not None and self.bot._control_channel is not None
 
     async def start(self) -> None:

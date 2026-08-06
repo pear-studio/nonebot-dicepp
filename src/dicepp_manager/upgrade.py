@@ -55,6 +55,28 @@ LINUX_STAGE_RESERVE_BYTES = 256 * 1024**2
 CONFIRMATION_TTL = timedelta(minutes=15)
 _GUARD_CACHE_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _TERMINAL = {"succeeded", "failed", "rejected", "interrupted"}
+_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x0010)
+_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = getattr(
+    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400
+)
+
+
+def _is_directory_reparse_point(path: Path) -> bool:
+    """Return whether ``path`` is a Windows directory reparse point.
+
+    ``Path.is_junction`` was added after this project's minimum supported
+    Python version.  ``lstat`` exposes the same Windows reparse attribute on
+    those older interpreters without following the point.
+    """
+    try:
+        metadata = os.lstat(path)
+    except OSError:
+        return False
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return bool(attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT) and (
+        stat.S_ISDIR(metadata.st_mode)
+        or bool(attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY)
+    )
 
 
 class UpgradeError(RuntimeError):
@@ -726,11 +748,13 @@ class WindowsVelopackUpgradeAdapter:
         for child in runtime_dir.iterdir():
             if child.name == keep_digest:
                 continue
-            if child.is_junction():
+            if child.is_symlink():
+                child.unlink()
+            elif _is_directory_reparse_point(child):
                 # A junction is not a symlink; remove only the reparse
                 # point itself, never the target's contents.
                 os.rmdir(child)
-            elif child.is_symlink() or not child.is_dir():
+            elif not child.is_dir():
                 child.unlink()
             else:
                 if not child.resolve().is_relative_to(runtime_dir):
