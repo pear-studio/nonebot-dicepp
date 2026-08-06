@@ -8,7 +8,7 @@ import warnings
 
 import pytest
 
-from tests.support.processes import stop_server_process
+from tests.support.processes import format_server_startup_failure, stop_server_process
 
 
 def _start_stdin_test_process(*, exits_on_close: bool) -> subprocess.Popen[str]:
@@ -55,3 +55,28 @@ def test_stop_server_process_warns_before_forcing_unresponsive_process() -> None
         )
 
     assert process.poll() is not None
+
+
+def test_server_startup_failure_diagnostics_include_process_and_logs() -> None:
+    process = _start_stdin_test_process(exits_on_close=True)
+    try:
+        message = format_server_startup_failure(
+            process,
+            name="Dashboard smoke server",
+            url="http://127.0.0.1:45678/api/auth/status",
+            elapsed_seconds=15.25,
+            output="uvicorn startup trace",
+        )
+    finally:
+        stop_server_process(
+            process,
+            name="diagnostic process",
+            request_stop=process.stdin.close,
+        )
+
+    assert "Dashboard smoke server" in message
+    assert "15.25s" in message
+    assert "127.0.0.1:45678" in message
+    assert f"pid={process.pid}" in message
+    assert "returncode=" in message
+    assert "uvicorn startup trace" in message

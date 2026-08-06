@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import threading
 import time
 from pathlib import Path
@@ -11,14 +12,16 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import dicepp_manager.auth as manager_auth
 from dicepp_data import InstanceLayout
 from dicepp_manager.api import create_manager_app
+from dicepp_manager.archive_coordinator import ArchiveCoordinator
 from dicepp_manager.config import ManagerSettings
 from dicepp_manager.runtime import UnavailableRuntimeAdapter
 from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
 from plugins.DicePP.core.data.schema import DicePPDatabase
-from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
+from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token, token_path
 from plugins.DicePP.module.dashboard_reporter.protocol import (
     auth,
     decode,
@@ -128,6 +131,71 @@ def test_control_auth_uses_local_token_not_manager_api_token(tmp_path: Path) -> 
         response = client.get("/v1/control/bots", headers=_api_headers())
         assert response.status_code == 200
         assert response.json()["bots"][0]["bot_id"] == "bot-1"
+
+
+def test_no_hardlink_token_publish_hides_staged_secret_until_ws_auth_ready(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Contenders cannot authenticate with a prefix while fallback publishing."""
+    path = token_path(tmp_path)
+    staged = threading.Event()
+    release_publish = threading.Event()
+    staged_tokens: list[str] = []
+    results: list[str] = []
+    failures: list[BaseException] = []
+    original_replace = manager_auth.os.replace
+
+    def no_hardlinks(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "hardlinks are unsupported")
+
+    def pause_before_final_publish(source, destination):
+        if Path(destination) == path:
+            staged_token = Path(source).read_text(encoding="utf-8").strip()
+            assert staged_token
+            staged_tokens.append(staged_token)
+            staged.set()
+            assert release_publish.wait(timeout=2)
+        return original_replace(source, destination)
+
+    def bootstrap() -> None:
+        try:
+            results.append(ensure_token(tmp_path))
+        except BaseException as exc:  # keep thread errors visible to this test
+            failures.append(exc)
+
+    monkeypatch.setattr(manager_auth.os, "link", no_hardlinks)
+    monkeypatch.setattr(manager_auth.os, "replace", pause_before_final_publish)
+    winner = threading.Thread(target=bootstrap)
+    consumers = [threading.Thread(target=bootstrap) for _ in range(2)]
+    winner.start()
+    try:
+        assert staged.wait(timeout=2)
+        for consumer in consumers:
+            consumer.start()
+        for consumer in consumers:
+            consumer.join(timeout=0.1)
+            assert consumer.is_alive(), "consumer must wait for the final publish"
+        assert results == [], "no caller may receive a staged token prefix"
+    finally:
+        release_publish.set()
+        winner.join(timeout=2)
+        for consumer in consumers:
+            consumer.join(timeout=2)
+
+    assert not winner.is_alive()
+    assert all(not consumer.is_alive() for consumer in consumers)
+    assert failures == []
+    assert len(staged_tokens) == 1
+    assert results == [staged_tokens[0]] * 3
+
+    with _client(tmp_path) as client:
+        with client.websocket_connect("/v1/control/ws") as ws:
+            ws.send_text(encode(auth("bot-1", results[1])))
+            reply = ws.receive_json()
+
+    assert reply["type"] == "auth_result"
+    assert reply["payload"]["ok"] is True
 
 
 def test_duplicate_bot_session_replaces_only_the_old_connection(tmp_path: Path) -> None:
@@ -303,3 +371,53 @@ async def test_replaced_session_cannot_update_status_or_complete_reload(
 
     assert service.bot_statuses()[0]["version"] == "new"
     assert pending.result()["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_archive_control_probe_uses_heartbeat_snapshot_during_new_session(
+    tmp_path: Path,
+) -> None:
+    """Health probes must not inspect Manager-owned sessions from a worker."""
+    from dicepp_manager.control import ControlChannelService
+
+    layout = InstanceLayout.from_root(tmp_path)
+    manager_service = ManagerService(
+        unit_provider=lambda: [],
+        runtime_adapter=UnavailableRuntimeAdapter(),
+        store=ManagerOperationStore(layout.manager_db),
+        state_dir=layout.manager_state_dir,
+    )
+    service = ControlChannelService(
+        project_root=tmp_path,
+        known_bot_ids=lambda: set(),
+    )
+    coordinator = ArchiveCoordinator(
+        layout=layout,
+        service=manager_service,
+        control_probe=service.probe,
+    )
+    existing_socket = _FakeControlSocket()
+    await service._replace_session("existing", existing_socket)
+    await service._handle_message(
+        "existing",
+        existing_socket,
+        status("existing", "3.0.0"),
+    )
+
+    owner_thread = threading.get_ident()
+
+    class OwnerLoopStates(dict):
+        def values(self):
+            assert threading.get_ident() == owner_thread
+            return super().values()
+
+    service._states = OwnerLoopStates(service._states)
+    health_task = asyncio.create_task(coordinator._probe_once(service.probe))
+    new_session_task = asyncio.create_task(
+        service._replace_session("new", _FakeControlSocket())
+    )
+
+    health, _ = await asyncio.gather(health_task, new_session_task)
+
+    assert health["status"] == "ok"
+    assert {row["bot_id"] for row in service.bot_statuses()} == {"existing", "new"}

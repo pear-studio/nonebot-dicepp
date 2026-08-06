@@ -174,6 +174,28 @@ async def test_stop_cancels_foreign_loop_task_without_awaiting_it(monkeypatch):
     assert client._running is False
 
 
+def test_foreign_task_cancellation_is_queued_on_a_stopped_owner_loop():
+    """A stopped loop owns cancellation until it is resumed by its launcher."""
+    owner_loop = asyncio.new_event_loop()
+    task = owner_loop.create_task(asyncio.Event().wait())
+    try:
+        ws_client.ControlChannelClient._cancel_foreign_task(task)
+
+        assert not task.cancelled()
+        resumed = threading.Thread(
+            target=lambda: owner_loop.run_until_complete(asyncio.sleep(0))
+        )
+        resumed.start()
+        resumed.join(timeout=1)
+        assert not resumed.is_alive()
+        assert task.cancelled()
+    finally:
+        if not task.done():
+            task.cancel()
+            owner_loop.run_until_complete(asyncio.sleep(0))
+        owner_loop.close()
+
+
 # ── WS reconnection loop contract tests ──────────────────────────────────────
 # These tests verify that _run() retries with exponential backoff, caps the
 # delay at _RECONNECT_MAX, and resets the attempt counter after a connection

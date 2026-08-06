@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dicepp_data import InstanceLayout
@@ -165,6 +166,54 @@ def test_invalid_full_bot_configuration_is_rejected_without_replacing_document(
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_configuration"
     assert any(error["field"].startswith("bots.10001.persona_ai") for error in response.json()["errors"])
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("route", "path_getter", "candidate"),
+    [
+        ("/v1/config/user", lambda layout: layout.config_user, {"unknown_api_key": "secret"}),
+        (
+            "/v1/config/user",
+            lambda layout: layout.config_user,
+            {"persona_ai": {"unknown_token": "secret"}},
+        ),
+        (
+            "/v1/config/bots/10001",
+            lambda layout: layout.bot_config_path("10001"),
+            {"unknown_api_key": "secret"},
+        ),
+        (
+            "/v1/config/bots/10001",
+            lambda layout: layout.bot_config_path("10001"),
+            {"persona_ai": {"unknown_token": "secret"}},
+        ),
+    ],
+    ids=("user-top-level", "user-nested", "bot-top-level", "bot-nested"),
+)
+def test_manager_rejects_runtime_critical_unknown_fields_without_replacing_document(
+    tmp_path: Path,
+    route: str,
+    path_getter,
+    candidate: dict,
+) -> None:
+    """A Manager save must not create a file the Bot runtime would reject."""
+    layout = InstanceLayout.from_root(tmp_path)
+    path = path_getter(layout)
+    path.parent.mkdir(parents=True)
+    before = b'{"app":{"name":"keep"}}\n'
+    path.write_bytes(before)
+
+    with TestClient(_app(layout)) as client:
+        response = client.put(route, headers=_auth(), json=candidate)
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["code"] == "invalid_configuration"
+    assert payload["errors"]
+    assert {error["message"] for error in payload["errors"]} == {
+        "Invalid configuration value"
+    }
     assert path.read_bytes() == before
 
 
