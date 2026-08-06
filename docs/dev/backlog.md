@@ -115,6 +115,8 @@
     - 恢复脚本不终止进程；`current/` 被占用、目录换位或数据恢复失败时原样保留所有材料并停止。恢复只能整目录移动，不逐文件合并。
     - 新 Manager 完成 migration、本地硬健康检查并提交升级后立即最佳努力删除程序备份、恢复描述与根恢复入口；清理失败只告警，不把已成功的新版重新判失败。
     - rc20 作为 `automatic_upgrade: no` 的手工迁移起点：不扫描、迁移、清理或恢复 rc19 及更旧 Guard 状态，旧遗留物不得阻止 rc20 启动。rc20 Candidate 验证无 Guard 的最终包结构、首装/手工迁移与 Linux 现有矩阵；不得用 rc19→rc20 宣称新 Windows 协议已通过。
+    - 当前状态（2026-08-05）：Windows 简化恢复基线与 Linux Manager handoff 代码主体均已完成。Linux 已补齐宿主 bind 来源解析、固定 `dicepp-current` alias、目标 Manager 前置身份门禁、独立 handoff coordinator、三类真实 Docker 场景及 release evidence 全场景门禁；Manager 全域回归和固定摘要 DinD 启动/端口重映射/重启/精确清理烟测已通过。后续 agent 不应重新实现这些路径，除非真实 candidate 验收失败。
+    - 剩余验收（保持 open）：先用 rc20 最终 Candidate 完成简化基线检查；待 rc21 Candidate 存在后，矩阵必须直接消费冻结的 rc20 来源字节与 rc21 目标字节，分别执行 Linux handoff commit、目标 Manager 崩溃回退、daemon 重启前后按 durable decision 人工恢复，以及 Windows 健康提交/根恢复脚本。保存 candidate identity、冻结 SHA、journal、request/decision/result、Docker identity 和恢复结果；DinD 基础设施烟测或 mock 测试不得替代这次独立验收。
     - 第一次真实 Windows 新协议验收是 rc20→rc21：同一最终候选上验证健康提交后恢复材料清理，以及目标 `current/` 缺失/损坏时根 `DicePP-Recover.cmd` 仍能换回旧程序、恢复 pre-upgrade 数据和 RuntimeUnit 原状态。矩阵必须消费冻结 Candidate 字节；`automatic_upgrade: no` 的 validation-only 证据不进入 Receipt 或 Release assets。
     - 未来正式版只维护“上一正式版 → 当前正式版”。关闭条件：rc20 的简化基线验收通过，rc20→rc21 Windows 真实升级/人工恢复与当次 Linux 矩阵全部绑定冻结 SHA 通过外部验收。完成前本条保持 open。
 
@@ -154,4 +156,3 @@
     - 优化方向：(1) StatManager 增加批量更新方法（update_user_stat_batch / update_group_stat_batch），单次事务内顺序获取 per-key 锁但合并 commit，需注意多锁获取顺序避免死锁
     - (2) 锁池增加 LRU 清理或 weakref 防护，需记录最后使用时间戳
     - 触发条件：实测 daily tick 耗时超阈值，或锁池 dict 大小超过 100K keys
-

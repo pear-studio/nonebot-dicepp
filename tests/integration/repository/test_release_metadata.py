@@ -32,6 +32,52 @@ def test_release_metadata_accepts_notes_without_artifact_display_fields(
     assert metadata.automatic_upgrade is False
 
 
+def test_release_metadata_parses_optional_linux_handoff_protocol(
+    tmp_path: Path,
+) -> None:
+    notes = tmp_path / "release.md"
+    notes.write_text(
+        _notes(**{"Linux Manager handoff 协议": "1"}),
+        encoding="utf-8",
+    )
+
+    metadata = parse_release_metadata(notes, expected_version="v3.1.0")
+
+    assert metadata.linux_manager_handoff_protocol == 1
+
+
+def test_release_metadata_accepts_no_linux_handoff_protocol(
+    tmp_path: Path,
+) -> None:
+    notes = tmp_path / "release.md"
+    notes.write_text(
+        _notes(**{"Linux Manager handoff 协议": "no"}),
+        encoding="utf-8",
+    )
+
+    metadata = parse_release_metadata(notes, expected_version="v3.1.0")
+
+    assert metadata.linux_manager_handoff_protocol is None
+
+
+@pytest.mark.parametrize("value", ["maybe", "0", "-1", "1.5", ""])
+def test_release_metadata_rejects_malformed_linux_handoff_protocol(
+    tmp_path: Path,
+    value: str,
+) -> None:
+    notes = tmp_path / "release.md"
+    notes.write_text(
+        _notes(**{"Linux Manager handoff 协议": value}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Linux Manager handoff 协议 must be a positive integer or no",
+    ):
+        parse_release_metadata(notes, expected_version="v3.1.0")
+
+
 def test_real_rc9_notes_drive_machine_upgrade_metadata() -> None:
     metadata = parse_release_metadata(
         Path("docs/releases/v3.0.0rc9.md"),

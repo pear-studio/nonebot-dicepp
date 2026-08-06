@@ -548,14 +548,29 @@ docker compose logs -f
 `DicePP-vX.Y.Z-linux-amd64.zip` 中解压镜像归档并执行本地 `docker load`。
 这条安装路径不会执行 `docker pull`，升级时无法访问 GHCR 也不受影响。
 
-Manager 只会重建当前标准 Compose 中已有的 Bot 和 Dashboard，Manager 容器
-本身保持运行并负责健康检查。程序切换、migration、容器启动或本地硬性健康检查
-失败时，它会重新切回旧镜像并恢复 pre-upgrade 数据。NapCat、LLOneBot、QQ、
+普通 Manager 代码变化可以随自动升级一起切换。目标 Release 变更范围包含
+`manager` 且声明受支持的 Linux Manager handoff 协议（当前协议 v1）时，
+来源 Manager 先准备恢复材料并写入不可变事务请求，再由来源镜像中的一次性
+Updater 容器（无端口、临时挂载 Docker Socket 和事务恢复目录）切换 Manager；
+新 Manager 执行目标 migration、创建并启动目标 Bot/Dashboard，通过完整健康
+检查后原子写入唯一不可逆的 `commit` 决策，Updater 观察提交后清理旧 Manager
+容器。交接窗口内相关容器均为 `restart=no`，维护窗口内请勿并发运行
+`docker compose up/down` 或人工清理容器；窗口内发生宿主机或 Docker daemon
+重启不会自动续作，需按 [manager-architecture.md](./dev/manager-architecture.md)
+的精确身份步骤人工恢复。程序切换、migration、容器启动或本地硬性健康检查
+失败时，Updater 自动恢复旧 Manager，旧 Manager 再完整恢复 Bot/Dashboard、
+pre-upgrade 数据、Dashboard 数据库快照和原运行状态。NapCat、LLOneBot、QQ、
 GitHub 或第三方 API 暂时不可用只显示警告，不会误触发程序回退。
+
+首个带 Linux Manager handoff 协议、Updater 入口和受管本地 `current` 镜像
+别名的版本（rc20）仍标记 `automatic_upgrade: no`：它必须按完整三服务 Compose
+手工迁移，之后兼容候选才允许自动升级 Manager。破坏性交接变化（handoff 协议、
+Manager state、deployment schema、Compose 运行契约或安装布局不兼容）永远
+要求手工迁移。
 
 自动安装不会替换 `docker-compose.yml`。以下任一情况会在停止容器前拒绝安装：
 
-- Release 要求升级 Manager；
+- Release 变更 Manager 但未声明受支持的 Linux Manager handoff 协议；
 - Release 的 deployment schema 与当前标准部署不兼容；
 - Release 附带的 Compose 改变 service、volume 或 network；
 - bundle 的 manifest、内部摘要、目标镜像或旧镜像保留校验失败。
@@ -576,11 +591,12 @@ driver/external/IPAM 等差异都会要求手工迁移。加载后的镜像 ID �
 
 - 第一次安装、旧式部署迁入当前三服务拓扑；
 - 指定安装较旧版本、人工回退或灾难恢复；
-- Release 需要升级 Manager；
+- Release 包含破坏性 Manager 交接变化（handoff 协议、Manager state、
+  deployment schema、Compose 运行契约或安装布局不兼容）；
 - Compose、挂载、网络、RuntimeUnit 或 deployment schema 需要迁移；
 - Dashboard 明确提示当前 Release 不能自动安装。
 
-每次手工更新或回退前，都先在 Dashboard 创建并验证归档。涉及 Manager 或 Compose 变更时，先按目标 Release 说明同步完整三服务 Compose；不要只更新 Bot/Dashboard，也不要移除 Manager。
+每次手工更新或回退前，都先在 Dashboard 创建并验证归档。涉及破坏性 Manager 交接或 Compose 变更时，先按目标 Release 说明同步完整三服务 Compose；不要只更新 Bot/Dashboard，也不要移除 Manager。
 
 更新到最新镜像：
 

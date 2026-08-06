@@ -21,7 +21,7 @@ from scripts.build.promotion_candidate import (
 from scripts.build.upgrade_evidence import (
     CandidateIdentity,
     FinalAssetIdentity,
-    required_scenarios_for,
+    source_scenarios_for,
     validate_upgrade_evidence,
 )
 from tests.support.fs_utils import symlink_or_skip
@@ -111,6 +111,12 @@ def _upgrade_matrix() -> dict:
     # Production intentionally has no Windows source during the rc20 manual
     # protocol break. Receipt cryptographic tests use a closed synthetic matrix
     # so they continue to protect the future automatic-upgrade path itself.
+    # The tracked rc19 Linux row deliberately pins only the classic four
+    # validation-only scenarios; release evidence must instead prove the full
+    # platform contract, represented here by omitting that optional subset.
+    for source in matrix["supported_sources"]:
+        if source["platform"] == "linux":
+            source.pop("scenarios", None)
     matrix["supported_sources"].insert(
         0,
         {
@@ -221,6 +227,52 @@ def _scenario_result(name: str, source_version: str) -> dict:
                 "program_restore_mode": "whole_current_directory",
             },
         ),
+        "manager_handoff_commit": (
+            {
+                "manager_handoff_completed": True,
+                "target_containers_started": True,
+                "local_health_passed": True,
+                "commit_decision_written": True,
+            },
+            {
+                "source_version_before": source_version,
+                "target_version_after": VERSION,
+                "handoff_protocol": "1",
+                "journal_status": "committed",
+                "health_status": "healthy",
+            },
+        ),
+        "manager_handoff_rollback": (
+            {
+                "target_manager_failed": True,
+                "source_manager_restored": True,
+                "program_restored": True,
+                "data_restored": True,
+                "dashboard_db_restored": True,
+                "source_restarted": True,
+                "journal_rolled_back": True,
+            },
+            {
+                "target_version_observed": VERSION,
+                "restored_version": source_version,
+                "result_status": "source-restored",
+                "journal_status": "rolled_back",
+                "rollback_marker_status": "restored",
+            },
+        ),
+        "manager_handoff_commit_crash_window": (
+            {
+                "crash_before_commit_allowed_source_restore": True,
+                "crash_after_commit_never_rolled_back": True,
+                "recovery_material_preserved": True,
+                "terminal_state_recorded": True,
+            },
+            {
+                "crash_before_commit_final_state": "source_restored",
+                "crash_after_commit_final_state": "cleanup_pending",
+                "decision_status": "committed",
+            },
+        ),
     }
     assertions, observations = records[name]
     return {
@@ -278,11 +330,7 @@ def _canonical_upgrade_evidence(root: Path) -> dict:
                 ],
                 "scenarios": [
                     _scenario_result(name, source["source_version"])
-                    for name in required_scenarios_for(
-                        matrix,
-                        platform=source["platform"],
-                        arch=source["arch"],
-                    )
+                    for name in source_scenarios_for(matrix, source)
                 ],
             }
             for source in matrix["supported_sources"]

@@ -61,7 +61,7 @@ version-release (skill)               version-deploy (skill)
 
 同一份 `docker-compose.yml` 同时包含 `image:` 和 `build:`。生产部署只使用发布镜像；源码构建仅用于开发或 GHCR 长期无法拉取时的应急验证。
 
-对已处于标准拓扑、要升级兼容最新 Release 的用户，首选 Dashboard 中的 Manager 更新流程。下表和 `version-deploy` 处理的是首次部署、旧部署迁入、指定版本/回退、Manager 自身升级或 Compose/deployment schema 迁移等手工兜底情形。
+对已处于标准拓扑、要升级兼容最新 Release 的用户，首选 Dashboard 中的 Manager 更新流程。下表和 `version-deploy` 处理的是首次部署、旧部署迁入、指定版本/回退、破坏性 Manager 交接变化（handoff 协议、Manager state、deployment schema、Compose 运行契约或安装布局不兼容）或 Compose/deployment schema 迁移等手工兜底情形；普通 Manager 代码变化随自动升级切换，不属于手工兜底。
 
 | 场景 | 变量 | 行为 |
 |------|------|------|
@@ -118,6 +118,14 @@ Windows Portable/Setup、Velopack bundle、Linux amd64 bundle、`docker-compose.
 
 在 backlog `B-260802-3e3e23` 完成并通过明确验收前，所有 release metadata 的
 `自动升级` 必须填写 `no`；现有证据链能力不等于该 backlog 已完成。
+
+`manager` 变更范围本身不再是一律手工的标志。变更 Manager 的 Linux 发布必须
+在 release manifest 与 bundle 内层 manifest 中声明受支持的
+`linux_manager_handoff_protocol`（当前 v1），并以真实 Linux 候选矩阵
+（rc20 手工基线 → 下一候选的 `manager_handoff_*` 场景）和 Windows 自身矩阵
+证据共同支撑 `自动升级: yes`；协议字段缺失或不受支持、破坏性交接变化，或
+任一平台缺乏真实字节证据时保持 fail closed 手工迁移，全局 `automatic_upgrade`
+保持 `no`。
 
 Sealed candidate artifact 的 retention 是 30 天，因此 Promotion 必须在 candidate
 run 完成后 30 天内执行；同时还要求 candidate `head_sha` 仍是当前 default branch

@@ -19,9 +19,15 @@ Promotion 先创建 draft Release，遇到已有 tag、Release、asset 或镜像
 
 - 第一次安装、旧式或不受支持的部署迁入标准拓扑；
 - 指定安装较旧版本、人工回退或灾难恢复；
-- 目标 Release 包含 Manager 自身升级；
+- 目标 Release 包含破坏性 Manager 交接变化（handoff 协议、Manager state、
+  deployment schema、Compose 运行契约或安装布局不兼容）；
 - Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
 - 发布被标记为不兼容，或 Manager 的校验、空间、旧版本保留或健康门槛未通过。
+
+普通 Manager 代码变化不属于上述手工情形：只要目标 Release 声明受支持的
+Linux Manager handoff 协议（当前 v1），Linux 可以随自动升级切换 Manager；
+Windows 简化方案同样允许普通 Manager 代码自动升级。首个协议基线 rc20 仍为
+`automatic_upgrade: no` 的手工完整三服务迁移，其后兼容候选才开放自动升级。
 
 手工操作前先创建并验证归档。Linux 请按 [Linux 部署](./linux.md#手工更新) 同步完整三服务 Compose 并更新或回退镜像；Windows 请按 [Windows 部署](./windows.md#版本更新与旧版迁移) 使用目标发布包、一次性 `DicePP-Recover.cmd` 或已验证归档恢复。除运行已生成的恢复脚本外，不要手工拼接 Windows `current/`；也不要未经对比直接用 Release 内的 Compose 覆盖现有实例。
 
@@ -90,11 +96,16 @@ GHCR。加载后会把镜像引用解析为包内声明的 immutable Image ID；
 “与旧默认值相同、但由 Compose 显式固定”的配置误判成未覆盖。不能证明可以无损
 保留的 Config/HostConfig 同样拒绝自动升级。旧镜像以 immutable Image ID 保留用于回退。
 
-如果 Release 要求升级 Manager 自身，或目标 `docker-compose.yml` 改变 service、
-volume、network、部署 schema 等当前 Manager 不能安全迁移的拓扑，Dashboard
-仍可展示该版本及不兼容原因，但 Manager 拒绝下载和自动安装，并提示按 Release
-文档手工同步完整三服务部署。它不会修改 Compose 文件，也不会退回到无 Manager
-部署。
+普通 Manager 代码变化随自动升级切换：目标 Release 变更范围包含 `manager`
+且声明受支持的 Linux Manager handoff 协议（当前协议 v1）时，Manager 才会
+下载并安装该版本；协议字段缺失或不支持时 fail closed，Linux 上按手工迁移
+处理。首个带协议基线的版本（rc20）仍声明 `automatic_upgrade: no`，必须
+手工完整三服务迁移，之后候选才允许自动升级 Manager。破坏性交接变化
+（handoff 协议、Manager state、deployment schema、Compose 运行契约或安装
+布局不兼容），或目标 `docker-compose.yml` 改变 service、volume、network 等
+当前 Manager 不能安全迁移的拓扑时，Dashboard 仍可展示该版本及不兼容原因，
+但 Manager 拒绝下载和自动安装，并提示按 Release 文档手工同步完整三服务
+部署。它不会修改 Compose 文件，也不会退回到无 Manager 部署。
 
 ### Windows 边界
 
@@ -130,10 +141,16 @@ Portable ZIP。若发布产物缺少 Velopack bundle，当前布局不受支持�
 先按 HTTPS URL、size 和 digest 验证原始 bytes，随后才解析 JSON。
 
 `automatic_upgrade`、最低 Manager 版本和 change scope 都从 tag 内
-`docs/releases/vX.Y.Z.md` 的受校验字段生成。发布者只有确认 Manager 无需
-自升级、部署拓扑兼容且 change scope 准确时，才把“自动升级”声明为 `yes`；
-字段缺失或冲突会让发布失败。该标志、部署 schema 或最低 Manager 任一不兼容
-时仍可展示 Release 和具体原因，但不能下载或进入可安装状态。
+`docs/releases/vX.Y.Z.md` 的受校验字段生成；可选的
+`Linux Manager handoff 协议` 字段（正整数协议代数或 `no`）写入 release
+manifest 与 Linux bundle 内层 manifest 的 `linux_manager_handoff_protocol`。
+发布者只有确认部署拓扑兼容、change scope 准确，且变更范围包含 `manager`
+时已声明受支持的 Linux Manager handoff 协议，才把“自动升级”声明为 `yes`；
+manager scope 本身不再是一律手工的标志，破坏性交接变化（handoff 协议、
+Manager state、deployment schema、Compose 运行契约或安装布局不兼容）仍
+fail closed 为手工迁移。字段缺失或冲突会让发布失败。该标志、协议、部署
+schema 或最低 Manager 任一不兼容时仍可展示 Release 和具体原因，但不能下载
+或进入可安装状态。
 
 发布流程还会在公开提升容器 tag 和生成 Release 之前读取
 `scripts/build/upgrade_protocol_registry.json` 与
@@ -145,13 +162,20 @@ Portable ZIP。若发布产物缺少 Velopack bundle，当前布局不受支持�
 Velopack 与 Linux bundle 的文件名、字节数和 SHA-256。Windows 固定验证两个场景：
 `healthy_commit` 确认健康提交和恢复材料清理；`manual_restore_after_target_failure` 确认根恢复脚本在目标
 `current/` 缺失或损坏时换回整个旧程序树，再恢复 pre-upgrade 数据和 RuntimeUnit
-状态。Linux 保持四个场景：健康提交、目标健康失败后自动回退、回退后重试，以及目标代码
-从未执行的 apply 失败。来源资产摘要、
+状态。Linux 保持七个场景：经典四场景（健康提交、目标健康失败后自动回退、回退后重试、
+目标代码从未执行的 apply 失败），以及 Linux Manager handoff 三场景
+（`manager_handoff_commit` 健康 Manager 交接与目标提交、
+`manager_handoff_rollback` 目标 Manager 失败后来源 Manager/Bot/Dashboard/
+归档/Dashboard 数据库完整恢复、`manager_handoff_commit_crash_window`
+commit 决策前后崩溃分别收敛为来源恢复与目标清理）。来源资产摘要、
 候选身份、平台覆盖或任一场景不匹配都会拒绝 `automatic_upgrade: yes`。
-`automatic_upgrade: no` 不需要这份证据。v3.0.0rc20 是新的 Windows 手工迁移基线，
-不扫描或消费此前 RC 的 UpdateGuard 状态，也不用 rc19→rc20 声称新 Windows 协议通过。
-rc20 Candidate 只验证无 Guard 的 Windows 最终包与手工迁移边界；Linux 现有矩阵保持不变。
-第一次 Windows 新协议真实跨版本验收是 rc20→rc21。这些 RC 验收不构成历史版本支持窗口；
+`automatic_upgrade: no` 不需要这份证据。v3.0.0rc20 同时是新的 Windows 与
+Linux 手工迁移基线：Windows 不扫描或消费此前 RC 的 UpdateGuard 状态，也
+不用 rc19→rc20 声称新 Windows 协议通过；Linux rc20 是首个带 handoff 协议、
+Updater 入口和受管 current 别名的版本，同样必须手工完整三服务迁移，现有
+rc19 来源只继续证明经典四场景。第一次 Windows 新协议真实跨版本验收是
+rc20→rc21，第一次 Linux Manager handoff 真实矩阵也是 rc20→rc21。这些 RC
+验收不构成历史版本支持窗口；
 正式版只维护“上一正式版 → 当前候选”。Final Candidate 先构建最终 Windows/Linux bytes，
 再由各平台 runner 调用当前 commit 内固定的 harness 入口，
 最后汇总 evidence 并交给 Receipt；协议 readiness 未通过、缺少来源资产或场景
@@ -191,7 +215,8 @@ identities 的 `dicepp-upgrade-evidence.json`，届时总数为八个；在该 b
 Linux amd64 Release 包含 `DicePP-vX.Y.Z-linux-amd64.zip`。外层
 `dicepp-release.json` 验证整个 zip；zip 内的 `dicepp-package.json` 是第二层
 安装契约，声明 deployment schema、最低 Manager、Catalog、是否允许自动升级、
-Compose、压缩 image archive、镜像引用与 immutable Image ID、`change_scope`
+Compose、压缩 image archive、镜像引用与 immutable Image ID、`change_scope`、
+可选的 `linux_manager_handoff_protocol` 协议代数
 及内部文件 size/SHA-256，包内
 `checksums.sha256` 再覆盖所有分发文件。这样避免让外层 zip 自我哈希。GHCR
 镜像引用只作为诊断和手工恢复信息；自动安装以包内 image archive 和加载后

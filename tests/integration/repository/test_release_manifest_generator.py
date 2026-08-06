@@ -45,19 +45,55 @@ def test_generator_hashes_real_artifacts_and_emits_valid_contract(tmp_path) -> N
     assert manifest["fallbacks"]["linux_ghcr_images"][0].endswith(":v3.1.0")
 
 
-def test_outer_release_contract_rejects_automatic_manager_change(
+def test_outer_release_contract_emits_declared_handoff_protocol(
     tmp_path,
 ) -> None:
     linux = tmp_path / "package.zip"
+    velopack = tmp_path / "velopack.win-x64.zip"
     linux.write_bytes(b"linux package")
+    velopack.write_bytes(b"velopack bundle")
+
+    manifest = build_manifest(
+        version="v3.1.0",
+        channel="stable",
+        artifacts=[
+            artifact_record(f"linux:amd64:linux-bundle:{linux}"),
+            artifact_record(f"windows:amd64:velopack-bundle:{velopack}"),
+        ],
+        metadata=ReleaseMetadata(
+            version="3.1.0",
+            data_changed=False,
+            config_changed=False,
+            change_scope=("runtime", "manager"),
+            automatic_upgrade=False,
+            minimum_manager_version="1.0",
+            linux_manager_handoff_protocol=1,
+        ),
+    )
+
+    assert manifest["linux_manager_handoff_protocol"] == 1
+
+
+def test_outer_release_contract_rejects_automatic_manager_without_protocol(
+    tmp_path,
+) -> None:
+    linux = tmp_path / "package.zip"
+    velopack = tmp_path / "velopack.win-x64.zip"
+    linux.write_bytes(b"linux package")
+    velopack.write_bytes(b"velopack bundle")
 
     with pytest.raises(
-        ReleaseContractError, match="change_scope includes manager"
+        ValueError,
+        match="automatic_upgrade with a Manager change requires a supported "
+        "linux_manager_handoff_protocol",
     ):
         build_manifest(
             version="v3.1.0",
             channel="stable",
-            artifacts=[artifact_record(f"linux:amd64:linux-bundle:{linux}")],
+            artifacts=[
+                artifact_record(f"linux:amd64:linux-bundle:{linux}"),
+                artifact_record(f"windows:amd64:velopack-bundle:{velopack}"),
+            ],
             metadata=ReleaseMetadata(
                 version="3.1.0",
                 data_changed=False,

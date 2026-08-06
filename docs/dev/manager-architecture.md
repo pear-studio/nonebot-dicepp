@@ -119,13 +119,48 @@ GitHub Release 是版本事实来源。Manager 使用机器可读的 `dicepp-rel
 
 更新配置默认发现 stable 频道；预发布频道需要用户主动选择，自动下载默认关闭。即使包已经下载，安装也始终要求用户确认。
 
-Manager 是**兼容的最新版本升级**的首选入口：它负责发现、下载、校验、pre-upgrade 归档、安装和本地硬性健康检查。Linux 失败时自动回退程序与数据；Windows 只预备一次性人工恢复入口。Manager 不负责升级自身，也不重写用户的 Compose 或部署拓扑。
+Manager 是**兼容的最新版本升级**的首选入口：它负责发现、下载、校验、pre-upgrade 归档、安装和本地硬性健康检查。Linux 失败时自动回退程序与数据；Windows 只预备一次性人工恢复入口。Manager 不重写用户的 Compose 或部署拓扑。普通 Manager 代码变化可以随自动升级切换（Linux 通过 handoff 协议、Windows 通过简化交接），破坏性交接变化（handoff 协议、Manager state、deployment schema、Compose 运行契约或安装布局不兼容）仍要求手工迁移。
 
 ### Linux 自动路径
 
-Linux 自动安装只处理当前部署结构兼容的 Bot/Dashboard 发布。Manager 验证已确认的发布和空间，创建并验证普通 pre-upgrade 归档，从发布包本地 `docker load` 目标镜像，保留旧 immutable Image ID，停止相关 RuntimeUnit，切换 Bot/Dashboard，执行 migration 和本地硬性健康检查。失败时恢复旧镜像和 pre-upgrade 数据。
+Linux 自动安装处理当前部署结构兼容的发布。Manager 验证已确认的发布和空间，创建并验证普通 pre-upgrade 归档，从发布包本地 `docker load` 目标镜像，保留旧 immutable Image ID，再执行下述 Manager handoff 与容器切换。自动事务不会在安装时 `docker pull`，也不会把包内 Compose 复制到实例目录。它会深度比较当前与发布包的 Compose；除了 Bot/Dashboard 的 `image`、`build` 和顶层 Compose `version` 外，挂载、依赖、网络和其他拓扑差异均转为人工迁移。镜像默认值或未知非默认 Docker 配置无法安全判定时也会拒绝自动安装。
 
-自动事务不会在安装时 `docker pull`，也不会把包内 Compose 复制到实例目录。它会深度比较当前与发布包的 Compose；除了 Bot/Dashboard 的 `image`、`build` 和顶层 Compose `version` 外，挂载、依赖、网络和其他拓扑差异均转为人工迁移。镜像默认值或未知非默认 Docker 配置无法安全判定时也会拒绝自动安装。Manager 在整个事务中保持旧版本运行，直到提交或完整回退结束。
+#### Linux Manager handoff 模型
+
+首个带协议基线、Updater 入口、Dashboard DB 稳定挂载和受管本地 `current`
+镜像别名的公开版本（rc20）必须手工完整三服务迁移并声明
+`automatic_upgrade: no`；之后变更 Manager 的兼容候选声明
+`linux_manager_handoff_protocol: 1`（release manifest 与 bundle 内层
+manifest 一致），Linux 运行时确认协议、deployment schema、Compose 语义契约
+和 immutable Image ID 后才允许自动升级；字段缺失或不受支持一律 fail closed
+为手工迁移。
+
+事务位于稳定实例根 `manager/recovery/<transaction-id>/`，与 Windows 简化方案
+共享“旧 Manager 准备、目标 Manager 接管、健康后提交”的事务骨架，但交接用
+三份事务文件表达：
+
+- `request.json`：来源 Manager 唯一写入、之后不可变，绑定协议版本、事务/
+  operation ID、来源/目标版本与 Image ID、Compose project、正式与备份容器名、
+  原 restart policy、pre-upgrade 归档、Dashboard DB 快照及两个 `current`
+  alias 的来源 Image ID。
+- `decision.json`：目标 Manager 一次性写入，只允许事务绑定的 `commit` 或
+  `rollback`；使用 first-write-wins 原子发布，`commit` 是唯一不可逆提交点，
+  其后任何流程都不得回退来源。
+- `result.json`：只有来源镜像中的 Updater helper 角色可写，记录
+  `target-committed`、`source-restored` 或 `restore-failed`。
+
+Updater 是来源镜像中独立 CLI 入口启动的一次性容器：不开放端口、不启动网页
+服务、临时挂载 Docker Socket 与事务恢复目录。它验证 request 与正式 Manager
+精确身份后，把来源 Manager 容器直接改名保留（不重建），用目标 immutable
+Image ID 与事务标签创建新 Manager；任一失败或启动期限耗尽都恢复来源 Manager
+并写 `source-restored`。来源 Manager、Bot、Dashboard 在交接窗口内 `restart=no`，
+commit/rollback 后只恢复最终一侧的原策略；宿主机或 Docker daemon 在窗口内
+重启不自动续作，用户或其 agent 先读取 request/decision/result 与 Docker
+实际身份，再按 commit 是否存在选择 `restore-source` 或 `finalize-committed`
+人工恢复。目标健康至少证明新 Manager 实际运行目标 Image ID、Dashboard 通过
+ManagerClient compatibility handshake、Bot 控制心跳推进，且两个受管
+`current` alias 精确指向目标 immutable Image ID；`commit` 写入前失败完整
+恢复来源，写入后只能完成目标侧清理。
 
 ### Windows 自动路径
 
@@ -159,16 +194,21 @@ journal、标志、归档和程序备份；不逐文件合并、不搜索其他�
 
 - 第一次安装、旧式或不受支持的部署迁入标准拓扑；
 - 指定安装较旧版本、人工回退或灾难恢复；
-- 发布包含 Manager 自身升级；
+- 发布包含破坏性 Manager 交接变化（handoff 协议、Manager state、
+  deployment schema、Compose 运行契约或安装布局不兼容）；
 - Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
 - 发布元数据标记为不兼容，或自动校验/空间/健康门槛未通过。
+
+普通 Manager 代码变化不属于上述手工情形：Linux 上声明受支持 handoff 协议
+的兼容候选可随自动升级切换 Manager；未声明协议或协议不受支持的 Manager
+变更仍在 Linux 上 fail closed 为手工迁移。
 
 人工操作前先创建并验证归档，按目标平台的部署指南替换程序或镜像，必要时从已验证归档恢复。Windows 只允许事务预先生成的根恢复脚本整体换回 `current/`，不得手工拼接文件；不要未经对比直接用发布包内 Compose 覆盖实例目录，也不要把一次自动升级拒绝当作可安全忽略的警告。
 
 ## 明确非目标
 
 - 按 QQ 账号单独启停共享 RuntimeUnit；
-- Manager 自身自动升级；
+- Updater 在宿主机或 Docker daemon 重启后自动续作（交接窗口中断按文档人工恢复）；
 - 自动改写 Linux Compose 或部署 schema；
 - 零停机归档、归档加密或自动云备份；
 - NapCat、LLOneBot 和其他 NoneBot 插件的数据迁移；

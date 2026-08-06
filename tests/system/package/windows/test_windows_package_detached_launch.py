@@ -324,14 +324,23 @@ def test_detached_exe_boots_without_console_streams(
 
 
 @pytest.mark.parametrize(
-    "hook",
-    ["--veloapp-install", "--veloapp-updated", "--veloapp-obsolete", "--veloapp-uninstall"],
+    ("hook", "timeout_seconds"),
+    [
+        # Velopack allows 30 seconds for install/uninstall and 15 seconds for
+        # updated/obsolete hooks.  Leave one second of headroom so this
+        # package-level test still fails before the installer would kill it.
+        ("--veloapp-install", 29),
+        ("--veloapp-updated", 14),
+        ("--veloapp-obsolete", 14),
+        ("--veloapp-uninstall", 29),
+    ],
 )
 def test_packaged_velopack_hooks_exit_quickly_without_starting_services(
     tmp_path: Path,
     hook: str,
+    timeout_seconds: float,
 ) -> None:
-    """The actual windowed executable must honour Velopack lifecycle hooks."""
+    """The actual windowed executable must meet each Velopack hook deadline."""
     exe = _dashboard_exe()
     env, _base_url = _launch_env(tmp_path)
     ports = {
@@ -341,7 +350,7 @@ def test_packaged_velopack_hooks_exit_quickly_without_starting_services(
     proc = _launch_detached(exe, [hook, "3.0.0-rc.18"], env)
 
     try:
-        return_code = proc.wait(timeout=10)
+        return_code = proc.wait(timeout=timeout_seconds)
         assert return_code == 0, f"stable entry exited with code {return_code}"
         _wait_for_package_processes_to_exit(exe, timeout=30)
     except Exception as exc:

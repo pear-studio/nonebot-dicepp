@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,63 @@ def test_prepare_compose_bootstraps_full_instance(tmp_path: Path) -> None:
     assert orch._api is not None
     assert orch._api.base_url == "http://127.0.0.1:4091"
     assert orch._api.token is None
+
+
+def test_prepare_compose_installs_ordered_target_crash_harness(
+    tmp_path: Path,
+) -> None:
+    orch = _make_orchestrator(tmp_path)
+    orch._handoff_mode = "target_crash"
+
+    orch._prepare_compose()
+
+    assert orch._harness_control_dir is not None
+    wrapper = (
+        orch._harness_control_dir / "manager_entrypoint.py"
+    ).read_text(encoding="utf-8")
+    crash_branch = wrapper[wrapper.index('if mode == "target_crash":') :]
+    marker = crash_branch.index('"target-manager-observed.json"')
+    assert crash_branch.index("damaged_by_target_manager") < marker
+    assert crash_branch.index("damaged-by-target-manager") < marker
+    assert crash_branch.index("connection.commit()") < marker
+    assert orch._instance_dir is not None
+    with sqlite3.connect(
+        orch._instance_dir / "dashboard" / "data" / "dashboard.db"
+    ) as connection:
+        row = connection.execute(
+            "SELECT value FROM dicepp_harness_sentinel WHERE id = 1"
+        ).fetchone()
+    assert row == ("source",)
+
+
+def test_prepare_compose_routes_manager_api_through_dind(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, str, str, str, dict | None]] = []
+
+    class Sandbox:
+        def manager_api_request(
+            self,
+            manager_name: str,
+            method: str,
+            path: str,
+            token: str,
+            body: dict | None,
+        ) -> tuple[int, dict]:
+            calls.append((manager_name, method, path, token, body))
+            return 200, {"ok": True, "dicepp_version": "3.0.0rc19"}
+
+    orch = _make_orchestrator(tmp_path)
+    orch._daemon_sandbox = Sandbox()  # type: ignore[assignment]
+    orch._prepare_compose()
+    assert orch._api is not None
+    orch._container_names["manager"] = "dicepp-manager"
+    orch._api.token = "token"
+
+    assert orch._api.health()["dicepp_version"] == "3.0.0rc19"
+    assert calls == [
+        ("dicepp-manager", "GET", "/v1/health", "token", None)
+    ]
 
 
 def test_prepare_compose_rejects_missing_compose_in_bundle(tmp_path: Path) -> None:

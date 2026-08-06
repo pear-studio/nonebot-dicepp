@@ -64,7 +64,9 @@ def test_linux_inner_contract_hashes_compose_and_image_archive(tmp_path) -> None
     assert len(manifest["catalog_digest"]) == 64
 
 
-def test_linux_inner_contract_rejects_automatic_manager_change(tmp_path) -> None:
+def test_linux_inner_contract_rejects_automatic_manager_without_protocol(
+    tmp_path,
+) -> None:
     package = tmp_path / "package"
     package.mkdir()
     compose = package / "docker-compose.yml"
@@ -72,7 +74,11 @@ def test_linux_inner_contract_rejects_automatic_manager_change(tmp_path) -> None
     compose.write_bytes(b"services: {}")
     archive.write_bytes(b"archive")
 
-    with pytest.raises(ValueError, match="change_scope includes manager"):
+    with pytest.raises(
+        ValueError,
+        match="automatic_upgrade with a Manager change requires a supported "
+        "linux_manager_handoff_protocol",
+    ):
         build_linux_package_manifest(
             version="v3.1.0",
             package_root=package,
@@ -93,5 +99,78 @@ def test_linux_inner_contract_rejects_automatic_manager_change(tmp_path) -> None
                 change_scope=("runtime", "manager"),
                 automatic_upgrade=True,
                 minimum_manager_version="1.0",
+            ),
+        )
+
+
+def test_linux_inner_contract_emits_supported_handoff_protocol(tmp_path) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    compose = package / "docker-compose.yml"
+    archive = package / "images.tar.zst"
+    compose.write_bytes(b"services: {}")
+    archive.write_bytes(b"archive")
+
+    manifest = build_linux_package_manifest(
+        version="v3.1.0",
+        package_root=package,
+        compose=compose,
+        image_archive=archive,
+        images=[
+            "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+        ],
+        image_ids=[
+            "sha256:" + ("1" * 64),
+            "sha256:" + ("2" * 64),
+        ],
+        metadata=ReleaseMetadata(
+            version="3.1.0",
+            data_changed=False,
+            config_changed=False,
+            change_scope=("runtime", "manager"),
+            automatic_upgrade=True,
+            minimum_manager_version="1.0",
+            linux_manager_handoff_protocol=1,
+        ),
+    )
+
+    assert manifest["linux_manager_handoff_protocol"] == 1
+
+
+def test_linux_inner_contract_rejects_unsupported_handoff_protocol(
+    tmp_path,
+) -> None:
+    package = tmp_path / "package"
+    package.mkdir()
+    compose = package / "docker-compose.yml"
+    archive = package / "images.tar.zst"
+    compose.write_bytes(b"services: {}")
+    archive.write_bytes(b"archive")
+
+    with pytest.raises(
+        ValueError, match="linux_manager_handoff_protocol must match"
+    ):
+        build_linux_package_manifest(
+            version="v3.1.0",
+            package_root=package,
+            compose=compose,
+            image_archive=archive,
+            images=[
+                "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+                "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            ],
+            image_ids=[
+                "sha256:" + ("1" * 64),
+                "sha256:" + ("2" * 64),
+            ],
+            metadata=ReleaseMetadata(
+                version="3.1.0",
+                data_changed=False,
+                config_changed=False,
+                change_scope=("runtime", "manager"),
+                automatic_upgrade=True,
+                minimum_manager_version="1.0",
+                linux_manager_handoff_protocol=2,
             ),
         )

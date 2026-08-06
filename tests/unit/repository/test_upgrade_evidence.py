@@ -13,6 +13,7 @@ from scripts.build.upgrade_evidence import (
     candidate_digest,
     normalize_candidate_identities,
     required_scenarios_for,
+    source_scenarios_for,
     validate_upgrade_evidence,
     validate_upgrade_matrix,
     validate_upgrade_matrix_coverage,
@@ -88,6 +89,7 @@ def _matrix() -> dict:
                 "platform": "linux",
                 "arch": "amd64",
                 "source_version": "3.0.0rc19",
+                "scenarios": list(LINUX_REQUIRED_SCENARIOS),
                 "assets": [
                     {
                         "purpose": "linux-bundle",
@@ -179,6 +181,52 @@ def _evidence(matrix: dict) -> dict:
                 "program_restore_mode": "whole_current_directory",
             },
         },
+        "manager_handoff_commit": {
+            "assertions": {
+                "manager_handoff_completed": True,
+                "target_containers_started": True,
+                "local_health_passed": True,
+                "commit_decision_written": True,
+            },
+            "observations": {
+                "source_version_before": "3.0.0rc19",
+                "target_version_after": "3.1.0",
+                "handoff_protocol": "1",
+                "journal_status": "committed",
+                "health_status": "healthy",
+            },
+        },
+        "manager_handoff_rollback": {
+            "assertions": {
+                "target_manager_failed": True,
+                "source_manager_restored": True,
+                "program_restored": True,
+                "data_restored": True,
+                "dashboard_db_restored": True,
+                "source_restarted": True,
+                "journal_rolled_back": True,
+            },
+            "observations": {
+                "target_version_observed": "3.1.0",
+                "restored_version": "3.0.0rc19",
+                "result_status": "source-restored",
+                "journal_status": "rolled_back",
+                "rollback_marker_status": "restored",
+            },
+        },
+        "manager_handoff_commit_crash_window": {
+            "assertions": {
+                "crash_before_commit_allowed_source_restore": True,
+                "crash_after_commit_never_rolled_back": True,
+                "recovery_material_preserved": True,
+                "terminal_state_recorded": True,
+            },
+            "observations": {
+                "crash_before_commit_final_state": "source_restored",
+                "crash_after_commit_final_state": "cleanup_pending",
+                "decision_status": "committed",
+            },
+        },
     }
     return {
         "contract_version": 2,
@@ -219,11 +267,7 @@ def _evidence(matrix: dict) -> dict:
                         **scenario_records[name],
                         "observations": scenario_records[name]["observations"],
                     }
-                    for name in required_scenarios_for(
-                        matrix,
-                        platform=source["platform"],
-                        arch=source["arch"],
-                    )
+                    for name in source_scenarios_for(matrix, source)
                 ],
             }
             for source in matrix["supported_sources"]
@@ -534,3 +578,104 @@ def test_tracked_registry_and_manual_transition_matrix_fail_closed() -> None:
     }
     with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):
         validate_upgrade_protocol_registry_ready(registry)
+
+
+def test_release_evidence_rejects_validation_only_legacy_source_subset() -> None:
+    matrix = _matrix()
+    legacy_linux = next(
+        source
+        for source in matrix["supported_sources"]
+        if source["platform"] == "linux"
+    )
+    classic = list(LINUX_REQUIRED_SCENARIOS)[:4]
+    legacy_linux["scenarios"] = classic
+    evidence = _evidence(matrix)
+
+    validated_matrix = validate_upgrade_matrix(matrix)
+    assert source_scenarios_for(validated_matrix, legacy_linux) == tuple(classic)
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_upgrade_evidence(
+            evidence,
+            matrix=matrix,
+            target_version="3.1.0",
+            target_commit_sha=COMMIT_SHA,
+            target_candidate_identities=CANDIDATES,
+            target_final_assets=FINAL_ASSETS,
+        )
+
+    message = str(exc_info.value)
+    assert "linux/amd64 source 3.0.0rc19" in message
+    assert "incomplete for release evidence" in message
+    for scenario in LINUX_REQUIRED_SCENARIOS[4:]:
+        assert scenario in message
+
+
+def test_automatic_release_rejects_validation_only_subset_before_evidence_read(
+    tmp_path: Path,
+) -> None:
+    notes = tmp_path / "notes.md"
+    matrix_path = tmp_path / "matrix.json"
+    notes.write_text(_notes("yes"), encoding="utf-8")
+    matrix = _matrix()
+    legacy_linux = next(
+        source
+        for source in matrix["supported_sources"]
+        if source["platform"] == "linux"
+    )
+    legacy_linux["scenarios"] = list(LINUX_REQUIRED_SCENARIOS)[:4]
+    matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="source scenarios are incomplete for release evidence",
+    ):
+        verify_release(
+            release_notes=notes,
+            version="3.1.0",
+            commit_sha=COMMIT_SHA,
+            candidate_identities=CANDIDATES,
+            final_assets=FINAL_ASSETS,
+            matrix_path=matrix_path,
+            evidence_path=tmp_path / "missing-evidence.json",
+        )
+
+
+def test_source_row_scenarios_cannot_exceed_its_platform_requirement() -> None:
+    matrix = _matrix()
+    legacy_windows = next(
+        source
+        for source in matrix["supported_sources"]
+        if source["platform"] == "windows"
+    )
+    legacy_windows["scenarios"] = [
+        *WINDOWS_REQUIRED_SCENARIOS,
+        "manager_handoff_commit",
+    ]
+
+    with pytest.raises(
+        ValueError, match="scenarios exceed its required platform set"
+    ):
+        validate_upgrade_matrix(matrix)
+
+
+def test_tracked_registry_declares_linux_manager_handoff_protocol() -> None:
+    root = find_repository_root(Path(__file__))
+    registry = json.loads(
+        (root / "scripts/build/upgrade_protocol_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    validated = validate_upgrade_protocol_registry(registry, repository_root=root)
+    contract = next(
+        item
+        for item in validated["contracts"]
+        if item["name"] == "linux_manager_handoff"
+    )
+
+    assert contract["medium"] == "json-files-in-recovery-directory"
+    assert contract["producer"] == "LinuxBundleUpgradeAdapter"
+    assert contract["format_versions"] == [1]
+    assert contract["verification_status"] == "awaiting_published_source"
+    assert contract["support_window"] == "previous published handoff release to current"

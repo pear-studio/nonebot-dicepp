@@ -428,6 +428,128 @@ def test_different_positive_deployment_schema_is_valid_but_incompatible(
     )
 
 
+def test_linux_manager_handoff_gate_fails_closed_without_protocol(
+    tmp_path: Path,
+) -> None:
+    body = b"manager change"
+    manifest = _manifest([_artifact("DicePP-v3.1.0-linux-amd64.zip", body)])
+    manifest["change_scope"] = ["runtime", "manager"]
+    validate_release_manifest(manifest)
+    release = _release(manifest, body)
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(
+            {
+                "https://api/releases?per_page=100&page=1": [
+                    _json_response([release])
+                ],
+                "https://downloads/manifest": [_json_response(manifest)],
+            }
+        ),
+        github_api="https://api",
+        target=("linux", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+
+    status = manager.discover(manual=True)
+
+    assert status["available"]["compatible"] is False
+    assert status["available"]["linux_manager_handoff_protocol"] is None
+    assert any(
+        "handoff protocol" in problem
+        for problem in status["available"]["compatibility"]["problems"]
+    )
+    with pytest.raises(ReleaseDownloadError, match="not compatible"):
+        manager.download()
+
+
+def test_linux_manager_handoff_gate_accepts_supported_protocol(
+    tmp_path: Path,
+) -> None:
+    body = b"manager change with protocol"
+    manifest = _manifest([_artifact("DicePP-v3.1.0-linux-amd64.zip", body)])
+    manifest["change_scope"] = ["runtime", "manager"]
+    manifest["linux_manager_handoff_protocol"] = 1
+    validate_release_manifest(manifest)
+    release = _release(manifest, body)
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(
+            {
+                "https://api/releases?per_page=100&page=1": [
+                    _json_response([release])
+                ],
+                "https://downloads/manifest": [_json_response(manifest)],
+            }
+        ),
+        github_api="https://api",
+        target=("linux", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+
+    status = manager.discover(manual=True)
+
+    assert status["available"]["compatible"] is True
+    assert status["available"]["linux_manager_handoff_protocol"] == 1
+
+
+def test_windows_manager_scope_is_not_gated_by_linux_handoff_protocol(
+    tmp_path: Path,
+) -> None:
+    body = b"windows manager change"
+    manifest = _manifest([_artifact("DicePP-v3.1.0-linux-amd64.zip", body)])
+    manifest["change_scope"] = ["runtime", "manager"]
+    validate_release_manifest(manifest)
+    velopack_body, _nupkg, _inner = _velopack_bundle()
+    velopack_artifact = _velopack_artifact(velopack_body)
+    manifest["artifacts"] = [
+        item
+        for item in manifest["artifacts"]
+        if item["purpose"] != "velopack-bundle"
+    ] + [velopack_artifact]
+    manifest_bytes = _json_bytes(manifest)
+    release = {
+        "tag_name": "v3.1.0",
+        "draft": False,
+        "prerelease": False,
+        "html_url": "https://github.com/example/release",
+        "published_at": "2026-07-23T00:00:00Z",
+        "assets": [
+            {
+                "name": "dicepp-release.json",
+                "size": len(manifest_bytes),
+                "digest": f"sha256:{hashlib.sha256(manifest_bytes).hexdigest()}",
+                "browser_download_url": "https://downloads/manifest",
+            },
+            {
+                "name": velopack_artifact["filename"],
+                "size": len(velopack_body),
+                "digest": f"sha256:{velopack_artifact['sha256']}",
+                "browser_download_url": "https://downloads/artifact",
+            },
+        ],
+    }
+    manager = ReleaseManager(
+        layout=InstanceLayout.from_root(tmp_path),
+        transport=Transport(
+            {
+                "https://api/releases?per_page=100&page=1": [
+                    _json_response([release])
+                ],
+                "https://downloads/manifest": [_json_response(manifest)],
+            }
+        ),
+        github_api="https://api",
+        target=("windows", "amd64"),
+        current_version_loader=lambda: "3.0.0",
+    )
+
+    status = manager.discover(manual=True)
+
+    assert status["available"]["compatible"] is True
+    assert status["available"]["linux_manager_handoff_protocol"] is None
+
+
 def test_discovery_skips_broken_candidate_and_selects_highest_newer_version(
     tmp_path: Path,
 ) -> None:
@@ -673,6 +795,7 @@ def test_windows_velopack_download_verifies_bundle_and_materializes_payload(
             "version": "3.1.0",
             "channel": "stable",
             "change_scope": ["runtime"],
+            "linux_manager_handoff_protocol": None,
             "compatible": True,
             "compatibility": compatibility,
             "release_url": "https://example/release",
@@ -721,6 +844,7 @@ def test_windows_metadata_is_not_published_if_materialized_payload_changes(
         "version": "3.1.0",
         "channel": "stable",
         "change_scope": ["runtime"],
+        "linux_manager_handoff_protocol": None,
         "compatibility": {
             "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
             "minimum_manager_version": MANAGER_VERSION,
@@ -783,6 +907,7 @@ def test_failed_windows_generation_preserves_previously_verified_generation(
         "version": "3.1.0",
         "channel": "stable",
         "change_scope": ["runtime"],
+        "linux_manager_handoff_protocol": None,
         "compatibility": {
             "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
             "minimum_manager_version": MANAGER_VERSION,
@@ -892,6 +1017,7 @@ def test_windows_generation_handles_reject_replacement_until_metadata_switch(
         "version": "3.1.0",
         "channel": "stable",
         "change_scope": ["runtime"],
+        "linux_manager_handoff_protocol": None,
         "compatibility": {
             "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,
             "minimum_manager_version": MANAGER_VERSION,
@@ -981,6 +1107,7 @@ def test_repeated_windows_download_replaces_one_complete_generation(
             "version": "3.1.0",
             "channel": "stable",
             "change_scope": ["runtime"],
+            "linux_manager_handoff_protocol": None,
             "compatible": True,
             "compatibility": compatibility,
             "release_url": "https://example/release",
@@ -1069,6 +1196,7 @@ def test_next_windows_download_removes_only_unpublished_managed_orphans(
             "version": "3.1.0",
             "channel": "stable",
             "change_scope": ["runtime"],
+            "linux_manager_handoff_protocol": None,
             "compatible": True,
             "compatibility": compatibility,
             "release_url": "https://example/release",
@@ -2327,6 +2455,7 @@ def test_settings_failure_releases_only_its_download_reservation(
             "version": "3.1.0",
             "channel": "stable",
             "change_scope": ["runtime"],
+            "linux_manager_handoff_protocol": None,
             "compatible": True,
             "compatibility": {
                 "deployment_schema_version": DEPLOYMENT_SCHEMA_VERSION,

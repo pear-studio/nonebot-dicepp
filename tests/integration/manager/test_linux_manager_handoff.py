@@ -125,18 +125,34 @@ class PlatformAdapter:
         fail_verify: bool = False,
         fail_identity: bool = False,
         handoff: FakeHandoff | None = None,
+        manager_restart_policy: str = "no",
     ) -> None:
         self.calls: list[str] = []
         self.fail_aliases = fail_aliases
         self.fail_verify = fail_verify
         self.fail_identity = fail_identity
         self.handoff = handoff
+        self.manager_restart_policy = manager_restart_policy
+        self.identity_policy_modes: list[bool] = []
 
-    async def verify_target_manager_identity(self, request):
+    async def verify_target_manager_identity(
+        self, request, *, allow_restored_restart_policy=False
+    ):
         self.calls.append("verify_target_manager_identity")
+        self.identity_policy_modes.append(allow_restored_restart_policy)
         if self.fail_identity:
             raise UpgradeCompatibilityError(
                 "injected target Manager identity failure",
+                code="target_manager_identity_invalid",
+            )
+        expected_policy = (
+            request["restart_policies"]["manager"]
+            if allow_restored_restart_policy
+            else "no"
+        )
+        if self.manager_restart_policy != expected_policy:
+            raise UpgradeCompatibilityError(
+                "target Manager restart policy does not match transaction state",
                 code="target_manager_identity_invalid",
             )
 
@@ -540,8 +556,8 @@ async def test_existing_commit_decision_converges_without_rewrite(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A durable commit decision is first-write-wins: recovery must never
-    rewrite it, only finish the remaining cleanup convergence."""
+    """After manual finalize restored the target policy and wrote the bound
+    result, recovery may converge the durable commit without rewriting it."""
     monkeypatch.setattr(handoff_coordinator_module, "get_version", lambda: TARGET_VERSION)
     layout, _data, service = _setup(tmp_path)
     request = request_payload(
@@ -570,7 +586,9 @@ async def test_existing_commit_decision_converges_without_rewrite(
         return real_write_decision(*args, **kwargs)
 
     monkeypatch.setattr(handoff_coordinator_module, "write_decision", track_write)
-    platform = PlatformAdapter()
+    platform = PlatformAdapter(
+        manager_restart_policy=request["restart_policies"]["manager"]
+    )
     coordinator, _runtime_support = _coordinator(layout, service, platform)
     _journal(coordinator, _detail(staged, current))
 
@@ -587,9 +605,51 @@ async def test_existing_commit_decision_converges_without_rewrite(
         "restore_runtime_policies",
         "cleanup",
     ]
+    assert platform.identity_policy_modes == [True]
     # Terminal success removes the transaction directory entirely.
     assert not tx_dir.exists()
     assert service._startup_maintenance_active is False
+
+
+@pytest.mark.asyncio
+async def test_commit_without_target_result_keeps_restart_policy_gate_strict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A commit decision alone cannot authorize the helper-restored policy.
+
+    Until the bound ``target-committed`` result exists, the target Manager is
+    still in the handoff window and must prove ``restart=no``.
+    """
+    monkeypatch.setattr(handoff_coordinator_module, "get_version", lambda: TARGET_VERSION)
+    layout, _data, service = _setup(tmp_path)
+    request = request_payload(
+        transaction_id=TRANSACTION_ID,
+        operation_id=OPERATION_ID,
+        source_version=SOURCE_VERSION,
+        target_version=TARGET_VERSION,
+    )
+    staged, tx_dir = _staged(layout, request)
+    current = _current(request)
+    write_decision(
+        tx_dir / _DECISION_FILENAME,
+        decision_payload(transaction_id=TRANSACTION_ID, operation_id=OPERATION_ID),
+        root=layout.manager_recovery_dir,
+    )
+    platform = PlatformAdapter(
+        manager_restart_policy=request["restart_policies"]["manager"]
+    )
+    coordinator, runtime_support = _coordinator(layout, service, platform)
+    _journal(coordinator, _detail(staged, current))
+
+    recovered = await coordinator.recover()
+
+    assert recovered[0]["action"] == "target_manager_identity_invalid"
+    assert recovered[0]["manual_recovery_required"] is True
+    assert platform.identity_policy_modes == [False]
+    assert runtime_support.migration_calls == 0
+    assert (tx_dir / _RESULT_FILENAME).exists() is False
+    assert service._startup_maintenance_active is True
 
 
 @pytest.mark.asyncio

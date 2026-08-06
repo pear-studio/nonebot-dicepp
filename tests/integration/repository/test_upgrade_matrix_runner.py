@@ -186,6 +186,25 @@ def _fake_harness_run(command, *, cwd, check):
             "recovery_trigger": "manual",
             "program_restore_mode": "whole_current_directory",
         },
+        "manager_handoff_commit": {
+            "source_version_before": context["source_version"],
+            "target_version_after": context["target_version"],
+            "handoff_protocol": "1",
+            "journal_status": "committed",
+            "health_status": "healthy",
+        },
+        "manager_handoff_rollback": {
+            "target_version_observed": context["target_version"],
+            "restored_version": context["source_version"],
+            "result_status": "source-restored",
+            "journal_status": "rolled_back",
+            "rollback_marker_status": "restored",
+        },
+        "manager_handoff_commit_crash_window": {
+            "crash_before_commit_final_state": "source_restored",
+            "crash_after_commit_final_state": "cleanup_pending",
+            "decision_status": "committed",
+        },
     }
     wrong_version_scenario = os.environ.get("DICEPP_TEST_WRONG_VERSION_SCENARIO")
     if wrong_version_scenario == scenario:
@@ -281,6 +300,69 @@ def test_real_harness_protocol_assembles_source_scenarios_and_final_bytes(
         and all(scenario["observations"] for scenario in result["scenarios"])
         for result in evidence["results"]
     )
+
+
+def test_validation_runner_allows_legacy_subset_but_assembler_rejects_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    matrix_path, cache, assets = _prepare(tmp_path)
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    for source in matrix["supported_sources"]:
+        if source["platform"] == "linux":
+            source["scenarios"] = list(LINUX_REQUIRED_SCENARIOS)[:4]
+    matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+    monkeypatch.setattr(matrix_runner.subprocess, "run", _fake_harness_run)
+
+    output = tmp_path / "linux-result.json"
+    run_platform(
+        matrix_path=matrix_path,
+        platform="linux",
+        arch="amd64",
+        target_version="3.1.0",
+        target_commit_sha=COMMIT_SHA,
+        target_asset_specs=assets["linux"],
+        source_cache=cache,
+        work_root=tmp_path / "linux-work",
+        output=output,
+    )
+
+    fragment = json.loads(output.read_text(encoding="utf-8"))
+    linux_result = next(
+        result
+        for result in fragment["results"]
+        if result["platform"] == "linux"
+    )
+    assert [scenario["name"] for scenario in linux_result["scenarios"]] == list(
+        LINUX_REQUIRED_SCENARIOS
+    )[:4]
+
+    windows_output = tmp_path / "windows-result.json"
+    run_platform(
+        matrix_path=matrix_path,
+        platform="windows",
+        arch="amd64",
+        target_version="3.1.0",
+        target_commit_sha=COMMIT_SHA,
+        target_asset_specs=assets["windows"],
+        source_cache=cache,
+        work_root=tmp_path / "windows-work",
+        output=windows_output,
+    )
+
+    evidence_output = tmp_path / "evidence.json"
+    with pytest.raises(
+        ValueError,
+        match="source scenarios are incomplete for release evidence",
+    ):
+        assemble_evidence(
+            matrix_path=matrix_path,
+            target_version="3.1.0",
+            target_commit_sha=COMMIT_SHA,
+            candidates=CANDIDATES,
+            platform_results=[windows_output, output],
+            output=evidence_output,
+        )
+    assert not evidence_output.exists()
 
 
 def test_failed_behavioral_assertion_cannot_be_recorded_as_evidence(

@@ -777,6 +777,7 @@ def test_read_journal_works_with_real_manager_schema(tmp_path: Path) -> None:
     # wins the ordering — a created_at-based query would fail closed here.
     assert orch._read_journal() == {
         "transaction_id": "tx-2",
+        "operation_id": None,
         "status": "committed",
         "phase": "commit",
         "detail": {},

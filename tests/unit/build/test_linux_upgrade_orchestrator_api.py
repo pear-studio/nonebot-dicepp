@@ -76,6 +76,10 @@ class _FakeDocker:
     ) -> subprocess.CompletedProcess[str]:
         argv = list(args)
         self.calls.append((argv, {"cwd": cwd, "env": env}))
+        if "network" in argv and "create" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=("e" * 64) + "\n", stderr=""
+            )
         if "ps" in argv:
             if any("service=dashboard" in value for value in argv):
                 name = DASHBOARD_NAME
@@ -267,14 +271,18 @@ def _make_orchestrator(
     )
     monkeypatch.setattr(orch_module, "_http_json", fake_api)
     monkeypatch.setattr(orch_module, "_docker", fake_docker)
-    monkeypatch.setattr(orch_module, "_docker_object_exists", lambda *_args: False)
-    monkeypatch.setattr(orch_module, "_optional_docker_image_id", lambda _ref: None)
+    monkeypatch.setattr(
+        orch_module, "_docker_object_exists", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        orch_module, "_optional_docker_image_id", lambda _ref, **_kwargs: None
+    )
     monkeypatch.setattr(orch_module._DockerSocketProxy, "start", lambda _self: None)
     monkeypatch.setattr(orch_module._DockerSocketProxy, "stop", lambda _self: None)
     monkeypatch.setattr(
         orch_module,
         "_load_docker_image_from_bundle",
-        lambda bundle, work_dir, label: (
+        lambda bundle, work_dir, label, **_kwargs: (
             {"bot": SOURCE_BOT_ID, "dashboard": SOURCE_DASH_ID}
             if label == "source"
             else {"bot": TARGET_BOT_ID, "dashboard": TARGET_DASH_ID}
