@@ -50,10 +50,56 @@ function Invoke-DetachedLaunchSmoke {
     }
 }
 
+function Write-ManualMigrationSentinels {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $sentinels = @(
+        "config\user-preserved.json",
+        "content\user-preserved.txt",
+        "data\user-preserved.txt",
+        "dashboard\data\user-preserved.txt",
+        "manager\control\user-preserved.txt",
+        "manager\state\user-preserved.txt",
+        "manager\backups\user-preserved.zip"
+    )
+    foreach ($relative in $sentinels) {
+        $path = Join-Path $Root $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+        [System.IO.File]::WriteAllText(
+            $path,
+            "preserve:$relative",
+            [System.Text.UTF8Encoding]::new($false)
+        )
+    }
+}
+
+function Assert-ManualMigrationSentinels {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    $sentinels = @(
+        "config\user-preserved.json",
+        "content\user-preserved.txt",
+        "data\user-preserved.txt",
+        "dashboard\data\user-preserved.txt",
+        "manager\control\user-preserved.txt",
+        "manager\state\user-preserved.txt",
+        "manager\backups\user-preserved.zip"
+    )
+    foreach ($relative in $sentinels) {
+        $path = Join-Path $Root $relative
+        if (
+            -not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            [System.IO.File]::ReadAllText($path) -ne "preserve:$relative"
+        ) {
+            throw "Manual migration did not preserve instance data: $relative"
+        }
+    }
+}
+
 $portablePath = Join-Path $artifactRootPath $portableName
 $extractRoot = Join-Path $env:RUNNER_TEMP "dicepp-portable-$([guid]::NewGuid())"
 try {
+    Write-ManualMigrationSentinels $extractRoot
     Expand-Archive -LiteralPath $portablePath -DestinationPath $extractRoot
+    Assert-ManualMigrationSentinels $extractRoot
     $runtimeMatches = @(
         Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "DicePP-Runtime.exe"
     )
@@ -63,7 +109,13 @@ try {
     $programRoot = $runtimeMatches[0].Directory.FullName
     $runtime = Join-Path $programRoot "DicePP-Runtime.exe"
     $dashboard = Join-Path $programRoot "DicePP.exe"
-    $updateGuard = Join-Path $programRoot "DicePP-UpdateGuard.exe"
+    $forbiddenGuard = @(
+        Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
+            Where-Object { $_.Name -eq "DicePP-UpdateGuard.exe" }
+    )
+    if ($forbiddenGuard.Count -ne 0) {
+        throw "Portable must not contain DicePP-UpdateGuard.exe"
+    }
     $expectedRuntime = "DicePP v${Version}"
     if ((Invoke-DicePPProcess -FilePath $runtime -Arguments @("--version") `
         -Scenario "final-portable-runtime-version" `
@@ -81,14 +133,6 @@ try {
     Invoke-DicePPProcess -FilePath $dashboard -Arguments @("--smoke-check") `
         -Scenario "final-portable-dashboard-smoke" `
         -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
-    if ((Invoke-DicePPProcess -FilePath $updateGuard -Arguments @("--version") `
-        -Scenario "final-portable-update-guard-version" `
-        -DiagnosticsRoot $ProcessDiagnosticsRoot) -ne $Version) {
-        throw "Portable UpdateGuard version mismatch"
-    }
-    Invoke-DicePPProcess -FilePath $updateGuard -Arguments @("--smoke-check") `
-        -Scenario "final-portable-update-guard-smoke" `
-        -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
     $stableDashboard = Join-Path $extractRoot "DicePP.exe"
     if (-not (Test-Path -LiteralPath $stableDashboard -PathType Leaf)) {
         throw "Portable stable DicePP.exe is missing"
@@ -103,18 +147,27 @@ try {
 $setupPath = Join-Path $artifactRootPath $setupName
 $installRoot = Join-Path $env:RUNNER_TEMP "dicepp-setup-$([guid]::NewGuid())"
 try {
+    Write-ManualMigrationSentinels $installRoot
     Invoke-DicePPProcess `
         -FilePath $setupPath `
         -Arguments @("--silent", "--installto", $installRoot) `
         -TimeoutSeconds 20 `
         -Scenario "final-setup-install" `
         -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
+    Assert-ManualMigrationSentinels $installRoot
     $stableDashboard = Join-Path $installRoot "DicePP.exe"
     $payloadDashboard = Join-Path $installRoot "current\DicePP.exe"
     foreach ($path in @($stableDashboard, $payloadDashboard)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Setup installation is incomplete: $path"
         }
+    }
+    $forbiddenGuard = @(
+        Get-ChildItem -LiteralPath $installRoot -Recurse -File |
+            Where-Object { $_.Name -eq "DicePP-UpdateGuard.exe" }
+    )
+    if ($forbiddenGuard.Count -ne 0) {
+        throw "Setup must not install DicePP-UpdateGuard.exe"
     }
     Invoke-DetachedLaunchSmoke $stableDashboard
 } finally {

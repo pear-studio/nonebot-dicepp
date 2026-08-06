@@ -10,9 +10,16 @@ import pytest
 
 import scripts.build.upgrade_matrix_runner as matrix_runner
 from scripts.build.upgrade_evidence import (
+    LINUX_REQUIRED_SCENARIOS,
     SCENARIO_ASSERTIONS,
+    WINDOWS_REQUIRED_SCENARIOS,
     CandidateIdentity,
-    REQUIRED_SCENARIOS,
+    required_scenarios_for,
+    validate_upgrade_matrix,
+    validate_upgrade_matrix_coverage,
+    validate_upgrade_matrix_platform_coverage,
+    validate_upgrade_protocol_registry,
+    validate_upgrade_protocol_registry_ready,
 )
 from scripts.build.upgrade_matrix_runner import assemble_evidence, run_platform
 
@@ -23,6 +30,56 @@ CANDIDATES = [
     CandidateIdentity("linux", "dashboard-manifest", "3" * 64),
     CandidateIdentity("windows", "package-tree", "4" * 64),
 ]
+ROOT = next(
+    parent
+    for parent in Path(__file__).resolve().parents
+    if (parent / "pyproject.toml").is_file()
+)
+
+
+def test_transition_registry_allows_linux_validation_but_blocks_release_evidence() -> None:
+    registry = json.loads(
+        (ROOT / "scripts/build/upgrade_protocol_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matrix = validate_upgrade_matrix(
+        json.loads(
+            (ROOT / "scripts/build/upgrade_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+
+    validate_upgrade_protocol_registry(registry, repository_root=ROOT)
+    validate_upgrade_matrix_platform_coverage(
+        matrix, platform="linux", arch="amd64"
+    )
+    assert required_scenarios_for(
+        matrix, platform="windows", arch="amd64"
+    ) == WINDOWS_REQUIRED_SCENARIOS
+    assert required_scenarios_for(
+        matrix, platform="linux", arch="amd64"
+    ) == LINUX_REQUIRED_SCENARIOS
+    windows_contract = next(
+        item
+        for item in registry["contracts"]
+        if item["name"] == "windows_current_backup_manual_restore"
+    )
+    assert windows_contract["producer"] == "SimpleWindowsVelopackUpgradeAdapter"
+    bundle_contract = next(
+        item
+        for item in registry["contracts"]
+        if item["name"] == "windows_bundle_manifest"
+    )
+    assert bundle_contract["consumers"] == [
+        "ReleaseManager",
+        "SimpleWindowsVelopackUpgradeAdapter",
+    ]
+    with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):
+        validate_upgrade_protocol_registry_ready(registry)
+    with pytest.raises(ValueError, match="windows/amd64"):
+        validate_upgrade_matrix_coverage(matrix)
 
 
 def _sha(payload: bytes) -> str:
@@ -40,10 +97,17 @@ def _prepare(tmp_path: Path) -> tuple[Path, Path, dict[str, list[str]]]:
     matrix = {
         "contract_version": 1,
         "required_platforms": [
-            {"platform": "windows", "arch": "amd64"},
-            {"platform": "linux", "arch": "amd64"},
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "scenarios": list(WINDOWS_REQUIRED_SCENARIOS),
+            },
+            {
+                "platform": "linux",
+                "arch": "amd64",
+                "scenarios": list(LINUX_REQUIRED_SCENARIOS),
+            },
         ],
-        "required_scenarios": list(REQUIRED_SCENARIOS),
         "supported_sources": [
             {
                 "platform": platform,
@@ -102,11 +166,7 @@ def _fake_harness_run(command, *, cwd, check):
             "target_version_observed": context["target_version"],
             "restored_version": context["source_version"],
             "journal_status": "rolled_back",
-            "rollback_marker_status": (
-                "program_rolled_back"
-                if context["platform"] == "windows"
-                else "restored"
-            ),
+            "rollback_marker_status": "restored",
         },
         "retry_after_rollback": {
             "first_transaction_status": "rolled_back",
@@ -119,6 +179,13 @@ def _fake_harness_run(command, *, cwd, check):
             "journal_status": "rolled_back",
             "apply_exit_code": 17,
         },
+        "manual_restore_after_target_failure": {
+            "target_version_observed": context["target_version"],
+            "restored_version": context["source_version"],
+            "journal_status": "manually_restored",
+            "recovery_trigger": "manual",
+            "program_restore_mode": "whole_current_directory",
+        },
     }
     wrong_version_scenario = os.environ.get("DICEPP_TEST_WRONG_VERSION_SCENARIO")
     if wrong_version_scenario == scenario:
@@ -127,6 +194,7 @@ def _fake_harness_run(command, *, cwd, check):
             "target_health_failure_rollback": "restored_version",
             "retry_after_rollback": "final_version",
             "apply_failure_before_target_execution": "source_version_after",
+            "manual_restore_after_target_failure": "restored_version",
         }[scenario]
         observations[scenario][version_observation] = "totally-wrong"
     output_path.write_text(
@@ -198,9 +266,16 @@ def test_real_harness_protocol_assembles_source_scenarios_and_final_bytes(
         (result["platform"], result["source_version"])
         for result in evidence["results"]
     } == {("windows", "3.0.0rc19"), ("linux", "3.0.0rc19")}
+    matrix_payload = json.loads(matrix.read_text(encoding="utf-8"))
     assert all(
         [scenario["name"] for scenario in result["scenarios"]]
-        == list(REQUIRED_SCENARIOS)
+        == list(
+            required_scenarios_for(
+                matrix_payload,
+                platform=result["platform"],
+                arch=result["arch"],
+            )
+        )
         and all(scenario["status"] == "passed" for scenario in result["scenarios"])
         and all(scenario["assertions"] for scenario in result["scenarios"])
         and all(scenario["observations"] for scenario in result["scenarios"])
@@ -296,11 +371,11 @@ def test_assembler_rejects_tampered_version_observation(
             output=output,
         )
         fragments.append(output)
-    fragment = json.loads(fragments[0].read_text(encoding="utf-8"))
+    fragment = json.loads(fragments[1].read_text(encoding="utf-8"))
     fragment["results"][0]["scenarios"][2]["observations"][
         "final_version"
     ] = "totally-wrong"
-    fragments[0].write_text(json.dumps(fragment), encoding="utf-8")
+    fragments[1].write_text(json.dumps(fragment), encoding="utf-8")
 
     with pytest.raises(ValueError, match="retry observations are inconsistent"):
         assemble_evidence(

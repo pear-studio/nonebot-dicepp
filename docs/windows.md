@@ -207,38 +207,41 @@ Portable 和 Setup 是首次安装或手工迁移入口，不是兼容后续
 自动更新的替代路径。检查和下载不会改变当前版本；只有已校验且兼容的版本才会显示
 安装按钮，安装仍需再次确认。
 
-确认后，Manager 会先创建并验证常规 pre-upgrade 归档、保留当前程序，再让
-Velopack 切换版本化程序目录。版本目录外的 `DicePP-UpdateGuard.exe` 观察本次
-升级的健康标记；新版本只有在 migration、Dashboard、Bot RuntimeUnit 和本地
-控制通道都健康后才提交。程序切换、migration、启动或硬性健康检查失败/超时，
-UpdateGuard 会在切换前从当前版本 bundle 校验并提取 full nupkg；失败时通过
-`Update.exe apply -p <旧版 full nupkg>` 降级，不直接删除或复制 `current/`。
-旧 Manager 随后恢复 pre-upgrade 数据。started、health 和 rollback marker 都绑定
-事务、目标版本与真实 Manager 进程身份；只有本地 Manager API 已监听且带 token
-的 `/v1/health` 验证通过，才会提交程序升级。
-Guard 终止后，Manager 会按摘要把当前版本随附的 UpdateGuard 原子刷新到实例根；
-活跃事务或 Guard 仍运行时不会替换。启动若发现唯一、路径和协议均有效的非终态
-请求，会核对 source/target 版本、全部 marker 和 Guard 精确进程身份：正常目标
-握手继续发布 started/health，已决定回退时才续作 Guard 或有序退出；source 已经
-恢复且 Guard 已退出时，在证据闭环后补齐程序回退终态并继续 data-only 恢复。
-身份未知、marker 冲突或存在多个活跃请求时保持维护状态并要求人工处理。Guard
-已退出且 Manager 数据恢复/提交日志也已终结的无冲突事务目录随后自动清理。
-LLOneBot、QQ、GitHub、LLM 等外部服务暂时不可用只显示警告，不会误判为程序故障。
-本次握手的 `request.json`、`health.json`、`rollback.json` 位于
-`manager/state/update-guard/`；升级进行中不要手工修改或删除。
+确认后，Manager 会先创建并验证常规 pre-upgrade 归档，再把完整
+`current/` 复制到 `manager/recovery/<transaction-id>/current/`，写入最小恢复描述，
+并在 DicePP 根目录准备一次性 `DicePP-Recover.cmd`。任一恢复材料准备失败都会
+在 Velopack 切换前停止，不会覆盖已有的未处理恢复事务。
 
-升级期间可以关闭浏览器页面，但不要结束 Manager 或 UpdateGuard；重新打开
-Dashboard 会继续展示持久化事务进度。若轮询超时，页面只表示“后台仍在继续”，
-不会取消升级。
+新版本在 migration、Dashboard、Bot RuntimeUnit 和本地控制通道都健康后提交。
+提交后立即最佳努力删除旧 `current/` 备份、恢复描述与根恢复入口；清理失败只会
+记录警告，不会把已成功的新版重新判为失败。LLOneBot、QQ、GitHub、LLM 等外部服务
+暂时不可用也只显示警告。
 
-Portable 和 Setup 只是两个独立的首次安装入口，Setup 不依赖 Portable ZIP；
-后续兼容更新都使用同一 Velopack bundle 和回退协议。实例
-`config/`、`data/`、`content/`、`dashboard/data/`、`manager/` 始终留在稳定
-DicePP 根目录，不跟随 `current/` 切换。发布包缺少 Velopack bundle
-或 UpdateGuard、需要升级 Manager 本身，或者当前目录不是受支持的安装布局时，
+如果新版无法正常启动，Windows 不会启动独立守护进程无人值守回退。请按以下步骤恢复：
+
+1. 关闭 DicePP；恢复脚本不会主动结束任何进程。
+2. 在 DicePP 安装目录根部运行 `DicePP-Recover.cmd`。
+3. 脚本将故障 `current/` 整体隔离，并将备份的旧 `current/` 整体移回；不会逐文件混合两个版本。
+4. 旧 Manager 启动后直接恢复这次升级的 pre-upgrade 数据和 RuntimeUnit 原状态，不再询问是否恢复数据。
+
+如果 `current/` 仍被占用，或任一目录移动失败，脚本会停止并保留全部恢复材料；
+关闭占用进程后再重试，不要手工拼接文件。如果旧 Manager 恢复数据失败，它也会保留
+journal、归档和程序备份供人工处理，不会自动重试。
+
+升级期间可以关闭浏览器页面；只要当前 Manager 仍在运行，重新打开 Dashboard 会继续展示
+持久化事务进度。若轮询超时，页面只表示“后台仍在继续”，不会取消升级。
+
+Portable 和 Setup 是两个独立的首次安装入口，Setup 不依赖 Portable ZIP；后续兼容更新
+使用同一 Velopack bundle 和简化恢复边界。实例 `config/`、`data/`、`content/`、
+`dashboard/data/`、`manager/` 始终留在稳定 DicePP 根目录，不跟随 `current/` 切换。
+发布包缺少 Velopack bundle、需要升级 Manager 本身，或当前目录不是受支持的安装布局时，
 自动安装会在修改程序和数据前拒绝。
 
-以下情形必须手工处理：第一次安装或旧目录迁入、指定安装较旧版本、人工回退或灾难恢复、Manager 自身升级，以及任何安装布局或发布元数据不兼容。手工操作前先创建并验证归档；退出旧的 `DicePP.exe` 后，使用目标 Release 的官方 Portable 或 Setup 完成程序/部署迁移，再启动目标版本的 `DicePP.exe` 并按需从已验证归档恢复。不要手工复制或删除 `current/`，也不要手动启动 `DicePP-Runtime.exe`。
+v3.0.0rc20 是这套简化机制的手工迁移起点，它本身不开放 Manager 自动安装。它不扫描、
+迁移、恢复或清理 rc19 及更旧版本留下的 UpdateGuard 状态；这些旧文件不会阻止 rc20 启动，
+也不参与之后的升级。
+
+以下情形必须手工处理：第一次安装或旧目录迁入、指定安装较旧版本、人工回退或灾难恢复、Manager 自身升级，以及任何安装布局或发布元数据不兼容。手工操作前先创建并验证归档；退出旧的 `DicePP.exe` 后，使用目标 Release 的官方 Portable 或 Setup 完成程序/部署迁移，再启动目标版本的 `DicePP.exe` 并按需从已验证归档恢复。除运行事务预先生成的 `DicePP-Recover.cmd` 外，不要手工复制、删除或拼接 `current/`，也不要手动启动 `DicePP-Runtime.exe`。
 
 完整配置、安装门槛和回退边界见 [updates.md](./updates.md)。
 

@@ -3,39 +3,24 @@
   "required_platforms": [
     {
       "platform": "windows",
-      "arch": "amd64"
+      "arch": "amd64",
+      "scenarios": [
+        "healthy_commit",
+        "manual_restore_after_target_failure"
+      ]
     },
     {
       "platform": "linux",
-      "arch": "amd64"
+      "arch": "amd64",
+      "scenarios": [
+        "healthy_commit",
+        "target_health_failure_rollback",
+        "retry_after_rollback",
+        "apply_failure_before_target_execution"
+      ]
     }
   ],
-  "required_scenarios": [
-    "healthy_commit",
-    "target_health_failure_rollback",
-    "retry_after_rollback",
-    "apply_failure_before_target_execution"
-  ],
   "supported_sources": [
-    {
-      "platform": "windows",
-      "arch": "amd64",
-      "source_version": "3.0.0rc19",
-      "assets": [
-        {
-          "purpose": "portable",
-          "name": "DicePP-v3.0.0rc19-win64-Portable.zip",
-          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc19/DicePP-v3.0.0rc19-win64-Portable.zip",
-          "sha256": "8caa1e9ad82edb5b6c486ba997a57cfe2f12e08a5841e735325f06276d188106"
-        },
-        {
-          "purpose": "velopack-bundle",
-          "name": "velopack.win-x64.zip",
-          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc19/velopack.win-x64.zip",
-          "sha256": "d85fe18c3b05af1eeab21cc8baa589244eda0b8b7bbeedbb3bf5a0081943c0ff"
-        }
-      ]
-    },
     {
       "platform": "linux",
       "arch": "amd64",

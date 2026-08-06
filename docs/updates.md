@@ -13,7 +13,7 @@ Promotion 先创建 draft Release，遇到已有 tag、Release、asset 或镜像
 
 ## 优先使用 Manager，何时手动
 
-对于当前的标准三服务 Linux 部署或受支持的 Windows 安装，Dashboard 的“版本更新”页是升级**兼容的最新版本**的首选入口。Manager 负责校验、pre-upgrade 归档、安装、本地健康检查和失败回退；用户只需确认安装。
+对于当前的标准三服务 Linux 部署或受支持的 Windows 安装，Dashboard 的“版本更新”页是升级**兼容的最新版本**的首选入口。Manager 负责校验、pre-upgrade 归档、安装和本地健康检查。Linux 失败时自动回退；Windows 失败时保留一次性人工恢复入口。
 
 以下情形必须使用手动部署或恢复流程：
 
@@ -23,7 +23,7 @@ Promotion 先创建 draft Release，遇到已有 tag、Release、asset 或镜像
 - Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
 - 发布被标记为不兼容，或 Manager 的校验、空间、旧版本保留或健康门槛未通过。
 
-手工操作前先创建并验证归档。Linux 请按 [Linux 部署](./linux.md#手工更新) 同步完整三服务 Compose 并更新或回退镜像；Windows 请按 [Windows 部署](./windows.md#版本更新与旧版迁移) 使用目标发布包或已验证归档恢复。不要手工复制 Windows `current/`，也不要未经对比直接用 Release 内的 Compose 覆盖现有实例。
+手工操作前先创建并验证归档。Linux 请按 [Linux 部署](./linux.md#手工更新) 同步完整三服务 Compose 并更新或回退镜像；Windows 请按 [Windows 部署](./windows.md#版本更新与旧版迁移) 使用目标发布包、一次性 `DicePP-Recover.cmd` 或已验证归档恢复。除运行已生成的恢复脚本外，不要手工拼接 Windows `current/`；也不要未经对比直接用 Release 内的 Compose 覆盖现有实例。
 
 ## 默认行为
 
@@ -64,7 +64,7 @@ Dashboard 的“版本更新”页展示频道、平台、可用版本、变更�
 显示安装入口；点击后还要确认目标版本和回退说明。关闭页面或 Dashboard 轮询
 超时不会取消后台事务，重新打开页面会从 Manager 持久化状态继续展示。
 
-## 确认安装与回退
+## 确认安装与失败处理
 
 安装不是“解压覆盖”。Manager 在实例级维护锁内执行同一套可恢复事务：
 
@@ -72,8 +72,8 @@ Dashboard 的“版本更新”页展示频道、平台、可用版本、变更�
 2. 保存 RuntimeUnit 原状态，创建并验证常规 pre-upgrade 归档。
 3. 保留可执行的旧程序或旧镜像，再切换目标程序。
 4. 执行数据 migration 和本地硬性健康检查。
-5. 成功后提交；程序切换、migration、启动或硬性健康检查失败时，自动恢复旧
-   程序和 pre-upgrade 数据。
+5. 成功后提交；Linux 失败时自动恢复旧镜像和 pre-upgrade 数据。
+6. Windows 成功后立即清理临时旧程序备份；新版无法正常启动时，用户运行实例根目录的一次性恢复脚本。
 
 创建 pre-upgrade 归档或保留旧程序失败时，事务在切换前停止。Dashboard、配置、
 schema、RuntimeUnit 启动和本地控制通道属于硬性健康检查；QQ 协议端、GitHub、
@@ -101,20 +101,25 @@ volume、network、部署 schema 等当前 Manager 不能安全迁移的拓扑�
 Windows 后续更新只使用 Release 中固定命名的 `velopack.win-x64.zip`。Manager
 先按外层 Release contract 校验整个 bundle，再安全解包并按内层 `manifest.json`
 复核 DicePP/Velopack 版本、频道、平台、架构以及唯一 full nupkg 的名称、大小和
-SHA-256，最后才把该 nupkg 交给 UpdateGuard。Velopack 切换版本化程序目录；
-Manager 在切换前把独立 UpdateGuard
-准备到版本目录之外并写入升级计划。新 Manager 只有在 migration、Dashboard、
-RuntimeUnit 和本地控制通道全部通过后才写入成功健康标记。超时或失败时，
-UpdateGuard 使用从旧版 bundle 校验解出的 full nupkg 请求降级，不手工
-删除或替换 `current/`；再由旧 Manager 按同一事务恢复 pre-upgrade 数据。新程序
-必须发布绑定事务、目标版本和真实进程身份的 started marker，并在带认证的本地
-`/v1/health` 已可访问且硬性健康检查完成后发布 health marker。
+SHA-256。调用 Velopack 前，Manager 创建并验证 pre-upgrade 数据归档，再将
+完整 `current/` 复制到稳定实例根下的 `manager/recovery/<transaction-id>/`，
+写入最小恢复描述并在实例根准备一次性 `DicePP-Recover.cmd`。归档、程序树
+复制或恢复入口任一准备失败，都在 Velopack 修改程序前停止。
 
-实例数据始终留在稳定 DicePP 根目录，不随 `current/` 切换。Portable 和 Setup
-都是首次部署入口，后续都使用同一更新事务；Setup 不依赖 Portable ZIP。若发布
-产物缺少 UpdateGuard 或 Velopack bundle，或当前目录不是受支持的
-Velopack 安装布局，Manager 会在修改程序或数据之前拒绝自动安装，并给出手工
-升级提示。
+Velopack 只切换 `current/`；`config/`、`content/`、`data/`、`dashboard/data/` 和
+`manager/` 始终位于稳定实例根。新 Manager 完成 migration、Dashboard、RuntimeUnit
+和本地控制通道的硬性健康检查并提交事务后，立即最佳努力删除该事务的
+旧 `current/` 备份、恢复描述和根恢复入口。清理失败只告警，不改变已提交的新版结果。
+
+新版无法正常启动时不会有独立进程无人值守回退。用户先关闭 DicePP，再运行
+实例根的 `DicePP-Recover.cmd`；脚本不会主动终止进程。目录仍被占用或任一整目录移动
+失败时，脚本停止并保留恢复材料；它不逐文件覆盖或合并新旧程序树。换回旧
+`current/` 后，旧 Manager 按同一 upgrade journal 恢复 pre-upgrade 数据与 RuntimeUnit
+原状态。恢复失败时不自动重试，保留 journal、数据归档和程序备份供人工处理。
+
+Portable 和 Setup 都是首次部署入口，后续使用同一 Velopack 更新包；Setup 不依赖
+Portable ZIP。若发布产物缺少 Velopack bundle，当前布局不受支持，或已有一个未处理
+的简化恢复事务，Manager 会在修改程序和数据前拒绝安装。
 
 ## Release contract
 
@@ -137,13 +142,17 @@ Velopack 安装布局，Manager 会在修改程序或数据之前拒绝自动安
 矩阵必须为 Windows amd64 与 Linux amd64 固定每个仍受支持来源版本的 HTTPS
 资产和 SHA-256；证据必须绑定目标版本、完整 Git commit、Runtime/Dashboard
 容器 manifest、Windows 测试包目录摘要，以及最终 Windows Portable/Setup/
-Velopack 与 Linux bundle 的文件名、字节数和 SHA-256，并逐项通过健康提交、目标健康失败
-回退、回退后重试、以及目标代码从未执行的 apply 失败四个场景。来源资产摘要、
+Velopack 与 Linux bundle 的文件名、字节数和 SHA-256。Windows 固定验证两个场景：
+`healthy_commit` 确认健康提交和恢复材料清理；`manual_restore_after_target_failure` 确认根恢复脚本在目标
+`current/` 缺失或损坏时换回整个旧程序树，再恢复 pre-upgrade 数据和 RuntimeUnit
+状态。Linux 保持四个场景：健康提交、目标健康失败后自动回退、回退后重试，以及目标代码
+从未执行的 apply 失败。来源资产摘要、
 候选身份、平台覆盖或任一场景不匹配都会拒绝 `automatic_upgrade: yes`。
-`automatic_upgrade: no` 不需要这份证据。v3.0.0rc20 作为新的公开基线，不承诺
-兼容此前 RC 的 Manager journal；当前 Windows/Linux v3.0.0rc19 → rc20 矩阵仅用于
-Final Candidate 的功能压力测试，不构成后续发布的历史版本支持窗口。正式版策略只
-维护“上一正式版 → 当前候选”。Final Candidate 先构建最终 Windows/Linux bytes，
+`automatic_upgrade: no` 不需要这份证据。v3.0.0rc20 是新的 Windows 手工迁移基线，
+不扫描或消费此前 RC 的 UpdateGuard 状态，也不用 rc19→rc20 声称新 Windows 协议通过。
+rc20 Candidate 只验证无 Guard 的 Windows 最终包与手工迁移边界；Linux 现有矩阵保持不变。
+第一次 Windows 新协议真实跨版本验收是 rc20→rc21。这些 RC 验收不构成历史版本支持窗口；
+正式版只维护“上一正式版 → 当前候选”。Final Candidate 先构建最终 Windows/Linux bytes，
 再由各平台 runner 调用当前 commit 内固定的 harness 入口，
 最后汇总 evidence 并交给 Receipt；协议 readiness 未通过、缺少来源资产或场景
 失败都会让
@@ -155,8 +164,8 @@ commit、三个候选身份、来源资产摘要与场景结果。
 `scripts/build/linux_upgrade_matrix_harness.py` 是唯一入口，不读取 repo variables、
 秘密或本机路径。harness 对每个 source/scenario 接收 `--context` 与 `--output`；
 只有返回闭合 contract v1、`status=passed`、完整行为断言和关键观测，矩阵才接受。
-rc20 metadata 声明 `automatic_upgrade: no` 时，可显式运行 validation-only 矩阵，
-但其证据不会进入 Receipt 或 Release assets，也不表示已开放自动升级。
+metadata 声明 `automatic_upgrade: no` 时，可显式运行与当次过渡目标相符的
+validation-only 矩阵，但其证据不会进入 Receipt 或 Release assets，也不表示已开放自动升级。
 
 Windows amd64 Release 包含：
 

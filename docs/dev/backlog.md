@@ -99,22 +99,24 @@
     - 若验收触发任何代码修复，必须重新冻结 SHA，并重跑本条、跨版本 evidence 和后续 Final Candidate/Promotion；不得沿用旧 Candidate。
     - 关闭条件：保存 Linux fresh 跨版本故障注入的版本、冻结 SHA、日志/journal 和恢复结果证据；上述恢复状态与控制健康语义全部符合预期后删除本条。
 
-### [B-260802-3e3e23] 建立持久化升级协议契约与跨版本升级回退矩阵
+### [B-260802-3e3e23] 建立简化 Windows 恢复契约与跨版本升级矩阵
 - 创建: 2026-08-02
 - 优先级: P0
 - 类型: refactor
 - 改动量: XL
 - 问题表现:
-    - rc17 `WindowsVelopackUpgradeAdapter.stage()` 将 rollback nupkg 写入 `<transaction>/rollback-payload/`，同版本 resume validator 却只接受事务根目录的直接子项，真实 rc17→rc18 自动升级因此报 `ValueError: UpdateGuard rollback package escapes transaction`。
-    - producer/stage 与 consumer/resume 由不同测试组分别验证；consumer fixture 手工构造事务根布局，没有消费真实 stage/switch 输出，所以互相矛盾的生产实现仍能全绿。
-    - UpdateGuard request `format_version=2` 只约束 JSON 字段、绝对路径和 digest 格式，没有表达 rollback 目录拓扑等跨进程、跨重启、跨版本语义。
-    - Windows 真实升级与故障回退目前依赖 `.temp` 下的一次性验收 harness；已验证的 pre-bump 候选与公开 rc19 二进制、同一实例回退后再次升级仍需明确区分，尚未成为固定 Release 门禁。
-    - 影响后果是 `automatic_upgrade: yes` 的版本可能在公开发布后才发现旧 Manager/Guard 无法消费新请求，严重时需要人工恢复。
+    - Windows 现有 UpdateGuard 将 Velopack、独立进程、身份监督、多组 marker 和程序/数据自动回退绑在一起；跨进程、跨重启和跨版本契约已多次在真实 RC 升级中暴露布局与兼容问题。
+    - 对“新版本完全无法启动”这个低频故障长期维护第二套无人值守协调器，复杂度和发布风险已高于所得收益。
+    - Windows 需收缩为可审计的简单保险：升级前备份整个 `current/` 并保留 pre-upgrade 数据归档；新版失败时不自动回退，由用户运行实例根目录 `DicePP-Recover.cmd` 换回旧程序，再由旧 Manager 恢复数据和 RuntimeUnit 原状态。
+    - 升级矩阵仍需消费真实候选产物而不是手工构造 fixture，避免 `automatic_upgrade: yes` 的版本在公开后才发现源 Manager 无法完成新协议。
 - 开发备忘:
-    - 当前状态（2026-08-04）：Windows/Linux 固定 harness、四场景、资产 purpose、`source < target`、诊断秘密脱敏及真实 process/Docker 观测均已实现。v3.0.0rc20 作为新的公开基线，不再保留 rc17 Manager journal fixture 或承诺历史 RC journal 兼容。
-    - 当前 rc19 → rc20 矩阵仅作为 Final Candidate 的功能压力测试，不构成正式支持窗口；未来正式版策略仅维护“上一正式版 → 当前正式版”。
-    - 剩余验收：在最终冻结 SHA 的 rc20 Candidate 上运行 Windows/Linux 真实 validation-only CI/E2E；矩阵失败必须关闭 Candidate，验证证据不得进入 `automatic_upgrade: no` 的 Receipt 或 Release assets，并完成外部验收。完成前本条保持 open。
-    - 关闭条件：上述最终 Candidate 双平台真实矩阵与冻结 SHA 外部验收全部通过。
+    - Windows 删除 `DicePP-UpdateGuard.exe`、`%LOCALAPPDATA%\DicePP-UpdateGuard`、Guard request/started/health/rollback marker、进程身份监督和无人值守程序降级；不以其他名称重建后台 watchdog。Linux 的 immutable Image ID、Compose 切换与自动回退协议保持不变。
+    - 调用 Velopack 前必须将完整 `current/` 备份到稳定实例根下的单一恢复事务，并写入仅绑定现有 upgrade journal 的最小 `recover.json` 和根目录一次性恢复入口；任一准备步骤失败都在程序切换前停止。
+    - 恢复脚本不终止进程；`current/` 被占用、目录换位或数据恢复失败时原样保留所有材料并停止。恢复只能整目录移动，不逐文件合并。
+    - 新 Manager 完成 migration、本地硬健康检查并提交升级后立即最佳努力删除程序备份、恢复描述与根恢复入口；清理失败只告警，不把已成功的新版重新判失败。
+    - rc20 作为 `automatic_upgrade: no` 的手工迁移起点：不扫描、迁移、清理或恢复 rc19 及更旧 Guard 状态，旧遗留物不得阻止 rc20 启动。rc20 Candidate 验证无 Guard 的最终包结构、首装/手工迁移与 Linux 现有矩阵；不得用 rc19→rc20 宣称新 Windows 协议已通过。
+    - 第一次真实 Windows 新协议验收是 rc20→rc21：同一最终候选上验证健康提交后恢复材料清理，以及目标 `current/` 缺失/损坏时根 `DicePP-Recover.cmd` 仍能换回旧程序、恢复 pre-upgrade 数据和 RuntimeUnit 原状态。矩阵必须消费冻结 Candidate 字节；`automatic_upgrade: no` 的 validation-only 证据不进入 Receipt 或 Release assets。
+    - 未来正式版只维护“上一正式版 → 当前正式版”。关闭条件：rc20 的简化基线验收通过，rc20→rc21 Windows 真实升级/人工恢复与当次 Linux 矩阵全部绑定冻结 SHA 通过外部验收。完成前本条保持 open。
 
 ## persona
 

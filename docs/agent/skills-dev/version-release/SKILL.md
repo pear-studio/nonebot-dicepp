@@ -33,9 +33,10 @@ metadata:
   amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用
   文档，用于国内或离线环境通过 `docker load` 导入镜像；兼容版本的 Manager
   自动安装也只使用该本地 image archive，不依赖 `docker pull`。
-- Windows onedir 必须包含独立 `DicePP-UpdateGuard.exe`，再由 Velopack 包装
-  Portable、Setup 和单一 `velopack.win-x64.zip` 更新 bundle。UpdateGuard 是更新事务产物，
-  不是用户需要单独下载的 Release asset。
+- Windows onedir 由 Velopack 包装为 Portable、Setup 和单一
+  `velopack.win-x64.zip` 更新 bundle，不得包含 `DicePP-UpdateGuard.exe`。
+  恢复入口是源 Manager 在具体升级事务切换前写入实例根的一次性
+  `DicePP-Recover.cmd`，不是独立 Release asset 或常驻恢复进程。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
@@ -89,7 +90,7 @@ metadata:
 
 `version-release` 只生成并验证 Release contract，不执行生产部署、不直接调用 Manager，也不替代 `version-deploy`。
 
-- 将 `自动升级` 写为 `yes` 前，确认当前标准 Manager 能对已采用标准拓扑的兼容实例完成下载、归档、安装、健康检查和失败回退，且无需 Manager 自身升级或人工迁移。
+- 将 `自动升级` 写为 `yes` 前，确认当前标准 Manager 能对已采用标准拓扑的兼容实例完成下载、归档、安装和健康检查，且失败处理已按平台验收：Linux 自动回退，Windows 生成可用的一次性人工恢复入口。正常安装不得需要 Manager 自身升级或人工迁移。
 - 当前 Manager 不满足 `最低 Manager 版本`、目标包含 Manager 自身升级、需要 Compose、deployment schema、RuntimeUnit、宿主配置或人工配置迁移、发布产物或兼容性未知时，必须写 `no`。
 - `数据变更` 或 `配置变更` 本身不自动等于 `no`；只有当前 Manager 的受支持事务能覆盖相应迁移且已在 release 验收中验证时才可写 `yes`。
 - 不能确认时写 `no`，并在 `Risk Notes` 说明手工迁移或恢复要求。
@@ -331,8 +332,9 @@ metadata:
      - `dicepp-release.json`
      - `dicepp-candidate.json`
      - 声明 `自动升级: yes` 时的 `dicepp-upgrade-evidence.json`
-   - Windows Portable 解压后包含 `DicePP.exe`、`DicePP-Runtime.exe` 和
-     `DicePP-UpdateGuard.exe`；Setup 安装后的程序目录具备相同三个入口。
+   - Windows Portable 解压后包含 `DicePP.exe` 和 `DicePP-Runtime.exe`，
+     且不包含 `DicePP-UpdateGuard.exe`；Setup 安装后的程序目录具备
+     相同入口与无 Guard 边界。
    - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
    - Linux 发布包下载后可解压，包内 `checksums.sha256` 存在且可用于校验内部
@@ -341,8 +343,10 @@ metadata:
      并可用 `docker compose up -d --pull never` 启动。
      GitHub Release asset digest 可作为外层 zip 的来源校验参考。
    - 对声明 `自动升级: yes` 的候选，在隔离测试目录执行一次真实 Windows
-     Portable/Setup 首装 → Velopack 升级 → 健康提交，并故障注入验证
-     UpdateGuard 降级；Linux 在临时 Compose project 中验证 bundle load、
+     Portable/Setup 首装 → Velopack 升级 → 健康提交，确认成功后旧
+     `current/` 备份与恢复入口已清理；故障注入必须在目标 `current/`
+     缺失或损坏时，由根 `DicePP-Recover.cmd` 换回旧程序、恢复
+     pre-upgrade 数据和 RuntimeUnit 原状态。Linux 在临时 Compose project 中验证 bundle load、
      `--pull never` 切换和旧镜像回退。若当次发布没有完成这些平台烟测，不得把
      单元测试结果表述为“真实自动升级已验证”，应把未验边界写入发版摘要。
    - Release asset digest 必须与 `dicepp-candidate.json` 中相应文件的 SHA-256

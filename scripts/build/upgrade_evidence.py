@@ -33,8 +33,7 @@ EXPECTED_FINAL_ASSET_KEYS = frozenset(
     }
 )
 EXPECTED_PROTOCOLS = {
-    "update_guard_request": (2,),
-    "update_guard_markers": (2,),
+    "windows_current_backup_manual_restore": (1,),
     "manager_upgrade_journal": ("unversioned-row-v1",),
     "release_manifest": (2,),
     "windows_bundle_manifest": (1,),
@@ -77,6 +76,17 @@ SCENARIO_ASSERTIONS = {
             "terminal_state_recorded",
         }
     ),
+    "manual_restore_after_target_failure": frozenset(
+        {
+            "target_failure_observed",
+            "recovery_material_preserved",
+            "manual_restore_invoked",
+            "whole_program_tree_restored",
+            "data_restored",
+            "source_restarted",
+            "journal_manually_restored",
+        }
+    ),
 }
 SCENARIO_OBSERVATION_FIELDS = {
     "healthy_commit": frozenset(
@@ -110,13 +120,30 @@ SCENARIO_OBSERVATION_FIELDS = {
             "apply_exit_code",
         }
     ),
+    "manual_restore_after_target_failure": frozenset(
+        {
+            "target_version_observed",
+            "restored_version",
+            "journal_status",
+            "recovery_trigger",
+            "program_restore_mode",
+        }
+    ),
 }
-REQUIRED_SCENARIOS = (
+LINUX_REQUIRED_SCENARIOS = (
     "healthy_commit",
     "target_health_failure_rollback",
     "retry_after_rollback",
     "apply_failure_before_target_execution",
 )
+WINDOWS_REQUIRED_SCENARIOS = (
+    "healthy_commit",
+    "manual_restore_after_target_failure",
+)
+REQUIRED_SCENARIOS_BY_PLATFORM = {
+    "windows": WINDOWS_REQUIRED_SCENARIOS,
+    "linux": LINUX_REQUIRED_SCENARIOS,
+}
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
@@ -274,8 +301,8 @@ def validate_upgrade_protocol_registry(
     if payload["contract_version"] != UPGRADE_PROTOCOL_REGISTRY_CONTRACT_VERSION:
         raise ValueError("unsupported upgrade protocol registry contract")
     if payload["policy"] != {
-        "current_matrix": "functional_rc_validation",
-        "future_release_window": "previous_stable_to_current",
+        "windows_transition": "manual_only_until_published_source",
+        "automatic_upgrade_window": "previous_published_release_to_current",
     }:
         raise ValueError("upgrade protocol registry policy is invalid")
     contracts = payload["contracts"]
@@ -305,7 +332,10 @@ def validate_upgrade_protocol_registry(
             for field in ("medium", "producer", "support_window")
         ):
             raise ValueError("upgrade protocol ownership is incomplete")
-        if contract["verification_status"] != "verified":
+        if contract["verification_status"] not in {
+            "verified",
+            "awaiting_published_source",
+        }:
             raise ValueError("upgrade protocol verification status is invalid")
         if not isinstance(contract["consumers"], list) or not contract["consumers"]:
             raise ValueError("upgrade protocol consumers are incomplete")
@@ -351,6 +381,8 @@ def validate_scenario_result(
 ) -> dict[str, Any]:
     if expected_platform not in {"windows", "linux"}:
         raise ValueError("upgrade scenario expected platform is invalid")
+    if expected_name not in REQUIRED_SCENARIOS_BY_PLATFORM[expected_platform]:
+        raise ValueError("upgrade scenario is invalid for its platform")
     if (
         not isinstance(expected_source_version, str)
         or not expected_source_version
@@ -390,15 +422,11 @@ def validate_scenario_result(
         or observations["health_status"] != "healthy"
     ):
         raise ValueError("healthy commit observations are inconsistent")
-    rollback_status = {
-        "windows": "program_rolled_back",
-        "linux": "restored",
-    }[expected_platform]
     if expected_name == "target_health_failure_rollback" and (
         observations["target_version_observed"] != expected_target_version
         or observations["restored_version"] != expected_source_version
         or observations["journal_status"] != "rolled_back"
-        or observations["rollback_marker_status"] != rollback_status
+        or observations["rollback_marker_status"] != "restored"
     ):
         raise ValueError("health rollback observations are inconsistent")
     if expected_name == "retry_after_rollback" and (
@@ -416,6 +444,14 @@ def validate_scenario_result(
         or observations["apply_exit_code"] == 0
     ):
         raise ValueError("pre-target apply failure observations are inconsistent")
+    if expected_name == "manual_restore_after_target_failure" and (
+        observations["target_version_observed"] != expected_target_version
+        or observations["restored_version"] != expected_source_version
+        or observations["journal_status"] != "manually_restored"
+        or observations["recovery_trigger"] != "manual"
+        or observations["program_restore_mode"] != "whole_current_directory"
+    ):
+        raise ValueError("manual restore observations are inconsistent")
     return value
 
 
@@ -425,7 +461,6 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
     if set(payload) != {
         "contract_version",
         "required_platforms",
-        "required_scenarios",
         "supported_sources",
     }:
         raise ValueError("upgrade matrix fields do not match contract version 1")
@@ -433,7 +468,11 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
         raise ValueError("unsupported upgrade matrix contract version")
     required_platforms = payload["required_platforms"]
     expected_platforms = [
-        {"platform": platform, "arch": arch}
+        {
+            "platform": platform,
+            "arch": arch,
+            "scenarios": list(REQUIRED_SCENARIOS_BY_PLATFORM[platform]),
+        }
         for platform, arch in REQUIRED_PLATFORMS
     ]
     if required_platforms != expected_platforms:
@@ -442,7 +481,11 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
         )
     platform_keys: list[tuple[str, str]] = []
     for item in required_platforms:
-        if not isinstance(item, dict) or set(item) != {"platform", "arch"}:
+        if not isinstance(item, dict) or set(item) != {
+            "platform",
+            "arch",
+            "scenarios",
+        }:
             raise ValueError("invalid required platform entry")
         key = (item["platform"], item["arch"])
         if not all(isinstance(value, str) and value for value in key):
@@ -450,8 +493,6 @@ def validate_upgrade_matrix(payload: Any) -> dict[str, Any]:
         platform_keys.append(key)
     if len(platform_keys) != len(set(platform_keys)):
         raise ValueError("upgrade matrix contains duplicate required platforms")
-    if payload["required_scenarios"] != list(REQUIRED_SCENARIOS):
-        raise ValueError("upgrade matrix must require the complete scenario contract")
     sources = payload["supported_sources"]
     if not isinstance(sources, list):
         raise ValueError("supported_sources must be a list")
@@ -595,10 +636,19 @@ def validate_upgrade_evidence(
         ]
         if result["source_assets"] != expected_assets:
             raise ValueError("upgrade evidence source asset digests differ from matrix")
+        required_scenarios = required_scenarios_for(
+            matrix,
+            platform=result["platform"],
+            arch=result["arch"],
+        )
         scenarios = result["scenarios"]
-        if not isinstance(scenarios, list) or len(scenarios) != len(REQUIRED_SCENARIOS):
-            raise ValueError("upgrade evidence scenarios are incomplete or did not pass")
-        for scenario, name in zip(scenarios, REQUIRED_SCENARIOS, strict=True):
+        if not isinstance(scenarios, list) or len(scenarios) != len(
+            required_scenarios
+        ):
+            raise ValueError(
+                "upgrade evidence scenarios are incomplete or did not pass"
+            )
+        for scenario, name in zip(scenarios, required_scenarios, strict=True):
             validate_scenario_result(
                 scenario,
                 expected_platform=result["platform"],
@@ -607,6 +657,15 @@ def validate_upgrade_evidence(
                 expected_target_version=target_version.removeprefix("v"),
             )
     return evidence
+
+
+def required_scenarios_for(
+    matrix: dict[str, Any], *, platform: str, arch: str
+) -> tuple[str, ...]:
+    for item in matrix["required_platforms"]:
+        if (item["platform"], item["arch"]) == (platform, arch):
+            return tuple(item["scenarios"])
+    raise ValueError(f"upgrade matrix does not require {platform}/{arch}")
 
 
 def validate_upgrade_matrix_coverage(matrix: dict[str, Any]) -> None:
@@ -625,6 +684,33 @@ def validate_upgrade_matrix_coverage(matrix: dict[str, Any]) -> None:
             for platform, arch in sorted(missing_platforms)
         )
         raise ValueError(f"upgrade matrix has no supported source for: {missing}")
+
+
+def validate_upgrade_matrix_platform_coverage(
+    matrix: dict[str, Any], *, platform: str, arch: str
+) -> None:
+    """Require a pinned source only for the platform being exercised.
+
+    Validation-only candidates may intentionally exercise Linux while Windows is
+    at a manual-migration protocol break.  Release evidence still calls
+    :func:`validate_upgrade_matrix_coverage` and therefore remains fail-closed
+    until both platforms have a published, pinned source.
+    """
+
+    key = (platform, arch)
+    required = {
+        (item["platform"], item["arch"])
+        for item in matrix["required_platforms"]
+    }
+    if key not in required:
+        raise ValueError(f"upgrade matrix does not require {platform}/{arch}")
+    if not any(
+        (source["platform"], source["arch"]) == key
+        for source in matrix["supported_sources"]
+    ):
+        raise ValueError(
+            f"upgrade matrix has no supported source for {platform}/{arch}"
+        )
 
 
 def verify_release(

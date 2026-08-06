@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 
 from scripts.build.upgrade_evidence import (
+    LINUX_REQUIRED_SCENARIOS,
+    WINDOWS_REQUIRED_SCENARIOS,
     CandidateIdentity,
     FinalAssetIdentity,
-    REQUIRED_SCENARIOS,
     candidate_digest,
     normalize_candidate_identities,
+    required_scenarios_for,
     validate_upgrade_evidence,
     validate_upgrade_matrix,
     validate_upgrade_matrix_coverage,
@@ -51,10 +53,17 @@ def _matrix() -> dict:
     return {
         "contract_version": 1,
         "required_platforms": [
-            {"platform": "windows", "arch": "amd64"},
-            {"platform": "linux", "arch": "amd64"},
+            {
+                "platform": "windows",
+                "arch": "amd64",
+                "scenarios": list(WINDOWS_REQUIRED_SCENARIOS),
+            },
+            {
+                "platform": "linux",
+                "arch": "amd64",
+                "scenarios": list(LINUX_REQUIRED_SCENARIOS),
+            },
         ],
-        "required_scenarios": list(REQUIRED_SCENARIOS),
         "supported_sources": [
             {
                 "platform": "windows",
@@ -121,7 +130,7 @@ def _evidence(matrix: dict) -> dict:
                 "target_version_observed": "3.1.0",
                 "restored_version": "3.0.0rc19",
                 "journal_status": "rolled_back",
-                "rollback_marker_status": "program_rolled_back",
+                "rollback_marker_status": "restored",
             },
         },
         "retry_after_rollback": {
@@ -150,6 +159,24 @@ def _evidence(matrix: dict) -> dict:
                 "source_version_after": "3.0.0rc19",
                 "journal_status": "rolled_back",
                 "apply_exit_code": 17,
+            },
+        },
+        "manual_restore_after_target_failure": {
+            "assertions": {
+                "target_failure_observed": True,
+                "recovery_material_preserved": True,
+                "manual_restore_invoked": True,
+                "whole_program_tree_restored": True,
+                "data_restored": True,
+                "source_restarted": True,
+                "journal_manually_restored": True,
+            },
+            "observations": {
+                "target_version_observed": "3.1.0",
+                "restored_version": "3.0.0rc19",
+                "journal_status": "manually_restored",
+                "recovery_trigger": "manual",
+                "program_restore_mode": "whole_current_directory",
             },
         },
     }
@@ -190,17 +217,13 @@ def _evidence(matrix: dict) -> dict:
                         "name": name,
                         "status": "passed",
                         **scenario_records[name],
-                        "observations": {
-                            **scenario_records[name]["observations"],
-                            **(
-                                {"rollback_marker_status": "restored"}
-                                if source["platform"] == "linux"
-                                and name == "target_health_failure_rollback"
-                                else {}
-                            ),
-                        },
+                        "observations": scenario_records[name]["observations"],
                     }
-                    for name in REQUIRED_SCENARIOS
+                    for name in required_scenarios_for(
+                        matrix,
+                        platform=source["platform"],
+                        arch=source["arch"],
+                    )
                 ],
             }
             for source in matrix["supported_sources"]
@@ -240,19 +263,36 @@ def test_complete_evidence_binds_commit_candidates_sources_and_scenarios() -> No
     }
 
 
-@pytest.mark.parametrize(
-    ("platform", "wrong_status"),
-    [("windows", "restored"), ("linux", "program_rolled_back")],
-)
-def test_health_rollback_marker_status_is_platform_specific(
-    platform: str, wrong_status: str
-) -> None:
+def test_linux_health_rollback_rejects_legacy_guard_status() -> None:
     matrix = _matrix()
     evidence = _evidence(matrix)
-    result = next(item for item in evidence["results"] if item["platform"] == platform)
-    result["scenarios"][1]["observations"]["rollback_marker_status"] = wrong_status
+    result = next(
+        item for item in evidence["results"] if item["platform"] == "linux"
+    )
+    result["scenarios"][1]["observations"][
+        "rollback_marker_status"
+    ] = "program_rolled_back"
 
     with pytest.raises(ValueError, match="health rollback observations"):
+        validate_upgrade_evidence(
+            evidence,
+            matrix=matrix,
+            target_version="3.1.0",
+            target_commit_sha=COMMIT_SHA,
+            target_candidate_identities=CANDIDATES,
+            target_final_assets=FINAL_ASSETS,
+        )
+
+
+def test_windows_manual_restore_requires_whole_current_directory() -> None:
+    matrix = _matrix()
+    evidence = _evidence(matrix)
+    result = next(
+        item for item in evidence["results"] if item["platform"] == "windows"
+    )
+    result["scenarios"][1]["observations"]["program_restore_mode"] = "file_merge"
+
+    with pytest.raises(ValueError, match="manual restore observations"):
         validate_upgrade_evidence(
             evidence,
             matrix=matrix,
@@ -283,7 +323,7 @@ def test_health_rollback_marker_status_is_platform_specific(
             "asset digests differ",
         ),
         (
-            lambda evidence: evidence["results"][0]["scenarios"][3].update(
+            lambda evidence: evidence["results"][1]["scenarios"][3].update(
                 status="failed"
             ),
             "did not prove its contract",
@@ -310,23 +350,24 @@ def test_evidence_rejects_identity_or_scenario_mismatch(
 
 
 @pytest.mark.parametrize(
-    ("scenario_index", "observation"),
+    ("result_index", "scenario_index", "observation"),
     [
-        (0, "source_version_before"),
-        (0, "target_version_after"),
-        (1, "target_version_observed"),
-        (1, "restored_version"),
-        (2, "final_version"),
-        (3, "source_version_after"),
+        (0, 0, "source_version_before"),
+        (0, 0, "target_version_after"),
+        (0, 1, "target_version_observed"),
+        (0, 1, "restored_version"),
+        (1, 2, "final_version"),
+        (1, 3, "source_version_after"),
     ],
 )
 def test_evidence_rejects_scenario_versions_outside_the_matrix_cell(
+    result_index: int,
     scenario_index: int,
     observation: str,
 ) -> None:
     matrix = _matrix()
     evidence = _evidence(matrix)
-    evidence["results"][0]["scenarios"][scenario_index]["observations"][
+    evidence["results"][result_index]["scenarios"][scenario_index]["observations"][
         observation
     ] = "totally-wrong"
 
@@ -455,7 +496,7 @@ def test_release_with_empty_matrix_reports_source_gap_before_missing_evidence(
         )
 
 
-def test_tracked_registry_and_functional_rc_matrix_are_complete() -> None:
+def test_tracked_registry_and_manual_transition_matrix_fail_closed() -> None:
     root = find_repository_root(Path(__file__))
     registry = json.loads(
         (root / "scripts/build/upgrade_protocol_registry.json").read_text(
@@ -467,7 +508,15 @@ def test_tracked_registry_and_functional_rc_matrix_are_complete() -> None:
     )
 
     validate_upgrade_protocol_registry(registry, repository_root=root)
-    validate_upgrade_matrix_coverage(validate_upgrade_matrix(matrix))
+    validated_matrix = validate_upgrade_matrix(matrix)
+    assert required_scenarios_for(
+        validated_matrix, platform="windows", arch="amd64"
+    ) == WINDOWS_REQUIRED_SCENARIOS
+    assert required_scenarios_for(
+        validated_matrix, platform="linux", arch="amd64"
+    ) == LINUX_REQUIRED_SCENARIOS
+    with pytest.raises(ValueError, match="windows/amd64"):
+        validate_upgrade_matrix_coverage(validated_matrix)
 
     assert {
         (
@@ -478,19 +527,10 @@ def test_tracked_registry_and_functional_rc_matrix_are_complete() -> None:
         for row in matrix["supported_sources"]
     } == {
         (
-            "windows",
-            "3.0.0rc19",
-            (
-                ("portable", "8caa1e9ad82edb5b6c486ba997a57cfe2f12e08a5841e735325f06276d188106"),
-                ("velopack-bundle", "d85fe18c3b05af1eeab21cc8baa589244eda0b8b7bbeedbb3bf5a0081943c0ff"),
-            ),
-        ),
-        (
             "linux",
             "3.0.0rc19",
             (("linux-bundle", "2d1cc5452112abab31baba9e9d4d276a344bf8534b0c2098b35078d56e4d5dd6"),),
         ),
     }
-    # All seven contracts are now verified; readiness must pass.
-    validated = validate_upgrade_protocol_registry_ready(registry)
-    assert validated is registry
+    with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):
+        validate_upgrade_protocol_registry_ready(registry)

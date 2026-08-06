@@ -1,35 +1,19 @@
 {
   "contract_version": 1,
   "policy": {
-    "current_matrix": "functional_rc_validation",
-    "future_release_window": "previous_stable_to_current"
+    "windows_transition": "manual_only_until_published_source",
+    "automatic_upgrade_window": "previous_published_release_to_current"
   },
   "contracts": [
     {
-      "name": "update_guard_request",
-      "medium": "json-file",
-      "producer": "WindowsVelopackUpgradeAdapter.switch",
-      "consumers": ["UpdateGuard.run_guard", "Manager startup resume"],
-      "format_versions": [2],
-      "verification_status": "verified",
-      "support_window": "all published v2 layouts",
-      "compatibility_fixtures": [
-        "tests/fixtures/update_guard/v2-direct.json",
-        "tests/fixtures/update_guard/rc17-staged.json"
-      ]
-    },
-    {
-      "name": "update_guard_markers",
-      "medium": "json-files",
-      "producer": "UpdateGuard and target Manager",
-      "consumers": ["UpdateGuard", "source Manager", "target Manager"],
-      "format_versions": [2],
-      "verification_status": "verified",
-      "support_window": "while a v2 transaction is recoverable",
-      "compatibility_fixtures": [
-        "tests/fixtures/update_guard/v2-direct.json",
-        "tests/fixtures/update_guard/rc17-staged.json"
-      ]
+      "name": "windows_current_backup_manual_restore",
+      "medium": "directory-and-json-file",
+      "producer": "SimpleWindowsVelopackUpgradeAdapter",
+      "consumers": ["manual recovery script", "source Manager startup recovery"],
+      "format_versions": [1],
+      "verification_status": "awaiting_published_source",
+      "support_window": "previous published simplified-protocol release to current",
+      "compatibility_fixtures": []
     },
     {
       "name": "manager_upgrade_journal",
@@ -55,7 +39,7 @@
       "name": "windows_bundle_manifest",
       "medium": "json-in-zip",
       "producer": "build_velopack_bundle.py",
-      "consumers": ["ReleaseManager", "WindowsVelopackUpgradeAdapter"],
+      "consumers": ["ReleaseManager", "SimpleWindowsVelopackUpgradeAdapter"],
       "format_versions": [1],
       "verification_status": "verified",
       "support_window": "current automatic-upgrade source window",

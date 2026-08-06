@@ -22,32 +22,32 @@ try:
     from scripts.build.upgrade_evidence import (
         CandidateIdentity,
         FinalAssetIdentity,
-        REQUIRED_SCENARIOS,
         UPGRADE_EVIDENCE_CONTRACT_VERSION,
         candidate_digest,
         load_json_object,
         normalize_candidate_identities,
         normalize_final_asset_identities,
         parse_candidate_identity,
+        required_scenarios_for,
         validate_upgrade_evidence,
         validate_upgrade_matrix,
-        validate_upgrade_matrix_coverage,
+        validate_upgrade_matrix_platform_coverage,
         validate_scenario_result,
     )
 except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
     from upgrade_evidence import (
         CandidateIdentity,
         FinalAssetIdentity,
-        REQUIRED_SCENARIOS,
         UPGRADE_EVIDENCE_CONTRACT_VERSION,
         candidate_digest,
         load_json_object,
         normalize_candidate_identities,
         normalize_final_asset_identities,
         parse_candidate_identity,
+        required_scenarios_for,
         validate_upgrade_evidence,
         validate_upgrade_matrix,
-        validate_upgrade_matrix_coverage,
+        validate_upgrade_matrix_platform_coverage,
         validate_scenario_result,
     )
 
@@ -212,7 +212,9 @@ def run_platform(
     matrix = validate_upgrade_matrix(
         load_json_object(matrix_path, label="upgrade matrix")
     )
-    validate_upgrade_matrix_coverage(matrix)
+    validate_upgrade_matrix_platform_coverage(
+        matrix, platform=platform, arch=arch
+    )
     sources = [
         source
         for source in matrix["supported_sources"]
@@ -250,7 +252,9 @@ def run_platform(
             for asset in source["assets"]
         ]
         scenarios = []
-        for scenario in REQUIRED_SCENARIOS:
+        for scenario in required_scenarios_for(
+            matrix, platform=platform, arch=arch
+        ):
             context = {
                 "contract_version": 1,
                 "platform": platform,

@@ -78,7 +78,7 @@ def test_candidate_is_bound_to_an_explicit_current_master_head() -> None:
     assert dispatch["inputs"]["version"]["required"] is True
     assert dispatch["inputs"]["commit_sha"]["required"] is True
     assert dispatch["inputs"]["exercise_upgrade_matrix"] == {
-        "description": "Exercise upgrade matrices without adding evidence to release assets",
+        "description": "Exercise eligible upgrade validation without adding release evidence",
         "required": False,
         "default": False,
         "type": "boolean",
@@ -124,6 +124,16 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     assert "contract_version = 1" in windows
     assert "Get-FileHash -LiteralPath $path -Algorithm SHA256" in windows
     assert "size = $item.Length" in windows
+    assert "Portable must not contain DicePP-UpdateGuard.exe" in windows
+    assert "Setup must not install DicePP-UpdateGuard.exe" in windows
+    assert windows.count("Assert-ManualMigrationSentinels") == 3
+    assert windows.count('"manager\\control\\user-preserved.txt"') == 2
+    assert windows.index("Write-ManualMigrationSentinels $extractRoot") < windows.index(
+        "Expand-Archive"
+    )
+    assert windows.index("Write-ManualMigrationSentinels $installRoot") < windows.index(
+        '-Scenario "final-setup-install"'
+    )
 
     linux_declaration = linux.index('if [ -n "$VALIDATED_SUMMARY" ]')
     assert linux_declaration > linux.index("up -d --pull never --wait")

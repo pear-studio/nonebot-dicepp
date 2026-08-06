@@ -119,7 +119,7 @@ GitHub Release 是版本事实来源。Manager 使用机器可读的 `dicepp-rel
 
 更新配置默认发现 stable 频道；预发布频道需要用户主动选择，自动下载默认关闭。即使包已经下载，安装也始终要求用户确认。
 
-Manager 是**兼容的最新版本自动升级**的首选入口：它负责发现、下载、校验、pre-upgrade 归档、安装、本地硬性健康检查和失败后的程序/数据回退。它不负责升级自身，也不重写用户的 Compose 或部署拓扑。
+Manager 是**兼容的最新版本升级**的首选入口：它负责发现、下载、校验、pre-upgrade 归档、安装和本地硬性健康检查。Linux 失败时自动回退程序与数据；Windows 只预备一次性人工恢复入口。Manager 不负责升级自身，也不重写用户的 Compose 或部署拓扑。
 
 ### Linux 自动路径
 
@@ -129,12 +129,29 @@ Linux 自动安装只处理当前部署结构兼容的 Bot/Dashboard 发布。Ma
 
 ### Windows 自动路径
 
-Windows 由当前 Manager 发起检查、下载和安装，Velopack 负责版本化程序目录切换，独立 UpdateGuard 监督切换握手和超时/健康失败时的指定版本降级。Manager 保留旧版完整包和 pre-upgrade 归档，只有匹配 transaction、版本和进程身份的本地健康结果才可提交；数据恢复仍由 Manager 执行。
+Windows 由当前 Manager 发起检查、下载和安装，Velopack 只负责切换版本化
+`current/` 程序目录。Manager 在切换前创建并验证 pre-upgrade 归档，再将完整
+`current/` 原子准备到稳定实例根下的单一 `manager/recovery/<transaction-id>/`
+恢复事务。最小 `recover.json` 只引用现有 upgrade journal 的 transaction ID、
+source/target version、pre-upgrade 归档和 RuntimeUnit 原状态，不成为第二个事实源。
 
-自动安装只接受与当前架构和频道匹配、具备 `velopack.win-x64.zip` 与 UpdateGuard
-的发布，并要求当前安装布局受 Velopack 支持且可保留旧程序。Manager 按外层
-Release contract 校验 bundle，再按内层 manifest 校验并提取唯一 full nupkg；
-缺少任何条件时会在数据切换前拒绝。
+同一恢复事务在实例根生成一次性 `DicePP-Recover.cmd`。脚本只使用 Windows
+`cmd.exe` 的目录操作，不调用 `current/` 中的 Python、Manager helper 或独立恢复 EXE；
+它不终止进程。用户关闭 DicePP 并运行脚本后，脚本将故障 `current/` 整体隔离、
+将备份程序树整体换回，写入固定 `manual-restore.requested` 标志后才启动稳定根
+`DicePP.exe`。旧 Manager 据此跳过平台程序回退，直接使用已绑定的归档恢复协调器，
+再按原状态恢复 RuntimeUnit。任一目录被占用、换位或数据恢复失败都停止且保留
+journal、标志、归档和程序备份；不逐文件合并、不搜索其他事务、不自动重试。
+
+新 Manager 完成 migration、本地硬性健康检查和 upgrade commit 后，立即最佳努力删除
+旧程序备份、恢复描述和根恢复入口。清理失败只产生 warning，不会反转已提交的成功结果。
+简化协议不包含 UpdateGuard、started/health/rollback marker、进程身份监督或无人值守
+程序降级。首个简化版本不扫描、迁移、恢复或清理任何旧 Guard 状态；遗留物不得阻止启动。
+
+自动安装只接受与当前架构和频道匹配、具备 `velopack.win-x64.zip` 的发布，
+并要求当前安装布局受 Velopack 支持、可读取完整 `current/`、可以在同卷稳定根准备
+恢复事务。Manager 按外层 Release contract 校验 bundle，再按内层 manifest 校验并提取
+唯一 full nupkg；缺少任何条件时会在程序和数据切换前拒绝。
 
 ### 必须人工处理的情形
 
@@ -146,7 +163,7 @@ Release contract 校验 bundle，再按内层 manifest 校验并提取唯一 ful
 - Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
 - 发布元数据标记为不兼容，或自动校验/空间/健康门槛未通过。
 
-人工操作前先创建并验证归档，按目标平台的部署指南替换程序或镜像，必要时从已验证归档恢复。不要手工复制 Windows `current/`，不要未经对比直接用发布包内 Compose 覆盖实例目录，也不要把一次自动升级拒绝当作可安全忽略的警告。
+人工操作前先创建并验证归档，按目标平台的部署指南替换程序或镜像，必要时从已验证归档恢复。Windows 只允许事务预先生成的根恢复脚本整体换回 `current/`，不得手工拼接文件；不要未经对比直接用发布包内 Compose 覆盖实例目录，也不要把一次自动升级拒绝当作可安全忽略的警告。
 
 ## 明确非目标
 

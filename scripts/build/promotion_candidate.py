@@ -45,6 +45,7 @@ def verify_promotion_candidate(
     artifact_name: str,
     commit_sha: str,
     version: str,
+    upgrade_matrix_path: Path | None = None,
 ) -> dict[str, Any]:
     """Verify explicit provenance and every byte before any promotion side effect."""
 
@@ -128,6 +129,7 @@ def verify_promotion_candidate(
                 for artifact in artifacts
                 if artifact["validated"]
             ],
+            matrix_path=upgrade_matrix_path,
         )
     return receipt
 

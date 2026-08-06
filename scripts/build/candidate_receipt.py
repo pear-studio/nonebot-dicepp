@@ -336,6 +336,7 @@ def validate_upgrade_evidence_target_attestation(
     commit_sha: str,
     candidate_identities: Sequence[Mapping[str, str]],
     final_assets: Sequence[Mapping[str, Any]],
+    matrix_path: Path | None = None,
 ) -> None:
     """Fully revalidate evidence, then recheck sealed target byte binding."""
 
@@ -372,7 +373,8 @@ def validate_upgrade_evidence_target_attestation(
     }
     if evidence["target"] != expected_target:
         raise ValueError("upgrade evidence target does not match sealed candidate")
-    matrix_path = Path(__file__).with_name("upgrade_matrix.json")
+    if matrix_path is None:
+        matrix_path = Path(__file__).with_name("upgrade_matrix.json")
     matrix = validate_upgrade_matrix(
         load_json_object(matrix_path, label="upgrade matrix")
     )
@@ -457,6 +459,7 @@ def build_candidate_receipt(
     containers: Iterable[ContainerCandidate],
     toolchains: dict[str, str],
     validated_artifacts: Iterable[ValidatedArtifact],
+    upgrade_matrix_path: Path | None = None,
 ) -> dict[str, Any]:
     validate_release_version(version)
     if type(commit_sha) is not str or _COMMIT_PATTERN.fullmatch(commit_sha) is None:
@@ -522,6 +525,7 @@ def build_candidate_receipt(
                 for artifact in artifacts
                 if artifact["validated"]
             ],
+            matrix_path=upgrade_matrix_path,
         )
 
     receipt = {

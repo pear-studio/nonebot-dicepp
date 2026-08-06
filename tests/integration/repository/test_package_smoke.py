@@ -75,10 +75,13 @@ def test_pyinstaller_spec_keeps_implementation_modules_out_of_datas_except_launc
     assert "os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP')" not in spec
 
 
-def test_update_guard_has_a_separate_pyinstaller_entrypoint():
-    spec = Path("scripts/build/update_guard.spec").read_text(encoding="utf-8")
-    entry = Path("scripts/build/update_guard_entry.py").read_text(encoding="utf-8")
+def test_windows_build_has_no_update_guard_entrypoint() -> None:
+    build = Path("scripts/build/build.bat").read_text(encoding="utf-8")
+    assembly = Path("scripts/build/assemble_windows_package.ps1").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'name="DicePP-UpdateGuard"' in spec
-    assert '"update_guard_entry.py"' in spec
-    assert "from dicepp_manager.update_guard import main" in entry
+    assert not Path("scripts/build/update_guard.spec").exists()
+    assert not Path("scripts/build/update_guard_entry.py").exists()
+    assert "update_guard.spec" not in build
+    assert "UpdateGuardSource" not in assembly

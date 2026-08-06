@@ -423,7 +423,7 @@ def test_automatic_upgrade_evidence_policy_is_enforced_by_the_receipt_verifier()
     )
 
 
-def test_upgrade_evidence_is_produced_from_both_final_platform_artifacts_before_receipt():
+def test_automatic_upgrade_evidence_requires_both_final_platform_artifacts_before_receipt():
     windows = _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")
     linux = _job(CANDIDATE_WORKFLOW, "linux-upgrade-matrix")
     evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
@@ -479,17 +479,20 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
 
     assert exercise == {
-        "description": "Exercise upgrade matrices without adding evidence to release assets",
+        "description": "Exercise eligible upgrade validation without adding release evidence",
         "required": False,
         "default": False,
         "type": "boolean",
     }
-    matrix_condition = (
+    linux_condition = (
         "needs.candidate-metadata.outputs.automatic_upgrade == 'true' || "
         "inputs.exercise_upgrade_matrix == true"
     )
-    assert windows["if"] == matrix_condition
-    assert linux["if"] == matrix_condition
+    automatic_condition = (
+        "needs.candidate-metadata.outputs.automatic_upgrade == 'true'"
+    )
+    assert windows["if"] == automatic_condition
+    assert linux["if"] == linux_condition
 
     combinations = {
         (False, False): False,
@@ -504,7 +507,7 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
             ),
             "inputs.exercise_upgrade_matrix == true": validation_only,
         }
-        actual = any(terms[term.strip()] for term in matrix_condition.split("||"))
+        actual = any(terms[term.strip()] for term in linux_condition.split("||"))
         assert actual is expected
 
     evidence_gate = evidence["if"]
@@ -527,15 +530,26 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
                 ),
             },
         )
-        requested = automatic_upgrade or exercise_matrix
-        expected = not requested or (windows_success and linux_success)
+        if automatic_upgrade:
+            expected = windows_success and linux_success
+        elif exercise_matrix:
+            expected = linux_success
+        else:
+            expected = True
         assert actual is expected, (
             automatic_upgrade,
             exercise_matrix,
             windows_success,
             linux_success,
         )
-    assert {step["if"] for step in evidence["steps"]} == {matrix_condition}
+    transition_condition = (
+        "needs.candidate-metadata.outputs.automatic_upgrade != 'true' && "
+        "inputs.exercise_upgrade_matrix == true"
+    )
+    assert {step["if"] for step in evidence["steps"]} == {
+        automatic_condition,
+        transition_condition,
+    }
     assemble = _step(
         CANDIDATE_WORKFLOW,
         "upgrade-evidence",
@@ -546,6 +560,41 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     assert assemble.count("--platform-result") == 2
     assert "continue-on-error" not in windows
     assert "continue-on-error" not in linux
+
+
+def test_manual_windows_protocol_break_is_not_misrepresented_as_matrix_evidence():
+    windows = _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")
+    linux = _job(CANDIDATE_WORKFLOW, "linux-upgrade-matrix")
+    evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
+    registry = json.loads(
+        (ROOT / "scripts/build/upgrade_protocol_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matrix = json.loads(
+        (ROOT / "scripts/build/upgrade_matrix.json").read_text(encoding="utf-8")
+    )
+
+    assert windows["if"] == (
+        "needs.candidate-metadata.outputs.automatic_upgrade == 'true'"
+    )
+    assert "inputs.exercise_upgrade_matrix == true" in linux["if"]
+    assert not any(
+        source["platform"] == "windows" for source in matrix["supported_sources"]
+    )
+    windows_contract = next(
+        item
+        for item in registry["contracts"]
+        if item["name"] == "windows_current_backup_manual_restore"
+    )
+    assert windows_contract["verification_status"] == "awaiting_published_source"
+    transition = _step(
+        CANDIDATE_WORKFLOW,
+        "upgrade-evidence",
+        "Record validation-only transition coverage",
+    )["run"]
+    assert "manual-migration package validation" in transition
+    assert "No upgrade evidence is promotable" in transition
 
 
 def test_validation_only_evidence_never_enters_receipt_or_release_assets():

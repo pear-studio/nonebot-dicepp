@@ -374,7 +374,6 @@ jobs:
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
           uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/update_guard.spec --clean --noconfirm
       - name: Assemble and smoke test package
         shell: pwsh
         run: |
@@ -413,11 +412,9 @@ jobs:
             -Arguments @("--smoke-check") `
             -Scenario "assembled-dashboard-smoke" `
             -DiagnosticsRoot $diagnostics | Out-Null
-          Invoke-DicePPProcess `
-            -FilePath "dist/DicePP/DicePP-UpdateGuard.exe" `
-            -Arguments @("--smoke-check") `
-            -Scenario "assembled-update-guard-smoke" `
-            -DiagnosticsRoot $diagnostics | Out-Null
+          if (Test-Path -LiteralPath "dist/DicePP/DicePP-UpdateGuard.exe") {
+            throw "Windows package must not contain DicePP-UpdateGuard.exe"
+          }
       - name: Upload Windows process diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

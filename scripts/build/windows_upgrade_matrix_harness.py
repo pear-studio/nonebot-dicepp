@@ -1,9 +1,8 @@
-"""Tracked Windows cross-version matrix harness entrypoint.
+"""Fail-closed Windows matrix boundary during the manual protocol transition.
 
-The entrypoint is intentionally small.  All process and Velopack orchestration
-lives in :mod:`windows_upgrade_orchestrator`; malformed inputs and missing
-Windows prerequisites are reported as ``unavailable`` and therefore cannot be
-assembled into release evidence.
+The old UpdateGuard source protocol is intentionally unsupported.  A real
+simplified-protocol harness can replace this boundary only after the first
+manual-migration release is public and pinned in ``upgrade_matrix.json``.
 """
 
 from __future__ import annotations
@@ -15,10 +14,8 @@ from typing import Any
 
 try:
     from scripts.build.upgrade_matrix_platform_harness import run_unavailable
-    from scripts.build.windows_upgrade_orchestrator import run_windows_scenario
 except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
     from upgrade_matrix_platform_harness import run_unavailable
-    from windows_upgrade_orchestrator import run_windows_scenario
 
 
 def _validate_context(context: Any) -> None:
@@ -61,11 +58,16 @@ def main() -> int:
     context = json.loads(args.context.read_text(encoding="utf-8"))
     try:
         _validate_context(context)
-        result = run_windows_scenario(context, args.output.parent)
+        result = run_unavailable("windows", context)
+        result["observations"]["reason"] = (
+            "Windows simplified-protocol matrix requires a pinned published "
+            "source release; manual-migration candidates are validated by the "
+            "final package validator instead"
+        )
     except Exception as exc:
         result = run_unavailable("windows", context)
         result["observations"]["reason"] = (
-            f"real Windows cross-version scenario orchestration failed: {exc}"
+            f"Windows matrix context is invalid: {exc}"
         )
     _write_result(args.output, result)
     return 0 if result.get("status") == "passed" else 2

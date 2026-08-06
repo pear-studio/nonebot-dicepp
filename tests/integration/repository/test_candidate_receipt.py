@@ -21,7 +21,7 @@ from scripts.build.promotion_candidate import (
 from scripts.build.upgrade_evidence import (
     CandidateIdentity,
     FinalAssetIdentity,
-    REQUIRED_SCENARIOS,
+    required_scenarios_for,
     validate_upgrade_evidence,
 )
 from tests.support.fs_utils import symlink_or_skip
@@ -105,12 +105,45 @@ def _candidate_digest() -> str:
 
 def _upgrade_matrix() -> dict:
     root = find_repository_root(Path(__file__))
-    return json.loads(
+    matrix = json.loads(
         (root / "scripts/build/upgrade_matrix.json").read_text(encoding="utf-8")
     )
+    # Production intentionally has no Windows source during the rc20 manual
+    # protocol break. Receipt cryptographic tests use a closed synthetic matrix
+    # so they continue to protect the future automatic-upgrade path itself.
+    matrix["supported_sources"].insert(
+        0,
+        {
+            "platform": "windows",
+            "arch": "amd64",
+            "source_version": "3.0.0rc20",
+            "assets": [
+                {
+                    "purpose": "portable",
+                    "name": "source-portable.zip",
+                    "url": "https://example.invalid/source-portable.zip",
+                    "sha256": "7" * 64,
+                },
+                {
+                    "purpose": "velopack-bundle",
+                    "name": "source-velopack.zip",
+                    "url": "https://example.invalid/source-velopack.zip",
+                    "sha256": "8" * 64,
+                },
+            ],
+        },
+    )
+    return matrix
 
 
-def _scenario_result(name: str, source_version: str, platform: str) -> dict:
+def _upgrade_matrix_path(tmp_path: Path) -> Path:
+    path = tmp_path / "test-upgrade-matrix.json"
+    if not path.exists():
+        path.write_text(json.dumps(_upgrade_matrix()), encoding="utf-8")
+    return path
+
+
+def _scenario_result(name: str, source_version: str) -> dict:
     records = {
         "healthy_commit": (
             {
@@ -139,9 +172,7 @@ def _scenario_result(name: str, source_version: str, platform: str) -> dict:
                 "target_version_observed": VERSION,
                 "restored_version": source_version,
                 "journal_status": "rolled_back",
-                "rollback_marker_status": (
-                    "program_rolled_back" if platform == "windows" else "restored"
-                ),
+                "rollback_marker_status": "restored",
             },
         ),
         "retry_after_rollback": (
@@ -170,6 +201,24 @@ def _scenario_result(name: str, source_version: str, platform: str) -> dict:
                 "source_version_after": source_version,
                 "journal_status": "rolled_back",
                 "apply_exit_code": 17,
+            },
+        ),
+        "manual_restore_after_target_failure": (
+            {
+                "target_failure_observed": True,
+                "recovery_material_preserved": True,
+                "manual_restore_invoked": True,
+                "whole_program_tree_restored": True,
+                "data_restored": True,
+                "source_restarted": True,
+                "journal_manually_restored": True,
+            },
+            {
+                "target_version_observed": VERSION,
+                "restored_version": source_version,
+                "journal_status": "manually_restored",
+                "recovery_trigger": "manual",
+                "program_restore_mode": "whole_current_directory",
             },
         ),
     }
@@ -228,10 +277,12 @@ def _canonical_upgrade_evidence(root: Path) -> dict:
                     for asset in source["assets"]
                 ],
                 "scenarios": [
-                    _scenario_result(
-                        name, source["source_version"], source["platform"]
+                    _scenario_result(name, source["source_version"])
+                    for name in required_scenarios_for(
+                        matrix,
+                        platform=source["platform"],
+                        arch=source["arch"],
                     )
-                    for name in REQUIRED_SCENARIOS
                 ],
             }
             for source in matrix["supported_sources"]
@@ -352,6 +403,7 @@ def _seal(
             if validated_artifacts is None
             else validated_artifacts
         ),
+        "upgrade_matrix_path": _upgrade_matrix_path(tmp_path),
     }
     arguments.update(overrides)
     return build_candidate_receipt(**arguments)  # type: ignore[arg-type]
@@ -374,6 +426,7 @@ def _promote(root: Path, receipt_path: Path, **overrides: object) -> dict:
         "artifact_name": ARTIFACT_NAME,
         "commit_sha": COMMIT_SHA,
         "version": VERSION,
+        "upgrade_matrix_path": _upgrade_matrix_path(root.parent),
     }
     arguments.update(overrides)
     return verify_promotion_candidate(**arguments)  # type: ignore[arg-type]
