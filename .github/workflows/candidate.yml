@@ -386,10 +386,154 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  windows-upgrade-matrix:
+    name: Exercise Final Windows Bytes From Supported Sources
+    if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+    runs-on: windows-latest
+    needs: [candidate-metadata, windows-final]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dicepp-final-windows-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/target
+      - name: Run the Windows cross-version matrix against final bytes
+        shell: pwsh
+        run: |
+          python scripts/build/upgrade_evidence.py check-readiness `
+            --registry scripts/build/upgrade_protocol_registry.json
+          python scripts/build/upgrade_matrix_runner.py run-platform `
+            --matrix scripts/build/upgrade_matrix.json `
+            --platform windows `
+            --arch amd64 `
+            --target-version "${{ needs.candidate-metadata.outputs.version }}" `
+            --target-commit-sha "${{ needs.candidate-metadata.outputs.commit_sha }}" `
+            --target-asset "portable=dist/target/DicePP-${{ needs.candidate-metadata.outputs.tag }}-win64-Portable.zip" `
+            --target-asset "setup=dist/target/DicePP-${{ needs.candidate-metadata.outputs.tag }}-win64-Setup.exe" `
+            --target-asset "velopack-bundle=dist/target/velopack.win-x64.zip" `
+            --source-cache dist/upgrade-cache `
+            --work-root dist/upgrade-work `
+            --output dist/upgrade-result/windows.json
+      - name: Upload Windows matrix result and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-upgrade-result-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/upgrade-result
+            dist/upgrade-work
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-upgrade-matrix:
+    name: Exercise Final Linux Bytes From Supported Sources
+    if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+    runs-on: ubuntu-latest
+    needs: [candidate-metadata, linux-final]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dicepp-final-linux-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/target
+      - name: Run the Linux cross-version matrix against final bytes
+        run: |
+          set -euo pipefail
+          python scripts/build/upgrade_evidence.py check-readiness \
+            --registry scripts/build/upgrade_protocol_registry.json
+          python scripts/build/upgrade_matrix_runner.py run-platform \
+            --matrix scripts/build/upgrade_matrix.json \
+            --platform linux \
+            --arch amd64 \
+            --target-version "${{ needs.candidate-metadata.outputs.version }}" \
+            --target-commit-sha "${{ needs.candidate-metadata.outputs.commit_sha }}" \
+            --target-asset "linux-bundle=dist/target/DicePP-${{ needs.candidate-metadata.outputs.tag }}-linux-amd64.zip" \
+            --source-cache dist/upgrade-cache \
+            --work-root dist/upgrade-work \
+            --output dist/upgrade-result/linux.json
+      - name: Upload Linux matrix result and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/upgrade-result
+            dist/upgrade-work
+          if-no-files-found: error
+          retention-days: 30
+
+  upgrade-evidence:
+    name: Bind Upgrade Evidence To Final Candidate Bytes
+    if: >-
+      always() &&
+      needs.candidate-metadata.result == 'success' &&
+      (needs.candidate-metadata.outputs.automatic_upgrade != 'true' ||
+       (needs.windows-upgrade-matrix.result == 'success' &&
+        needs.linux-upgrade-matrix.result == 'success'))
+    runs-on: ubuntu-latest
+    needs:
+      - candidate-metadata
+      - quality-gate
+      - windows-upgrade-matrix
+      - linux-upgrade-matrix
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        with:
+          ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        with:
+          pattern: dicepp-upgrade-result-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/platform-results
+      - name: Assemble closed cross-version evidence
+        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        run: |
+          set -euo pipefail
+          python scripts/build/upgrade_matrix_runner.py assemble \
+            --matrix scripts/build/upgrade_matrix.json \
+            --target-version "${{ needs.candidate-metadata.outputs.version }}" \
+            --target-commit-sha "${{ needs.candidate-metadata.outputs.commit_sha }}" \
+            --candidate "linux:runtime-manifest:${{ needs.quality-gate.outputs.runtime_candidate_digest }}" \
+            --candidate "linux:dashboard-manifest:${{ needs.quality-gate.outputs.dashboard_candidate_digest }}" \
+            --candidate "windows:package-tree:${{ needs.quality-gate.outputs.windows_candidate_digest }}" \
+            --platform-result dist/platform-results/dicepp-upgrade-result-windows-${{ github.run_id }}-${{ github.run_attempt }}/upgrade-result/windows.json \
+            --platform-result dist/platform-results/dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}/upgrade-result/linux.json \
+            --output dist/upgrade-evidence/evidence.json
+      - name: Upload commit-and-final-byte-bound upgrade evidence
+        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-upgrade-evidence
+          path: dist/upgrade-evidence/evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
   receipt:
     name: Seal Final Candidate Receipt
     runs-on: ubuntu-latest
-    needs: [candidate-metadata, quality-gate, windows-final, linux-final]
+    needs:
+      - candidate-metadata
+      - quality-gate
+      - windows-final
+      - linux-final
+      - upgrade-evidence
     permissions:
       actions: read
       contents: read
@@ -429,8 +573,8 @@ jobs:
         if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          # The reusable quality gate is the sole future producer. The receipt
-          # verifies its commit/candidate binding before it can be sealed.
+          # The platform matrix consumes final package bytes; this aggregator
+          # is the sole producer and Receipt rechecks every final asset digest.
           name: dicepp-upgrade-evidence
           path: dist/staged/upgrade-evidence
       - name: Stage every final GitHub Release asset

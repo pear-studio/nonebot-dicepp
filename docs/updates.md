@@ -131,19 +131,32 @@ Velopack 安装布局，Manager 会在修改程序或数据之前拒绝自动安
 时仍可展示 Release 和具体原因，但不能下载或进入可安装状态。
 
 发布流程还会在公开提升容器 tag 和生成 Release 之前读取
-`scripts/build/upgrade_matrix.json`，并要求 CI 产出 `dicepp-upgrade-evidence`。
+`scripts/build/upgrade_protocol_registry.json` 与
+`scripts/build/upgrade_matrix.json`，并要求 Final Candidate 产出
+`dicepp-upgrade-evidence`。
 矩阵必须为 Windows amd64 与 Linux amd64 固定每个仍受支持来源版本的 HTTPS
 资产和 SHA-256；证据必须绑定目标版本、完整 Git commit、Runtime/Dashboard
-容器 manifest 与 Windows 测试包目录摘要，并逐项通过健康提交、目标健康失败
+容器 manifest、Windows 测试包目录摘要，以及最终 Windows Portable/Setup/
+Velopack 与 Linux bundle 的文件名、字节数和 SHA-256，并逐项通过健康提交、目标健康失败
 回退、回退后重试、以及目标代码从未执行的 apply 失败四个场景。来源资产摘要、
 候选身份、平台覆盖或任一场景不匹配都会拒绝 `automatic_upgrade: yes`。
-`automatic_upgrade: no` 不需要这份证据。当前矩阵没有受支持来源，reusable
-Quality Gate 也尚未包含 evidence producer；因此 `automatic_upgrade: yes`
-目前有意不可达，而不会用手工或模拟结果冒充跨版本验收。未来只有真实
-Windows/Linux runner 完成矩阵场景后，才能在 reusable quality workflow 中上传
-同名 `dicepp-upgrade-evidence` artifact。Release workflow 复验通过后会把原始
+`automatic_upgrade: no` 不需要这份证据。当前功能验证矩阵固定 Windows
+v3.0.0rc17（覆盖旧 staged-v2 布局）以及 Windows/Linux v3.0.0rc19（最新公开
+RC）；正式版策略只维护“上一正式版 → 当前候选”。Final Candidate 先构建最终
+Windows/Linux bytes，再由各平台 runner 调用当前 commit 内固定的 harness 入口，
+最后汇总 evidence 并交给 Receipt；协议 readiness 未通过、缺少来源资产或场景
+失败都会让
+`automatic_upgrade: yes` 不可达。Release workflow 复验通过后会把原始
 证据以稳定名称 `dicepp-upgrade-evidence.json` 随 Release 发布，供后续审计目标
 commit、三个候选身份、来源资产摘要与场景结果。
+
+当前 `scripts/build/windows_upgrade_matrix_harness.py` 与
+`scripts/build/linux_upgrade_matrix_harness.py` 是唯一入口，不读取 repo variables、
+秘密或本机路径。它们会校验 pinned 来源与最终候选 bytes，但在真实四场景编排及
+rc17 journal 导出完成前明确返回 unavailable，因此当前仍不能发布
+`automatic_upgrade: yes`。harness 对每个 source/scenario 接收 `--context` 与
+`--output`；只有返回闭合 contract v1、`status=passed`、完整行为断言和关键观测，
+矩阵才接受。
 
 Windows amd64 Release 包含：
 

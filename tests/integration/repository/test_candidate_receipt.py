@@ -20,10 +20,12 @@ from scripts.build.promotion_candidate import (
 )
 from scripts.build.upgrade_evidence import (
     CandidateIdentity,
+    FinalAssetIdentity,
     REQUIRED_SCENARIOS,
     validate_upgrade_evidence,
 )
 from tests.support.fs_utils import symlink_or_skip
+from tests.support.paths import find_repository_root
 
 
 VERSION = "3.1.0rc1"
@@ -102,41 +104,113 @@ def _candidate_digest() -> str:
 
 
 def _upgrade_matrix() -> dict:
-    platforms = (("windows", "amd64", "7"), ("linux", "amd64", "8"))
-    return {
-        "contract_version": 1,
-        "required_platforms": [
-            {"platform": platform, "arch": arch}
-            for platform, arch, _digest_seed in platforms
-        ],
-        "required_scenarios": list(REQUIRED_SCENARIOS),
-        "supported_sources": [
+    root = find_repository_root(Path(__file__))
+    return json.loads(
+        (root / "scripts/build/upgrade_matrix.json").read_text(encoding="utf-8")
+    )
+
+
+def _scenario_result(name: str, source_version: str) -> dict:
+    records = {
+        "healthy_commit": (
             {
-                "platform": platform,
-                "arch": arch,
-                "source_version": "3.0.0",
-                "assets": [
-                    {
-                        "name": f"source-{platform}.zip",
-                        "url": f"https://example.invalid/source-{platform}.zip",
-                        "sha256": digest_seed * 64,
-                    }
-                ],
-            }
-            for platform, arch, digest_seed in platforms
-        ],
+                "source_started": True,
+                "target_started": True,
+                "local_health_passed": True,
+                "journal_committed": True,
+            },
+            {
+                "source_version_before": source_version,
+                "target_version_after": VERSION,
+                "journal_status": "committed",
+                "health_status": "healthy",
+            },
+        ),
+        "target_health_failure_rollback": (
+            {
+                "target_executed": True,
+                "health_failure_injected": True,
+                "program_restored": True,
+                "data_restored": True,
+                "source_restarted": True,
+                "journal_rolled_back": True,
+            },
+            {
+                "target_version_observed": VERSION,
+                "restored_version": source_version,
+                "journal_status": "rolled_back",
+                "rollback_marker_status": "program_rolled_back",
+            },
+        ),
+        "retry_after_rollback": (
+            {
+                "prior_rollback_observed": True,
+                "retry_started_same_instance": True,
+                "target_started": True,
+                "journal_committed": True,
+            },
+            {
+                "first_transaction_status": "rolled_back",
+                "retry_transaction_status": "committed",
+                "final_version": VERSION,
+            },
+        ),
+        "apply_failure_before_target_execution": (
+            {
+                "apply_failure_injected": True,
+                "target_never_executed": True,
+                "source_remained_or_restored": True,
+                "no_target_migration": True,
+                "terminal_state_recorded": True,
+            },
+            {
+                "target_process_start_count": 0,
+                "source_version_after": source_version,
+                "journal_status": "aborted_before_switch",
+                "apply_exit_code": 17,
+            },
+        ),
+    }
+    assertions, observations = records[name]
+    return {
+        "name": name,
+        "status": "passed",
+        "assertions": assertions,
+        "observations": observations,
     }
 
 
-def _canonical_upgrade_evidence() -> dict:
+def _canonical_upgrade_evidence(root: Path) -> dict:
     matrix = _upgrade_matrix()
+    final_assets = [
+        FinalAssetIdentity(
+            platform,
+            arch,
+            purpose,
+            filename,
+            (root / filename).stat().st_size,
+            _sha256(root / filename),
+        )
+        for platform, arch, purpose, filename in _package_specs()
+    ]
     evidence = {
-        "contract_version": 1,
+        "contract_version": 2,
         "target": {
             "version": VERSION,
             "commit_sha": COMMIT_SHA,
             "candidate_identities": _candidate_identities(),
             "candidate_digest": _candidate_digest(),
+            "final_assets": [
+                {
+                    "platform": item.platform,
+                    "arch": item.arch,
+                    "purpose": item.purpose,
+                    "filename": item.filename,
+                    "size": item.size,
+                    "sha256": item.sha256,
+                }
+                for item in final_assets
+            ],
         },
         "results": [
             {
@@ -148,7 +222,7 @@ def _canonical_upgrade_evidence() -> dict:
                     for asset in source["assets"]
                 ],
                 "scenarios": [
-                    {"name": name, "status": "passed"}
+                    _scenario_result(name, source["source_version"])
                     for name in REQUIRED_SCENARIOS
                 ],
             }
@@ -163,6 +237,7 @@ def _canonical_upgrade_evidence() -> dict:
         target_candidate_identities=[
             CandidateIdentity(**identity) for identity in _candidate_identities()
         ],
+        target_final_assets=final_assets,
     )
 
 
@@ -211,7 +286,7 @@ def _prepare_assets(
     )
     if automatic_upgrade:
         (root / "dicepp-upgrade-evidence.json").write_text(
-            json.dumps(_canonical_upgrade_evidence()),
+            json.dumps(_canonical_upgrade_evidence(root)),
             encoding="utf-8",
         )
     summaries = [
@@ -413,6 +488,32 @@ def test_seal_rejects_non_integer_upgrade_evidence_contract_version(
         _seal(tmp_path, artifact_root=root, validated_artifacts=summaries)
 
 
+def test_seal_rejects_evidence_bound_to_different_final_package_bytes(
+    tmp_path: Path,
+) -> None:
+    root, summaries = _prepare_assets(tmp_path)
+    evidence_path = root / "dicepp-upgrade-evidence.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["target"]["final_assets"][0]["sha256"] = "0" * 64
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not match sealed candidate"):
+        _seal(tmp_path, artifact_root=root, validated_artifacts=summaries)
+
+
+def test_seal_fully_revalidates_upgrade_scenario_observations(tmp_path: Path) -> None:
+    root, summaries = _prepare_assets(tmp_path)
+    evidence_path = root / "dicepp-upgrade-evidence.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["results"][0]["scenarios"][0]["observations"][
+        "target_version_after"
+    ] = "totally-wrong"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="observations are inconsistent"):
+        _seal(tmp_path, artifact_root=root, validated_artifacts=summaries)
+
+
 @pytest.mark.parametrize("invalid_version", [True, 2.0, "2"])
 def test_receipt_rejects_non_integer_contract_version(
     tmp_path: Path,
@@ -453,6 +554,28 @@ def test_promotion_preflight_verifies_every_byte_and_writes_bound_outputs(
     assert outputs["automatic_upgrade"] == "true"
     assert outputs["runtime_candidate_ref"].endswith("candidate-10-1")
     assert outputs["dashboard_manifest_digest"] == f"sha256:{'5' * 64}"
+
+
+def test_promotion_fully_revalidates_sealed_upgrade_scenarios(tmp_path: Path) -> None:
+    root, summaries = _prepare_assets(tmp_path)
+    receipt = _seal(tmp_path, artifact_root=root, validated_artifacts=summaries)
+    evidence_path = root / "dicepp-upgrade-evidence.json"
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    evidence["results"][0]["scenarios"][1]["observations"][
+        "restored_version"
+    ] = "totally-wrong"
+    evidence_path.write_text(json.dumps(evidence), encoding="utf-8")
+    evidence_record = next(
+        item
+        for item in receipt["artifacts"]
+        if item["filename"] == "dicepp-upgrade-evidence.json"
+    )
+    evidence_record["size"] = evidence_path.stat().st_size
+    evidence_record["sha256"] = _sha256(evidence_path)
+    receipt_path = _write_receipt(root, receipt)
+
+    with pytest.raises(ValueError, match="observations are inconsistent"):
+        _promote(root, receipt_path)
 
 
 @pytest.mark.parametrize("mutation", ["equal-size-drift", "extra", "wrong-run"])

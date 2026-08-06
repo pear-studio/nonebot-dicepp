@@ -1,3 +1,4 @@
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -349,6 +350,54 @@ def test_automatic_upgrade_evidence_policy_is_enforced_by_the_receipt_verifier()
     assert "dicepp-upgrade-evidence.json" not in RELEASE_WORKFLOW.read_text(
         encoding="utf-8"
     )
+
+
+def test_upgrade_evidence_is_produced_from_both_final_platform_artifacts_before_receipt():
+    windows = _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")
+    linux = _job(CANDIDATE_WORKFLOW, "linux-upgrade-matrix")
+    evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
+    receipt = _job(CANDIDATE_WORKFLOW, "receipt")
+
+    assert set(windows["needs"]) == {"candidate-metadata", "windows-final"}
+    assert set(linux["needs"]) == {"candidate-metadata", "linux-final"}
+    assert {
+        "candidate-metadata",
+        "quality-gate",
+        "windows-upgrade-matrix",
+        "linux-upgrade-matrix",
+    } == set(evidence["needs"])
+    assert "upgrade-evidence" in receipt["needs"]
+
+    windows_run = _step(
+        CANDIDATE_WORKFLOW,
+        "windows-upgrade-matrix",
+        "Run the Windows cross-version matrix against final bytes",
+    )["run"]
+    linux_run = _step(
+        CANDIDATE_WORKFLOW,
+        "linux-upgrade-matrix",
+        "Run the Linux cross-version matrix against final bytes",
+    )["run"]
+    assemble = _step(
+        CANDIDATE_WORKFLOW,
+        "upgrade-evidence",
+        "Assemble closed cross-version evidence",
+    )["run"]
+    assert "dicepp-final-windows-candidate" in json.dumps(windows["steps"])
+    assert "dicepp-final-linux-candidate" in json.dumps(linux["steps"])
+    assert all(name in windows_run for name in ("portable=", "setup=", "velopack-bundle="))
+    assert "linux-bundle=" in linux_run
+    assert "check-readiness" in windows_run
+    assert "check-readiness" in linux_run
+    candidate_text = CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
+    assert "${{ vars." not in windows_run
+    assert "${{ vars." not in linux_run
+    runner_text = (
+        ROOT / "scripts/build/upgrade_matrix_runner.py"
+    ).read_text(encoding="utf-8")
+    assert "windows_upgrade_matrix_harness.py" in runner_text
+    assert "linux_upgrade_matrix_harness.py" in runner_text
+    assert assemble.count("--platform-result") == 2
 
 
 def test_final_candidate_upload_identity_is_run_attempt_unique_and_auditable():
