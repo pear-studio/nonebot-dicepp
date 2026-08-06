@@ -102,19 +102,79 @@ def test_release_manifest_is_generated_after_all_platform_artifacts():
 
 def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
     job = _workflow_job(TEST_SUITE_WORKFLOW, "runtime-image")
+    seed = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "runtime-image",
+        "Seed stale Python build artifacts in Docker context",
+    )
     build = _workflow_step(TEST_SUITE_WORKFLOW, "runtime-image", "Build Runtime image")
     smoke = _workflow_step(TEST_SUITE_WORKFLOW, "runtime-image", "Smoke test Runtime image")
 
     assert job["runs-on"] == "ubuntu-latest"
     assert job["needs"] == "quick"
     assert build["run"].strip() == "docker build -f Dockerfile -t dicepp-runtime:ci ."
-    assert smoke["run"].strip() == (
-        "docker run --rm --network=none dicepp-runtime:ci python bot.py --smoke-check"
-    )
+    assert "Version: 0.0.0-stale" in seed["run"]
+    assert "src/plugins/DicePP/__pycache__/stale.cpython-313.pyc" in seed["run"]
+    assert "python bot.py --version" in smoke["run"]
+    assert "DicePP v$expected" in smoke["run"]
+    assert "test ! -e /app/src/dicepp.egg-info" in smoke["run"]
+    assert "test ! -d /app/src/plugins/DicePP/__pycache__" in smoke["run"]
+    assert "python bot.py --smoke-check" in smoke["run"]
     assert "services" not in job
     assert "docker compose" not in "\n".join(
         step.get("run", "") for step in job["steps"]
     )
+
+
+def test_dashboard_image_smokes_dashboard_and_manager_without_dashboard_control_channel():
+    seed = _workflow_step(
+        TEST_SUITE_WORKFLOW,
+        "dashboard-image",
+        "Seed stale Python build artifacts in Docker context",
+    )["run"]
+    ci_smoke = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Dashboard image"
+    )["run"]
+    release_smoke = _workflow_step(
+        RELEASE_WORKFLOW, "build-docker", "Smoke test Dashboard image"
+    )["run"]
+    ci_manager_smoke = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Smoke test Manager image"
+    )["run"]
+    release_manager_smoke = _workflow_step(
+        RELEASE_WORKFLOW, "build-docker", "Smoke test Manager image"
+    )["run"]
+
+    for script in (ci_smoke, release_smoke):
+        assert "/api/auth/status" in script
+        assert "smoke_dashboard_control_channel" not in script
+        assert "/ws/control" not in script
+
+    assert "Version: 0.0.0-stale" in seed
+    assert "python -m dashboard --version" in ci_smoke
+    assert "DicePP Dashboard v$expected" in ci_smoke
+    assert "test ! -e /app/src/dicepp.egg-info" in ci_smoke
+    assert "test ! -d /app/src/plugins/DicePP/__pycache__" in ci_smoke
+
+    for script in (ci_manager_smoke, release_manager_smoke):
+        assert "python -m dicepp_manager" in script
+        assert "dicepp-manager-smoke" in script
+        assert "DICEPP_MANAGER_RELEASE_SCHEDULER=false" in script
+        assert "/app/manager/state/api-token" in script
+        assert "Authorization: Bearer $token" in script
+        assert "http://127.0.0.1:4091/v1/health" in script
+        assert "smoke_dashboard_control_channel" not in script
+        assert "/ws/control" not in script
+
+    assert "from importlib.metadata import version" in ci_manager_smoke
+    assert 'assert version("dicepp") == expected' in ci_manager_smoke
+
+    ci_cleanup = _workflow_step(
+        TEST_SUITE_WORKFLOW, "dashboard-image", "Clean up image smoke resources"
+    )["run"]
+    assert "dicepp-manager-smoke" in ci_cleanup
+    assert "docker volume rm -f dicepp-manager-smoke" in ci_cleanup
+    assert "trap cleanup EXIT" in release_manager_smoke
 
 
 def test_release_bot_image_smoke_preflights_local_tag_without_network():

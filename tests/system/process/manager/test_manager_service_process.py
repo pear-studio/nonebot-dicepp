@@ -18,6 +18,7 @@ from dicepp_manager.config import ManagerClientSettings
 from dicepp_manager.deployment import MANAGER_API_VERSION
 from dashboard.src.app import _init_db
 from dashboard.src.auth import set_password_db
+from tests.support.processes import stop_server_process
 
 
 def _port() -> int:
@@ -56,12 +57,13 @@ def _process(module: str, *, env: dict[str, str]):
     try:
         yield process
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        stop_server_process(
+            process,
+            name=f"{module} system-test server",
+            request_stop=process.terminate,
+            timeout=5,
+            force_kill_tree=module == "dicepp_manager",
+        )
 
 
 def test_standalone_manager_process_auth_status_and_operation_persistence(tmp_path: Path) -> None:

@@ -21,7 +21,7 @@ from tests.support.dashboard.playwright import (
     route_setup_allowed_status,
     wait_for_server,
 )
-from tests.support.processes import stop_server_process
+from tests.support.processes import format_server_startup_failure, stop_server_process
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -122,25 +122,50 @@ def dashboard_url(tmp_path: Path) -> str:
     env["DICEPP_MANAGER_RELEASE_SCHEDULER"] = "0"
     env["DICEPP_TEST_START_MANAGER"] = "1"
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "tests.support.dashboard_server"],
-        cwd=str(PROJECT_ROOT),
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    try:
-        wait_for_server(f"{base_url}/api/auth/status")
-        yield base_url
-    finally:
-        assert proc.stdin is not None
-        stop_server_process(
-            proc,
-            name="Dashboard smoke server",
-            request_stop=proc.stdin.close,
+    log_path = tmp_path / "dashboard-server.log"
+    with log_path.open("w+", encoding="utf-8") as server_log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "tests.support.dashboard_server"],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=server_log,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
         )
+        started_at = time.monotonic()
+
+        try:
+            try:
+                wait_for_server(f"{base_url}/api/auth/status")
+            except TimeoutError as exc:
+                assert proc.stdin is not None
+                stop_server_process(
+                    proc,
+                    name="Dashboard smoke server",
+                    request_stop=proc.stdin.close,
+                )
+                server_log.flush()
+                server_log.seek(0)
+                pytest.fail(
+                    format_server_startup_failure(
+                        proc,
+                        name="Dashboard smoke server",
+                        url=f"{base_url}/api/auth/status",
+                        elapsed_seconds=time.monotonic() - started_at,
+                        output=server_log.read(),
+                    )
+                    + f"\nOriginal wait error: {exc}"
+                )
+            yield base_url
+        finally:
+            assert proc.stdin is not None
+            stop_server_process(
+                proc,
+                name="Dashboard smoke server",
+                request_stop=proc.stdin.close,
+            )
 
 
 def test_smoke_auth_flow(dashboard_url: str) -> None:
