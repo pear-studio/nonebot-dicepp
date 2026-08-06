@@ -82,6 +82,58 @@ def test_redirected_stderr_logger_outputs_utf8_without_ansi(
     assert "\ufffd" not in stderr_text
 
 
+def test_windowed_launcher_logging_without_console_streams(tmp_path: Path) -> None:
+    """PyInstaller console=False 从 Explorer 启动时 sys.stdout/sys.stderr 为 None。
+
+    RC17 回归：logger 模块 import 即崩溃（Loguru 拒绝 None sink），整个 GUI
+    进程在 import 阶段弹窗退出。修复后应跳过 console handler，文件日志照常。
+    """
+    marker = tmp_path / "boot-ok.txt"
+    script = tmp_path / "logger_windowed.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import sys
+
+            # 模拟 PyInstaller windowed（console=False）进程：无控制台流
+            sys.stdout = None
+            sys.stderr = None
+
+            sys.path.insert(0, {str(Path.cwd() / "src")!r})
+            from plugins.DicePP.utils.logger import (
+                configure_log_level,
+                logger,
+                restore_runtime_logging,
+            )
+
+            restore_runtime_logging()
+            configure_log_level("INFO")
+            logger.info("windowed launcher boot")
+
+            with open({str(marker)!r}, "w", encoding="utf-8") as output:
+                output.write("ok")
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["DICEPP_PROJECT_ROOT"] = str(tmp_path)
+
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=os.getcwd(),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+    assert marker.read_text(encoding="utf-8") == "ok"
+    log_file = tmp_path / "data" / "logs" / "dicepp.log"
+    assert "windowed launcher boot" in log_file.read_text(encoding="utf-8")
+
+
 def test_restore_runtime_logging_replaces_colored_redirected_handler(
     tmp_path: Path,
 ) -> None:

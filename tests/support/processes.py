@@ -9,6 +9,22 @@ from collections.abc import Callable
 from typing import Any
 
 
+def run_completed_process(
+    command: list[str],
+    *,
+    cwd: os.PathLike[str] | str,
+) -> subprocess.CompletedProcess[str]:
+    """Run one bounded integration-test command and capture its result."""
+
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def stop_server_process(
     process: subprocess.Popen[Any],
     *,

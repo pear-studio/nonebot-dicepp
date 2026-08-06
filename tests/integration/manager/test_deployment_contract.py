@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import io
 import json
 import hashlib
 import time
@@ -32,6 +33,90 @@ from dicepp_manager.upgrade import (
 )
 
 
+def _nupkg_bytes(version: str) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr(
+            "DicePP.nuspec",
+            f"<package><metadata><version>{version}</version></metadata></package>",
+        )
+    return output.getvalue()
+
+
+def _velopack_package(
+    root: Path,
+    version: str,
+    *,
+    payload_path: Path | None = None,
+) -> VerifiedUpgradePackage:
+    if payload_path is None:
+        payload_path = (
+            root / f"DicePP-{version}-full.nupkg"
+            if root.name == "packages"
+            else (
+                root
+                / "manager"
+                / "packages"
+                / version
+                / f"DicePP-{version}-full.nupkg"
+            )
+        )
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    if not payload_path.exists():
+        payload_path.write_bytes(_nupkg_bytes(version))
+    inner = {
+        "format_version": 1,
+        "dicepp_version": version,
+        "velopack_version": version,
+        "channel": "stable",
+        "platform": "windows",
+        "arch": "amd64",
+        "nupkg": {
+            "filename": payload_path.name,
+            "size": payload_path.stat().st_size,
+            "sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+        },
+    }
+    bundle_path = payload_path.parent / "velopack.win-x64.zip"
+    with zipfile.ZipFile(bundle_path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(inner))
+        archive.write(payload_path, arcname=payload_path.name)
+    bundle_digest = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    (bundle_path.parent / "velopack.win-x64.verified.json").write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "dicepp_version": version,
+                "channel": "stable",
+                "platform": "windows",
+                "arch": "amd64",
+                "filename": bundle_path.name,
+                "size": bundle_path.stat().st_size,
+                "sha256": bundle_digest,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return VerifiedUpgradePackage(
+        version=version,
+        platform="windows",
+        arch="amd64",
+        path=payload_path,
+        metadata_path=payload_path.parent / "verified-release.json",
+        artifact={
+            "platform": "windows",
+            "arch": "amd64",
+            "purpose": "velopack-bundle",
+            "filename": bundle_path.name,
+            "size": bundle_path.stat().st_size,
+            "sha256": bundle_digest,
+        },
+        release={"channel": "stable"},
+        bundle_path=bundle_path,
+        bundle_manifest=inner,
+    )
+
+
 def _write_guard_transaction(
     root: Path,
     *,
@@ -46,9 +131,9 @@ def _write_guard_transaction(
     transaction.mkdir(parents=True)
     target = root / "manager" / "packages" / "3.1.0" / "target.nupkg"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"target")
+    target.write_bytes(_nupkg_bytes("3.1.0"))
     rollback_package = transaction / "DicePP-3.0.0-full.nupkg"
-    rollback_package.write_bytes(b"rollback")
+    rollback_package.write_bytes(_nupkg_bytes("3.0.0"))
     token = root / "manager" / "state" / "api-token"
     token.parent.mkdir(parents=True, exist_ok=True)
     token.write_text("secret", encoding="utf-8")
@@ -343,15 +428,8 @@ async def test_terminal_handoff_refreshes_guard_without_manager_restart_and_clea
 
     for name in ("Update.exe", "DicePP.exe"):
         (tmp_path / name).write_bytes(name.encode())
-    current_full = tmp_path / "packages" / "DicePP-3.1.0-full.nupkg"
-    current_full.parent.mkdir()
-    with zipfile.ZipFile(current_full, "w") as archive:
-        archive.writestr(
-            "DicePP.nuspec",
-            "<package><metadata><version>3.1.0</version></metadata></package>",
-        )
-    next_package = tmp_path / "DicePP-3.2.0-full.nupkg"
-    next_package.write_bytes(b"next")
+    current_package = _velopack_package(tmp_path / "packages", "3.1.0")
+    assert current_package.bundle_path is not None
     adapter = WindowsVelopackUpgradeAdapter(
         layout=InstanceLayout.from_root(tmp_path),
         guard_command=[str(target)],
@@ -365,19 +443,7 @@ async def test_terminal_handoff_refreshes_guard_without_manager_restart_and_clea
         version_loader=lambda: "3.1.0",
         bundled_guard_path=source,
     )
-    package = VerifiedUpgradePackage(
-        version="3.2.0",
-        platform="windows",
-        arch="amd64",
-        path=next_package,
-        metadata_path=tmp_path / "verified.json",
-        artifact={
-            "purpose": "velopack-full",
-            "filename": next_package.name,
-            "sha256": hashlib.sha256(next_package.read_bytes()).hexdigest(),
-        },
-        release={},
-    )
+    package = _velopack_package(tmp_path, "3.2.0")
 
     assert (await adapter.preflight(package))["status"] == "ok"
 
@@ -1493,18 +1559,10 @@ def test_target_manager_with_live_guard_completes_real_lifespan_handoff(
         release_manager=release,
         platform_adapter=adapter,
     )
-    package = VerifiedUpgradePackage(
-        version="3.1.0",
-        platform="windows",
-        arch="amd64",
-        path=Path(request["package"]),
-        metadata_path=tmp_path / "verified-release.json",
-        artifact={
-            "purpose": "velopack-full",
-            "filename": Path(request["package"]).name,
-            "sha256": request["package_sha256"],
-        },
-        release={},
+    package = _velopack_package(
+        tmp_path,
+        "3.1.0",
+        payload_path=Path(request["package"]),
     )
     monkeypatch.setattr(
         coordinator,
