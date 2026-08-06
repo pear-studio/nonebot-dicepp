@@ -58,22 +58,27 @@
     - Dashboard 功能达到替代条件后，再决定是否禁用 `HomebrewCommand`
     - 按最终写入归属更新 Manager 架构文档
 
-## dice_hub
+## deployment
 
-### [B-260731-4c8f69] 暂时禁用过时的 DiceHub 命令
-- 创建: 2026-07-31
-- 优先级: P1
-- 类型: bug
-- 改动量: S
+### [B-260802-6fdfcc] 建立发布前最终制品候选与不可变晋升门禁
+- 创建: 2026-08-02
+- 优先级: P0
+- 类型: refactor
+- 改动量: XL
 - 问题表现:
-    - `.hub` 命令已经过时，当前不应继续向用户开放
-    - `.hub online` 调用了不存在的 `HubManager.heartbeat()`
-    - 命令在已有异步调用链中使用 `run_async` 创建额外线程和事件循环，并同步等待结果
+    - 普通 CI 当前主要验证 PyInstaller assembled payload；最终 `vpk pack`、Portable stable stub、Setup 安装和安装后启动主要在 tag 触发的 Release workflow 才首次执行。
+    - rc17 至 rc19 多次出现普通 CI 成功但 Release workflow 失败；同一 tag 在失败后移动到新 SHA 重跑，tag 同时承担“候选构建按钮”和“公开发布身份”，无法保持不可变发布语义。
+    - `.github/workflows/test-suite.yml` 与 `.github/workflows/release.yml` 各自包含 Windows executable 启动、标准流重定向和制品检查逻辑，已经发生 Windows 建链权限、进程树清理及 onefile payload 等待窗口导致的门禁失败。
+    - 影响后果是打包与启动缺陷直到推 tag 后才暴露，发版需要撤回或移动 tag，失败定位还要区分产品缺陷与测试 harness 缺陷。
 - 开发备忘:
-    - 停止导入和注册 `HubCommand`，使 `.hub` 不再被命令分发处理
-    - 暂时保留仍可能被其他调用者使用的 `HubManager`、配置数据和远端访问代码，不删除已有用户数据
-    - 补充命令注册与实际消息行为测试，确认 `.hub` 已禁用且不影响其他命令
-    - 不调用真实 DiceHub 或其他外部网络
+    - 建立按 commit SHA 或 workflow_dispatch 运行的 Windows 最终候选流水线，在创建 tag 前生成 Portable、Setup、Velopack bundle 和 release manifest。
+    - 对候选资产执行 stable stub 无控制台启动、Velopack hooks、silent Setup 安装、安装后启动、资产布局、版本、digest 和 provenance 校验；全部通过后才允许创建 tag。
+    - Release workflow 只按 digest 晋升并发布已经验证的同一字节资产，不重新打包；禁止 force-move 已用于候选或发布的 tag。
+    - 将两份 workflow 中重复的 Windows 构建、启动、进程清理和诊断逻辑提取为仓库内可本地与 CI 共用的版本化 PowerShell/Python runner。
+    - 将候选资格检查设为 master/tag required check，并保留失败时的进程树、端口、启动耗时、日志和安装目录清单。
+    - 先验证 GitHub artifact retention、跨 workflow provenance、GHCR/Release 权限和候选缓存成本；不得重写已公开 release assets。
+
+## dice_hub
 
 ### [B-260731-93a733] 重新设计并实现 DiceHub 命令
 - 创建: 2026-07-31
@@ -92,6 +97,26 @@
     - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
 
 ## manager
+
+### [B-260802-3e3e23] 建立持久化升级协议契约与跨版本升级回退矩阵
+- 创建: 2026-08-02
+- 优先级: P0
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+    - rc17 `WindowsVelopackUpgradeAdapter.stage()` 将 rollback nupkg 写入 `<transaction>/rollback-payload/`，同版本 resume validator 却只接受事务根目录的直接子项，真实 rc17→rc18 自动升级因此报 `ValueError: UpdateGuard rollback package escapes transaction`。
+    - producer/stage 与 consumer/resume 由不同测试组分别验证；consumer fixture 手工构造事务根布局，没有消费真实 stage/switch 输出，所以互相矛盾的生产实现仍能全绿。
+    - UpdateGuard request `format_version=2` 只约束 JSON 字段、绝对路径和 digest 格式，没有表达 rollback 目录拓扑等跨进程、跨重启、跨版本语义。
+    - Windows 真实升级与故障回退目前依赖 `.temp` 下的一次性验收 harness；已验证的 pre-bump 候选与公开 rc19 二进制、同一实例回退后再次升级仍需明确区分，尚未成为固定 Release 门禁。
+    - 影响后果是 `automatic_upgrade: yes` 的版本可能在公开发布后才发现旧 Manager/Guard 无法消费新请求，严重时需要人工恢复。
+- 开发备忘:
+    - 建立真实 `adapter.stage() → switch() → scan/load/resume` producer-consumer 契约测试；正常请求必须由生产 producer 生成，只有畸形和攻击样本允许手工 mutation。
+    - 在 `tests/fixtures/update_guard/` 保存 `v2-direct`、`rc17-staged` 等不可变 golden protocol fixtures，使用路径占位符并记录期望事务树；当前 consumer 必须读取全部仍受支持的历史变体。
+    - 盘点 request、guard/started/health/rollback marker、journal、release manifest、bundle manifest 和 deployment schema，逐项记录 producer、consumer、format version、支持周期及门禁测试；目录语义变化必须新增协议版本或显式布局字段。
+    - 建立上一受支持版本→当前候选的 Windows/Linux E2E：正常健康提交、目标启动后健康失败自动回退、同一实例回退后再次升级、Velopack apply 失败且目标代码从未执行。
+    - 普通 PR 跑低成本 producer-consumer 与 golden tests；涉及 Manager/UpdateGuard/Velopack/发布协议的 PR、nightly 和 Release 跑真实旧二进制矩阵，并固定下载资产 SHA-256。
+    - `automatic_upgrade: yes` 必须绑定当前 SHA 的跨版本验证证据；证据缺失或受支持旧制品不可获得时只能发布为 `automatic_upgrade: no`。
+    - 本条应先于 `B-260731-b6f811` Manager 维护事务 Module 的大规模重构完成，以先建立旧 journal、回退状态和平台行为兼容护栏。
 
 ### [B-260731-b6f811] 深化 Manager 维护事务 Module
 - 创建: 2026-07-31
@@ -163,21 +188,6 @@
   - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
-
-### [B-260630-46af37] compact_conversation 改为 LLM 摘要压缩
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 当前 compact_conversation 仅做 clear() 清空
-    - 日终前的所有对话记忆被丢弃而非提炼为叙事线索
-    - 跨事件累积的叙事上下文（人物/地点/事件/线索）完全丢失
-- 开发备忘:
-    - 将 compact 从 clear 改为 LLM summary 压缩
-    - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
-    - 需评估压缩 LLM 的 token 消耗和延时
-    - 影响面: life/agent.py compact_conversation()
 
 ## query
 
