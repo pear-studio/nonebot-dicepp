@@ -16,5 +16,42 @@
     "retry_after_rollback",
     "apply_failure_before_target_execution"
   ],
-  "supported_sources": []
+  "supported_sources": [
+    {
+      "platform": "windows",
+      "arch": "amd64",
+      "source_version": "3.0.0rc17",
+      "assets": [
+        {
+          "name": "DicePP-v3.0.0rc17-win64-Portable.zip",
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc17/DicePP-v3.0.0rc17-win64-Portable.zip",
+          "sha256": "a5aec34c8ffd35e409bdaddcf4eee3bc6b3142ad496005a8e44769be3d488b13"
+        }
+      ]
+    },
+    {
+      "platform": "windows",
+      "arch": "amd64",
+      "source_version": "3.0.0rc19",
+      "assets": [
+        {
+          "name": "DicePP-v3.0.0rc19-win64-Portable.zip",
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc19/DicePP-v3.0.0rc19-win64-Portable.zip",
+          "sha256": "8caa1e9ad82edb5b6c486ba997a57cfe2f12e08a5841e735325f06276d188106"
+        }
+      ]
+    },
+    {
+      "platform": "linux",
+      "arch": "amd64",
+      "source_version": "3.0.0rc19",
+      "assets": [
+        {
+          "name": "DicePP-v3.0.0rc19-linux-amd64.zip",
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc19/DicePP-v3.0.0rc19-linux-amd64.zip",
+          "sha256": "2d1cc5452112abab31baba9e9d4d276a344bf8534b0c2098b35078d56e4d5dd6"
+        }
+      ]
+    }
+  ]
 }

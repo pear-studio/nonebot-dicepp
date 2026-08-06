@@ -34,12 +34,14 @@ except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
 try:
     from scripts.build.upgrade_evidence import (
         CandidateIdentity,
+        FinalAssetIdentity,
         parse_candidate_identity,
         verify_release,
     )
 except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
     from upgrade_evidence import (
         CandidateIdentity,
+        FinalAssetIdentity,
         parse_candidate_identity,
         verify_release,
     )
@@ -113,6 +115,7 @@ def build_manifest(
             version=version,
             commit_sha=commit_sha,
             candidate_identities=candidate_identities or [],
+            final_assets=[FinalAssetIdentity(**artifact) for artifact in artifacts],
             matrix_path=upgrade_matrix,
             evidence_path=upgrade_evidence,
         )

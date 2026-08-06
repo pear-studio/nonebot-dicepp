@@ -113,6 +113,21 @@ def verify_promotion_candidate(
             version=version,
             commit_sha=commit_sha,
             candidate_identities=receipt["build"]["candidate_identities"],
+            final_assets=[
+                {
+                    key: artifact[key]
+                    for key in (
+                        "platform",
+                        "arch",
+                        "purpose",
+                        "filename",
+                        "size",
+                        "sha256",
+                    )
+                }
+                for artifact in artifacts
+                if artifact["validated"]
+            ],
         )
     return receipt
 

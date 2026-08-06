@@ -335,14 +335,32 @@ def validate_upgrade_evidence_target_attestation(
     version: str,
     commit_sha: str,
     candidate_identities: Sequence[Mapping[str, str]],
+    final_assets: Sequence[Mapping[str, Any]],
 ) -> None:
-    """Recheck target binding after canonical evidence validation succeeded."""
+    """Fully revalidate evidence, then recheck sealed target byte binding."""
+
+    try:
+        from scripts.build.upgrade_evidence import (
+            CandidateIdentity,
+            FinalAssetIdentity,
+            load_json_object,
+            validate_upgrade_evidence,
+            validate_upgrade_matrix,
+        )
+    except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
+        from upgrade_evidence import (
+            CandidateIdentity,
+            FinalAssetIdentity,
+            load_json_object,
+            validate_upgrade_evidence,
+            validate_upgrade_matrix,
+        )
 
     evidence = _load_json_object(path, label="upgrade evidence")
     if set(evidence) != {"contract_version", "target", "results"}:
-        raise ValueError("upgrade evidence fields do not match contract version 1")
+        raise ValueError("upgrade evidence fields do not match contract version 2")
     if not _is_strict_int(
-        evidence["contract_version"], expected=1
+        evidence["contract_version"], expected=2
     ) or not isinstance(evidence["results"], list):
         raise ValueError("unsupported upgrade evidence contract")
     expected_target = {
@@ -350,9 +368,24 @@ def validate_upgrade_evidence_target_attestation(
         "commit_sha": commit_sha,
         "candidate_identities": list(candidate_identities),
         "candidate_digest": _candidate_digest(candidate_identities),
+        "final_assets": list(final_assets),
     }
     if evidence["target"] != expected_target:
         raise ValueError("upgrade evidence target does not match sealed candidate")
+    matrix_path = Path(__file__).with_name("upgrade_matrix.json")
+    matrix = validate_upgrade_matrix(
+        load_json_object(matrix_path, label="upgrade matrix")
+    )
+    validate_upgrade_evidence(
+        evidence,
+        matrix=matrix,
+        target_version=version,
+        target_commit_sha=commit_sha,
+        target_candidate_identities=(
+            CandidateIdentity(**identity) for identity in candidate_identities
+        ),
+        target_final_assets=(FinalAssetIdentity(**asset) for asset in final_assets),
+    )
 
 
 def validate_release_asset_directory(
@@ -474,6 +507,21 @@ def build_candidate_receipt(
             version=version,
             commit_sha=commit_sha,
             candidate_identities=identities,
+            final_assets=[
+                {
+                    key: artifact[key]
+                    for key in (
+                        "platform",
+                        "arch",
+                        "purpose",
+                        "filename",
+                        "size",
+                        "sha256",
+                    )
+                }
+                for artifact in artifacts
+                if artifact["validated"]
+            ],
         )
 
     receipt = {
