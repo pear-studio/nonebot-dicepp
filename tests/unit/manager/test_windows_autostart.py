@@ -38,7 +38,7 @@ def test_hkcu_run_toggle_uses_stable_root_entry(tmp_path) -> None:
     adapter.set_enabled(True)
     assert adapter.enabled() is True
     assert registry.values[VALUE_NAME] == autostart_command(executable)
-    assert "--manager-tray" in registry.values[VALUE_NAME]
+    assert "--background" in registry.values[VALUE_NAME]
     assert RUN_KEY.endswith("CurrentVersion\\Run")
     adapter.set_enabled(False)
     assert adapter.enabled() is False

@@ -132,7 +132,7 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
                     layout=settings.layout,
                     guard_command=[str(guard)],
                     install_command=install_command,
-                    restart_command=[str(launcher)],
+                    restart_command=[str(launcher), "--background"],
                     process_identity_loader=current_process_identity,
                     bundled_guard_path=(
                         Path(

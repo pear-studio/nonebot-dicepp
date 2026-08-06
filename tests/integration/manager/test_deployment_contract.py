@@ -198,6 +198,35 @@ def test_windows_launcher_starts_dashboard_before_manager_recovery() -> None:
     )
 
 
+def test_windows_factory_restarts_stable_launcher_in_background(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    for name in ("DicePP-UpdateGuard.exe", "Update.exe", "DicePP.exe"):
+        (tmp_path / name).write_bytes(name.encode())
+    monkeypatch.setattr(
+        manager_factory,
+        "os",
+        SimpleNamespace(name="nt", environ={}),
+    )
+    service = manager_factory.create_manager_service(
+        ManagerSettings(
+            layout=InstanceLayout.from_root(tmp_path),
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        )
+    )
+    try:
+        adapter = service.upgrade_coordinator.platform_adapter
+        assert isinstance(adapter, WindowsVelopackUpgradeAdapter)
+        assert adapter.restart_command == [
+            str(tmp_path / "DicePP.exe"),
+            "--background",
+        ]
+    finally:
+        service.close()
+
+
 def test_dashboard_probe_requires_semantic_health_and_rejects_404(monkeypatch) -> None:
     error = urllib.error.HTTPError(
         "http://dashboard/api/health",

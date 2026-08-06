@@ -32,7 +32,7 @@ from dicepp_meta import get_version
 from packaging.version import Version
 
 from .archive import ArchiveError, apply_archive, create_archive, estimate_archive
-from .archive_coordinator import ArchiveCoordinator
+from .archive_coordinator import CONTROL_GATE_ENFORCED, ArchiveCoordinator
 from ._file_utils import _atomic_copy, _atomic_json, _read_json_object
 from .deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_DEFAULT_PORT, MANAGER_VERSION
 from .models import ManagerOperation, utc_now
@@ -461,7 +461,7 @@ class WindowsVelopackUpgradeAdapter:
         self.guard_command = list(guard_command)
         self.install_command = list(install_command)
         self.restart_command = list(
-            restart_command or [str(layout.root / "DicePP.exe")]
+            restart_command or [str(layout.root / "DicePP.exe"), "--background"]
         )
         self.process_identity_loader = process_identity_loader
         self.version_loader = version_loader
@@ -1133,11 +1133,9 @@ class UpgradeCoordinator:
             preflight = await self.platform_adapter.preflight(package)
             detail["preflight"] = preflight
             self._phase(operation, detail, "pre_upgrade_archive", 15)
-            baseline, control_required = await self.archive._capture_control_baseline()
+            baseline, control_gate = await self.archive._capture_control_baseline()
             detail["control_heartbeat_baseline"] = baseline
-            detail["control_gate"] = (
-                "enforced" if control_required else "skipped_no_bound_bots"
-            )
+            detail["control_gate"] = control_gate
             with self._maintenance_context(maintenance_lease) as maintenance:
                 original, _ = await self.archive._quiesce(
                     maintenance,
@@ -1203,7 +1201,7 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     original,
                     control_baseline=detail.get("control_heartbeat_baseline"),
-                    control_required=control_required,
+                    control_gate=control_gate,
                 )
                 self._fault("health")
                 detail["health"] = health
@@ -1258,6 +1256,11 @@ class UpgradeCoordinator:
         allow_startup_recovery: bool = False,
     ) -> list[dict[str, Any]]:
         recovered: list[dict[str, Any]] = []
+        # The startup maintenance gate blocks user-submitted operations while
+        # recovery is pending; recovery itself raises that gate below and must
+        # stay exempt from it, otherwise it deadlocks against its own gate and
+        # misrecords the conflict as a rollback failure.
+        recovery_allowed = allow_startup_recovery
         for journal in self.store.list_recoverable_journals():
             if journal.get("kind") != UPGRADE_JOURNAL_KIND:
                 continue
@@ -1332,6 +1335,7 @@ class UpgradeCoordinator:
             )
             if guard_handoff:
                 self.service.set_startup_maintenance_gate(True)
+                recovery_allowed = True
             if (
                 isinstance(authoritative_rollback, dict)
                 and authoritative_rollback.get("status") == "program_rolled_back"
@@ -1341,7 +1345,7 @@ class UpgradeCoordinator:
                     None,
                     detail,
                     validated_rollback_marker=authoritative_rollback,
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 recovered.append(
                     {
@@ -1383,6 +1387,7 @@ class UpgradeCoordinator:
             )
             if preparing_handoff and prepare_windows_handoff_only:
                 self.service.set_startup_maintenance_gate(True)
+                recovery_allowed = True
                 try:
                     prepared = self._publish_started_marker(detail)
                 except BaseException:
@@ -1480,7 +1485,7 @@ class UpgradeCoordinator:
                     operation,
                     package,
                     detail,
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 recovered.append(
                     {
@@ -1494,7 +1499,7 @@ class UpgradeCoordinator:
                 cleanup_error = await self._cleanup_platform_staging(detail)
                 restart_error = await self.archive._best_effort_restart(
                     _string_list(detail.get("original_running")),
-                    allow_startup_recovery=allow_startup_recovery,
+                    allow_startup_recovery=recovery_allowed,
                 )
                 status = (
                     "rolled_back"
@@ -1531,7 +1536,7 @@ class UpgradeCoordinator:
                 operation,
                 package,
                 detail,
-                allow_startup_recovery=allow_startup_recovery,
+                allow_startup_recovery=recovery_allowed,
             )
             operation.transition(
                 "failed",
@@ -1684,8 +1689,8 @@ class UpgradeCoordinator:
                 health = await self.archive._hard_health(
                     _string_list(detail.get("original_running")),
                     control_baseline=detail.get("control_heartbeat_baseline"),
-                    control_required=(
-                        detail.get("control_gate") != "skipped_no_bound_bots"
+                    control_gate=str(
+                        detail.get("control_gate") or CONTROL_GATE_ENFORCED
                     ),
                 )
             detail.update(
@@ -1943,6 +1948,11 @@ class UpgradeCoordinator:
                 "staging_cleanup_error": cleanup_error,
             }
         detail["rollback_status"] = "running"
+        rollback_baseline, rollback_control_gate = (
+            await self.archive._capture_control_baseline()
+        )
+        detail["rollback_control_heartbeat_baseline"] = rollback_baseline
+        detail["rollback_control_gate"] = rollback_control_gate
         self._journal(operation, detail, phase="rolling_back")
         try:
             with self._maintenance_context(
@@ -1983,9 +1993,8 @@ class UpgradeCoordinator:
                 await self.archive._restart(maintenance, original)
                 health = await self.archive._hard_health(
                     original,
-                    control_required=(
-                        detail.get("control_gate") != "skipped_no_bound_bots"
-                    ),
+                    control_baseline=rollback_baseline,
+                    control_gate=rollback_control_gate,
                 )
             result = {
                 "succeeded": True,

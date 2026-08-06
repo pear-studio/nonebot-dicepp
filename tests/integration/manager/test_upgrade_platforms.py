@@ -564,6 +564,145 @@ async def test_windows_guard_markers_are_scoped_to_one_transaction(tmp_path: Pat
     assert first["rollback_marker"] != second["rollback_marker"]
 
 
+def test_windows_default_restart_runs_launcher_in_background(tmp_path: Path) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=["guard.exe"],
+        install_command=["Update.exe", "--package", "{package}"],
+        process_identity_loader=lambda: {},
+    )
+
+    assert adapter.restart_command == [str(layout.root / "DicePP.exe"), "--background"]
+
+
+@pytest.mark.asyncio
+async def test_windows_default_background_restart_reaches_target_and_rollback_guard_paths(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    launcher = layout.root / "DicePP.exe"
+    launcher.write_bytes(b"launcher")
+    package = _windows_package(tmp_path)
+    adapter = WindowsVelopackUpgradeAdapter(
+        layout=layout,
+        guard_command=["guard.exe"],
+        install_command=["vpk", "apply", "{package}"],
+        process_identity_loader=lambda: {
+            "pid": 1,
+            "started_at": "old",
+            "executable": str(launcher.resolve()),
+        },
+        version_loader=lambda: "3.0.0",
+    )
+    monkeypatch.setattr(
+        adapter,
+        "start_guard",
+        lambda _request: (SimpleNamespace(pid=1234), tmp_path / "guard.exe"),
+    )
+
+    async def create_guard_request(transaction_id: str) -> tuple[Path, dict]:
+        transaction_dir = layout.manager_state_dir / "update-guard" / transaction_id
+        transaction_dir.mkdir(parents=True)
+        rollback_package = transaction_dir / "DicePP-3.0.0-full.nupkg"
+        rollback_package.write_bytes(b"rollback")
+        staged = {
+            "request": str(transaction_dir / "request.json"),
+            "guard_marker": str(transaction_dir / "guard.json"),
+            "started_marker": str(transaction_dir / "started.json"),
+            "health_marker": str(transaction_dir / "health.json"),
+            "rollback_marker": str(transaction_dir / "rollback.json"),
+            "rollback_package": str(rollback_package),
+            "rollback_package_sha256": hashlib.sha256(
+                rollback_package.read_bytes()
+            ).hexdigest(),
+        }
+        await adapter.switch(
+            package,
+            current={
+                "source_version": "3.0.0",
+                "process_identity": adapter.process_identity_loader(),
+            },
+            staged=staged,
+            transaction_id=transaction_id,
+        )
+        request_path = Path(staged["request"])
+        return request_path, json.loads(request_path.read_text(encoding="utf-8"))
+
+    expected_restart = [str(launcher), "--background"]
+    target_path, target_request = await create_guard_request("target")
+    target_identity = {
+        "pid": 2,
+        "started_at": "new",
+        "executable": str(launcher.resolve()),
+    }
+    target_started = {
+        "format_version": 2,
+        "transaction_id": "target",
+        "target_version": "3.1.0",
+        "actual_version": "3.1.0",
+        "status": "started",
+        "manager_identity": target_identity,
+    }
+    target_health = {
+        "format_version": 2,
+        "transaction_id": "target",
+        "target_version": "3.1.0",
+        "status": "healthy",
+        "manager_identity": target_identity,
+        "health": {"status": "ok"},
+    }
+    target_starts: list[list[str]] = []
+
+    def start_target(command: list[str]) -> SimpleNamespace:
+        target_starts.append(command)
+        Path(target_request["started_marker"]).write_text(
+            json.dumps(target_started), encoding="utf-8"
+        )
+        Path(target_request["health_marker"]).write_text(
+            json.dumps(target_health), encoding="utf-8"
+        )
+        return SimpleNamespace(pid=2)
+
+    target_result = run_guard(
+        target_path,
+        inspect_identity=lambda _pid: None,
+        run_command=lambda _command: None,
+        start_command=start_target,
+        health_probe=lambda _request: {
+            "ok": True,
+            "dicepp_version": "3.1.0",
+            "upgrade_handoff": target_health,
+        },
+    )
+
+    rollback_path, rollback_request = await create_guard_request("rollback")
+    rollback_commands: list[list[str]] = []
+
+    def fail_target_install(command: list[str]) -> None:
+        rollback_commands.append(command)
+        if command == rollback_request["install_command"]:
+            raise OSError("target install failed")
+
+    rollback_result = run_guard(
+        rollback_path,
+        inspect_identity=lambda _pid: None,
+        run_command=fail_target_install,
+        start_command=rollback_commands.append,
+    )
+
+    assert target_request["restart_command"] == expected_restart
+    assert target_result["status"] == "healthy"
+    assert target_starts == [expected_restart]
+    assert rollback_result["status"] == "program_rolled_back"
+    assert rollback_commands == [
+        rollback_request["install_command"],
+        rollback_request["rollback_command"],
+        expected_restart,
+    ]
+
+
 @pytest.mark.asyncio
 async def test_windows_guard_spawn_persists_child_output_without_creation_flags(
     monkeypatch,

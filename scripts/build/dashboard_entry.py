@@ -4,6 +4,7 @@ import os
 import stat
 import sys
 import tempfile
+import traceback
 
 
 def _quote_command(parts: list[str]) -> str:
@@ -178,6 +179,35 @@ def _validate_seed_directory(
     return info
 
 
+def _is_background_launch(argv: list[str] | None = None) -> bool:
+    arguments = argv if argv is not None else sys.argv[1:]
+    return any(argument in {"--background", "--manager-tray"} for argument in arguments)
+
+
+def _append_bootstrap_failure(app_dir: str, exc: BaseException) -> None:
+    """Best-effort logging before the regular launcher logger exists."""
+    try:
+        program_dir = os.path.abspath(app_dir)
+        install_root = (
+            os.path.dirname(program_dir)
+            if os.path.basename(program_dir).lower() == "current"
+            else program_dir
+        )
+        log_dir = os.path.join(install_root, "data", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "dicepp-runtime.log")
+        with open(log_path, "a", encoding="utf-8") as output:
+            output.write(
+                "launcher | bootstrap fatal error: "
+                f"{type(exc).__name__}: {exc}\n"
+            )
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=output)
+    except BaseException:
+        # The original bootstrap failure remains the authoritative result.
+        # Logging cannot be allowed to mask it during an unattended launch.
+        pass
+
+
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -188,10 +218,16 @@ else:
     app_dir = project_root
 
 
-_launcher_environment = _configure_launcher_environment(app_dir)
-os.chdir(_launcher_environment["DICEPP_PROJECT_ROOT"])
+try:
+    _launcher_environment = _configure_launcher_environment(app_dir)
+    os.chdir(_launcher_environment["DICEPP_PROJECT_ROOT"])
 
-from dashboard.src.launcher import main
+    from dashboard.src.launcher import main
+except Exception as exc:
+    if _is_background_launch():
+        _append_bootstrap_failure(app_dir, exc)
+        raise SystemExit(1) from None
+    raise
 
 
 if __name__ == "__main__":

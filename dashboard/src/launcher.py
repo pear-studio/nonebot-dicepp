@@ -471,15 +471,21 @@ def dashboard_url(settings: DashboardSettings | None = None) -> str:
     return f"http://127.0.0.1:{settings.port}/dashboard"
 
 
-def run_windows_launcher(*, fake_tray: bool = False) -> None:
-    """Start Dashboard, open browser, start runtime once, then run the tray."""
-    log_path = rotate_runtime_log()
-    configure_file_logging(log_path)
-    _install_launcher_excepthook(log_path)
+def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -> None:
+    """Start Dashboard, start runtime once, then run the tray.
+
+    ``background`` keeps the tray available for a user session while avoiding
+    foreground UI from unattended launch paths such as login autostart and the
+    UpdateGuard restart handoff.
+    """
+    log_path = _launcher_fallback_log_path()
     manager_server: ManagedServerHandle | None = None
     dashboard_server: ManagedServerHandle | None = None
     controller: TrayController | None = None
     try:
+        log_path = rotate_runtime_log()
+        configure_file_logging(log_path)
+        _install_launcher_excepthook(log_path)
         append_runtime_log_line("launcher | starting DicePP", path=log_path)
 
         from dashboard.__main__ import ensure_dirs
@@ -535,7 +541,12 @@ def run_windows_launcher(*, fake_tray: bool = False) -> None:
             )
 
         _auto_start_runtime(controller, log_path)
-        if should_open_browser():
+        if background:
+            append_runtime_log_line(
+                "launcher | browser auto-open disabled for background launch",
+                path=log_path,
+            )
+        elif should_open_browser():
             controller.open_dashboard()
         else:
             append_runtime_log_line(
@@ -562,7 +573,8 @@ def run_windows_launcher(*, fake_tray: bool = False) -> None:
             manager_server,
             timeout=10,
         )
-        _record_launcher_exception(log_path, exc)
+        if isinstance(exc, Exception):
+            _record_launcher_exception(log_path, exc)
         raise
 
 
@@ -575,7 +587,12 @@ def build_tray(controller: TrayController, *, fake: bool = False):
 def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--launcher-fake-tray", action="store_true")
-    parser.add_argument("--manager-tray", action="store_true")
+    parser.add_argument(
+        "--background",
+        "--manager-tray",
+        dest="background",
+        action="store_true",
+    )
     parser.add_argument("--autostart", choices=("enable", "disable", "status"))
     args, remaining = parser.parse_known_args()
     if remaining:
@@ -592,7 +609,18 @@ def main() -> None:
             adapter.set_enabled(False)
         print("enabled" if adapter.enabled() else "disabled")
         return
-    run_windows_launcher(fake_tray=args.launcher_fake_tray)
+    try:
+        run_windows_launcher(
+            background=args.background,
+            fake_tray=args.launcher_fake_tray,
+        )
+    except Exception:
+        if args.background:
+            # The launcher has already recorded the exception. Re-raising it
+            # from a windowed PyInstaller entry displays its fatal-error modal,
+            # which is inappropriate for unattended startup paths.
+            raise SystemExit(1) from None
+        raise
 
 
 def _start_dashboard_server(settings: DashboardSettings, log_path: Path) -> ManagedServerHandle:
@@ -728,18 +756,40 @@ def _install_launcher_excepthook(log_path: Path) -> None:
     sys.excepthook = _hook
 
 
+def _launcher_fallback_log_path() -> Path:
+    try:
+        return DashboardPaths.runtime_log_path()
+    except Exception:
+        return Path(tempfile.gettempdir()) / "dicepp-launcher-fallback.log"
+
+
 def _record_launcher_exception(log_path: Path, exc: BaseException) -> None:
     if getattr(exc, "_dicepp_launcher_logged", False):
         return
     setattr(exc, "_dicepp_launcher_logged", True)
-    logger.error(
-        "launcher | fatal error",
-        exc_info=(type(exc), exc, exc.__traceback__),
-    )
-    append_runtime_log_line(
-        f"launcher | fatal error: {type(exc).__name__}: {exc}",
-        path=log_path,
-    )
+    if any(
+        isinstance(handler, logging.FileHandler)
+        for handler in logging.getLogger().handlers
+    ):
+        logger.error(
+            "launcher | fatal error",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    message = f"launcher | fatal error: {type(exc).__name__}: {exc}"
+    try:
+        append_runtime_log_line(message, path=log_path)
+    except Exception:
+        _append_launcher_fallback_line(message)
+
+
+def _append_launcher_fallback_line(message: str) -> None:
+    try:
+        fallback = Path(tempfile.gettempdir()) / "dicepp-launcher-fallback.log"
+        append_runtime_log_line(message, path=fallback)
+    except Exception:
+        # A fatal exception must retain its original failure semantics even if
+        # every usable diagnostic destination is unavailable.
+        pass
 
 
 async def _first_runtime_unit_id(service: ManagerClient) -> str | None:

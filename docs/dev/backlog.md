@@ -22,6 +22,61 @@
 - 问题表现: release 全流程约 10-11 分钟, 其中 quality gate 与 release 各完整构建一遍镜像和 PyInstaller EXE(规格相同, 串行相接, 合计约 4-5 分钟重复); 产物命名三种版本格式混用: Portable/Setup/linux zip 用 tag 格式(v3.0.0rc16, workflow 重命名), nupkg 和 releases/assets feed 用 Velopack SemVer2(3.0.0-rc.16, 原样保留), dicepp-release.json 内 version 又是去 v 的 3.0.0rc16; publish 阶段 docker save ~1.2GB + zstd -19 重压缩约 1 分多钟。
 - 开发备忘: 调查于 2026-07-28(基于 rc15 run 30355233453 / rc16 run 30373296372 实测)。关键位置: .github/workflows/test-suite.yml:111-113 与 release.yml:177-181 的重复 PyInstaller; release.yml:258-264 只重命名 Portable/Setup 不重命名 nupkg; 版本派生逻辑散在 generate_release_manifest.py(velopack_version/velopack_channel)与各 job 的 Extract version info。方向: gate 产物经 artifact 复用或 release 触发时跳过重复 job; 版本派生收进单一脚本统一输出; build-push-action 配 GHA 缓存; zstd 降档或多线程。优化时注意 nupkg/feed 命名是 Velopack 更新 contract 的一部分, 改名需确认 Manager 侧消费兼容。
 
+### [B-260729-78cc61] 同机 Agent 的 Manager HTTP 安全接入
+- 创建: 2026-07-29
+- 优先级: P1
+- 类型: feature
+- 改动量: XL
+- 问题表现:
+    - Windows Manager 已监听 127.0.0.1:4091，但 Linux Compose 中 Manager 只有容器内部 expose，宿主机 Agent 无法通过统一的本机 HTTP 地址调用，只能进入容器或绕行 Dashboard。
+    - Manager 使用长期 Bearer token，但 Windows token 文件目前主要依靠普通文件创建和尽力 chmod，没有显式验证 ACL 是否仅允许当前用户访问。
+    - 现有接口以 Dashboard/部署脚本为主要调用方，机器可读错误结构和 OpenAPI 契约未系统验证，Agent 可能依赖不稳定的响应细节。
+    - 若直接扩大监听范围会把带有运行控制、升级和归档能力的 Manager 暴露到局域网，安全后果明显。
+- 开发备忘:
+    - Linux Compose 仅将 Manager 映射到宿主机回环地址 127.0.0.1:4091，Windows 继续只监听回环地址；不得默认绑定 0.0.0.0。
+    - 继续复用现有长期 Manager Bearer token，不增加账号、角色、远程认证、MCP 服务或独立 diceppctl。
+    - 加固并验证 Windows token 文件 ACL 和 Linux 文件权限，确保只有运行 DicePP 的本机用户可读；token 不得出现在日志、异常正文或普通状态接口中。
+    - 为 Agent 需要的响应、错误码和确认流程建立代码内类型模型、OpenAPI 输出与契约测试，不维护逐端点手写 API 文档。
+    - 仅补充稳定的最小人工说明：本机地址、token 位置、认证头格式和只允许同机访问的安全边界。
+    - 影响面包括 docker-compose 配置、Manager 监听/认证、Windows 权限处理、API 响应模型及集成测试；需要分别验证 Windows 和 Linux 安装形态。
+
+### [B-260729-4cb6ec] Manager 配置读取与统一校验
+- 创建: 2026-07-29
+- 优先级: P1
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+    - Manager 当前只有 PUT /v1/config/user 和 PUT /v1/config/bots/{bot_id}，没有对应 GET，Agent 无法只通过 Manager 完成配置读取与修改闭环。
+    - Dashboard 在自身进程中读取和校验配置，Manager 的 PUT 主要接收任意对象后原子写入；Agent 直接调用时可能绕过 Dashboard 的完整校验。
+    - 配置模型、默认值和错误信息若分别存在于 Dashboard 与 Manager，会形成两套规则并随代码演进产生漂移。
+    - Manager 保存配置后不负责现有 Dashboard WebSocket 热重载，Agent 容易误以为保存已经让 Runtime 即时生效。
+- 开发备忘:
+    - 增加用户配置和单 Bot 配置的 GET 接口，并用类型化响应明确配置来源、保存结果和应用状态。
+    - 将配置解析、默认值补全和完整校验收敛到 Manager 可复用层；Dashboard 和 Agent 均复用同一套规则，避免复制校验逻辑。
+    - PUT 必须先完成校验，再使用现有原子写入机制保存；校验失败不得产生部分修改，并返回稳定的字段级错误。
+    - 在 Bot 控制通道迁移前，Dashboard 保存后继续使用现有热重载；Agent 保存后如果要求立即应用，应显式调用 Runtime 重启，响应中明确 deferred/restart-required 状态。
+    - 当前同一用户通常不会同时操作 Dashboard 和 Agent，暂不增加 revision、ETag、锁服务或复杂冲突合并。
+    - 影响面包括 Manager 配置 API、配置模型/校验、Dashboard 配置读写客户端以及契约和回归测试；应先盘点现有 Dashboard 特有校验，避免迁移时丢失语义。
+
+### [B-260729-817c43] Bot 控制通道由 Dashboard 迁移到 Manager
+- 创建: 2026-07-29
+- 优先级: P1
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+    - Bot Runtime 当前直接连接 Dashboard 的 /ws/control，Dashboard 同时负责心跳、在线状态、重载请求和结果转发。
+    - Manager 为判断 Runtime 控制通道状态需要探测 Dashboard /api/health；当 Dashboard 未启动时，Manager 和同机 Agent 无法直接获得完整状态或触发热重载。
+    - Dashboard 将控制心跳写入 bots_meta 并维护状态事件，导致 UI 服务拥有基础运行控制职责，不利于后台启动、Agent 运维和后续无 Dashboard 部署。
+    - 相关代码横跨 Bot、Dashboard、Manager、Docker 拓扑、升级兼容和大量控制通道测试，若混入配置 API 小改会显著扩大单次改动和回归风险。
+- 开发备忘:
+    - 由 Manager 承载 Bot WebSocket 控制通道、心跳/在线状态、ping/pong、配置重载请求及执行结果，形成与调用方无关的控制协议。
+    - Bot 控制 token 与 Manager HTTP API token 必须保持完全独立；迁移前核实 token 的创建者、存储位置、轮换和升级保留语义。
+    - Bot 改为连接 Manager，调整 Compose 网络、健康门禁、启动顺序和 Manager 状态存储；Manager 健康接口直接基于所持有的控制会话报告状态。
+    - Dashboard 改为通过 Manager 获取状态、订阅事件和发起热重载，切换完成后禁止 Dashboard 直接控制 Bot，并移除旧 /ws/control 和 bots_meta 中的控制通道职责。
+    - 同机 Agent 通过相同 Manager HTTP 能力读取状态和触发重载，不再引入第二套 Agent 专用控制协议。
+    - 制定旧版本 Bot、Dashboard、Manager 混合升级的兼容窗口和失败回退策略，避免升级过程中双方都等待对方或控制通道永久断开。
+    - 补充断线重连、重复会话、心跳超时、重载成功/失败、Dashboard 状态展示、Agent 调用、容器网络及跨版本升级测试。
+
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
