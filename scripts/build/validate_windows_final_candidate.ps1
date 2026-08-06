@@ -118,10 +118,47 @@ try {
     }
     Invoke-DetachedLaunchSmoke $stableDashboard
 } finally {
-    if ($null -ne $installer -and -not $installer.HasExited) {
-        taskkill /PID $installer.Id /T /F | Out-Null
-    }
     if (Test-Path -LiteralPath $installRoot) {
         Remove-Item -LiteralPath $installRoot -Recurse -Force
+    }
+}
+
+# The declaration is intentionally the last write: every listed byte has passed
+# the complete Portable, Setup, hook and detached-launch validation above.
+if ($ValidatedSummaryPath) {
+    $summaryPath = [System.IO.Path]::GetFullPath($ValidatedSummaryPath)
+    $summaryParent = Split-Path -Parent $summaryPath
+    if (-not $summaryParent) {
+        throw "Validated summary path must have a parent directory"
+    }
+    New-Item -ItemType Directory -Path $summaryParent -Force | Out-Null
+    $records = @(
+        foreach ($name in ($expectedNames | Sort-Object)) {
+            $path = Join-Path $artifactRootPath $name
+            $item = Get-Item -LiteralPath $path
+            [ordered]@{
+                filename = $name
+                size = $item.Length
+                sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+    )
+    $summary = [ordered]@{
+        contract_version = 1
+        artifacts = $records
+    }
+    $temporarySummary = Join-Path $summaryParent ".$(Split-Path -Leaf $summaryPath).$([guid]::NewGuid()).tmp"
+    try {
+        $json = $summary | ConvertTo-Json -Depth 4
+        [System.IO.File]::WriteAllText(
+            $temporarySummary,
+            "$json`n",
+            [System.Text.UTF8Encoding]::new($false)
+        )
+        Move-Item -LiteralPath $temporarySummary -Destination $summaryPath -Force
+    } finally {
+        if (Test-Path -LiteralPath $temporarySummary -PathType Leaf) {
+            Remove-Item -LiteralPath $temporarySummary -Force
+        }
     }
 }

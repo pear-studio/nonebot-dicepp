@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  echo "usage: $0 TAG PACKAGE_ZIP RUNTIME_IMAGE_ID DASHBOARD_IMAGE_ID" >&2
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+  echo "usage: $0 TAG PACKAGE_ZIP RUNTIME_IMAGE_ID DASHBOARD_IMAGE_ID [VALIDATED_SUMMARY]" >&2
   exit 2
 fi
 
@@ -10,6 +10,7 @@ TAG="$1"
 PACKAGE_ZIP="$2"
 EXPECTED_BOT_IMAGE_ID="$3"
 EXPECTED_DASHBOARD_IMAGE_ID="$4"
+VALIDATED_SUMMARY="${5:-}"
 BOT_IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
 DASHBOARD_IMAGE="ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
 
@@ -30,6 +31,15 @@ if [[ ! "$EXPECTED_BOT_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] \
 fi
 if [ ! -f "$PACKAGE_ZIP" ]; then
   echo "final Linux bundle is missing: $PACKAGE_ZIP" >&2
+  exit 2
+fi
+if [ -L "$PACKAGE_ZIP" ]; then
+  echo "final Linux bundle must not be a symbolic link: $PACKAGE_ZIP" >&2
+  exit 2
+fi
+EXPECTED_PACKAGE_NAME="DicePP-${TAG}-linux-amd64.zip"
+if [ "$(basename -- "$PACKAGE_ZIP")" != "$EXPECTED_PACKAGE_NAME" ]; then
+  echo "final Linux bundle name differs from the release contract" >&2
   exit 2
 fi
 
@@ -53,6 +63,7 @@ fi
 SMOKE_ROOT_IDENTITY="$(stat -Lc '%d:%i' -- "$SMOKE_ROOT")"
 SMOKE_PROJECT="dicepp-final-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
 SMOKE_COMPOSE="${SMOKE_ROOT}/smoke-compose.json"
+DIAGNOSTICS_ROOT="${CANDIDATE_DIAGNOSTICS_ROOT:-}"
 
 validate_smoke_root_for_removal() {
   if [ -L "$SMOKE_ROOT" ] || [ ! -d "$SMOKE_ROOT" ]; then
@@ -69,10 +80,45 @@ validate_smoke_root_for_removal() {
     && [ "$identity" = "$SMOKE_ROOT_IDENTITY" ]
 }
 
+capture_failure_diagnostics() {
+  if [ -z "$DIAGNOSTICS_ROOT" ]; then
+    return 0
+  fi
+  if ! mkdir -p -- "$DIAGNOSTICS_ROOT"; then
+    echo "failed to create candidate diagnostics directory" >&2
+    return 0
+  fi
+  if [ -f "$SMOKE_COMPOSE" ]; then
+    if ! timeout 30s docker compose \
+      --project-name "$SMOKE_PROJECT" \
+      -f "$SMOKE_COMPOSE" ps --all --no-trunc \
+      > "${DIAGNOSTICS_ROOT}/compose-ps.txt" 2>&1; then
+      echo "failed to capture Compose process state" \
+        > "${DIAGNOSTICS_ROOT}/compose-ps-error.txt"
+    fi
+    if ! timeout 30s docker compose \
+      --project-name "$SMOKE_PROJECT" \
+      -f "$SMOKE_COMPOSE" logs --no-color --timestamps \
+      > "${DIAGNOSTICS_ROOT}/compose.log" 2>&1; then
+      echo "failed to capture Compose logs" \
+        > "${DIAGNOSTICS_ROOT}/compose-log-error.txt"
+    fi
+  fi
+  if ! find "$SMOKE_ROOT" -maxdepth 4 -printf '%y %p %s bytes\n' \
+    > "${DIAGNOSTICS_ROOT}/extracted-tree.txt" 2>&1; then
+    echo "failed to capture extracted package tree" \
+      > "${DIAGNOSTICS_ROOT}/extracted-tree-error.txt"
+  fi
+  return 0
+}
+
 cleanup() {
   local main_status=$?
   local cleanup_status=0
   trap - EXIT
+  if [ "$main_status" -ne 0 ]; then
+    capture_failure_diagnostics
+  fi
   if [ -f "$SMOKE_COMPOSE" ]; then
     if ! timeout 60s docker compose \
       --project-name "$SMOKE_PROJECT" \
@@ -253,3 +299,19 @@ for service in dashboard manager; do
     exit 1
   fi
 done
+
+if [ -n "$VALIDATED_SUMMARY" ]; then
+  SUMMARY_PARENT="$(dirname -- "$VALIDATED_SUMMARY")"
+  mkdir -p -- "$SUMMARY_PARENT"
+  SUMMARY_TEMP="$(mktemp "${SUMMARY_PARENT%/}/.validated-linux.XXXXXX")"
+  PACKAGE_SIZE="$(stat -Lc '%s' -- "$PACKAGE_ZIP")"
+  PACKAGE_SHA256="$(sha256sum -- "$PACKAGE_ZIP" | cut -d ' ' -f 1)"
+  if [[ ! "$PACKAGE_SIZE" =~ ^[1-9][0-9]*$ ]] \
+    || [[ ! "$PACKAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "failed to declare validated Linux bundle identity" >&2
+    exit 1
+  fi
+  printf '{\n  "contract_version": 1,\n  "artifacts": [\n    {"filename": "%s", "size": %s, "sha256": "%s"}\n  ]\n}\n' \
+    "$EXPECTED_PACKAGE_NAME" "$PACKAGE_SIZE" "$PACKAGE_SHA256" > "$SUMMARY_TEMP"
+  mv -f -- "$SUMMARY_TEMP" "$VALIDATED_SUMMARY"
+fi
