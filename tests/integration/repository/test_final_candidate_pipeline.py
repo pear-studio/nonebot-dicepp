@@ -43,9 +43,19 @@ def test_candidate_is_bound_to_an_explicit_current_master_head() -> None:
         "Reject an ambiguous target commit",
     )["run"]
 
-    assert set(dispatch["inputs"]) == {"version", "commit_sha"}
+    assert set(dispatch["inputs"]) == {
+        "version",
+        "commit_sha",
+        "exercise_upgrade_matrix",
+    }
     assert dispatch["inputs"]["version"]["required"] is True
     assert dispatch["inputs"]["commit_sha"]["required"] is True
+    assert dispatch["inputs"]["exercise_upgrade_matrix"] == {
+        "description": "Exercise upgrade matrices without adding evidence to release assets",
+        "required": False,
+        "default": False,
+        "type": "boolean",
+    }
     assert "^[0-9a-f]{40}$" in guard
     assert '"$WORKFLOW_SHA" != "$INPUT_COMMIT_SHA"' in guard
     assert '"$GITHUB_REF" != "refs/heads/master"' in guard

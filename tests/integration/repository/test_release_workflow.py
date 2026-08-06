@@ -1,6 +1,8 @@
+import ast
 import json
 import re
 import tomllib
+from itertools import product
 from pathlib import Path
 
 import yaml
@@ -13,6 +15,7 @@ ROOT = next(
 )
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 CANDIDATE_WORKFLOW = ROOT / ".github" / "workflows" / "candidate.yml"
+TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
 SYNC_WORKFLOW = ROOT / ".github" / "workflows" / "sync2gitee.yml"
 PYPROJECT = ROOT / "pyproject.toml"
 RELEASE_README = ROOT / "docs" / "releases" / "README.md"
@@ -41,6 +44,74 @@ def _step(path: Path, job_name: str, step_name: str) -> dict:
 
 def _job_text(path: Path, job_name: str) -> str:
     return yaml.safe_dump(_job(path, job_name), sort_keys=False)
+
+
+def _evaluate_github_gate(expression: str, values: dict[str, object]) -> bool:
+    rendered = expression
+    for name in sorted(values, key=len, reverse=True):
+        rendered = rendered.replace(name, repr(values[name]))
+    rendered = rendered.replace("always()", "True")
+    rendered = rendered.replace("&&", " and ").replace("||", " or ")
+    rendered = re.sub(r"(?<!['\"])\btrue\b(?!['\"])", "True", rendered)
+    rendered = re.sub(r"(?<!['\"])\bfalse\b(?!['\"])", "False", rendered)
+    tree = ast.parse(rendered, mode="eval")
+    allowed = (
+        ast.Expression,
+        ast.BoolOp,
+        ast.And,
+        ast.Or,
+        ast.Compare,
+        ast.Eq,
+        ast.NotEq,
+        ast.Constant,
+    )
+    assert all(isinstance(node, allowed) for node in ast.walk(tree)), rendered
+
+    def evaluate(node: ast.AST) -> object:
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.BoolOp):
+            items = [bool(evaluate(item)) for item in node.values]
+            return all(items) if isinstance(node.op, ast.And) else any(items)
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            left = evaluate(node.left)
+            right = evaluate(node.comparators[0])
+            return left == right if isinstance(node.ops[0], ast.Eq) else left != right
+        raise AssertionError(f"unsupported gate node: {ast.dump(node)}")
+
+    return bool(evaluate(tree))
+
+
+def test_windows_candidate_excludes_transient_runtime_state_symmetrically():
+    cleanup = _step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Record release candidate provenance",
+    )["run"]
+    upload = _step(
+        TEST_SUITE_WORKFLOW,
+        "windows-package",
+        "Upload release-ready Windows candidate",
+    )["with"]["path"]
+
+    for path in (
+        "dist/DicePP/manager/state/api-token",
+        "dist/DicePP/manager/control",
+        "dist/DicePP/manager/packages",
+    ):
+        assert f'"{path}"' in cleanup
+    for exclusion in (
+        "!dist/DicePP/manager/state/api-token",
+        "!dist/DicePP/manager/control/**",
+        "!dist/DicePP/manager/packages/**",
+    ):
+        assert exclusion in upload
+
+
+def test_windows_upgrade_matrix_has_bounded_job_timeout():
+    assert _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")["timeout-minutes"] == 60
 
 
 def test_promotion_requires_an_explicit_candidate_run_and_artifact_per_version():
@@ -389,7 +460,6 @@ def test_upgrade_evidence_is_produced_from_both_final_platform_artifacts_before_
     assert "linux-bundle=" in linux_run
     assert "check-readiness" in windows_run
     assert "check-readiness" in linux_run
-    candidate_text = CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
     assert "${{ vars." not in windows_run
     assert "${{ vars." not in linux_run
     runner_text = (
@@ -398,6 +468,119 @@ def test_upgrade_evidence_is_produced_from_both_final_platform_artifacts_before_
     assert "windows_upgrade_matrix_harness.py" in runner_text
     assert "linux_upgrade_matrix_harness.py" in runner_text
     assert assemble.count("--platform-result") == 2
+
+
+def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
+    workflow = _workflow(CANDIDATE_WORKFLOW)
+    dispatch = _trigger(workflow, "workflow_dispatch")
+    exercise = dispatch["inputs"]["exercise_upgrade_matrix"]
+    windows = _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")
+    linux = _job(CANDIDATE_WORKFLOW, "linux-upgrade-matrix")
+    evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
+
+    assert exercise == {
+        "description": "Exercise upgrade matrices without adding evidence to release assets",
+        "required": False,
+        "default": False,
+        "type": "boolean",
+    }
+    matrix_condition = (
+        "needs.candidate-metadata.outputs.automatic_upgrade == 'true' || "
+        "inputs.exercise_upgrade_matrix == true"
+    )
+    assert windows["if"] == matrix_condition
+    assert linux["if"] == matrix_condition
+
+    combinations = {
+        (False, False): False,
+        (False, True): True,
+        (True, False): True,
+        (True, True): True,
+    }
+    for (automatic_upgrade, validation_only), expected in combinations.items():
+        terms = {
+            "needs.candidate-metadata.outputs.automatic_upgrade == 'true'": (
+                automatic_upgrade
+            ),
+            "inputs.exercise_upgrade_matrix == true": validation_only,
+        }
+        actual = any(terms[term.strip()] for term in matrix_condition.split("||"))
+        assert actual is expected
+
+    evidence_gate = evidence["if"]
+    for automatic_upgrade, exercise_matrix, windows_success, linux_success in product(
+        (False, True), repeat=4
+    ):
+        actual = _evaluate_github_gate(
+            evidence_gate,
+            {
+                "needs.candidate-metadata.result": "success",
+                "needs.candidate-metadata.outputs.automatic_upgrade": (
+                    "true" if automatic_upgrade else "false"
+                ),
+                "inputs.exercise_upgrade_matrix": exercise_matrix,
+                "needs.windows-upgrade-matrix.result": (
+                    "success" if windows_success else "failure"
+                ),
+                "needs.linux-upgrade-matrix.result": (
+                    "success" if linux_success else "failure"
+                ),
+            },
+        )
+        requested = automatic_upgrade or exercise_matrix
+        expected = not requested or (windows_success and linux_success)
+        assert actual is expected, (
+            automatic_upgrade,
+            exercise_matrix,
+            windows_success,
+            linux_success,
+        )
+    assert {step["if"] for step in evidence["steps"]} == {matrix_condition}
+    assemble = _step(
+        CANDIDATE_WORKFLOW,
+        "upgrade-evidence",
+        "Assemble closed cross-version evidence",
+    )["run"]
+    assert "--target-commit-sha" in assemble
+    assert assemble.count("--candidate") == 3
+    assert assemble.count("--platform-result") == 2
+    assert "continue-on-error" not in windows
+    assert "continue-on-error" not in linux
+
+
+def test_validation_only_evidence_never_enters_receipt_or_release_assets():
+    receipt = _job(CANDIDATE_WORKFLOW, "receipt")
+    receipt_text = json.dumps(receipt)
+    download = _step(
+        CANDIDATE_WORKFLOW,
+        "receipt",
+        "Download commit-bound upgrade evidence",
+    )
+    stage = _step(
+        CANDIDATE_WORKFLOW,
+        "receipt",
+        "Stage every final GitHub Release asset",
+    )
+
+    assert "exercise_upgrade_matrix" not in receipt_text
+    assert download["if"] == (
+        "needs.candidate-metadata.outputs.automatic_upgrade == 'true'"
+    )
+    assert 'if [ "$AUTOMATIC_UPGRADE" = "true" ]; then' in stage["run"]
+    assert "dicepp-upgrade-evidence.json" in stage["run"]
+
+
+def test_linux_upgrade_diagnostics_exclude_runtime_credentials() -> None:
+    upload = _step(
+        CANDIDATE_WORKFLOW,
+        "linux-upgrade-matrix",
+        "Upload Linux matrix result and diagnostics",
+    )
+    assert "exclude" not in upload["with"]
+    paths = upload["with"]["path"]
+    assert "!dist/upgrade-work/**/manager/state/api-token" in paths
+    assert "!dist/upgrade-work/**/manager/control/**" in paths
+    assert "!dist/upgrade-work/**/manager/docker-proxy.sock" in paths
 
 
 def test_final_candidate_upload_identity_is_run_attempt_unique_and_auditable():

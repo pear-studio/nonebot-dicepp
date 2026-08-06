@@ -111,16 +111,10 @@
     - Windows 真实升级与故障回退目前依赖 `.temp` 下的一次性验收 harness；已验证的 pre-bump 候选与公开 rc19 二进制、同一实例回退后再次升级仍需明确区分，尚未成为固定 Release 门禁。
     - 影响后果是 `automatic_upgrade: yes` 的版本可能在公开发布后才发现旧 Manager/Guard 无法消费新请求，严重时需要人工恢复。
 - 开发备忘:
-    - 当前状态（2026-08-03）：协议 registry、固定 rc17/rc19 来源资产及 SHA、闭合四场景 evidence contract、最终 Candidate 字节绑定、Receipt/Promotion 完整复验和 Candidate 双平台 job 已实现；任何字段、版本、场景、候选身份或最终资产篡改都会 fail closed。
-    - 当前有意保持 `automatic_upgrade: yes` 不可达：registry 的 `manager_upgrade_journal` 标记为 `pending_real_rc17_export`，且仓库内固定 Windows/Linux harness 在真实编排实现前只返回 `unavailable`。不得用 repo variable、任意命令、手写 journal 或模拟通过结果绕开。
-    - 建立真实 `adapter.stage() → switch() → scan/load/resume` producer-consumer 契约测试；正常请求必须由生产 producer 生成，只有畸形和攻击样本允许手工 mutation。
-    - 在 `tests/fixtures/update_guard/` 保存 `v2-direct`、`rc17-staged` 等不可变 golden protocol fixtures，使用路径占位符并记录期望事务树；当前 consumer 必须读取全部仍受支持的历史变体。
-    - 盘点 request、guard/started/health/rollback marker、journal、release manifest、bundle manifest 和 deployment schema，逐项记录 producer、consumer、format version、支持周期及门禁测试；目录语义变化必须新增协议版本或显式布局字段。
-    - 建立上一受支持版本→当前候选的 Windows/Linux E2E：正常健康提交、目标启动后健康失败自动回退、同一实例回退后再次升级、Velopack apply 失败且目标代码从未执行。
-    - 普通 PR 跑低成本 producer-consumer 与 golden tests；涉及 Manager/UpdateGuard/Velopack/发布协议的 PR、nightly 和 Release 跑真实旧二进制矩阵，并固定下载资产 SHA-256。
-    - `automatic_upgrade: yes` 必须绑定当前 SHA 的跨版本验证证据；证据缺失或受支持旧制品不可获得时只能发布为 `automatic_upgrade: no`。
-    - 剩余实现：从带明确 tag/commit/asset provenance 的真实 rc17 数据库导出 Manager journal fixture；在仓库固定 Windows/Linux harness 中编排四个真实场景；在最终冻结 SHA 上运行并保存双平台 evidence。
-    - 关闭条件：真实 journal fixture 被当前 `UpgradeCoordinator.recover` 消费；Windows/Linux 所有受支持来源的四场景均由真实旧制品与最终 Candidate 字节执行并通过；Candidate、Receipt、Promotion 的 fail-closed 行为在冻结 SHA 上完成外部验收。
+    - 当前状态（2026-08-04）：Windows/Linux 固定 harness、四场景、资产 purpose、`source < target`、诊断秘密脱敏及真实 process/Docker 观测均已实现。v3.0.0rc20 作为新的公开基线，不再保留 rc17 Manager journal fixture 或承诺历史 RC journal 兼容。
+    - 当前 rc19 → rc20 矩阵仅作为 Final Candidate 的功能压力测试，不构成正式支持窗口；未来正式版策略仅维护“上一正式版 → 当前正式版”。
+    - 剩余验收：在最终冻结 SHA 的 rc20 Candidate 上运行 Windows/Linux 真实 validation-only CI/E2E；矩阵失败必须关闭 Candidate，验证证据不得进入 `automatic_upgrade: no` 的 Receipt 或 Release assets，并完成外部验收。完成前本条保持 open。
+    - 关闭条件：上述最终 Candidate 双平台真实矩阵与冻结 SHA 外部验收全部通过。
 
 ## persona
 

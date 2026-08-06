@@ -18,6 +18,11 @@ on:
         description: Full lowercase 40-character source commit SHA
         required: true
         type: string
+      exercise_upgrade_matrix:
+        description: Exercise upgrade matrices without adding evidence to release assets
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -388,8 +393,11 @@ jobs:
 
   windows-upgrade-matrix:
     name: Exercise Final Windows Bytes From Supported Sources
-    if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+    if: >-
+      needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+      inputs.exercise_upgrade_matrix == true
     runs-on: windows-latest
+    timeout-minutes: 60
     needs: [candidate-metadata, windows-final]
     permissions:
       contents: read
@@ -434,8 +442,11 @@ jobs:
 
   linux-upgrade-matrix:
     name: Exercise Final Linux Bytes From Supported Sources
-    if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+    if: >-
+      needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+      inputs.exercise_upgrade_matrix == true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [candidate-metadata, linux-final]
     permissions:
       contents: read
@@ -446,6 +457,12 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
+      - name: Install zstd for image archive decompression
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
+      - name: Diagnose Docker and zstd toolchain
+        run: |
+          zstd --version
+          docker compose version
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dicepp-final-linux-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -473,6 +490,11 @@ jobs:
           path: |
             dist/upgrade-result
             dist/upgrade-work
+            !dist/upgrade-work/**/manager/state/api-token
+            !dist/upgrade-work/**/manager/control/**
+            !dist/upgrade-work/**/manager/docker-proxy.sock
+            !dist/upgrade-work/**/*-images/**
+            !dist/upgrade-work/**/manager/packages/**
           if-no-files-found: error
           retention-days: 30
 
@@ -481,7 +503,8 @@ jobs:
     if: >-
       always() &&
       needs.candidate-metadata.result == 'success' &&
-      (needs.candidate-metadata.outputs.automatic_upgrade != 'true' ||
+      ((needs.candidate-metadata.outputs.automatic_upgrade != 'true' &&
+        inputs.exercise_upgrade_matrix != true) ||
        (needs.windows-upgrade-matrix.result == 'success' &&
         needs.linux-upgrade-matrix.result == 'success'))
     runs-on: ubuntu-latest
@@ -494,16 +517,22 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        if: >-
+          needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+          inputs.exercise_upgrade_matrix == true
         with:
           ref: ${{ needs.candidate-metadata.outputs.commit_sha }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        if: >-
+          needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+          inputs.exercise_upgrade_matrix == true
         with:
           pattern: dicepp-upgrade-result-*-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/platform-results
       - name: Assemble closed cross-version evidence
-        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        if: >-
+          needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+          inputs.exercise_upgrade_matrix == true
         run: |
           set -euo pipefail
           python scripts/build/upgrade_matrix_runner.py assemble \
@@ -517,7 +546,9 @@ jobs:
             --platform-result dist/platform-results/dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}/upgrade-result/linux.json \
             --output dist/upgrade-evidence/evidence.json
       - name: Upload commit-and-final-byte-bound upgrade evidence
-        if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+        if: >-
+          needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+          inputs.exercise_upgrade_matrix == true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dicepp-upgrade-evidence

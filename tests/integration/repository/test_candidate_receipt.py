@@ -110,7 +110,7 @@ def _upgrade_matrix() -> dict:
     )
 
 
-def _scenario_result(name: str, source_version: str) -> dict:
+def _scenario_result(name: str, source_version: str, platform: str) -> dict:
     records = {
         "healthy_commit": (
             {
@@ -139,7 +139,9 @@ def _scenario_result(name: str, source_version: str) -> dict:
                 "target_version_observed": VERSION,
                 "restored_version": source_version,
                 "journal_status": "rolled_back",
-                "rollback_marker_status": "program_rolled_back",
+                "rollback_marker_status": (
+                    "program_rolled_back" if platform == "windows" else "restored"
+                ),
             },
         ),
         "retry_after_rollback": (
@@ -166,7 +168,7 @@ def _scenario_result(name: str, source_version: str) -> dict:
             {
                 "target_process_start_count": 0,
                 "source_version_after": source_version,
-                "journal_status": "aborted_before_switch",
+                "journal_status": "rolled_back",
                 "apply_exit_code": 17,
             },
         ),
@@ -218,11 +220,17 @@ def _canonical_upgrade_evidence(root: Path) -> dict:
                 "arch": source["arch"],
                 "source_version": source["source_version"],
                 "source_assets": [
-                    {"name": asset["name"], "sha256": asset["sha256"]}
+                    {
+                        "purpose": asset["purpose"],
+                        "name": asset["name"],
+                        "sha256": asset["sha256"],
+                    }
                     for asset in source["assets"]
                 ],
                 "scenarios": [
-                    _scenario_result(name, source["source_version"])
+                    _scenario_result(
+                        name, source["source_version"], source["platform"]
+                    )
                     for name in REQUIRED_SCENARIOS
                 ],
             }

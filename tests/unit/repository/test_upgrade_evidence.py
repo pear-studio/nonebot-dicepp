@@ -57,21 +57,37 @@ def _matrix() -> dict:
         "required_scenarios": list(REQUIRED_SCENARIOS),
         "supported_sources": [
             {
-                "platform": platform,
+                "platform": "windows",
                 "arch": "amd64",
                 "source_version": "3.0.0rc19",
                 "assets": [
                     {
-                        "name": asset_name,
-                        "url": f"https://example.invalid/{asset_name}",
+                        "purpose": "portable",
+                        "name": "source-windows-portable.zip",
+                        "url": "https://example.invalid/source-windows-portable.zip",
+                        "sha256": SOURCE_SHA,
+                    },
+                    {
+                        "purpose": "velopack-bundle",
+                        "name": "velopack.win-x64.zip",
+                        "url": "https://example.invalid/velopack.win-x64.zip",
+                        "sha256": "a" * 64,
+                    },
+                ],
+            },
+            {
+                "platform": "linux",
+                "arch": "amd64",
+                "source_version": "3.0.0rc19",
+                "assets": [
+                    {
+                        "purpose": "linux-bundle",
+                        "name": "source-linux.zip",
+                        "url": "https://example.invalid/source-linux.zip",
                         "sha256": SOURCE_SHA,
                     }
                 ],
-            }
-            for platform, asset_name in (
-                ("windows", "DicePP-v3.0.0rc19-win64-Portable.zip"),
-                ("linux", "DicePP-v3.0.0rc19-linux-amd64.zip"),
-            )
+            },
         ],
     }
 
@@ -132,7 +148,7 @@ def _evidence(matrix: dict) -> dict:
             "observations": {
                 "target_process_start_count": 0,
                 "source_version_after": "3.0.0rc19",
-                "journal_status": "aborted_before_switch",
+                "journal_status": "rolled_back",
                 "apply_exit_code": 17,
             },
         },
@@ -162,7 +178,11 @@ def _evidence(matrix: dict) -> dict:
                 "arch": source["arch"],
                 "source_version": source["source_version"],
                 "source_assets": [
-                    {"name": asset["name"], "sha256": asset["sha256"]}
+                    {
+                        "purpose": asset["purpose"],
+                        "name": asset["name"],
+                        "sha256": asset["sha256"],
+                    }
                     for asset in source["assets"]
                 ],
                 "scenarios": [
@@ -170,6 +190,15 @@ def _evidence(matrix: dict) -> dict:
                         "name": name,
                         "status": "passed",
                         **scenario_records[name],
+                        "observations": {
+                            **scenario_records[name]["observations"],
+                            **(
+                                {"rollback_marker_status": "restored"}
+                                if source["platform"] == "linux"
+                                and name == "target_health_failure_rollback"
+                                else {}
+                            ),
+                        },
                     }
                     for name in REQUIRED_SCENARIOS
                 ],
@@ -211,6 +240,29 @@ def test_complete_evidence_binds_commit_candidates_sources_and_scenarios() -> No
         "windows",
         "linux",
     }
+
+
+@pytest.mark.parametrize(
+    ("platform", "wrong_status"),
+    [("windows", "restored"), ("linux", "program_rolled_back")],
+)
+def test_health_rollback_marker_status_is_platform_specific(
+    platform: str, wrong_status: str
+) -> None:
+    matrix = _matrix()
+    evidence = _evidence(matrix)
+    result = next(item for item in evidence["results"] if item["platform"] == platform)
+    result["scenarios"][1]["observations"]["rollback_marker_status"] = wrong_status
+
+    with pytest.raises(ValueError, match="health rollback observations"):
+        validate_upgrade_evidence(
+            evidence,
+            matrix=matrix,
+            target_version="3.1.0",
+            target_commit_sha=COMMIT_SHA,
+            target_candidate_identities=CANDIDATES,
+            target_final_assets=FINAL_ASSETS,
+        )
 
 
 @pytest.mark.parametrize(
@@ -420,27 +472,27 @@ def test_tracked_registry_and_functional_rc_matrix_are_complete() -> None:
     validate_upgrade_matrix_coverage(validate_upgrade_matrix(matrix))
 
     assert {
-        (row["platform"], row["source_version"], row["assets"][0]["sha256"])
+        (
+            row["platform"],
+            row["source_version"],
+            tuple((asset["purpose"], asset["sha256"]) for asset in row["assets"]),
+        )
         for row in matrix["supported_sources"]
     } == {
         (
             "windows",
-            "3.0.0rc17",
-            "a5aec34c8ffd35e409bdaddcf4eee3bc6b3142ad496005a8e44769be3d488b13",
-        ),
-        (
-            "windows",
             "3.0.0rc19",
-            "8caa1e9ad82edb5b6c486ba997a57cfe2f12e08a5841e735325f06276d188106",
+            (
+                ("portable", "8caa1e9ad82edb5b6c486ba997a57cfe2f12e08a5841e735325f06276d188106"),
+                ("velopack-bundle", "d85fe18c3b05af1eeab21cc8baa589244eda0b8b7bbeedbb3bf5a0081943c0ff"),
+            ),
         ),
         (
             "linux",
             "3.0.0rc19",
-            "2d1cc5452112abab31baba9e9d4d276a344bf8534b0c2098b35078d56e4d5dd6",
+            (("linux-bundle", "2d1cc5452112abab31baba9e9d4d276a344bf8534b0c2098b35078d56e4d5dd6"),),
         ),
     }
-    with pytest.raises(
-        ValueError,
-        match="verification is incomplete: manager_upgrade_journal",
-    ):
-        validate_upgrade_protocol_registry_ready(registry)
+    # All seven contracts are now verified; readiness must pass.
+    validated = validate_upgrade_protocol_registry_ready(registry)
+    assert validated is registry

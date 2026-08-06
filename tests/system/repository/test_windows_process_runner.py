@@ -40,6 +40,7 @@ def _run_harness(script: str) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=30,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -160,6 +161,7 @@ def test_windows_runner_timeout_terminates_the_owned_descendant_tree(
 $child = Start-Process `
     -FilePath (Get-Command pwsh).Source `
     -ArgumentList @('-NoProfile', '-EncodedCommand', '{sleeping_child}') `
+    -WindowStyle Hidden `
     -PassThru
 [System.IO.File]::WriteAllText('{_ps_literal(child_pid_path)}', [string]$child.Id)
 Start-Sleep -Seconds 60

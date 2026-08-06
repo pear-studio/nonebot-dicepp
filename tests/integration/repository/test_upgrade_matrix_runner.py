@@ -30,7 +30,13 @@ def _sha(payload: bytes) -> str:
 
 
 def _prepare(tmp_path: Path) -> tuple[Path, Path, dict[str, list[str]]]:
-    source_payloads = {"windows": b"old-windows", "linux": b"old-linux"}
+    source_payloads = {
+        "windows": [
+            ("portable", "source-windows.zip", b"old-windows"),
+            ("velopack-bundle", "source-velopack.zip", b"old-velopack"),
+        ],
+        "linux": [("linux-bundle", "source-linux.zip", b"old-linux")],
+    }
     matrix = {
         "contract_version": 1,
         "required_platforms": [
@@ -45,22 +51,25 @@ def _prepare(tmp_path: Path) -> tuple[Path, Path, dict[str, list[str]]]:
                 "source_version": "3.0.0rc19",
                 "assets": [
                     {
-                        "name": f"source-{platform}.zip",
-                        "url": f"https://example.invalid/source-{platform}.zip",
+                        "purpose": purpose,
+                        "name": name,
+                        "url": f"https://example.invalid/{name}",
                         "sha256": _sha(payload),
                     }
+                    for purpose, name, payload in records
                 ],
             }
-            for platform, payload in source_payloads.items()
+            for platform, records in source_payloads.items()
         ],
     }
     matrix_path = tmp_path / "matrix.json"
     matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
     cache = tmp_path / "cache"
-    for platform, payload in source_payloads.items():
-        path = cache / "3.0.0rc19" / f"source-{platform}.zip"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(payload)
+    for records in source_payloads.values():
+        for _purpose, name, payload in records:
+            path = cache / "3.0.0rc19" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
     assets: dict[str, list[str]] = {"windows": [], "linux": []}
     for platform, purpose, filename in (
         ("linux", "linux-bundle", "target-linux.zip"),
@@ -93,7 +102,11 @@ def _fake_harness_run(command, *, cwd, check):
             "target_version_observed": context["target_version"],
             "restored_version": context["source_version"],
             "journal_status": "rolled_back",
-            "rollback_marker_status": "program_rolled_back",
+            "rollback_marker_status": (
+                "program_rolled_back"
+                if context["platform"] == "windows"
+                else "restored"
+            ),
         },
         "retry_after_rollback": {
             "first_transaction_status": "rolled_back",
@@ -103,7 +116,7 @@ def _fake_harness_run(command, *, cwd, check):
         "apply_failure_before_target_execution": {
             "target_process_start_count": 0,
             "source_version_after": context["source_version"],
-            "journal_status": "aborted_before_switch",
+            "journal_status": "rolled_back",
             "apply_exit_code": 17,
         },
     }
@@ -216,6 +229,29 @@ def test_failed_behavioral_assertion_cannot_be_recorded_as_evidence(
         )
 
 
+def test_runner_rejects_same_or_newer_source_before_harness_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    matrix, cache, assets = _prepare(tmp_path)
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("harness must not run for a non-upgrade version pair")
+
+    monkeypatch.setattr(matrix_runner.subprocess, "run", must_not_run)
+    with pytest.raises(ValueError, match="must be older"):
+        run_platform(
+            matrix_path=matrix,
+            platform="windows",
+            arch="amd64",
+            target_version="3.0.0rc19",
+            target_commit_sha=COMMIT_SHA,
+            target_asset_specs=assets["windows"],
+            source_cache=cache,
+            work_root=tmp_path / "windows-work",
+            output=tmp_path / "result.json",
+        )
+
+
 def test_runner_rejects_harness_version_observation_outside_matrix_cell(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -303,4 +339,7 @@ def test_tracked_platform_entrypoint_fails_closed_until_real_e2e_exists(
     )
     assert unavailable["status"] == "unavailable"
     assert unavailable["assertions"] == {}
-    assert "not implemented" in unavailable["observations"]["reason"]
+    # The harness must provide a reason; the exact text depends on which
+    # prerequisite is missing (Docker, valid bundles, etc.).
+    assert isinstance(unavailable["observations"].get("reason"), str)
+    assert len(unavailable["observations"]["reason"]) > 0

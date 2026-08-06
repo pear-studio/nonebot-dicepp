@@ -437,6 +437,16 @@ jobs:
         id: record-candidate
         shell: pwsh
         run: |
+          $runtimeState = @(
+            "dist/DicePP/manager/state/api-token",
+            "dist/DicePP/manager/control",
+            "dist/DicePP/manager/packages"
+          )
+          foreach ($path in $runtimeState) {
+            if (Test-Path -LiteralPath $path) {
+              Remove-Item -LiteralPath $path -Recurse -Force
+            }
+          }
           $actualCommit = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actualCommit -notmatch '^[0-9a-f]{40}$') {
             throw "Unable to resolve the checked-out commit"
@@ -467,6 +477,9 @@ jobs:
           name: dicepp-windows-candidate
           path: |
             dist/DicePP
+            !dist/DicePP/manager/state/api-token
+            !dist/DicePP/manager/control/**
+            !dist/DicePP/manager/packages/**
             dist/windows-candidate.json
           include-hidden-files: true
           if-no-files-found: error
