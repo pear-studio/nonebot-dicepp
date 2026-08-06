@@ -8,6 +8,7 @@
 #       DicePP-<tag>-linux-amd64.zip
 #       velopack.win-x64.zip（Manager/UpdateGuard machine bundle）
 #       dicepp-release.json（Manager machine contract）
+#       dicepp-upgrade-evidence.json（仅 automatic_upgrade=yes）
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
 #       docker-compose.yml、Windows 安装产物和 Linux 发布包作为 release assets
 
@@ -33,6 +34,7 @@ jobs:
       channel: ${{ steps.release.outputs.channel }}
       velopack_version: ${{ steps.release.outputs.velopack_version }}
       velopack_channel: ${{ steps.release.outputs.velopack_channel }}
+      automatic_upgrade: ${{ steps.release.outputs.automatic_upgrade }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,10 +60,45 @@ jobs:
       release_version: ${{ needs.release-metadata.outputs.version }}
       release_commit_sha: ${{ needs.release-metadata.outputs.commit_sha }}
 
+  upgrade-evidence-gate:
+    name: Verify Cross-version Upgrade Evidence
+    runs-on: ubuntu-latest
+    needs: [release-metadata, quality-gate]
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.24"
+      - name: Download commit-bound upgrade evidence
+        if: needs.release-metadata.outputs.automatic_upgrade == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: dicepp-upgrade-evidence
+          path: dist/upgrade-evidence
+      - name: Require evidence before publishing automatic upgrades
+        if: needs.release-metadata.outputs.automatic_upgrade == 'true'
+        run: |
+          PYTHONPATH=src uv run --frozen python scripts/build/upgrade_evidence.py verify-release \
+            --version "${{ needs.release-metadata.outputs.version }}" \
+            --release-notes "docs/releases/${{ needs.release-metadata.outputs.tag }}.md" \
+            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}" \
+            --candidate "linux:runtime-manifest:${{ needs.quality-gate.outputs.runtime_candidate_digest }}" \
+            --candidate "linux:dashboard-manifest:${{ needs.quality-gate.outputs.dashboard_candidate_digest }}" \
+            --candidate "windows:package-tree:${{ needs.quality-gate.outputs.windows_candidate_digest }}" \
+            --matrix scripts/build/upgrade_matrix.json \
+            --evidence dist/upgrade-evidence/evidence.json
+
   promote-docker:
     name: Promote Tested Container Candidates
     runs-on: ubuntu-latest
-    needs: [release-metadata, quality-gate]
+    needs: [release-metadata, quality-gate, upgrade-evidence-gate]
     outputs:
       runtime_digest: ${{ steps.promote.outputs.runtime_digest }}
       runtime_image_id: ${{ steps.promote.outputs.runtime_image_id }}
@@ -148,7 +185,7 @@ jobs:
   windows-build:
     name: Package Windows Candidate
     runs-on: windows-latest
-    needs: [release-metadata, quality-gate]
+    needs: [release-metadata, quality-gate, upgrade-evidence-gate]
     steps:
       - uses: actions/checkout@v4
 
@@ -171,7 +208,8 @@ jobs:
             --path dist/windows-candidate.json `
             --tag "${{ needs.release-metadata.outputs.tag }}" `
             --version "${{ needs.release-metadata.outputs.version }}" `
-            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}"
+            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}" `
+            --package-root dist/DicePP
 
           $requiredExecutables = @(
             "dist/DicePP/DicePP.exe",
@@ -376,7 +414,8 @@ jobs:
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [release-metadata, promote-docker, windows-build]
+    needs:
+      [release-metadata, quality-gate, upgrade-evidence-gate, promote-docker, windows-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -387,6 +426,13 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "0.5.24"
+
+      - name: Download commit-bound upgrade evidence
+        if: needs.release-metadata.outputs.automatic_upgrade == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dicepp-upgrade-evidence
+          path: dist/upgrade-evidence
 
       - uses: actions/download-artifact@v4
         with:
@@ -675,10 +721,21 @@ jobs:
             --version "${{ needs.release-metadata.outputs.version }}" \
             --channel "${{ needs.release-metadata.outputs.channel }}" \
             --release-notes "docs/releases/${{ needs.release-metadata.outputs.tag }}.md" \
+            --commit-sha "${{ needs.release-metadata.outputs.commit_sha }}" \
+            --candidate "linux:runtime-manifest:${{ needs.quality-gate.outputs.runtime_candidate_digest }}" \
+            --candidate "linux:dashboard-manifest:${{ needs.quality-gate.outputs.dashboard_candidate_digest }}" \
+            --candidate "windows:package-tree:${{ needs.quality-gate.outputs.windows_candidate_digest }}" \
+            --upgrade-matrix scripts/build/upgrade_matrix.json \
+            --upgrade-evidence dist/upgrade-evidence/evidence.json \
             --artifact "windows:amd64:portable:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Portable.zip" \
             --artifact "windows:amd64:setup:DicePP-${{ needs.release-metadata.outputs.tag }}-win64-Setup.exe" \
             --artifact "windows:amd64:velopack-bundle:velopack.win-x64.zip" \
             --artifact "linux:amd64:linux-bundle:DicePP-${{ needs.release-metadata.outputs.tag }}-linux-amd64.zip"
+
+      - name: Stage verified upgrade evidence for audit
+        if: needs.release-metadata.outputs.automatic_upgrade == 'true'
+        run: |
+          cp dist/upgrade-evidence/evidence.json dicepp-upgrade-evidence.json
 
       - name: Create GitHub Release
         env:
@@ -699,6 +756,9 @@ jobs:
             "dicepp-release.json"
             "docker-compose.yml"
           )
+          if [ "${{ needs.release-metadata.outputs.automatic_upgrade }}" = "true" ]; then
+            ASSETS+=("dicepp-upgrade-evidence.json")
+          fi
           for asset in "${ASSETS[@]}"; do
             if [ ! -f "$asset" ]; then
               echo "Missing final release asset: $asset"

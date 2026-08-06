@@ -31,6 +31,18 @@ try:
     )
 except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
     from release_metadata import ReleaseMetadata, parse_release_metadata
+try:
+    from scripts.build.upgrade_evidence import (
+        CandidateIdentity,
+        parse_candidate_identity,
+        verify_release,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
+    from upgrade_evidence import (
+        CandidateIdentity,
+        parse_candidate_identity,
+        verify_release,
+    )
 
 
 def artifact_record(spec: str) -> dict:
@@ -63,6 +75,11 @@ def build_manifest(
     channel: str,
     artifacts: list[dict],
     metadata: ReleaseMetadata,
+    commit_sha: str | None = None,
+    candidate_identities: list[CandidateIdentity] | None = None,
+    upgrade_matrix: Path | None = None,
+    upgrade_evidence: Path | None = None,
+    release_notes: Path | None = None,
 ) -> dict:
     normalized_version = str(Version(version.removeprefix("v")))
     if metadata.version != normalized_version:
@@ -85,7 +102,21 @@ def build_manifest(
             ]
         },
     }
-    return validate_release_manifest(payload)
+    validated = validate_release_manifest(payload)
+    if metadata.automatic_upgrade:
+        if None in {commit_sha, upgrade_matrix, upgrade_evidence, release_notes}:
+            raise ValueError(
+                "automatic_upgrade requires commit-bound cross-version evidence"
+            )
+        verify_release(
+            release_notes=release_notes,
+            version=version,
+            commit_sha=commit_sha,
+            candidate_identities=candidate_identities or [],
+            matrix_path=upgrade_matrix,
+            evidence_path=upgrade_evidence,
+        )
+    return validated
 
 
 def main() -> int:
@@ -93,6 +124,19 @@ def main() -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--channel", choices=("stable", "prerelease"), required=True)
     parser.add_argument("--release-notes", type=Path, required=True)
+    parser.add_argument("--commit-sha")
+    parser.add_argument(
+        "--candidate",
+        action="append",
+        default=[],
+        help="PLATFORM:NAME:SHA256 identity used by upgrade evidence",
+    )
+    parser.add_argument(
+        "--upgrade-matrix",
+        type=Path,
+        default=Path("scripts/build/upgrade_matrix.json"),
+    )
+    parser.add_argument("--upgrade-evidence", type=Path)
     parser.add_argument(
         "--artifact",
         action="append",
@@ -110,6 +154,13 @@ def main() -> int:
         channel=args.channel,
         artifacts=[artifact_record(value) for value in args.artifact],
         metadata=metadata,
+        commit_sha=args.commit_sha,
+        candidate_identities=[
+            parse_candidate_identity(value) for value in args.candidate
+        ],
+        upgrade_matrix=args.upgrade_matrix,
+        upgrade_evidence=args.upgrade_evidence,
+        release_notes=args.release_notes,
     )
     args.output.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",

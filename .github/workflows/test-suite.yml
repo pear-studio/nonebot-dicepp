@@ -27,6 +27,9 @@ on:
       dashboard_candidate_image_id:
         description: Tested Dashboard/Manager candidate Docker image ID
         value: ${{ jobs.dashboard-image.outputs.candidate_image_id }}
+      windows_candidate_digest:
+        description: SHA-256 identity of the tested Windows package tree
+        value: ${{ jobs.windows-package.outputs.candidate_digest }}
     inputs:
       release_tag:
         description: Release tag for publishable Windows and container candidates
@@ -323,6 +326,8 @@ jobs:
     needs: quick
     permissions:
       contents: read
+    outputs:
+      candidate_digest: ${{ steps.record-candidate.outputs.package_tree_sha256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -408,6 +413,7 @@ jobs:
           uv run pytest tests/system/package/windows -n0 --tb=short -q
       - name: Record release candidate provenance
         if: inputs.release_tag != ''
+        id: record-candidate
         shell: pwsh
         run: |
           $actualCommit = (git rev-parse HEAD).Trim()
@@ -419,7 +425,9 @@ jobs:
             --tag "${{ inputs.release_tag }}" `
             --version "${{ inputs.release_version }}" `
             --expected-commit-sha "${{ inputs.release_commit_sha }}" `
-            --actual-commit-sha "$actualCommit"
+            --actual-commit-sha "$actualCommit" `
+            --package-root dist/DicePP `
+            --github-output "$env:GITHUB_OUTPUT"
       - name: Package artifact
         if: inputs.release_tag == ''
         shell: pwsh

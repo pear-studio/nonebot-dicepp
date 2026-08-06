@@ -35,7 +35,7 @@ def _create_release_script() -> str:
     return _workflow_step(RELEASE_WORKFLOW, "publish", "Create GitHub Release")["run"]
 
 
-def test_create_release_uploads_the_exact_six_asset_contract():
+def test_create_release_adds_auditable_evidence_only_for_automatic_upgrade():
     script = _create_release_script()
 
     for asset in (
@@ -48,6 +48,11 @@ def test_create_release_uploads_the_exact_six_asset_contract():
     ):
         assert f'"{asset}"' in script
     assert 'for asset in "${ASSETS[@]}"' in script
+    assert (
+        'if [ "${{ needs.release-metadata.outputs.automatic_upgrade }}" = "true" ]'
+        in script
+    )
+    assert 'ASSETS+=("dicepp-upgrade-evidence.json")' in script
     assert 'ASSETS+=("$RELEASE_MD")' not in script
     assert "DicePP-*-linux-amd64-images.tar.zst" not in script
     assert "ASSETS+=(docs/linux.md)" not in script
@@ -253,6 +258,69 @@ def test_release_manifest_is_generated_after_all_platform_artifacts():
     assert "windows:amd64:setup:" in script
     assert "windows:amd64:velopack-bundle:velopack.win-x64.zip" in script
     assert "linux:amd64:linux-bundle:" in script
+    assert '--commit-sha "${{ needs.release-metadata.outputs.commit_sha }}"' in script
+    assert "linux:runtime-manifest:" in script
+    assert "linux:dashboard-manifest:" in script
+    assert "windows:package-tree:" in script
+    assert "--upgrade-matrix scripts/build/upgrade_matrix.json" in script
+    assert "--upgrade-evidence dist/upgrade-evidence/evidence.json" in script
+
+
+def test_automatic_upgrade_evidence_is_required_before_public_promotion():
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    gate = release["jobs"]["upgrade-evidence-gate"]
+    steps = gate["steps"]
+    download = next(
+        step
+        for step in steps
+        if step.get("name") == "Download commit-bound upgrade evidence"
+    )
+    verify = next(
+        step
+        for step in steps
+        if step.get("name") == "Require evidence before publishing automatic upgrades"
+    )
+
+    assert set(gate["needs"]) == {"release-metadata", "quality-gate"}
+    assert gate["permissions"] == {"actions": "read", "contents": "read"}
+    automatic_upgrade = (
+        "needs.release-metadata.outputs.automatic_upgrade == 'true'"
+    )
+    assert download["if"] == automatic_upgrade
+    assert download["continue-on-error"] is True
+    assert download["with"] == {
+        "name": "dicepp-upgrade-evidence",
+        "path": "dist/upgrade-evidence",
+    }
+    assert verify["if"] == automatic_upgrade
+    assert "upgrade_evidence.py verify-release" in verify["run"]
+    assert "needs.quality-gate.outputs.runtime_candidate_digest" in verify["run"]
+    assert "needs.quality-gate.outputs.dashboard_candidate_digest" in verify["run"]
+    assert "needs.quality-gate.outputs.windows_candidate_digest" in verify["run"]
+    assert verify["run"].count("--candidate ") == 3
+    for key in (
+        "linux:runtime-manifest:",
+        "linux:dashboard-manifest:",
+        "windows:package-tree:",
+    ):
+        assert verify["run"].count(key) == 1
+    for job_name in ("promote-docker", "windows-build"):
+        assert "upgrade-evidence-gate" in release["jobs"][job_name]["needs"]
+
+    publish_steps = release["jobs"]["publish"]["steps"]
+    stage = next(
+        step
+        for step in publish_steps
+        if step.get("name") == "Stage verified upgrade evidence for audit"
+    )
+    assert stage["if"] == automatic_upgrade
+    assert (
+        "cp dist/upgrade-evidence/evidence.json dicepp-upgrade-evidence.json"
+        in stage["run"]
+    )
+    names = [step.get("name") for step in publish_steps]
+    assert names.index("Generate release machine contract") < names.index(stage["name"])
+    assert names.index(stage["name"]) < names.index("Create GitHub Release")
 
 
 def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
@@ -341,6 +409,10 @@ def test_release_gate_publishes_only_images_that_passed_the_image_smokes():
         for role in ("runtime", "dashboard")
         for field in ("ref", "digest", "image_id")
     }
+    expected_outputs["windows_candidate_digest"] = {
+        "description": "SHA-256 identity of the tested Windows package tree",
+        "value": "${{ jobs.windows-package.outputs.candidate_digest }}",
+    }
     assert call["outputs"] == expected_outputs
     assert gate["permissions"] == {"contents": "read", "packages": "write"}
 
@@ -419,7 +491,11 @@ def test_release_promotes_candidate_manifest_digests_without_rebuilding():
     )["run"]
     normalized = " ".join(script.replace("\\\n", "").split())
 
-    assert set(promotion["needs"]) == {"release-metadata", "quality-gate"}
+    assert set(promotion["needs"]) == {
+        "release-metadata",
+        "quality-gate",
+        "upgrade-evidence-gate",
+    }
     assert promotion["outputs"] == {
         "runtime_digest": "${{ steps.promote.outputs.runtime_digest }}",
         "runtime_image_id": "${{ steps.promote.outputs.runtime_image_id }}",
@@ -559,6 +635,7 @@ def test_release_packages_the_exact_windows_candidate_tested_by_the_gate():
             "channel",
             "velopack_version",
             "velopack_channel",
+            "automatic_upgrade",
         )
     }
     assert gate["needs"] == "release-metadata"
@@ -596,11 +673,14 @@ def test_release_packages_the_exact_windows_candidate_tested_by_the_gate():
     )
 
     assert record["if"] == "inputs.release_tag != ''"
+    assert record["id"] == "record-candidate"
     assert record["shell"] == "pwsh"
     assert "$actualCommit = (git rev-parse HEAD).Trim()" in record["run"]
     assert "uv run --frozen python" in record["run"]
     assert "--expected-commit-sha \"${{ inputs.release_commit_sha }}\"" in record["run"]
     assert '--actual-commit-sha "$actualCommit"' in record["run"]
+    assert "--package-root dist/DicePP" in record["run"]
+    assert '--github-output "$env:GITHUB_OUTPUT"' in record["run"]
     assert "${{ github.sha }}" not in record["run"]
     assert upload["with"]["name"] == "dicepp-windows-candidate"
     assert set(upload["with"]["path"].splitlines()) == {
@@ -615,6 +695,7 @@ def test_release_packages_the_exact_windows_candidate_tested_by_the_gate():
     }
     for field in ("tag", "version", "commit_sha"):
         assert f"${{{{ needs.release-metadata.outputs.{field} }}}}" in validate["run"]
+    assert "--package-root dist/DicePP" in validate["run"]
 
 
 def test_release_jobs_consume_one_validated_metadata_derivation():

@@ -9,6 +9,7 @@ import pytest
 from scripts.build.release_build_metadata import (
     build_windows_candidate_metadata,
     derive_release_build_metadata,
+    package_tree_sha256,
     validate_windows_candidate_metadata,
 )
 
@@ -42,7 +43,18 @@ def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
     notes = tmp_path / "notes"
     notes.mkdir()
     (notes / f"v{version}.md").write_text(
-        f"# v{version}\n\nRelease notes.\n",
+        f"""# v{version}
+
+- 镜像: ghcr.io/pear-studio/nonebot-dicepp:v{version}
+- Windows: DicePP-v{version}-win64-Portable.zip
+- 数据变更: no
+- 配置变更: no
+- 变更范围: runtime
+- 自动升级: no
+- 最低 Manager 版本: 1.0
+
+## Changed
+""",
         encoding="utf-8",
     )
 
@@ -60,6 +72,7 @@ def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
     assert metadata.is_prerelease is is_prerelease
     assert metadata.velopack_version == velopack_version
     assert metadata.velopack_channel == velopack_channel
+    assert metadata.automatic_upgrade is False
 
 
 def test_release_build_metadata_rejects_a_tag_that_differs_from_project(
@@ -79,12 +92,16 @@ def test_release_build_metadata_rejects_a_tag_that_differs_from_project(
 def test_windows_candidate_provenance_round_trip_rejects_another_commit(
     tmp_path: Path,
 ) -> None:
+    package_root = tmp_path / "DicePP"
+    package_root.mkdir()
+    (package_root / "DicePP.exe").write_bytes(b"candidate")
     candidate = build_windows_candidate_metadata(
         tag="v3.1.0rc7",
         version="3.1.0rc7",
         expected_commit_sha=COMMIT_SHA,
         actual_commit_sha=COMMIT_SHA,
         python_version="3.11",
+        package_tree_digest=package_tree_sha256(package_root),
     )
     path = tmp_path / "windows-candidate.json"
     path.write_text(json.dumps(asdict(candidate)), encoding="utf-8")
@@ -95,6 +112,7 @@ def test_windows_candidate_provenance_round_trip_rejects_another_commit(
             tag="v3.1.0rc7",
             version="3.1.0rc7",
             commit_sha=COMMIT_SHA,
+            package_root=package_root,
         )
         == candidate
     )
@@ -105,6 +123,7 @@ def test_windows_candidate_provenance_round_trip_rejects_another_commit(
             tag="v3.1.0rc7",
             version="3.1.0rc7",
             commit_sha="2" * 40,
+            package_root=package_root,
         )
 
 
@@ -116,4 +135,34 @@ def test_windows_candidate_rejects_a_different_checked_out_commit() -> None:
             expected_commit_sha=COMMIT_SHA,
             actual_commit_sha="2" * 40,
             python_version="3.11",
+            package_tree_digest="3" * 64,
+        )
+
+
+def test_windows_candidate_rejects_package_changed_after_quality_gate(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "DicePP"
+    package_root.mkdir()
+    executable = package_root / "DicePP.exe"
+    executable.write_bytes(b"tested")
+    candidate = build_windows_candidate_metadata(
+        tag="v3.1.0",
+        version="3.1.0",
+        expected_commit_sha=COMMIT_SHA,
+        actual_commit_sha=COMMIT_SHA,
+        python_version="3.11",
+        package_tree_digest=package_tree_sha256(package_root),
+    )
+    path = tmp_path / "windows-candidate.json"
+    path.write_text(json.dumps(asdict(candidate)), encoding="utf-8")
+    executable.write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="differs from tested provenance"):
+        validate_windows_candidate_metadata(
+            path,
+            tag="v3.1.0",
+            version="3.1.0",
+            commit_sha=COMMIT_SHA,
+            package_root=package_root,
         )

@@ -67,3 +67,34 @@ def test_outer_release_contract_rejects_automatic_manager_change(
                 minimum_manager_version="1.0",
             ),
         )
+
+
+def test_automatic_upgrade_manifest_requires_commit_bound_matrix_evidence(
+    tmp_path,
+) -> None:
+    linux = tmp_path / "package.zip"
+    velopack = tmp_path / "velopack.win-x64.zip"
+    linux.write_bytes(b"linux package")
+    velopack.write_bytes(b"velopack bundle")
+
+    with pytest.raises(
+        ValueError, match="commit-bound cross-version evidence"
+    ):
+        build_manifest(
+            version="v3.1.0",
+            channel="stable",
+            artifacts=[
+                artifact_record(f"linux:amd64:linux-bundle:{linux}"),
+                artifact_record(
+                    f"windows:amd64:velopack-bundle:{velopack}"
+                ),
+            ],
+            metadata=ReleaseMetadata(
+                version="3.1.0",
+                data_changed=False,
+                config_changed=False,
+                change_scope=("runtime",),
+                automatic_upgrade=True,
+                minimum_manager_version="1.0",
+            ),
+        )

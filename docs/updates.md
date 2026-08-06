@@ -123,6 +123,21 @@ Velopack 安装布局，Manager 会在修改程序或数据之前拒绝自动安
 字段缺失或冲突会让发布失败。该标志、部署 schema 或最低 Manager 任一不兼容
 时仍可展示 Release 和具体原因，但不能下载或进入可安装状态。
 
+发布流程还会在公开提升容器 tag 和生成 Release 之前读取
+`scripts/build/upgrade_matrix.json`，并要求 CI 产出 `dicepp-upgrade-evidence`。
+矩阵必须为 Windows amd64 与 Linux amd64 固定每个仍受支持来源版本的 HTTPS
+资产和 SHA-256；证据必须绑定目标版本、完整 Git commit、Runtime/Dashboard
+容器 manifest 与 Windows 测试包目录摘要，并逐项通过健康提交、目标健康失败
+回退、回退后重试、以及目标代码从未执行的 apply 失败四个场景。来源资产摘要、
+候选身份、平台覆盖或任一场景不匹配都会拒绝 `automatic_upgrade: yes`。
+`automatic_upgrade: no` 不需要这份证据。当前矩阵没有受支持来源，reusable
+Quality Gate 也尚未包含 evidence producer；因此 `automatic_upgrade: yes`
+目前有意不可达，而不会用手工或模拟结果冒充跨版本验收。未来只有真实
+Windows/Linux runner 完成矩阵场景后，才能在 reusable quality workflow 中上传
+同名 `dicepp-upgrade-evidence` artifact。Release workflow 复验通过后会把原始
+证据以稳定名称 `dicepp-upgrade-evidence.json` 随 Release 发布，供后续审计目标
+commit、三个候选身份、来源资产摘要与场景结果。
+
 Windows amd64 Release 包含：
 
 - `DicePP-vX.Y.Z-win64-Portable.zip`

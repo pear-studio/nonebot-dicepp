@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -11,8 +12,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TextIO
 
+try:
+    from scripts.build.release_metadata import parse_release_metadata
+except ModuleNotFoundError:  # Direct ``python scripts/build/...`` execution.
+    from release_metadata import parse_release_metadata
 
-WINDOWS_CANDIDATE_CONTRACT_VERSION = 1
+
+WINDOWS_CANDIDATE_CONTRACT_VERSION = 2
 WINDOWS_CANDIDATE_PYTHON = "3.11"
 _TAG_PATTERN = re.compile(
     r"^v(?P<base>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"
@@ -30,6 +36,7 @@ class ReleaseBuildMetadata:
     channel: str
     velopack_version: str
     velopack_channel: str
+    automatic_upgrade: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,39 @@ class WindowsCandidateMetadata:
     version: str
     commit_sha: str
     python_version: str
+    package_tree_sha256: str
+
+
+def package_tree_sha256(package_root: Path) -> str:
+    """Hash every regular package file and its relative path deterministically."""
+    if not package_root.is_dir():
+        raise ValueError("Windows candidate package root is not a directory")
+    records: list[dict[str, object]] = []
+    for path in sorted(package_root.rglob("*"), key=lambda item: item.as_posix()):
+        if path.is_symlink():
+            raise ValueError("Windows candidate package tree contains a symlink")
+        if not path.is_file():
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        records.append(
+            {
+                "path": path.relative_to(package_root).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": digest.hexdigest(),
+            }
+        )
+    if not records:
+        raise ValueError("Windows candidate package tree is empty")
+    canonical = json.dumps(
+        records,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def velopack_version(version: str) -> str:
@@ -87,6 +127,7 @@ def derive_release_build_metadata(
             f"release tag {tag} does not match project version {project_version}"
         )
 
+    automatic_upgrade = False
     if release_notes_dir is not None:
         notes = release_notes_dir / f"{tag}.md"
         if not notes.is_file():
@@ -94,6 +135,10 @@ def derive_release_build_metadata(
         first_line = notes.read_text(encoding="utf-8").splitlines()[:1]
         if first_line != [f"# {tag}"]:
             raise ValueError(f"release notes title must be '# {tag}'")
+        automatic_upgrade = parse_release_metadata(
+            notes,
+            expected_version=tag,
+        ).automatic_upgrade
 
     is_prerelease = match["pre"] is not None
     channel = "prerelease" if is_prerelease else "stable"
@@ -105,6 +150,7 @@ def derive_release_build_metadata(
         channel=channel,
         velopack_version=velopack_version(tag),
         velopack_channel=velopack_channel(channel, "amd64"),
+        automatic_upgrade=automatic_upgrade,
     )
 
 
@@ -115,6 +161,7 @@ def build_windows_candidate_metadata(
     expected_commit_sha: str,
     actual_commit_sha: str,
     python_version: str,
+    package_tree_digest: str,
 ) -> WindowsCandidateMetadata:
     _match_release_tag(tag)
     _validate_commit_sha(expected_commit_sha)
@@ -127,6 +174,8 @@ def build_windows_candidate_metadata(
         raise ValueError(
             f"Windows candidate must use Python {WINDOWS_CANDIDATE_PYTHON}"
         )
+    if re.fullmatch(r"[0-9a-f]{64}", package_tree_digest) is None:
+        raise ValueError("Windows candidate package tree digest is invalid")
     return WindowsCandidateMetadata(
         contract_version=WINDOWS_CANDIDATE_CONTRACT_VERSION,
         platform="windows",
@@ -135,6 +184,7 @@ def build_windows_candidate_metadata(
         version=version,
         commit_sha=actual_commit_sha,
         python_version=python_version,
+        package_tree_sha256=package_tree_digest,
     )
 
 
@@ -144,23 +194,37 @@ def validate_windows_candidate_metadata(
     tag: str,
     version: str,
     commit_sha: str,
+    package_root: Path | None = None,
 ) -> WindowsCandidateMetadata:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("Windows candidate metadata is unreadable") from exc
-    expected = WindowsCandidateMetadata(
-        contract_version=WINDOWS_CANDIDATE_CONTRACT_VERSION,
-        platform="windows",
-        arch="amd64",
-        tag=tag,
-        version=version,
-        commit_sha=commit_sha,
-        python_version=WINDOWS_CANDIDATE_PYTHON,
-    )
-    if payload != asdict(expected):
+    fixed_fields = {
+        "contract_version": WINDOWS_CANDIDATE_CONTRACT_VERSION,
+        "platform": "windows",
+        "arch": "amd64",
+        "tag": tag,
+        "version": version,
+        "commit_sha": commit_sha,
+        "python_version": WINDOWS_CANDIDATE_PYTHON,
+    }
+    if any(payload.get(key) != value for key, value in fixed_fields.items()):
         raise ValueError("Windows candidate metadata does not match this release")
-    return expected
+    tree_digest = payload.get("package_tree_sha256")
+    if (
+        not isinstance(tree_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", tree_digest) is None
+    ):
+        raise ValueError("Windows candidate metadata has an invalid package tree digest")
+    if set(payload) != {*fixed_fields, "package_tree_sha256"}:
+        raise ValueError("Windows candidate metadata does not match this release")
+    if (
+        package_root is not None
+        and package_tree_sha256(package_root) != tree_digest
+    ):
+        raise ValueError("Windows candidate package tree differs from tested provenance")
+    return WindowsCandidateMetadata(**payload)
 
 
 def write_github_outputs(
@@ -215,12 +279,15 @@ def _build_parser() -> argparse.ArgumentParser:
     write_candidate.add_argument("--version", required=True)
     write_candidate.add_argument("--expected-commit-sha", required=True)
     write_candidate.add_argument("--actual-commit-sha", required=True)
+    write_candidate.add_argument("--package-root", type=Path, required=True)
+    write_candidate.add_argument("--github-output", type=Path)
 
     validate_candidate = subparsers.add_parser("validate-windows-candidate")
     validate_candidate.add_argument("--path", type=Path, required=True)
     validate_candidate.add_argument("--tag", required=True)
     validate_candidate.add_argument("--version", required=True)
     validate_candidate.add_argument("--commit-sha", required=True)
+    validate_candidate.add_argument("--package-root", type=Path, required=True)
     return parser
 
 
@@ -243,8 +310,12 @@ def main() -> int:
             expected_commit_sha=args.expected_commit_sha,
             actual_commit_sha=args.actual_commit_sha,
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+            package_tree_digest=package_tree_sha256(args.package_root),
         )
         _write_json(args.output, asdict(metadata))
+        if args.github_output is not None:
+            with args.github_output.open("a", encoding="utf-8") as output:
+                output.write(f"package_tree_sha256={metadata.package_tree_sha256}\n")
         return 0
     if args.command == "validate-windows-candidate":
         validate_windows_candidate_metadata(
@@ -252,6 +323,7 @@ def main() -> int:
             tag=args.tag,
             version=args.version,
             commit_sha=args.commit_sha,
+            package_root=args.package_root,
         )
         return 0
     raise AssertionError(f"unsupported command: {args.command}")

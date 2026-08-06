@@ -98,6 +98,24 @@
 
 ## manager
 
+### [B-260802-eb74ca] 修正功能回退成功被控制心跳误判为 rollback_failed
+- 创建: 2026-08-02
+- 优先级: P0
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - Linux fresh rc17→公开 rc19 故障注入验收中，程序镜像、配置、数据、schema 和 Runtime 均已恢复，事务 marker/request 也已清理，但 operation journal 仍记录 `rollback_status=failed`。
+    - 故障注入在 confirm 前 24 秒关闭控制通道；回退捕获 baseline 时末次心跳约 70 秒旧，仍小于 `heartbeat_timeout=120s`。`ControlChannelService.probe()` 只按历史心跳年龄返回 ok，没有表达 authenticated websocket 已断开，导致 rollback control gate 被错误设为 enforced。
+    - post-rollback control heartbeat 不可能前进后，`upgrade.py` 将整个回退持久化为 `rollback_failed`；后续恢复可能据此报告 `manual_recovery_required`、保留事务资产并误导运维，尽管程序与数据实际已经安全恢复。
+    - 现有回归只覆盖断开后 heartbeat 已过期约 3600 秒的场景，没有覆盖 fresh-but-disconnected 的 120 秒竞态，也没有区分 restoration success 与 post-rollback control health。
+- 开发备忘:
+    - 为 ControlChannel 维护线程可读的不可变 active-session snapshot，至少记录当前 authenticated session 数与当前 session 的最新 heartbeat；connect、replace、disconnect、heartbeat 均必须更新，多 Bot 下不得由已断开 Bot 的历史心跳遮蔽真实状态。
+    - `_capture_control_baseline()` 仅在当前确有 authenticated session 且其心跳新鲜时选择 enforced，不得只依据历史 heartbeat age；不要通过单纯扩大超时或按 rollback 阶段无条件豁免规避问题。
+    - 分离 restoration 与 post-rollback control health：程序、数据、schema 和 Runtime 本地恢复成功时记录 `rollback_status=succeeded`、`rolled_back=true`；控制通道未恢复单独记录 degraded/failed warning。只有程序、数据、schema 或 Runtime 本地恢复失败才进入 `rollback_failed/manual_recovery_required`。
+    - 保持首次目标升级后的 control gate fail-closed；切换前存在 active session 而目标未重连时，升级仍必须失败并触发回退。
+    - 补充 fresh heartbeat 后断开、多 Bot session 切换、回退后重连并产生新心跳、永久断开但本地恢复成功、本地恢复真实失败等回归测试。
+    - 关联 `B-260802-3e3e23` 的跨版本矩阵与 `B-260731-b6f811` 的长期事务重构，但本 bug 应独立优先修复并在 v3.0 正式版前完成 Linux 定向复验。
+
 ### [B-260802-3e3e23] 建立持久化升级协议契约与跨版本升级回退矩阵
 - 创建: 2026-08-02
 - 优先级: P0
