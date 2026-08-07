@@ -1084,6 +1084,69 @@ def _read_bundle_manifest(bundle_path: Path) -> dict[str, Any]:
     return manifest
 
 
+def _copy_validation_bundle(
+    source: Path,
+    destination: Path,
+    manifest: dict[str, Any],
+) -> None:
+    """Copy final bytes, enabling only the isolated validation policy gate.
+
+    A manual-migration candidate has ``automatic_upgrade=false`` in its final
+    manifest, so the Manager correctly refuses to enter the upgrade adapter.
+    The validation-only matrix is deliberately non-promotable: it derives a
+    package inside the excluded Manager package directory with that single
+    policy bit enabled, while retaining the final compose and image bytes.
+    """
+    automatic_upgrade = manifest.get("automatic_upgrade")
+    if type(automatic_upgrade) is not bool:
+        raise _OrchestratorUnavailable(
+            "target bundle automatic_upgrade policy is not boolean"
+        )
+    if automatic_upgrade:
+        shutil.copy2(source, destination)
+        return
+    patched_manifest = {**manifest, "automatic_upgrade": True}
+    try:
+        with zipfile.ZipFile(source, "r") as source_archive:
+            manifest_members = [
+                info
+                for info in source_archive.infolist()
+                if info.filename == "dicepp-package.json"
+            ]
+            if len(manifest_members) != 1:
+                raise _OrchestratorUnavailable(
+                    "target bundle manifest member is not unique"
+                )
+            with zipfile.ZipFile(destination, "x") as target_archive:
+                target_archive.comment = source_archive.comment
+                for info in source_archive.infolist():
+                    if info.filename == "dicepp-package.json":
+                        target_archive.writestr(
+                            info,
+                            json.dumps(
+                                patched_manifest,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ).encode("utf-8"),
+                        )
+                        continue
+                    with source_archive.open(info, "r") as source_member:
+                        with target_archive.open(
+                            info,
+                            "w",
+                            force_zip64=True,
+                        ) as target_member:
+                            shutil.copyfileobj(
+                                source_member,
+                                target_member,
+                                length=1024 * 1024,
+                            )
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise _OrchestratorUnavailable(
+            f"cannot derive validation-only target bundle: {exc}"
+        ) from exc
+
+
 def _image_ids_by_role(manifest: dict[str, Any]) -> dict[str, str]:
     """Map ``{role: image_id}`` from a bundle manifest's ``images`` records."""
     images = manifest.get("images")
@@ -1738,14 +1801,19 @@ class _LinuxUpgradeOrchestrator:
             _read_bundle_manifest(self._source_bundle)
         )
         bundle_filename = self._target_bundle.name
-        bundle_size = self._target_bundle.stat().st_size
-        bundle_digest = _sha256_file(self._target_bundle)
         self._seeded_bundle_path = packages_dir / bundle_filename
-        shutil.copy2(self._target_bundle, self._seeded_bundle_path)
+        _copy_validation_bundle(
+            self._target_bundle,
+            self._seeded_bundle_path,
+            target_manifest,
+        )
+        seeded_manifest = _read_bundle_manifest(self._seeded_bundle_path)
+        bundle_size = self._seeded_bundle_path.stat().st_size
+        bundle_digest = _sha256_file(self._seeded_bundle_path)
         self._write_seeded_release(
             instance,
             packages_dir,
-            target_manifest,
+            seeded_manifest,
             bundle_filename,
             bundle_size,
             bundle_digest,

@@ -27,6 +27,7 @@ def build_linux_bundle_bytes(
     dashboard_image_id: str | None = None,
     image_archive_path: str | None = None,
     archive_member: bytes | None = None,
+    automatic_upgrade: bool = True,
 ) -> bytes:
     """Return a zip archive with ``docker-compose.yml`` and a manifest.
 
@@ -52,7 +53,7 @@ def build_linux_bundle_bytes(
         "minimum_manager_version": DEFAULT_MINIMUM_MANAGER_VERSION,
         "catalog_version": 2,
         "catalog_digest": DEFAULT_CATALOG_DIGEST,
-        "automatic_upgrade": True,
+        "automatic_upgrade": automatic_upgrade,
         "change_scope": change_scope or ["upgrade-runtime"],
         "compose": {
             "path": "docker-compose.yml",
@@ -113,6 +114,12 @@ def build_bundle_bytes_with_non_object_manifest() -> bytes:
     return buffer.getvalue()
 
 
+def read_bundle_member(path: Path, name: str) -> bytes:
+    """Read one member from a Linux bundle fixture."""
+    with zipfile.ZipFile(path, "r") as archive:
+        return archive.read(name)
+
+
 def write_linux_bundle(
     path: Path,
     *,
@@ -123,6 +130,7 @@ def write_linux_bundle(
     dashboard_image_id: str | None = None,
     image_archive_path: str | None = None,
     archive_member: bytes | None = None,
+    automatic_upgrade: bool = True,
 ) -> Path:
     """Write a Linux release bundle fixture to ``path`` and return it."""
     compose = compose or (
@@ -141,6 +149,7 @@ def write_linux_bundle(
             dashboard_image_id=dashboard_image_id,
             image_archive_path=image_archive_path,
             archive_member=archive_member,
+            automatic_upgrade=automatic_upgrade,
         )
     )
     return path

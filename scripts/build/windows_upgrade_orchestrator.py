@@ -368,20 +368,26 @@ def _start_runtime(client: ManagerClient) -> None:
     _wait_operation(client, operation)
     status = asyncio.run(client.status())
     units = status.get("runtime_units")
-    if (
-        not isinstance(units, list)
-        or len(units) != 1
-        or units[0].get("runtime_state") != "running"
-        or units[0].get("health") != "healthy"
-    ):
+    if not _runtime_is_healthy(units):
         raise WindowsMatrixError(f"RuntimeUnit did not start: {units!r}")
+
+
+def _runtime_is_healthy(units: Any) -> bool:
+    if not isinstance(units, list) or len(units) != 1:
+        return False
+    runtime = units[0].get("runtime") if isinstance(units[0], dict) else None
+    return (
+        isinstance(runtime, dict)
+        and runtime.get("runtime_state") == "running"
+        and runtime.get("health") == "healthy"
+    )
 
 
 def _stop_runtime_best_effort(root: Path, port: int) -> None:
     try:
         client, status = _wait_manager(root, port, version=_program_version(root), timeout=3)
         units = status.get("runtime_units")
-        if isinstance(units, list) and units and units[0].get("runtime_state") == "running":
+        if _runtime_is_healthy(units):
             operation = asyncio.run(client.operate("dicepp-runtime", "stop"))
             _wait_operation(client, operation, timeout=10)
     except Exception:
@@ -629,10 +635,7 @@ def _healthy_commit(
         and current_tree == target_tree
         and _read_marker(layout.config_user) == "source"
         and recovery_clean
-        and isinstance(runtime_units, list)
-        and len(runtime_units) == 1
-        and runtime_units[0].get("runtime_state") == "running"
-        and runtime_units[0].get("health") == "healthy"
+        and _runtime_is_healthy(runtime_units)
     )
     if not all((source_started, target_started, local_health_passed, journal_committed)):
         raise WindowsMatrixError(
@@ -750,10 +753,7 @@ def _manual_restore(
         and detail.get("rolled_back") is True
         and isinstance(detail.get("manual_restore"), dict)
         and detail["manual_restore"].get("data_runtime_restored") is True
-        and isinstance(runtime_units, list)
-        and len(runtime_units) == 1
-        and runtime_units[0].get("runtime_state") == "running"
-        and runtime_units[0].get("health") == "healthy"
+        and _runtime_is_healthy(runtime_units)
     )
     whole_program_tree_restored = _tree_digest(root / "current") == source_tree
     if not all(

@@ -32,6 +32,7 @@ from scripts.build.linux_upgrade_orchestrator import (
     _minimal_test_compose,
     _read_bundle_manifest,
     _result,
+    _sha256_file,
     _unavailable,
 )
 from scripts.build.upgrade_evidence import (
@@ -42,6 +43,7 @@ from scripts.build.upgrade_evidence import (
 from tests.support.linux_bundle import (
     build_bundle_bytes_with_non_object_manifest,
     build_bundle_bytes_without_manifest,
+    read_bundle_member,
     write_linux_bundle,
 )
 from tests.support.manager_journal import write_manager_journal
@@ -830,6 +832,55 @@ def test_prepare_compose_seeds_valid_release_state(tmp_path: Path) -> None:
         current_version="3.0.0rc19",
         target=("linux", "amd64"),
     )
+
+
+def test_prepare_compose_derives_non_promotable_bundle_for_manual_policy(
+    tmp_path: Path,
+) -> None:
+    compose = (
+        "services:\n"
+        "  manager:\n"
+        "    image: test:${DICEPP_IMAGE_TAG:-latest}\n"
+        "  bot:\n"
+        "    image: test:${DICEPP_IMAGE_TAG:-latest}\n"
+    )
+    source_bundle = write_linux_bundle(
+        tmp_path / "source.zip",
+        version="3.0.0rc20",
+        compose=compose,
+    )
+    target_bundle = write_linux_bundle(
+        tmp_path / "target.zip",
+        version="3.0.0rc21",
+        compose=compose,
+        automatic_upgrade=False,
+        archive_member=b"final-image-bytes",
+    )
+    original_digest = _sha256_file(target_bundle)
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=source_bundle,
+        source_version="3.0.0rc20",
+        target_bundle=target_bundle,
+        target_version="3.0.0rc21",
+        work_dir=tmp_path / "work",
+    )
+
+    orch._prepare_compose()
+
+    assert _sha256_file(target_bundle) == original_digest
+    assert _read_bundle_manifest(target_bundle)["automatic_upgrade"] is False
+    seeded = orch._seeded_bundle_path
+    assert seeded is not None
+    assert _read_bundle_manifest(seeded)["automatic_upgrade"] is True
+    final_image = read_bundle_member(target_bundle, "images/test.tar.zst")
+    validation_image = read_bundle_member(seeded, "images/test.tar.zst")
+    assert validation_image == final_image == b"final-image-bytes"
+    state = json.loads(
+        (orch._instance_dir / "manager/state/release-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["available"]["compatibility"]["automatic_upgrade"] is True
 
 
 def test_prepare_compose_seeds_verified_release_metadata(tmp_path: Path) -> None:
