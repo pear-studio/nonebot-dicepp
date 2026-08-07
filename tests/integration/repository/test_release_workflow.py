@@ -727,17 +727,19 @@ def test_release_docs_record_temporary_upgrade_gate_and_remote_acceptance():
     assert "`GITHUB_TOKEN` 外，发布不要求额外凭据" in docs
 
     assert "velopack.win-x64.zip" in skill
-    for text in (docs, skill, UPDATES_DOC.read_text(encoding="utf-8")):
+    for text in (docs, skill):
         assert "当前不做 Gitee 镜像同步，恢复需单独设计并经用户确认" in text
 
 
-def test_updates_document_matches_the_sealed_public_asset_contract():
+def test_updates_document_routes_maintainer_contracts_out_of_the_user_guide():
     updates = UPDATES_DOC.read_text(encoding="utf-8")
 
-    assert "automatic_upgrade: no` 时固定为七个 assets" in updates
-    assert "dicepp-candidate.json" in updates
-    assert "总数为八个" in updates
-    assert "dicepp-upgrade-evidence.json" in updates
+    assert "## Dashboard 更新流程" in updates
+    assert "## 必须手工处理的情况" in updates
+    assert "[Manager、归档恢复与升级架构](./dev/manager-architecture.md)" in updates
+    assert "[DicePP 发版系统](./releases/README.md)" in updates
+    assert "dicepp-candidate.json" not in updates
+    assert "dicepp-upgrade-evidence.json" not in updates
 
 
 def test_only_promotion_requests_github_contents_write():

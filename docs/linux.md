@@ -1,6 +1,6 @@
 # Linux 部署
 
-本页面面向想在 Linux 服务器上部署 DicePP 的骰主。
+本页面面向想在 Linux 服务器上部署 DicePP 的骰主，只说明平台安装、QQ 接入、日常运行和 Linux 手工部署操作。通用升级判断见 [版本更新](./updates.md)，内部事务设计见 [Manager、归档恢复与升级架构](./dev/manager-architecture.md)。
 
 推荐使用 GitHub Release 发布的 Docker 镜像部署。源码构建只作为无法拉取镜像时的备用方案，见本文末尾附录。需要开发时请看 [dev/guide.md](./dev/guide.md)。
 
@@ -12,7 +12,7 @@
 2. 创建部署目录，下载 Release 附带的 `docker-compose.yml`。
 3. 创建 Docker 网络并启动 Bot、Dashboard、Manager 三个标准服务。
 4. 初始化网页管理面板管理员密码。
-5. 配置 LLOneBot，让 QQ 机器人账号连接 DicePP。
+5. 配置 NapCat，让 QQ 机器人账号连接 DicePP。
 6. 在网页管理面板中确认机器人状态，并完成账号配置。
 7. 在 QQ 中向机器人发送 `.help` 验证。
 
@@ -543,47 +543,18 @@ docker compose logs -f
 ### 通过 Dashboard 更新
 
 标准三服务部署可以在 Dashboard 的“版本更新”页检查、下载并安装兼容 Release。
-自动发现默认开启，自动下载默认关闭；安装始终需要用户确认。Manager 会先创建
-并验证常规 pre-upgrade 归档，再从已下载并校验的
-`DicePP-vX.Y.Z-linux-amd64.zip` 中解压镜像归档并执行本地 `docker load`。
-这条安装路径不会执行 `docker pull`，升级时无法访问 GHCR 也不受影响。
+自动发现默认开启，自动下载默认关闭；安装始终需要用户确认。Manager 会创建并验证
+升级前归档，从已校验的 Linux 发布包在本机导入目标镜像，完成本地健康检查后提交；
+失败时自动恢复旧程序、升级前数据和原运行状态。安装阶段不依赖 `docker pull`。
 
-普通 Manager 代码变化可以随自动升级一起切换。目标 Release 变更范围包含
-`manager` 且声明受支持的 Linux Manager handoff 协议（当前协议 v1）时，
-来源 Manager 先准备恢复材料并写入不可变事务请求，再由来源镜像中的一次性
-Updater 容器（无端口、临时挂载 Docker Socket 和事务恢复目录）切换 Manager；
-新 Manager 执行目标 migration、创建并启动目标 Bot/Dashboard，通过完整健康
-检查后原子写入唯一不可逆的 `commit` 决策，Updater 观察提交后清理旧 Manager
-容器。交接窗口内相关容器均为 `restart=no`，维护窗口内请勿并发运行
-`docker compose up/down` 或人工清理容器；窗口内发生宿主机或 Docker daemon
-重启不会自动续作，需按 [manager-architecture.md](./dev/manager-architecture.md)
-的精确身份步骤人工恢复。程序切换、migration、容器启动或本地硬性健康检查
-失败时，Updater 自动恢复旧 Manager，旧 Manager 再完整恢复 Bot/Dashboard、
-pre-upgrade 数据、Dashboard 数据库快照和原运行状态。NapCat、LLOneBot、QQ、
-GitHub 或第三方 API 暂时不可用只显示警告，不会误触发程序回退。
+自动安装不会替换 `docker-compose.yml`。Release 改变 service、volume、network、
+挂载、deployment schema 或其他无法安全保留的部署契约时，Dashboard 会在停止容器前
+拒绝安装，并提示按 Release 说明手工迁移。不要绕过检查，也不要只更新 Bot/Dashboard
+或移除 Manager。
 
-首个带 Linux Manager handoff 协议、Updater 入口和受管本地 `current` 镜像
-别名的版本（rc20）仍标记 `automatic_upgrade: no`：它必须按完整三服务 Compose
-手工迁移，之后兼容候选才允许自动升级 Manager。破坏性交接变化（handoff 协议、
-Manager state、deployment schema、Compose 运行契约或安装布局不兼容）永远
-要求手工迁移。
-
-自动安装不会替换 `docker-compose.yml`。以下任一情况会在停止容器前拒绝安装：
-
-- Release 变更 Manager 但未声明受支持的 Linux Manager handoff 协议；
-- Release 的 deployment schema 与当前标准部署不兼容；
-- Release 附带的 Compose 改变 service、volume 或 network；
-- bundle 的 manifest、内部摘要、目标镜像或旧镜像保留校验失败。
-
-其中 Compose 兼容检查会比较完整嵌套配置；除了 Bot/Dashboard 的 `image`、
-`build` 和顶层 Compose `version`，mount source/type/mode、依赖、network
-driver/external/IPAM 等差异都会要求手工迁移。加载后的镜像 ID 也必须和发布包
-声明一致；Docker inspect 无法证明 Compose 显式覆盖来源，因此旧/新 image defaults
-只要变化就拒绝自动升级。容器存在无法安全保留的非默认 HostConfig 时同样拒绝。
-
-遇到这种提示时，按照目标 Release 说明手工同步完整三服务 Compose，再重新启动。
-不要只更新 Bot/Dashboard，也不要移除 Manager。自动安装和详细回退边界见
-[updates.md](./updates.md)。
+升级执行期间不要并发运行 `docker compose up`、`down` 或人工清理相关容器。完整的
+兼容条件、失败处理和恢复边界见 [版本更新](./updates.md)；内部交接模型见
+[Manager、归档恢复与升级架构](./dev/manager-architecture.md)。
 
 ### 手工更新
 
@@ -804,16 +775,12 @@ docker compose up -d
 
 ## 备选方案：LLOneBot
 
-> ⚠️ LLOneBot 在国内网络环境下，其 Docker 镜像（`linyuchen/llbot`、`linyuchen/pmhq`）可能无法拉取。仅推荐在能正常访问 Docker Hub 且成功拉取上述镜像的环境下使用。新用户建议优先使用上方的 NapCat 方案。
-
-LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一个 Docker 网络中。
+> ⚠️ 新用户优先使用上方的 NapCat 方案。LLOneBot 的 Docker 镜像在部分网络环境中可能无法拉取，仅作为备选。
 
 按 LLOneBot 官方文档安装 Docker 版本即可：
 
 - [LLBot 文档站](https://luckylillia.com)
 - [LuckyLilliaBot GitHub](https://github.com/LLOneBot/LuckyLilliaBot)
-
-关键是让 LLOneBot 容器加入 `dice-net` 网络，这样它才能通过容器名访问 DicePP。
 
 向导里的关键选择：
 
@@ -829,19 +796,8 @@ LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一
 
 ### LLOneBot 无法连接
 
-常见现象：
-
-- LLOneBot 日志反复出现 WebSocket 连接失败
-- DicePP 日志没有收到连接
-- QQ 发 `.help` 没反应
-
-检查：
-
-- DicePP 容器是否叫 `dicepp`
-- DicePP 和 LLOneBot 是否都在 `dice-net` 网络中
-- LLOneBot URL 是否是 `ws://dicepp:8080/onebot/v11/ws`
-
-可用命令：
+确认 DicePP 容器名为 `dicepp`、两个容器都加入 `dice-net`，并且 WebSocket URL 是
+`ws://dicepp:8080/onebot/v11/ws`。可用以下命令检查容器、网络和日志：
 
 ```bash
 docker ps

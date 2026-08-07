@@ -1,57 +1,84 @@
 # 版本更新
 
-DicePP Manager 以 GitHub Release 为版本事实来源。每个 Release 必须携带
-`dicepp-release.json`；Manager 不根据文件名猜测版本或平台，也不解析 Release
-正文来决定能否升级。
+本页面向 DicePP 使用者，说明如何安全升级、何时必须手工处理，以及升级失败后如何恢复。发布流水线和内部升级协议属于维护者资料，见文末链接。
 
-GitHub Release 与 GHCR 是当前唯一发布目标。当前不做 Gitee 镜像同步，恢复需单独设计并经用户确认。
+## 推荐方式
 
-发布资产由 Final Candidate 一次构建、测试并封存，Promotion 必须显式选择同一候选的
-run ID 与 artifact ID，复核文件 SHA-256 和容器 digest 后原样晋升；它不重新构建或打包。
-Promotion 先创建 draft Release，遇到已有 tag、Release、asset 或镜像身份冲突即停止，
-正式版只在发布完成并复验后最后更新 `latest`。当前不自动清理候选 GHCR 镜像。
+对于受支持的 Windows 安装和标准 Linux 三服务部署，优先使用 Dashboard 的“版本更新”页升级到兼容的最新版本。
 
-## 优先使用 Manager，何时手动
+Manager 以 GitHub Release 和其中的 `dicepp-release.json` 为版本来源，不根据文件名或 Release 正文猜测兼容性。默认行为是：
 
-对于当前的标准三服务 Linux 部署或受支持的 Windows 安装，Dashboard 的“版本更新”页是升级**兼容的最新版本**的首选入口。Manager 负责校验、pre-upgrade 归档、安装和本地健康检查。Linux 失败时自动回退；Windows 失败时保留一次性人工恢复入口。
+- 自动发现 stable 频道的新版本；prerelease 频道需要主动开启；
+- 自动下载默认关闭；
+- 检查和下载不会停止、替换或重启当前运行版本；
+- 只有下载完整、校验通过且与当前部署兼容的版本才会显示安装入口；
+- 安装始终需要再次确认。
 
-以下情形必须使用手动部署或恢复流程：
+Dashboard 会展示目标版本、变更范围、兼容性、下载校验状态和升级进度。关闭页面或轮询超时不会取消已经提交的后台操作，重新打开页面后可以继续查看。
 
-- 第一次安装、旧式或不受支持的部署迁入标准拓扑；
+## 更新前
+
+开始安装或手工迁移前：
+
+1. 在 Dashboard 创建并验证归档；重要实例建议同时保留一份导出的完整归档。
+2. 阅读目标版本的 Release 说明，确认配置、数据和部署风险。
+3. 确认没有未完成的归档、恢复或升级事务。
+4. 确认磁盘空间足以保存目标包、旧程序或镜像以及升级前归档。
+
+发现版本和下载发布包不改变当前运行状态。只有在用户确认安装后，Manager 才会进入受保护的升级事务。
+
+## Dashboard 更新流程
+
+兼容版本的标准流程是：
+
+1. Manager 重新校验目标版本、平台、发布包和部署兼容性。
+2. 创建并验证升级前归档。
+3. 保留可恢复的旧程序或旧镜像。
+4. 切换目标版本并执行必要的数据迁移。
+5. 检查 Manager、Dashboard、Bot RuntimeUnit 和本地控制通道。
+6. 健康检查通过后提交升级；失败时按平台恢复。
+
+QQ 协议端、GitHub、LLM、语音或图片等外部服务暂时不可用只会产生警告，不会让一个本地已经健康的新版本被错误回退。
+
+## 必须手工处理的情况
+
+以下情况不走兼容自动安装：
+
+- 第一次安装，或旧式部署迁入当前标准拓扑；
 - 指定安装较旧版本、人工回退或灾难恢复；
-- 目标 Release 包含破坏性 Manager 交接变化（handoff 协议、Manager state、
-  deployment schema、Compose 运行契约或安装布局不兼容）；
-- Linux Compose、RuntimeUnit、挂载、网络或 deployment schema 迁移；
-- 发布被标记为不兼容，或 Manager 的校验、空间、旧版本保留或健康门槛未通过。
+- Release 明确标记为不兼容或不允许自动升级；
+- Manager handoff、Manager state、deployment schema、Compose 运行契约或安装布局发生不兼容变化；
+- Linux 的 service、volume、network、挂载或其他 Compose 拓扑需要迁移；
+- Windows 当前目录不是受支持的安装布局，或发布包缺少所需更新资产；
+- 校验、磁盘空间、旧版本保留或本地健康门槛未通过。
 
-普通 Manager 代码变化不属于上述手工情形：只要目标 Release 声明受支持的
-Linux Manager handoff 协议（当前 v1），Linux 可以随自动升级切换 Manager；
-Windows 简化方案同样允许普通 Manager 代码自动升级。首个协议基线 rc20 仍为
-`automatic_upgrade: no` 的手工完整三服务迁移，其后兼容候选才开放自动升级。
+遇到拒绝安装时，不要绕过兼容检查。先阅读目标 Release 说明，再按对应平台文档完成手工迁移。
 
-手工操作前先创建并验证归档。Linux 请按 [Linux 部署](./linux.md#手工更新) 同步完整三服务 Compose 并更新或回退镜像；Windows 请按 [Windows 部署](./windows.md#版本更新与旧版迁移) 使用目标发布包、一次性 `DicePP-Recover.cmd` 或已验证归档恢复。除运行已生成的恢复脚本外，不要手工拼接 Windows `current/`；也不要未经对比直接用 Release 内的 Compose 覆盖现有实例。
+## Linux
 
-## 默认行为
+兼容升级会使用已经下载并校验的 Linux 发布包，在本机导入目标镜像；安装阶段不依赖 `docker pull`。Manager 会保留旧镜像并在失败时自动恢复程序、升级前数据和原运行状态。
 
-- Manager 分页读取 GitHub Release 列表。`stable` 频道只比较非 draft、
-  非 prerelease；`prerelease` 频道需要用户主动开启，只比较非 draft 的
-  prerelease。每个候选独立校验，坏候选不会遮蔽其他合法版本。
-- 合法候选按版本号比较，只展示严格高于当前 DicePP 的最高版本；不会把当前
-  版本或旧版本当作更新。
-- 自动发现默认开启；自动下载默认关闭。
-- 发现只下载小型 JSON 清单，不下载发布包。
-- 下载完成后先写入 `manager/packages/<version>/`。发现和下载本身不会停止、
-  替换或重启当前 RuntimeUnit；只有用户在 Dashboard 再次确认安装后，Manager
-  才会启动升级事务。
-- 下载的软件包必须同时通过 manifest schema、平台/架构、GitHub asset
-  size/digest 和本地 SHA-256 校验，才会标记为可安装。
-- 默认只保留最近两个已完成下载的版本；仍处于运行、待恢复或回退失败事务中的
-  目标版本不受此上限清理，直到事务得到明确处理。
-- 检查与下载使用同一互斥队列。检查请求立即返回，Dashboard 根据持久化状态
-  轮询；Manager 重启后仍可看到最后检查时间、频道、结果或错误。
+Manager 不会自动修改用户的 `docker-compose.yml`。如果目标版本调整了 Compose 拓扑或部署契约，必须先按 Release 说明同步完整三服务 Compose，再手工更新。具体命令见 [Linux 部署的手工更新](./linux.md#手工更新)。
 
-这些选项位于 `config/global.json` 的 `update` 段，也可以在
-`config/user.json` 覆盖，因此可直接使用 Dashboard 的配置编辑页管理：
+自动升级正在执行时，不要并发运行 `docker compose up`、`down` 或人工清理相关容器。若宿主机或 Docker daemon 在 Manager 交接窗口中重启，先停止自行修改容器，并按 Dashboard 提示或架构文档进行人工恢复。
+
+## Windows
+
+兼容升级会使用 Release 中固定的 Windows 更新包。Manager 在切换前创建并验证升级前归档，并备份完整旧 `current/` 程序目录；准备失败时不会修改当前程序。
+
+如果新版无法正常启动：
+
+1. 关闭 DicePP；恢复脚本不会主动结束任何进程。
+2. 在 DicePP 安装根目录运行升级事务生成的 `DicePP-Recover.cmd`。
+3. 脚本会整体换回旧 `current/`，再由旧 Manager 恢复升级前数据和原运行状态。
+
+如果目录仍被占用或移动失败，脚本会停止并保留恢复材料。关闭占用程序后再重试，不要手工拼接新旧 `current/`，也不要直接启动 `DicePP-Runtime.exe`。
+
+第一次安装、旧目录迁入、指定旧版本或不兼容升级使用目标 Release 的官方 Portable 或 Setup。详细步骤见 [Windows 部署的版本更新与旧版迁移](./windows.md#版本更新与旧版迁移)。
+
+## 更新配置
+
+版本发现配置位于 `config/global.json` 的 `update` 段，也可以在 `config/user.json` 中覆盖：
 
 ```json
 {
@@ -65,174 +92,11 @@ Windows 简化方案同样允许普通 Manager 代码自动升级。首个协议
 }
 ```
 
-Dashboard 的“版本更新”页展示频道、平台、可用版本、变更范围、兼容性、下载
-校验状态和升级事务进度。只有已经完整下载、校验通过且与当前部署兼容的版本才
-显示安装入口；点击后还要确认目标版本和回退说明。关闭页面或 Dashboard 轮询
-超时不会取消后台事务，重新打开页面会从 Manager 持久化状态继续展示。
+通常直接使用 Dashboard 配置编辑页即可。不了解预发布风险时保持 `stable`，不要开启 prerelease 频道。
 
-## 确认安装与失败处理
+## 相关资料
 
-安装不是“解压覆盖”。Manager 在实例级维护锁内执行同一套可恢复事务：
-
-1. 重新校验 Release contract、已下载 artifact、当前平台和部署兼容性。
-2. 保存 RuntimeUnit 原状态，创建并验证常规 pre-upgrade 归档。
-3. 保留可执行的旧程序或旧镜像，再切换目标程序。
-4. 执行数据 migration 和本地硬性健康检查。
-5. 成功后提交；Linux 失败时自动恢复旧镜像和 pre-upgrade 数据。
-6. Windows 成功后立即清理临时旧程序备份；新版无法正常启动时，用户运行实例根目录的一次性恢复脚本。
-
-创建 pre-upgrade 归档或保留旧程序失败时，事务在切换前停止。Dashboard、配置、
-schema、RuntimeUnit 启动和本地控制通道属于硬性健康检查；QQ 协议端、GitHub、
-LLM、语音或图片等外部服务故障只产生警告，不会因此回退一个已经健康的新版本。
-
-### Linux 边界
-
-兼容 Release 的安装直接读取已经校验的 Linux bundle，校验包内
-`dicepp-package.json` 与 `checksums.sha256`，解压其中的 image archive 并执行
-本地 `docker load`。安装路径不会先尝试 `docker pull`，因此不依赖升级时能访问
-GHCR。加载后会把镜像引用解析为包内声明的 immutable Image ID；不匹配就拒绝
-切换。Manager 随后只用当前标准 Compose 已有的配置重建 Bot/Dashboard，并在
-重建前比较旧/新 image defaults；第一阶段只要默认值变化就转为手工升级，避免把
-“与旧默认值相同、但由 Compose 显式固定”的配置误判成未覆盖。不能证明可以无损
-保留的 Config/HostConfig 同样拒绝自动升级。旧镜像以 immutable Image ID 保留用于回退。
-
-普通 Manager 代码变化随自动升级切换：目标 Release 变更范围包含 `manager`
-且声明受支持的 Linux Manager handoff 协议（当前协议 v1）时，Manager 才会
-下载并安装该版本；协议字段缺失或不支持时 fail closed，Linux 上按手工迁移
-处理。首个带协议基线的版本（rc20）仍声明 `automatic_upgrade: no`，必须
-手工完整三服务迁移，之后候选才允许自动升级 Manager。破坏性交接变化
-（handoff 协议、Manager state、deployment schema、Compose 运行契约或安装
-布局不兼容），或目标 `docker-compose.yml` 改变 service、volume、network 等
-当前 Manager 不能安全迁移的拓扑时，Dashboard 仍可展示该版本及不兼容原因，
-但 Manager 拒绝下载和自动安装，并提示按 Release 文档手工同步完整三服务
-部署。它不会修改 Compose 文件，也不会退回到无 Manager 部署。
-
-### Windows 边界
-
-Windows 后续更新只使用 Release 中固定命名的 `velopack.win-x64.zip`。Manager
-先按外层 Release contract 校验整个 bundle，再安全解包并按内层 `manifest.json`
-复核 DicePP/Velopack 版本、频道、平台、架构以及唯一 full nupkg 的名称、大小和
-SHA-256。调用 Velopack 前，Manager 创建并验证 pre-upgrade 数据归档，再将
-完整 `current/` 复制到稳定实例根下的 `manager/recovery/<transaction-id>/`，
-写入最小恢复描述并在实例根准备一次性 `DicePP-Recover.cmd`。归档、程序树
-复制或恢复入口任一准备失败，都在 Velopack 修改程序前停止。
-
-Velopack 只切换 `current/`；`config/`、`content/`、`data/`、`dashboard/data/` 和
-`manager/` 始终位于稳定实例根。新 Manager 完成 migration、Dashboard、RuntimeUnit
-和本地控制通道的硬性健康检查并提交事务后，立即最佳努力删除该事务的
-旧 `current/` 备份、恢复描述和根恢复入口。清理失败只告警，不改变已提交的新版结果。
-
-新版无法正常启动时不会有独立进程无人值守回退。用户先关闭 DicePP，再运行
-实例根的 `DicePP-Recover.cmd`；脚本不会主动终止进程。目录仍被占用或任一整目录移动
-失败时，脚本停止并保留恢复材料；它不逐文件覆盖或合并新旧程序树。换回旧
-`current/` 后，旧 Manager 按同一 upgrade journal 恢复 pre-upgrade 数据与 RuntimeUnit
-原状态。恢复失败时不自动重试，保留 journal、数据归档和程序备份供人工处理。
-
-Portable 和 Setup 都是首次部署入口，后续使用同一 Velopack 更新包；Setup 不依赖
-Portable ZIP。若发布产物缺少 Velopack bundle，当前布局不受支持，或已有一个未处理
-的简化恢复事务，Manager 会在修改程序和数据前拒绝安装。
-
-## Release contract
-
-`dicepp-release.json` 使用 contract version 2。顶层声明 DicePP 版本与频道、
-部署 schema、最低 Manager 版本、DataAsset Catalog version/digest、变更范围和
-`automatic_upgrade`；每个 artifact 分别声明 platform、arch、用途、文件名、
-字节数和 SHA-256。GitHub Release API 返回的 machine-contract asset 本身也会
-先按 HTTPS URL、size 和 digest 验证原始 bytes，随后才解析 JSON。
-
-`automatic_upgrade`、最低 Manager 版本和 change scope 都从 tag 内
-`docs/releases/vX.Y.Z.md` 的受校验字段生成；可选的
-`Linux Manager handoff 协议` 字段（正整数协议代数或 `no`）写入 release
-manifest 与 Linux bundle 内层 manifest 的 `linux_manager_handoff_protocol`。
-发布者只有确认部署拓扑兼容、change scope 准确，且变更范围包含 `manager`
-时已声明受支持的 Linux Manager handoff 协议，才把“自动升级”声明为 `yes`；
-manager scope 本身不再是一律手工的标志，破坏性交接变化（handoff 协议、
-Manager state、deployment schema、Compose 运行契约或安装布局不兼容）仍
-fail closed 为手工迁移。字段缺失或冲突会让发布失败。该标志、协议、部署
-schema 或最低 Manager 任一不兼容时仍可展示 Release 和具体原因，但不能下载
-或进入可安装状态。
-
-发布流程还会在公开提升容器 tag 和生成 Release 之前读取
-`scripts/build/upgrade_protocol_registry.json` 与
-`scripts/build/upgrade_matrix.json`，并要求 Final Candidate 产出
-`dicepp-upgrade-evidence`。
-矩阵必须为 Windows amd64 与 Linux amd64 固定每个仍受支持来源版本的 HTTPS
-资产和 SHA-256；证据必须绑定目标版本、完整 Git commit、Runtime/Dashboard
-容器 manifest、Windows 测试包目录摘要，以及最终 Windows Portable/Setup/
-Velopack 与 Linux bundle 的文件名、字节数和 SHA-256。Windows 固定验证两个场景：
-`healthy_commit` 确认健康提交和恢复材料清理；`manual_restore_after_target_failure` 确认根恢复脚本在目标
-`current/` 缺失或损坏时换回整个旧程序树，再恢复 pre-upgrade 数据和 RuntimeUnit
-状态。Linux 保持七个场景：经典四场景（健康提交、目标健康失败后自动回退、回退后重试、
-目标代码从未执行的 apply 失败），以及 Linux Manager handoff 三场景
-（`manager_handoff_commit` 健康 Manager 交接与目标提交、
-`manager_handoff_rollback` 目标 Manager 失败后来源 Manager/Bot/Dashboard/
-归档/Dashboard 数据库完整恢复、`manager_handoff_commit_crash_window`
-commit 决策前后崩溃分别收敛为来源恢复与目标清理）。来源资产摘要、
-候选身份、平台覆盖或任一场景不匹配都会拒绝 `automatic_upgrade: yes`。
-`automatic_upgrade: no` 不需要这份证据。v3.0.0rc20 同时是新的 Windows 与
-Linux 手工迁移基线：Windows 不扫描或消费此前 RC 的 UpdateGuard 状态，也
-不用 rc19→rc20 声称新 Windows 协议通过；Linux rc20 是首个带 handoff 协议、
-Updater 入口和受管 current 别名的版本，同样必须手工完整三服务迁移，现有
-rc19 来源只继续证明经典四场景。第一次 Windows 新协议真实跨版本验收是
-rc20→rc21，第一次 Linux Manager handoff 真实矩阵也是 rc20→rc21。这些 RC
-验收不构成历史版本支持窗口；
-正式版只维护“上一正式版 → 当前候选”。Final Candidate 先构建最终 Windows/Linux bytes，
-再由各平台 runner 调用当前 commit 内固定的 harness 入口，
-最后汇总 evidence 并交给 Receipt；协议 readiness 未通过、缺少来源资产或场景
-失败都会让
-`automatic_upgrade: yes` 不可达。Release workflow 复验通过后会把原始
-证据以稳定名称 `dicepp-upgrade-evidence.json` 随 Release 发布，供后续审计目标
-commit、三个候选身份、来源资产摘要与场景结果。
-
-当前 `scripts/build/windows_upgrade_matrix_harness.py` 与
-`scripts/build/linux_upgrade_matrix_harness.py` 是唯一入口，不读取 repo variables、
-秘密或本机路径。harness 对每个 source/scenario 接收 `--context` 与 `--output`；
-只有返回闭合 contract v1、`status=passed`、完整行为断言和关键观测，矩阵才接受。
-metadata 声明 `automatic_upgrade: no` 时，可显式运行与当次过渡目标相符的
-validation-only 矩阵，但其证据不会进入 Receipt 或 Release assets，也不表示已开放自动升级。
-
-Windows amd64 Release 包含：
-
-- `DicePP-vX.Y.Z-win64-Portable.zip`
-- `DicePP-vX.Y.Z-win64-Setup.exe`
-- `velopack.win-x64.zip`
-
-`velopack.win-x64.zip` 恰好包含根目录 `manifest.json` 与一个 Velopack full
-nupkg，不包含 feed；nupkg 不作为独立 Release asset。内层 manifest 严格声明
-format version、DicePP/Velopack version、channel、platform、arch 和 nupkg
-filename/size/SHA-256。bundle 拒绝路径穿越、POSIX/Windows 绝对路径、反斜杠、
-符号链接/重解析点、重复或额外成员和超出成员数、解压大小、单文件大小、压缩比
-上限的输入；nupkg 内部版本也必须与两层清单一致。Portable 与 Setup 是两个独立
-的首次部署入口，Setup 不依赖 Portable zip。
-
-GitHub Release 在 `automatic_upgrade: no` 时固定为七个 assets：上述三个
-Windows/Linux 用户发行包、`velopack.win-x64.zip`、`dicepp-release.json`、
-`docker-compose.yml` 和审计 receipt `dicepp-candidate.json`。未来 backlog
-`B-260802-3e3e23` 完成并允许 `automatic_upgrade: yes` 后，再额外发布已绑定候选
-identities 的 `dicepp-upgrade-evidence.json`，届时总数为八个；在该 backlog 验收前
-`automatic_upgrade: yes` 仍不可达。
-
-Linux amd64 Release 包含 `DicePP-vX.Y.Z-linux-amd64.zip`。外层
-`dicepp-release.json` 验证整个 zip；zip 内的 `dicepp-package.json` 是第二层
-安装契约，声明 deployment schema、最低 Manager、Catalog、是否允许自动升级、
-Compose、压缩 image archive、镜像引用与 immutable Image ID、`change_scope`、
-可选的 `linux_manager_handoff_protocol` 协议代数
-及内部文件 size/SHA-256，包内
-`checksums.sha256` 再覆盖所有分发文件。这样避免让外层 zip 自我哈希。GHCR
-镜像引用只作为诊断和手工恢复信息；自动安装以包内 image archive 和加载后
-校验的 immutable Image ID 为准，不执行
-`docker pull`。
-
-## 断点续传边界
-
-Manager 只在已有 `.part` 同时具备 ETag/Last-Modified，服务器对 Range 返回
-`206`，且 `Content-Range` 的 start/end/total 与本地偏移及 manifest size
-完全一致时续传。任一条件不满足都会丢弃旧 partial 并从零下载。最终 size 或
-SHA-256 不匹配时，partial 会被删除且不会标记为可安装。
-
-下载缓存以实例根、`manager/packages` 和版本目录的固定身份作为安全边界，
-逐级拒绝符号链接、Windows reparse/junction、目录替换及多链接文件。bundle 的
-外层摘要与 ZIP 内容必须从同一个 no-follow 文件句柄校验；提取时重新打开
-no-follow 句柄，先在该句柄复核已授权的整包摘要，再从同一句柄读取 payload。
-因此路径在校验、发布或提取之间被替换时会失败关闭，不会把替换后的内容标记为
-可安装。
+- 平台操作：[Windows 部署](./windows.md)、[Linux 部署](./linux.md)
+- 版本变化和风险：[Release 记录](./releases/)
+- 内部架构：[Manager、归档恢复与升级架构](./dev/manager-architecture.md)
+- 维护者发版流程：[DicePP 发版系统](./releases/README.md)

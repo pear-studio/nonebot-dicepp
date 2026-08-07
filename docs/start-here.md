@@ -1,5 +1,7 @@
 # 从这里开始
 
+本页是 DicePP 用户文档的主入口。第一次使用先选择 Windows 或 Linux 路线；部署成功后，再按需要阅读配置、升级和 Persona 文档。
+
 DicePP 是一个面向骰主的 QQ 跑团机器人。它支持 Windows 和 Linux 部署，并提供网页管理面板，用来完成初始化、配置、运行状态查看、日志和存档管理。
 
 如果你第一次使用，不需要先读开发文档。目标是先让机器人接入 QQ，能在群里回复 `.help`；之后再按需要启用 Persona AI、整理规则资料或调整更多配置。
@@ -33,6 +35,7 @@ DicePP 是一个面向骰主的 QQ 跑团机器人。它支持 Windows 和 Linux
 | 你想做什么 | 阅读 |
 |------------|------|
 | 修改账号、主人、API Key、常用开关 | [configuration.md](./configuration.md) |
+| 升级、回退或恢复 | [updates.md](./updates.md) |
 | 启用 Persona AI 对话 | [persona.md](./persona.md) |
 | 编写 Persona 角色卡 | [persona-character-card.md](./persona-character-card.md) |
 | 查看版本发布记录 | [releases/](./releases/) |

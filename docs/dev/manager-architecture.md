@@ -2,6 +2,8 @@
 
 > 状态：当前实现契约。本页描述标准部署已经提供的行为；代码、发布元数据和测试是更细的事实来源。
 
+本页面向开发者说明 Manager、RuntimeUnit、归档恢复和升级事务的系统边界。用户操作步骤见 [版本更新](../updates.md) 以及对应平台部署文档；发版流程见 [DicePP 发版系统](../releases/README.md)。
+
 ## 职责边界
 
 Manager 是 DicePP 标准 Windows 与 Linux 部署的一部分，负责实例运行单元、维护事务、归档和兼容更新。Dashboard 是经过用户鉴权的界面与 Manager API 代理；它不直接控制 Docker 或子进程，不直接读写归档文件或执行数据恢复，但仍负责用户驱动的配置编辑、自身本地状态，以及受限的 Persona 角色卡编辑。Bot 只负责 NoneBot 与一个或多个 QQ 账号的业务运行。

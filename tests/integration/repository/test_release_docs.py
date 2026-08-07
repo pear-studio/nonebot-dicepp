@@ -1,4 +1,4 @@
-"""Release quick-start documentation contracts."""
+"""Release documentation responsibility contracts."""
 
 from __future__ import annotations
 
@@ -11,14 +11,12 @@ ROOT = find_repository_root(Path(__file__))
 RELEASE_README = ROOT / "docs" / "releases" / "README.md"
 
 
-def test_linux_newcomer_quick_start_is_a_complete_offline_bundle_flow() -> None:
-    """The release README must not present metadata as a deployable compose setup."""
+def test_release_readme_routes_user_operations_to_platform_docs() -> None:
+    """The maintainer release guide must not duplicate the user deployment guide."""
     content = RELEASE_README.read_text(encoding="utf-8")
 
-    assert "[完整 Linux 部署说明](../linux.md)" in content
-    assert 'unzip -o "DicePP-${VERSION}-linux-amd64.zip" -d "${PACKAGE_DIR}"' in content
-    assert "sha256sum -c checksums.sha256" in content
-    assert "cp docker-compose.yml .." in content
-    assert 'docker load -i "images/DicePP-${VERSION}-linux-amd64-images.tar"' in content
-    assert "DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never" in content
-    assert "仅供 Manager" in content
+    assert "[版本更新](../updates.md)" in content
+    assert "[Windows 部署](../windows.md)" in content
+    assert "[Linux 部署](../linux.md)" in content
+    assert "## 用户操作速查" not in content
+    assert 'unzip -o "DicePP-${VERSION}-linux-amd64.zip"' not in content

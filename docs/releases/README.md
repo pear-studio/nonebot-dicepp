@@ -1,5 +1,7 @@
 # DicePP 发版系统
 
+本页面向版本维护者说明如何构建、验证和发布 DicePP。用户升级与恢复见 [版本更新](../updates.md)，平台手工操作见 [Windows 部署](../windows.md) 和 [Linux 部署](../linux.md)。
+
 ## 架构概览
 
 ```
@@ -79,8 +81,9 @@ version-release (skill)               version-deploy (skill)
 启用 Promotion 前，仓库管理员只需完成以下一次性配置：
 
 - 启用 GitHub Immutable Releases，使公开后的 Release、assets 和关联 tag 不可变。
-- 为 `refs/tags/v*` 建立 active tag ruleset，同时限制 creation、update 和 deletion，
-  并允许 GitHub Actions 创建发布 tag。
+- 为 `refs/tags/v*` 建立 active tag ruleset，禁止 update 和 deletion。保留 creation，
+  让 workflow 使用仓库自动提供的 `GITHUB_TOKEN` 创建新发布 tag；个人仓库无法把内置
+  GitHub Actions App 加入 ruleset bypass，不为此增加 PAT 或自建 GitHub App。
 - 分别为 `pear-studio/nonebot-dicepp` 和 `pear-studio/dicepp-dashboard` 两个 GHCR
   package 授予本仓库 Write access，使 workflow 的 `GITHUB_TOKEN` 可以推送候选镜像
   并按已验证 digest 添加正式 tag。
@@ -158,52 +161,6 @@ Promotion 全局串行，不按版本并发。GitHub Release 与 GHCR 是当前�
 4. 对比生产 `docker-compose.yml` 与目标 Release 的 compose 拓扑，必要时先计划同步 compose
 5. 展示影响范围，等待用户确认
 6. 在线路径注入 `DICEPP_IMAGE_TAG=vX.Y.Z`，调用 deploy-docker 执行 compose sync + pull + up；离线路径先 `docker load` 目标离线包，再执行 `up --pull never`
-
-## 用户操作速查
-
-兼容最新版本的日常升级先使用 Dashboard 的 Manager 更新页。下面命令仅用于已经确认需要手工操作的场景；执行前创建并验证归档。
-
-```bash
-# 手工兜底：生产环境（镜像部署）
-DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
-DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
-DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker compose up -d  # 更新
-
-# 生产环境（离线包）
-VERSION=v3.0.0
-unzip -o DicePP-${VERSION}-linux-amd64.zip
-cd DicePP-${VERSION}-linux-amd64
-sha256sum -c checksums.sha256
-zstd -d -f images/DicePP-${VERSION}-linux-amd64-images.tar.zst
-docker load -i images/DicePP-${VERSION}-linux-amd64-images.tar
-cd ..
-DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
-
-# 小白首次离线部署（从零开始）
-# 先确认服务器已有 Docker Compose、unzip 和 zstd；安装方法见下方完整 Linux 文档。
-VERSION=v3.0.0
-
-# 二选一取得发布包：服务器可访问 GitHub 时执行这一段。
-BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
-curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64.zip"
-
-# 服务器不能访问 GitHub 时，不执行上面的 curl；在有网设备下载同名文件后传入当前目录：
-# scp "DicePP-${VERSION}-linux-amd64.zip" 用户名@服务器IP:~/dicepp/
-
-# 发布包包含与该版本匹配的 Compose、镜像和校验清单。
-PACKAGE_DIR="DicePP-${VERSION}-linux-amd64"
-unzip -o "DicePP-${VERSION}-linux-amd64.zip" -d "${PACKAGE_DIR}"
-cd "${PACKAGE_DIR}"
-sha256sum -c checksums.sha256
-cp docker-compose.yml ..
-zstd -d -f "images/DicePP-${VERSION}-linux-amd64-images.tar.zst"
-docker load -i "images/DicePP-${VERSION}-linux-amd64-images.tar"
-cd ..
-docker network inspect dice-net >/dev/null 2>&1 || docker network create dice-net
-DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
-```
-
-`dicepp-release.json` 不需要在首次部署时手工下载；它仅供 Manager 在标准部署启动后发现和校验可用版本，不是 Compose 文件或安装脚本。完整的在线、离线传输和初始化说明见[完整 Linux 部署说明](../linux.md)。
 
 ## 约束
 

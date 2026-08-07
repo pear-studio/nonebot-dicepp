@@ -52,8 +52,8 @@ metadata:
 - 目标分支为 `master` 的最新状态。
 - 工作区必须干净；存在未提交更改时拒绝执行 release。
 - 首次真实晋升前，管理员已经完成 `docs/releases/README.md` 的三项一次性配置：
-  Immutable Releases、限制 creation/update/deletion 且允许 GitHub Actions 创建 tag 的
-  `v*` tag ruleset，以及两个 GHCR package 对本仓库的 Write access。
+  Immutable Releases、禁止 update/deletion 但允许 workflow 创建新 tag 的 `v*` tag
+  ruleset，以及两个 GHCR package 对本仓库的 Write access。
 - 除 workflow 自动获得的 `GITHUB_TOKEN` 外，发布不要求额外凭据、管理员设置 ID
   变量或人工审批门禁，也不在每次 Promotion 中重复读取管理员设置。
 
