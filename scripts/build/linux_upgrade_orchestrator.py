@@ -1709,11 +1709,12 @@ class _LinuxUpgradeOrchestrator:
                 proxy_path,
                 on_create_failure=self._mutate_sentinels_for_failure,
             )
-            quoted_proxy = json.dumps(proxy_path.resolve().as_posix())
             override_lines.extend(
                 [
                     "    volumes:",
-                    f"      - {quoted_proxy}:/var/run/docker.sock",
+                    "      - type: bind",
+                    f"        source: {json.dumps(proxy_path.resolve().as_posix())}",
+                    "        target: /var/run/docker.sock",
                 ]
             )
         self._compose_override.write_text(

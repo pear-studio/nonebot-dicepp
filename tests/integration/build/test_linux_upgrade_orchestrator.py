@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.build.linux_upgrade_orchestrator import (
     _LinuxUpgradeOrchestrator,
@@ -61,6 +62,12 @@ def test_prepare_compose_writes_byte_identical_compose_file(tmp_path: Path) -> N
     assert "bot:" in content
     assert orch._instance_dir is not None
     assert orch._instance_dir.is_dir()
+    assert orch._compose_override is not None
+    override = yaml.safe_load(orch._compose_override.read_text(encoding="utf-8"))
+    volume = override["services"]["manager"]["volumes"][0]
+    assert volume["type"] == "bind"
+    assert volume["source"].endswith(".sock")
+    assert volume["target"] == "/var/run/docker.sock"
 
 
 def test_prepare_compose_uses_source_topology_and_catalog_sentinels(
