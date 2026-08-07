@@ -957,13 +957,21 @@ def _http_json(
                 )
             return response.status, parsed
     except urllib.error.HTTPError as exc:
-        detail = ""
+        raw_detail = ""
         try:
-            parsed = json.loads(exc.read().decode("utf-8"))
+            raw_detail = exc.read().decode("utf-8", errors="replace").strip()
+            parsed = json.loads(raw_detail)
             if isinstance(parsed, dict):
-                detail = str(parsed.get("detail", ""))
+                detail = str(
+                    parsed.get("detail")
+                    or parsed.get("message")
+                    or parsed.get("error")
+                    or raw_detail
+                )
+            else:
+                detail = raw_detail
         except (OSError, ValueError):
-            pass
+            detail = raw_detail
         raise _ManagerApiError(int(exc.code), detail) from exc
     except urllib.error.URLError as exc:
         raise _OrchestratorUnavailable(

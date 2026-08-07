@@ -78,7 +78,7 @@ def test_candidate_is_bound_to_an_explicit_current_master_head() -> None:
     assert dispatch["inputs"]["version"]["required"] is True
     assert dispatch["inputs"]["commit_sha"]["required"] is True
     assert dispatch["inputs"]["exercise_upgrade_matrix"] == {
-        "description": "Exercise eligible upgrade validation without adding release evidence",
+        "description": "Exercise a pinned source that supports the target upgrade contract",
         "required": False,
         "default": False,
         "type": "boolean",

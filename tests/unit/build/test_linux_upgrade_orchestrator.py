@@ -491,7 +491,7 @@ def test_http_json_http_error_becomes_manager_api_error(
             409,
             "Conflict",
             {},
-            io.BytesIO(b'{"detail": "rejected by manager"}'),
+            io.BytesIO(b'{"message": "rejected by manager"}'),
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)

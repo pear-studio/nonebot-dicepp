@@ -50,9 +50,9 @@
     - 当前状态（2026-08-03）：本地 `master` 已实现并拆分提交 Windows 有界进程 runner、仓库污染守卫、Final Candidate/Receipt v2、Promotion 原字节晋升、Gitee 停用及升级证据 fail-closed 框架；Manager 维护边界、配置保存后重启和 Query 只读化也已完成。全量测试为 `4191 passed, 67 skipped`，但本轮提交尚未 push，新流程也尚未在 GitHub/GHCR 上运行。后续 agent 不应重新设计或重复实现本地代码，除非真实验收暴露缺陷。
     - 当前设计：Final Candidate 绑定当前 `master` 的精确 SHA，封存 Windows、Linux、release manifest、条件性 upgrade evidence、容器身份和 `dicepp-candidate.json`；Promotion 必须显式选择 run ID 与 artifact ID，复核同一字节和镜像 digest 后按 draft-first 流程发布，不重新构建、压缩或打包。
     - 当前有意不做：Gitee 同步、额外发布 token、release environment/第二位 reviewer、每次 Promotion 读取管理员配置、自动 GHCR candidate 清理。不得在没有新决策的情况下重新加入这些复杂度。
-    - 验收时机：`B-260731-b6f811` 及本轮其他代码修改已完成；先补完 `B-260802-3e3e23` 剩余的真实 journal 与双平台 harness，再冻结最终 `master` SHA。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
+    - 验收时机：`B-260731-b6f811` 及本轮其他代码修改已完成；rc20 作为不支持自动升级的手工基线，只要求最终 Windows/Linux 候选字节与首装/手工迁移验收，不以 rc19→rc20 矩阵阻塞发布。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
     - 冻结后一次性确认远端最小配置：启用 Immutable Releases、建立受保护的 `refs/tags/v*` ruleset、授予仓库 Actions 对两个 GHCR package 的 Write access；发布运行时只使用 `GITHUB_TOKEN`。
-    - 验收顺序：push 冻结 SHA 并等待普通 CI → 先完成 `B-260802-eb74ca` 的 Linux 故障回退验收及 `B-260802-3e3e23` 的跨版本矩阵/evidence → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。
+    - 验收顺序：push 冻结 SHA 并等待普通 CI → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。`B-260802-eb74ca` 与 `B-260802-3e3e23` 的真实跨版本验收在 rc20→rc21 独立执行，不阻塞 `automatic_upgrade: no` 的 rc20。
     - Promotion 会真实创建 tag、GitHub Release、正式 GHCR version tag 并最后更新 `latest`，不得作为无副作用的试运行；应使用计划公开的 RC 或正式版本。
     - 关闭条件：记录成功的 Candidate run ID、run attempt、artifact ID/digest 和 Promotion run；确认公开 tag、Release metadata/assets、版本镜像及 `latest` 均与 Receipt 一致，且冲突状态 fail closed、精确同身份中断状态可幂等恢复。全部满足后才删除本条。
 
@@ -93,8 +93,8 @@
     - 保持首次目标升级后的 control gate fail-closed；切换前存在 active session 而目标未重连时，升级仍必须失败并触发回退。
     - 补充 fresh heartbeat 后断开、多 Bot session 切换、回退后重连并产生新心跳、永久断开但本地恢复成功、本地恢复真实失败等回归测试。
     - 当前状态（2026-08-03）：active-session snapshot、断开后撤销健康、回退本地恢复与 post-rollback control health 分离、Manager 凭据就绪后重连及对应回归测试均已实现；本条代码主体完成，当前只保留真实跨版本故障注入验收。后续 agent 不应重新实现已有修复，除非验收失败。
-    - 验收时机：`B-260731-b6f811` 代码已完成；补完 `B-260802-3e3e23` 的真实 journal 与双平台 harness 后，在最终冻结的 `master` SHA 上独立执行；它是 `B-260802-6fdfcc` Final Candidate/Promotion 之前的第一个系统验收。
-    - Linux 定向场景：从受支持旧版本 fresh 部署升级到冻结 SHA，在 confirm 前保持 fresh heartbeat 后主动断开控制通道并触发目标失败；确认程序镜像、配置、数据、schema、Runtime、marker/request 均恢复，operation journal 记录 `rollback_status=succeeded` 与 `rolled_back=true`，控制通道未恢复只产生 degraded warning。
+    - 验收时机：`B-260731-b6f811` 代码已完成；rc19 不支持 rc20 的 Manager handoff 契约，而 rc20 明确为 `automatic_upgrade: no` 的手工基线，因此不再用 rc19→rc20 伪造自动升级验收。本条随 `B-260802-3e3e23` 在 rc20→rc21 的最终冻结 Candidate 上独立执行，不阻塞 rc20 Final Candidate/Promotion。
+    - Linux 定向场景：从冻结的 rc20 fresh 部署升级到 rc21 Candidate，在 confirm 前保持 fresh heartbeat 后主动断开控制通道并触发目标失败；确认程序镜像、配置、数据、schema、Runtime、marker/request 均恢复，operation journal 记录 `rollback_status=succeeded` 与 `rolled_back=true`，控制通道未恢复只产生 degraded warning。
     - 同次验收还要确认切换前存在 active session 而目标未重连时仍会 fail closed，并覆盖多 Bot session 切换、回退后重连产生新心跳、永久断开但本地恢复成功、本地恢复真实失败。
     - 若验收触发任何代码修复，必须重新冻结 SHA，并重跑本条、跨版本 evidence 和后续 Final Candidate/Promotion；不得沿用旧 Candidate。
     - 关闭条件：保存 Linux fresh 跨版本故障注入的版本、冻结 SHA、日志/journal 和恢复结果证据；上述恢复状态与控制健康语义全部符合预期后删除本条。

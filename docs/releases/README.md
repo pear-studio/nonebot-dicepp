@@ -106,7 +106,8 @@ release notes 与目标 commit，再更新 SHA 及相邻版本注释；不得退
 4. 以 `--no-commit --no-tag` 运行 `bump-my-version`，同步 `uv.lock` 后创建一个
    不含 tag 的 release commit
 5. 在当前 HEAD 上运行完整回归 `uv run pytest`，只推送 `master` commit
-6. 对该 commit dispatch `.github/workflows/candidate.yml`；等待成功后记录
+6. 对该 commit dispatch `.github/workflows/candidate.yml`；只有矩阵中已固定且能读取目标
+   升级契约的来源版本存在时，才启用 validation-only upgrade matrix。等待成功后记录
    `candidate_run_id`、`run_attempt`、`candidate_artifact_id` 和 artifact digest
 7. 使用相同 version、显式 run ID 和 artifact ID dispatch `.github/workflows/release.yml`
 8. Promotion 验证 run/workflow/event/conclusion/head SHA/attempt、artifact 归属与摘要、

@@ -479,7 +479,7 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
 
     assert exercise == {
-        "description": "Exercise eligible upgrade validation without adding release evidence",
+        "description": "Exercise a pinned source that supports the target upgrade contract",
         "required": False,
         "default": False,
         "type": "boolean",

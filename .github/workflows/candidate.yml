@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       exercise_upgrade_matrix:
-        description: Exercise eligible upgrade validation without adding release evidence
+        description: Exercise a pinned source that supports the target upgrade contract
         required: false
         default: false
         type: boolean
@@ -486,6 +486,10 @@ jobs:
             --source-cache dist/upgrade-cache \
             --work-root dist/upgrade-work \
             --output dist/upgrade-result/linux.json
+      - name: Make Linux matrix diagnostics readable
+        if: always()
+        run: |
+          sudo chmod -R a+rX dist/upgrade-result dist/upgrade-work 2>/dev/null || true
       - name: Upload Linux matrix result and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -565,7 +569,7 @@ jobs:
           inputs.exercise_upgrade_matrix == true
         run: |
           echo "Windows: manual-migration package validation (windows-final)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Linux: four-scenario cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux: pinned supported-source cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
           echo "No upgrade evidence is promotable while automatic_upgrade is false." >> "$GITHUB_STEP_SUMMARY"
 
   receipt:
