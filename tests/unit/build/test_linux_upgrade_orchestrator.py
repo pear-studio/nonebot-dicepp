@@ -869,9 +869,12 @@ def test_prepare_compose_derives_non_promotable_bundle_for_manual_policy(
 
     assert _sha256_file(target_bundle) == original_digest
     assert _read_bundle_manifest(target_bundle)["automatic_upgrade"] is False
+    assert "linux_manager_handoff_protocol" not in _read_bundle_manifest(target_bundle)
     seeded = orch._seeded_bundle_path
     assert seeded is not None
-    assert _read_bundle_manifest(seeded)["automatic_upgrade"] is True
+    seeded_manifest = _read_bundle_manifest(seeded)
+    assert seeded_manifest["automatic_upgrade"] is True
+    assert seeded_manifest["linux_manager_handoff_protocol"] == 1
     final_image = read_bundle_member(target_bundle, "images/test.tar.zst")
     validation_image = read_bundle_member(seeded, "images/test.tar.zst")
     assert validation_image == final_image == b"final-image-bytes"

@@ -1105,7 +1105,11 @@ def _copy_validation_bundle(
     if automatic_upgrade:
         shutil.copy2(source, destination)
         return
-    patched_manifest = {**manifest, "automatic_upgrade": True}
+    patched_manifest = {
+        **manifest,
+        "automatic_upgrade": True,
+        "linux_manager_handoff_protocol": 1,
+    }
     try:
         with zipfile.ZipFile(source, "r") as source_archive:
             manifest_members = [

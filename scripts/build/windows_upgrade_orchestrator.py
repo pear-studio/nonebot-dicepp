@@ -383,6 +383,24 @@ def _runtime_is_healthy(units: Any) -> bool:
     )
 
 
+def _wait_runtime_healthy(
+    client: ManagerClient,
+    *,
+    timeout: float = 60,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_status: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        last_status = asyncio.run(client.status())
+        if _runtime_is_healthy(last_status.get("runtime_units")):
+            return last_status
+        time.sleep(0.2)
+    raise WindowsMatrixError(
+        "RuntimeUnit did not recover to healthy state: "
+        f"{last_status.get('runtime_units')!r}"
+    )
+
+
 def _stop_runtime_best_effort(root: Path, port: int) -> None:
     try:
         client, status = _wait_manager(root, port, version=_program_version(root), timeout=3)
@@ -622,6 +640,7 @@ def _healthy_commit(
         and isinstance(detail, dict)
         and detail.get("phase") == "committed"
     )
+    target_status = _wait_runtime_healthy(target_client)
     current_tree = _tree_digest(root / "current")
     layout = InstanceLayout.from_root(root)
     recovery_clean = (
@@ -639,7 +658,15 @@ def _healthy_commit(
     )
     if not all((source_started, target_started, local_health_passed, journal_committed)):
         raise WindowsMatrixError(
-            "Healthy Windows upgrade did not satisfy source/target/health/journal gates"
+            "Healthy Windows upgrade did not satisfy source/target/health/journal "
+            f"gates: source_started={source_started!r}, "
+            f"target_started={target_started!r}, "
+            f"local_health_passed={local_health_passed!r}, "
+            f"journal_committed={journal_committed!r}, "
+            f"current_tree_matches={current_tree == target_tree!r}, "
+            f"config_preserved={_read_marker(layout.config_user) == 'source'!r}, "
+            f"recovery_clean={recovery_clean!r}, "
+            f"runtime_units={runtime_units!r}, last_operation={last!r}"
         )
     return (
         {
@@ -741,6 +768,7 @@ def _manual_restore(
         time.sleep(0.2)
     last = upgrade_status.get("last_operation")
     detail = last.get("detail") if isinstance(last, dict) else None
+    source_status = _wait_runtime_healthy(source_client)
     runtime_units = source_status.get("runtime_units")
     data_restored = _read_marker(InstanceLayout.from_root(root).config_user) == "source"
     source_restarted = source_status.get("health", {}).get("dicepp_version") == source_version
@@ -768,7 +796,15 @@ def _manual_restore(
         )
     ):
         raise WindowsMatrixError(
-            "Manual Windows recovery did not satisfy program/data/runtime/journal gates"
+            "Manual Windows recovery did not satisfy program/data/runtime/journal "
+            f"gates: target_failure_observed={target_failure_observed!r}, "
+            f"recovery_material_preserved={recovery_material_preserved!r}, "
+            f"manual_restore_invoked={manual_restore_invoked!r}, "
+            f"whole_program_tree_restored={whole_program_tree_restored!r}, "
+            f"data_restored={data_restored!r}, "
+            f"source_restarted={source_restarted!r}, "
+            f"journal_manually_restored={journal_manually_restored!r}, "
+            f"runtime_units={runtime_units!r}, last_operation={last!r}"
         )
     return (
         {
