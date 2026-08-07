@@ -34,30 +34,6 @@
     - Dashboard 功能达到替代条件后，再决定是否禁用 `HomebrewCommand`
     - 按最终写入归属更新 Manager 架构文档
 
-## deployment
-
-### [B-260802-6fdfcc] 建立发布前最终制品候选与不可变晋升门禁
-- 创建: 2026-08-02
-- 优先级: P0
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-    - 普通 CI 当前主要验证 PyInstaller assembled payload；最终 `vpk pack`、Portable stable stub、Setup 安装和安装后启动主要在 tag 触发的 Release workflow 才首次执行。
-    - rc17 至 rc19 多次出现普通 CI 成功但 Release workflow 失败；同一 tag 在失败后移动到新 SHA 重跑，tag 同时承担“候选构建按钮”和“公开发布身份”，无法保持不可变发布语义。
-    - `.github/workflows/test-suite.yml` 与 `.github/workflows/release.yml` 各自包含 Windows executable 启动、标准流重定向和制品检查逻辑，已经发生 Windows 建链权限、进程树清理及 onefile payload 等待窗口导致的门禁失败。
-    - 影响后果是打包与启动缺陷直到推 tag 后才暴露，发版需要撤回或移动 tag，失败定位还要区分产品缺陷与测试 harness 缺陷。
-- 开发备忘:
-    - 当前状态（2026-08-03）：本地 `master` 已实现并拆分提交 Windows 有界进程 runner、仓库污染守卫、Final Candidate/Receipt v2、Promotion 原字节晋升、Gitee 停用及升级证据 fail-closed 框架；Manager 维护边界、配置保存后重启和 Query 只读化也已完成。全量测试为 `4191 passed, 67 skipped`，但本轮提交尚未 push，新流程也尚未在 GitHub/GHCR 上运行。后续 agent 不应重新设计或重复实现本地代码，除非真实验收暴露缺陷。
-    - 当前设计：Final Candidate 绑定当前 `master` 的精确 SHA，封存 Windows、Linux、release manifest、条件性 upgrade evidence、容器身份和 `dicepp-candidate.json`；Promotion 必须显式选择 run ID 与 artifact ID，复核同一字节和镜像 digest 后按 draft-first 流程发布，不重新构建、压缩或打包。
-    - 当前有意不做：Gitee 同步、额外发布 token、release environment/第二位 reviewer、每次 Promotion 读取管理员配置、自动 GHCR candidate 清理。不得在没有新决策的情况下重新加入这些复杂度。
-    - 验收时机：`B-260731-b6f811` 及本轮其他代码修改已完成；rc20 作为不支持自动升级的手工基线，只要求最终 Windows/Linux 候选字节与首装/手工迁移验收，不以 rc19→rc20 矩阵阻塞发布。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
-    - 冻结后一次性确认远端最小配置：启用 Immutable Releases、建立受保护的 `refs/tags/v*` ruleset、授予仓库 Actions 对两个 GHCR package 的 Write access；发布运行时只使用 `GITHUB_TOKEN`。
-    - 验收顺序：push 冻结 SHA 并等待普通 CI → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。`B-260802-eb74ca` 与 `B-260802-3e3e23` 的真实跨版本验收在 rc20→rc21 独立执行，不阻塞 `automatic_upgrade: no` 的 rc20。
-    - Promotion 会真实创建 tag、GitHub Release 和正式 GHCR version tag，正式稳定版还会最后更新 `latest`；不得将其作为无副作用的试运行，应使用计划公开的 RC 或正式版本。
-    - rc20 验收结果（2026-08-07）：Candidate run `31161368711` / attempt `1` 在冻结 SHA `34d976b16f67df81a679acd47f3e1f83d7d9c102` 上成功，artifact `8987530103` 摘要为 `sha256:b4407c5f9303a5d6fe12202fa6b0f750d132a651e16385b0073520e2d03a51ed`；Promotion run `31162380770` 成功发布 `v3.0.0rc20`。公开 tag、Release 七份资产和两个 GHCR 版本 manifest 均与 Receipt 一致，Immutable Releases 与 `refs/tags/v*` 防更新/防删除规则仍启用。
-    - `latest` 只在正式稳定版发布时更新；RC Promotion 按设计跳过该步，不构成验收缺口。
-    - 关闭条件：记录成功的 Candidate run ID、run attempt、artifact ID/digest 和 Promotion run；确认公开 tag、Release metadata/assets 与版本镜像均与 Receipt 一致，正式稳定版还需确认 `latest`；冲突状态必须 fail closed，精确同身份的中断状态必须可幂等恢复。rc20 已满足本条关闭条件，待 backlog 清理确认后删除。
-
 ## dice_hub
 
 ### [B-260731-93a733] 重新设计并实现 DiceHub 命令
