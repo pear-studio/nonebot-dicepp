@@ -99,9 +99,7 @@ class TestSessionWorkspace:
     def test_create_session_builds_isolated_workspace_without_copying_secrets(self):
         session_dir = create_session("isolated")
 
-        assert json.loads(
-            (session_dir / "config" / "global.json").read_text(encoding="utf-8")
-        ) == {}
+        assert not (session_dir / "config" / "global.json").exists()
         assert json.loads(
             (session_dir / "config" / "user.json").read_text(encoding="utf-8")
         ) == {}

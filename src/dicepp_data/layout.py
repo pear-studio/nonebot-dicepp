@@ -62,10 +62,6 @@ class InstanceLayout:
         return self.root / "config"
 
     @property
-    def config_global(self) -> Path:
-        return self.config_dir / "global.json"
-
-    @property
     def config_user(self) -> Path:
         return self.config_dir / "user.json"
 

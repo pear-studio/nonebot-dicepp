@@ -220,6 +220,29 @@ if [ "$LOADED_DASHBOARD_IMAGE_ID" != "$EXPECTED_DASHBOARD_IMAGE_ID" ]; then
   exit 1
 fi
 
+# Inspect and execute the actual offline Runtime image.  The first probe checks
+# its unmounted filesystem; the second mounts a legacy instance and proves that
+# global.json is preserved but ignored while user/account layers remain active.
+timeout 60s docker run --rm --entrypoint python "$BOT_IMAGE" -c \
+  'from pathlib import Path; assert not Path("/app/config/global.json").exists()'
+mkdir -p -- "${SMOKE_ROOT}/config/bots"
+LEGACY_GLOBAL_SENTINEL='{"chat_interval":99,"legacy":"preserve"}'
+printf '%s\n' "$LEGACY_GLOBAL_SENTINEL" > "${SMOKE_ROOT}/config/global.json"
+printf '%s\n' '{"chat_interval":31}' > "${SMOKE_ROOT}/config/user.json"
+printf '%s\n' '{"nickname":"image-bot-layer"}' \
+  > "${SMOKE_ROOT}/config/bots/10001.json"
+LEGACY_GLOBAL_SHA256="$(sha256sum "${SMOKE_ROOT}/config/global.json" | cut -d ' ' -f 1)"
+timeout 60s docker run --rm \
+  --volume "${SMOKE_ROOT}/config:/app/config" \
+  --entrypoint python \
+  "$BOT_IMAGE" \
+  -c 'import sys; sys.path.insert(0, "/app/src"); from plugins.DicePP.core.config.loader import ConfigLoader; config = ConfigLoader("/app/config", "10001").load(); assert config.chat_interval == 31; assert config.nickname == "image-bot-layer"'
+if [ "$(sha256sum "${SMOKE_ROOT}/config/global.json" | cut -d ' ' -f 1)" \
+  != "$LEGACY_GLOBAL_SHA256" ]; then
+  echo "Runtime image modified legacy config/global.json" >&2
+  exit 1
+fi
+
 RESOLVED_COMPOSE="${SMOKE_ROOT}/resolved-compose.json"
 DICEPP_IMAGE_TAG="$TAG" docker compose \
   --project-name "$SMOKE_PROJECT" \

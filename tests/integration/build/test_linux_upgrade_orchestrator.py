@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,7 @@ def test_prepare_compose_uses_source_topology_and_catalog_sentinels(
     assert (instance / "data" / "local_images" / "sentinel.bin").is_file()
     assert set(orch._sentinel_digests) == {
         "config/user.json",
+        "config/global.json",
         "data/local_images/sentinel.bin",
     }
 
@@ -108,6 +110,8 @@ def test_prepare_compose_uses_source_topology_and_catalog_sentinels(
 def test_prepare_compose_bootstraps_full_instance(tmp_path: Path) -> None:
     """Instance layout, config, release seeds, and API client are all created."""
     orch = _make_orchestrator(tmp_path)
+    legacy_global = b'{"chat_interval":99,"legacy":"preserve"}\n'
+    legacy_path = tmp_path / "work" / "instance" / "config" / "global.json"
     orch._prepare_compose()
 
     instance = orch._instance_dir
@@ -123,13 +127,29 @@ def test_prepare_compose_bootstraps_full_instance(tmp_path: Path) -> None:
     ):
         assert (instance / relative).is_dir(), relative
 
-    # Global config pins the prerelease channel and disables discovery.
-    global_config = json.loads(
-        (instance / "config" / "global.json").read_text(encoding="utf-8")
+    # User config pins the prerelease channel and disables discovery.
+    user_config = json.loads(
+        (instance / "config" / "user.json").read_text(encoding="utf-8")
     )
-    assert global_config == {
+    assert user_config == {
+        "chat_interval": 31,
         "update": {"channel": "prerelease", "discovery_enabled": False}
     }
+    assert legacy_path.read_bytes() == legacy_global
+
+    for bundle in (orch._source_bundle, orch._target_bundle):
+        with zipfile.ZipFile(bundle) as archive:
+            assert "config/global.json" not in archive.namelist()
+
+    from plugins.DicePP.core.config.loader import ConfigLoader
+
+    bot_path = instance / "config" / "bots" / "10001.json"
+    bot_path.parent.mkdir(parents=True)
+    bot_path.write_text('{"nickname":"bot-layer"}', encoding="utf-8")
+    loaded = ConfigLoader(str(instance / "config"), "10001").load()
+    assert loaded.chat_interval == 31
+    assert loaded.nickname == "bot-layer"
+    assert legacy_path.read_bytes() == legacy_global
 
     # Release state and verified metadata are seeded for the target version.
     release_state = json.loads(
@@ -165,6 +185,32 @@ def test_prepare_compose_bootstraps_full_instance(tmp_path: Path) -> None:
     assert orch._api is not None
     assert orch._api.base_url == "http://127.0.0.1:4091"
     assert orch._api.token is None
+
+
+def test_mutation_detection_uses_only_mutable_sentinels(tmp_path: Path) -> None:
+    orch = _make_orchestrator(tmp_path)
+    orch._prepare_compose()
+    instance = orch._instance_dir
+    assert instance is not None
+    user = instance / "config" / "user.json"
+    image = instance / "data" / "local_images" / "sentinel.bin"
+    legacy_global = instance / "config" / "global.json"
+    original_user = user.read_bytes()
+    original_image = image.read_bytes()
+    original_global = legacy_global.read_bytes()
+
+    orch._mutate_sentinels_for_failure()
+
+    assert orch._sentinels_differ_from_source() is True
+    assert legacy_global.read_bytes() == original_global
+
+    image.write_bytes(original_image)
+    assert orch._sentinels_differ_from_source() is False
+
+    legacy_global.write_bytes(b'{"changed_global_cannot_substitute":true}\n')
+    assert user.read_bytes() != original_user
+    assert image.read_bytes() == original_image
+    assert orch._sentinels_differ_from_source() is False
 
 
 def test_prepare_compose_installs_ordered_target_crash_harness(

@@ -1,6 +1,6 @@
 """Pure validation for Manager-owned configuration candidates.
 
-The runtime merges ``global.json < user.json < bots/<id>.json`` before
+The runtime merges ``BotConfig defaults < user.json < bots/<id>.json`` before
 constructing :class:`BotConfig`.  Manager must apply the same precedence before
 it accepts a write, but it must not use ``ConfigLoader`` here: loading through
 that class may canonicalize and rewrite existing production files.
@@ -8,20 +8,17 @@ that class may canonicalize and rewrite existing production files.
 
 from __future__ import annotations
 
-import copy
 import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from dicepp_data import InstanceLayout
 from plugins.DicePP.core.config.loader import (
     ConfigValidationError as RuntimeConfigValidationError,
-    canonicalize_config_layer,
+    ResolvedConfigLayers,
+    resolve_config_layers,
 )
-from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
 class ConfigurationValidationError(ValueError):
@@ -32,19 +29,13 @@ class ConfigurationValidationError(ValueError):
         super().__init__("Configuration validation failed")
 
 
-def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Return the runtime-equivalent recursive merge without mutating inputs."""
-    result = copy.deepcopy(base)
-    for key, value in override.items():
-        if isinstance(result.get(key), dict) and isinstance(value, dict):
-            result[key] = deep_merge(result[key], value)
-        else:
-            result[key] = copy.deepcopy(value)
-    return result
-
-
 def read_config_object(path: Path, *, missing_is_empty: bool = True) -> dict[str, Any]:
-    """Read one config document without normalizing or rewriting it."""
+    """Read one config document without normalizing or rewriting it.
+
+    Candidate equivalence starts after parsing a JSON object.  An existing
+    malformed/unreadable file is a storage-integrity error for Manager, while
+    Runtime's fail-soft boot policy is intentionally outside that contract.
+    """
     if not path.exists():
         if missing_is_empty:
             return {}
@@ -65,91 +56,45 @@ def read_config_object(path: Path, *, missing_is_empty: bool = True) -> dict[str
 def validate_user_candidate(
     layout: InstanceLayout,
     candidate_user: dict[str, Any],
-) -> None:
-    """Validate a user override against every current and future Bot candidate."""
-    global_raw = read_config_object(layout.config_global)
+) -> dict[str, Any]:
+    """Validate and return one canonical sparse user layer."""
     bot_candidates = list(_bot_candidates(layout))
-
-    # Retain the Manager's existing schema contract before applying the
-    # runtime-specific layer safety check below.  The runtime can discard
-    # non-critical unknown fields during canonicalization, but the Manager API
-    # must continue to report those invalid edits instead of accepting a save
-    # that does not take effect.
     errors: list[dict[str, str]] = []
+    canonical_user: dict[str, Any] | None = None
     for label, bot_config in bot_candidates:
         prefix = ("bots", label)
-        errors.extend(
-            _validate_merged(
-                global_raw,
-                candidate_user,
-                bot_config,
-                prefix=prefix,
-            )
+        resolved, candidate_errors = _resolve_layers(
+            candidate_user,
+            bot_config,
+            prefix=prefix,
         )
+        errors.extend(candidate_errors)
+        if resolved is not None:
+            if canonical_user is None:
+                canonical_user = resolved.user
+            else:
+                # Canonicalization of one layer cannot depend on its peers.
+                assert canonical_user == resolved.user
     _raise_if_invalid(errors)
-
-    global_config = _canonicalize_layer(
-        global_raw,
-        prefix=("global",),
-        fill_missing_defaults=True,
-    )
-    canonical_user = _canonicalize_layer(
-        candidate_user,
-        prefix=("user",),
-        fill_missing_defaults=False,
-    )
-    for label, bot_config in bot_candidates:
-        prefix = ("bots", label)
-        errors.extend(
-            _validate_merged(
-                global_config,
-                canonical_user,
-                _canonicalize_layer(
-                    bot_config,
-                    prefix=prefix,
-                    fill_missing_defaults=False,
-                ),
-                prefix=prefix,
-            )
-        )
-    _raise_if_invalid(errors)
+    assert canonical_user is not None
+    return canonical_user
 
 
 def validate_bot_candidate(
     layout: InstanceLayout,
     bot_id: str,
     candidate_bot: dict[str, Any],
-) -> None:
-    """Validate one Bot override using the current global and user layers."""
-    global_raw = read_config_object(layout.config_global)
+) -> dict[str, Any]:
+    """Validate and return one canonical sparse Bot/account layer."""
     user_raw = read_config_object(layout.config_user)
-    errors = _validate_merged(
-        global_raw,
+    resolved, errors = _resolve_layers(
         user_raw,
         candidate_bot,
         prefix=("bots", bot_id),
     )
     _raise_if_invalid(errors)
-
-    errors = _validate_merged(
-        _canonicalize_layer(
-            global_raw,
-            prefix=("global",),
-            fill_missing_defaults=True,
-        ),
-        _canonicalize_layer(
-            user_raw,
-            prefix=("user",),
-            fill_missing_defaults=False,
-        ),
-        _canonicalize_layer(
-            candidate_bot,
-            prefix=("bots", bot_id),
-            fill_missing_defaults=False,
-        ),
-        prefix=("bots", bot_id),
-    )
-    _raise_if_invalid(errors)
+    assert resolved is not None
+    return resolved.account
 
 
 def _bot_candidates(layout: InstanceLayout) -> Iterable[tuple[str, dict[str, Any]]]:
@@ -170,49 +115,28 @@ def _bot_candidates(layout: InstanceLayout) -> Iterable[tuple[str, dict[str, Any
         yield "fallback", {}
 
 
-def _validate_merged(
-    global_config: dict[str, Any],
+def _resolve_layers(
     user_config: dict[str, Any],
     bot_config: dict[str, Any],
     *,
     prefix: tuple[str, ...],
-) -> list[dict[str, str]]:
-    merged = deep_merge(deep_merge(global_config, user_config), bot_config)
+) -> tuple[ResolvedConfigLayers | None, list[dict[str, str]]]:
     try:
-        BotConfig.model_validate(merged)
-    except ValidationError as exc:
-        return _field_errors(exc, prefix)
-    return []
-
-
-def _canonicalize_layer(
-    raw: dict[str, Any],
-    *,
-    prefix: tuple[str, ...],
-    fill_missing_defaults: bool,
-) -> dict[str, Any]:
-    """Use runtime canonical validation without allowing it to touch files."""
-    try:
-        return canonicalize_config_layer(
-            raw,
-            fill_missing_defaults=fill_missing_defaults,
-        )
+        resolved = resolve_config_layers(user_config, bot_config)
     except RuntimeConfigValidationError as exc:
-        # Runtime errors contain a file path and can include Pydantic details.
-        # The Manager API exposes neither; its field marker is enough for users
-        # to identify the rejected document while keeping credentials private.
-        raise ConfigurationValidationError(
-            [
-                {
-                    "field": ".".join((*prefix, "configuration")),
-                    "message": "Invalid configuration value",
-                }
-            ]
-        ) from exc
+        if exc.validation_error is not None:
+            return None, _field_errors(exc.validation_error, prefix)
+        return None, [
+            {
+                "field": ".".join((*prefix, "configuration")),
+                "message": "Invalid configuration value",
+            }
+        ]
+    return resolved, []
 
 
 def _field_errors(
-    exc: ValidationError,
+    exc: Any,
     prefix: tuple[str, ...],
 ) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []

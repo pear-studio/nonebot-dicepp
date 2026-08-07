@@ -13,7 +13,7 @@ from tests.support.pollution import (
 @pytest.fixture
 def repository_root(tmp_path: Path) -> Path:
     (tmp_path / "config" / "bots").mkdir(parents=True)
-    (tmp_path / "config" / "global.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "config" / "user.json").write_text("{}", encoding="utf-8")
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "dicepp.db").write_bytes(b"baseline")
     return tmp_path
@@ -23,7 +23,7 @@ def repository_root(tmp_path: Path) -> Path:
     ("relative_path", "operation", "expected_change"),
     [
         ("config/bots/production.json", "add", "added files"),
-        ("config/global.json", "modify", "modified files"),
+        ("config/user.json", "modify", "modified files"),
         ("data/dicepp.db", "remove", "removed files"),
     ],
 )

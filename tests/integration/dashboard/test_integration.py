@@ -69,24 +69,25 @@ class TestFullFlow:
         resp = test_client.get("/api/config/merged")
         assert resp.status_code == 200
         config = resp.json()["config"]
-        assert "app.name" in config
-        assert config["app.name"]["source"] == "default"
+        assert "chat_interval" in config
+        assert config["chat_interval"]["source"] == "default"
 
         # ── 8. Edit config ───────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/set",
-            json={"path": "app.name", "value": "custom_name"},
+            json={"path": "chat_interval", "value": 33},
         )
         assert resp.status_code == 200
 
         # Verify the change persisted to user.json
         user_cfg = DashboardPaths.CONFIG_USER.read_text()
-        assert '"custom_name"' in user_cfg
+        assert '"chat_interval"' in user_cfg
+        assert "33" in user_cfg
 
         # ── 9. Reset config ──────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/reset",
-            json={"path": "app.name"},
+            json={"path": "chat_interval"},
         )
         assert resp.status_code == 200
         assert resp.json()["removed"] is True

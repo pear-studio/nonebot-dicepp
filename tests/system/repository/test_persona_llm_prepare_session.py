@@ -53,10 +53,6 @@ def _make_test_repo(tmp_path: Path, *, ignored: bool = True) -> tuple[Path, Path
     )
     (repo / "config").mkdir(parents=True)
     source_skill = SCRIPT_PATH.parent.parent
-    _write_json(
-        repo / "config" / "global.json",
-        json.loads((REPO_ROOT / "config" / "global.json").read_text(encoding="utf-8")),
-    )
     (skill / "assets").mkdir(parents=True)
     _write_json(
         skill / "assets" / "test-overrides.json",
@@ -405,6 +401,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert result.scenarios == ("warp", "private", "group")
     assert result.providers == ("deepseek",)
     assert all(model.startswith("deepseek/") for model in result.probe_models)
+    assert not (result.path / "config" / "global.json").exists()
 
     user_config = json.loads(
         (result.path / "config" / "user.json").read_text(encoding="utf-8")

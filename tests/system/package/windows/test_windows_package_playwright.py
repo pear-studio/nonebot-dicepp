@@ -68,10 +68,6 @@ def dashboard_exe_url(tmp_path: Path) -> str:
     project_root = tmp_path / "dicepp-project"
     (project_root / "config" / "bots").mkdir(parents=True, exist_ok=True)
     (project_root / "dashboard" / "data").mkdir(parents=True, exist_ok=True)
-    (project_root / "config" / "global.json").write_text(
-        json.dumps({"app": {"name": "dicepp-windows-smoke", "version": "1.0.0"}})
-    )
-
     port = find_free_port()
     base_url = f"http://127.0.0.1:{port}"
     manager_port = find_free_port()

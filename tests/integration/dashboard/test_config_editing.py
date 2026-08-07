@@ -34,25 +34,27 @@ class TestMergedView:
         config = data["config"]
 
         # The endpoint flattens nested objects into dotted keys.
-        # Keys from global.json with no user override have source "default".
-        assert config["app.name"]["value"] == "test_dicepp"
-        assert config["app.name"]["source"] == "default"
-        assert config["app.version"]["value"] == "1.0.0"
-        assert config["app.version"]["source"] == "default"
+        # Keys from BotConfig with no user override have source "default".
+        assert config["chat_interval"]["value"] == 20
+        assert config["chat_interval"]["source"] == "default"
+        assert config["persona_ai.providers.minimax.base_url"]["value"] == (
+            "https://api.minimaxi.com/v1"
+        )
+        assert config["persona_ai.providers.minimax.base_url"]["source"] == "default"
 
     def test_merged_with_user_overrides(self, test_client: TestClient, tmp_dashboard_paths):
         """User overrides show source "user"."""
         # Pre-populate user.json — when overlay has a matching key the
         # structure IS flattened to dotted keys.
-        user_cfg = {"app": {"name": "user_override"}}
+        user_cfg = {"chat_interval": 33}
         DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
 
         setup_auth(test_client)
         resp = test_client.get("/api/config/merged")
         config = resp.json()["config"]
 
-        assert config["app.name"]["value"] == "user_override"
-        assert config["app.name"]["source"] == "user"
+        assert config["chat_interval"]["value"] == 33
+        assert config["chat_interval"]["source"] == "user"
 
     def test_merged_includes_tab_and_section(self, test_client: TestClient, tmp_dashboard_paths):
         """Each config field in merged output includes tab and section keys."""
@@ -92,8 +94,8 @@ class TestMergedView:
         config = resp.json()["config"]
 
         # Should include normal keys
-        assert config["app.name"]["value"] == "test_dicepp"
-        assert config["persona_ai.enabled"]["value"] is False
+        assert config["chat_interval"]["value"] == 20
+        assert config["persona_ai.enabled"]["value"] is True
 
         # Should NOT include comment keys at any level
         for path in config:

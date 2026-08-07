@@ -345,7 +345,6 @@ def _ensure_workspace(session_dir: Path) -> None:
     for relative in _WORKSPACE_DIRS:
         (session_dir / relative).mkdir(parents=True, exist_ok=True)
     defaults = {
-        session_dir / "config" / "global.json": {},
         session_dir / "config" / "user.json": {},
         session_dir / "config" / "bots" / "_template.json": {},
     }

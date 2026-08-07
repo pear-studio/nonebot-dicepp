@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -20,20 +19,10 @@ from plugins.DicePP.module.common.log import LogRecorder
 from tests.support.fs_utils import rmtree_retry
 
 
-def _repository_root() -> Path:
-    return next(
-        parent
-        for parent in Path(__file__).resolve().parents
-        if (parent / "pyproject.toml").is_file()
-    )
-
-
 @pytest_asyncio.fixture
 async def uninitialized_log_bot():
     original_project_root = Paths.PROJECT_ROOT
-    isolated_project_root = Path(os.environ["DICEPP_PROJECT_ROOT"])
-    tracked_global = _repository_root() / "config" / "global.json"
-    global_snapshot = tracked_global.read_bytes()
+    isolated_project_root = os.environ["DICEPP_PROJECT_ROOT"]
     Paths.configure_project_root(isolated_project_root)
     bot = None
     try:
@@ -53,8 +42,6 @@ async def uninitialized_log_bot():
                 rmtree_retry(bot.data_path)
         finally:
             Paths.configure_project_root(original_project_root)
-            if tracked_global.read_bytes() != global_snapshot:
-                tracked_global.write_bytes(global_snapshot)
 
 
 @pytest_asyncio.fixture

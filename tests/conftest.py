@@ -46,7 +46,7 @@ os.environ["DICEPP_PROJECT_ROOT"] = _TEST_APP_DIR
 
 _REAL_PROJECT = find_repository_root(Path(__file__))
 _TEST_PROJECT = Path(_TEST_APP_DIR)
-for relative_path in (Path("config/bots/_template.json"), Path("config/global.json")):
+for relative_path in (Path("config/bots/_template.json"),):
     source = _REAL_PROJECT / relative_path
     if not source.exists():
         raise RuntimeError(f"测试模板不存在: {source}")

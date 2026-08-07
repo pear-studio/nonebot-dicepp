@@ -31,7 +31,6 @@ def _make_test_repo(tmp_path: Path) -> tuple[Path, Path]:
     skill = repo / "docs" / "agent" / "skills-dev" / "persona-llm-test"
     (repo / "config").mkdir(parents=True)
     source_skill = SCRIPT_PATH.parent.parent
-    _write_json(repo / "config" / "global.json", json.loads((REPO_ROOT / "config" / "global.json").read_text(encoding="utf-8")))
     (skill / "assets").mkdir(parents=True)
     _write_json(skill / "assets" / "test-overrides.json", json.loads((source_skill / "assets" / "test-overrides.json").read_text(encoding="utf-8")))
     source_character = source_skill / "assets" / prepare.CHARACTER_NAME
@@ -66,10 +65,12 @@ def test_config_validation_error_never_includes_api_key(tmp_path: Path, monkeypa
     repo, skill = _make_test_repo(tmp_path)
     secret = "sk-sensitive-validation-test"
     _write_json(skill / "test_llm.local.json", {"persona_ai": {"providers": {"deepseek": {"api_key": secret}}}})
-    global_config = json.loads((repo / "config" / "global.json").read_text(encoding="utf-8"))
-    global_config["persona_ai"]["segment_soft_limit"] = 999
-    global_config["persona_ai"]["segment_hard_limit"] = 1
-    _write_json(repo / "config" / "global.json", global_config)
+    test_overrides = json.loads(
+        (skill / "assets" / "test-overrides.json").read_text(encoding="utf-8")
+    )
+    test_overrides["persona_ai"]["segment_soft_limit"] = 999
+    test_overrides["persona_ai"]["segment_hard_limit"] = 1
+    _write_json(skill / "assets" / "test-overrides.json", test_overrides)
     monkeypatch.setattr(prepare, "assert_git_ignored", lambda *_: None)
     shell_session = _isolate_shell_sessions(monkeypatch, tmp_path)
 

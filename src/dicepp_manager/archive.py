@@ -59,7 +59,6 @@ SCOPE_INCLUDED = [
     for asset in DATA_CATALOG.for_profile(ARCHIVE_PROFILE_REGULAR)
 ]
 SCOPE_EXCLUDED = [
-    "config/global.json",
     "config/bots/_template.json",
     "dashboard/data/dashboard.db",
     "content",

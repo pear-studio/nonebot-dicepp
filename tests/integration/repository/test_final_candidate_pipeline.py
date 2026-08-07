@@ -136,6 +136,8 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     assert windows.count("Assert-ManualMigrationSentinels") == 2
     assert windows.count("Write-ManualMigrationSentinels") == 2
     assert windows.count('"manager\\control\\user-preserved.txt"') == 2
+    assert "Portable payload must not contain config/global.json" in windows
+    assert "Setup payload must not install config/global.json" in windows
     assert windows.index("Write-ManualMigrationSentinels $extractRoot") < windows.index(
         "[System.IO.Compression.ZipFile]::ExtractToDirectory"
     )
@@ -146,6 +148,10 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     assert 'stat -Lc \'%s\' -- "$PACKAGE_ZIP"' in linux
     assert 'sha256sum -- "$PACKAGE_ZIP"' in linux
     assert '"contract_version": 1' in linux
+    assert 'assert not Path("/app/config/global.json").exists()' in linux
+    assert 'assert config.chat_interval == 31' in linux
+    assert 'assert config.nickname == "image-bot-layer"' in linux
+    assert "Runtime image modified legacy config/global.json" in linux
 
 
 def test_release_workflows_pin_actions_and_toolchain_versions() -> None:

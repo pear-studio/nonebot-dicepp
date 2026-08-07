@@ -202,12 +202,12 @@ def test_background_entry_logs_bootstrap_failure_without_traceback_modal(
 ) -> None:
     install_root = tmp_path / "DicePP"
     program_dir = install_root / "current"
-    source_config = program_dir / "config" / "global.json"
+    source_config = program_dir / "config" / "bots" / "_template.json"
     source_config.parent.mkdir(parents=True)
     source_config.write_text("{}", encoding="utf-8")
     # A directory at the destination makes bootstrap fail before Dashboard's
     # regular logger imports, which is the PyInstaller-modal regression path.
-    (install_root / "config" / "global.json").mkdir(parents=True)
+    (install_root / "config" / "bots" / "_template.json").mkdir(parents=True)
     project_root = repo_root()
     code = textwrap.dedent(
         f"""

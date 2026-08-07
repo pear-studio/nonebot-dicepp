@@ -26,7 +26,6 @@ class DashboardPaths:
 
     # Config paths (relative to project root)
     CONFIG_DIR = _INSTANCE_LAYOUT.config_dir
-    CONFIG_GLOBAL = _INSTANCE_LAYOUT.config_global
     CONFIG_USER = _INSTANCE_LAYOUT.config_user
     CONFIG_BOTS_DIR = _INSTANCE_LAYOUT.config_bots_dir
 

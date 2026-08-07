@@ -55,7 +55,6 @@ def _dashboard_server(
     workspace = tmp_path / "workspace"
     (workspace / "config" / "bots").mkdir(parents=True)
     (workspace / "dashboard" / "data").mkdir(parents=True)
-    (workspace / "config" / "global.json").write_text("{}", encoding="utf-8")
     database = workspace / "dashboard" / "data" / "dashboard.db"
     _init_db(str(database))
     set_password_db(str(database), "test-pass")
@@ -150,7 +149,7 @@ def test_dashboard_config_route_exposes_missing_manager(tmp_path: Path) -> None:
 
 def test_dashboard_server_harness_starts_manager_for_config_writes(tmp_path: Path) -> None:
     """The browser/process harness supplies the real Manager that owns writes."""
-    expected = {"app": {"name": "manager-owned"}}
+    expected = {"nickname": "manager-owned"}
     with _dashboard_server(tmp_path, start_manager=True) as (base_url, workspace):
         opener, base_url = _session_request(base_url)
         _login(opener, base_url)

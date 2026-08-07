@@ -175,21 +175,15 @@ def test_velopack_current_keeps_mutable_instance_data_in_install_root(
     current = tmp_path / "current"
     current.mkdir()
     (current / "config" / "bots").mkdir(parents=True)
-    (current / "config" / "global.json").write_text(
-        '{"version_owned": 2}',
-        encoding="utf-8",
-    )
     (current / "config" / "bots" / "_template.json").write_text(
         '{"template": 2}',
         encoding="utf-8",
     )
     (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "global.json").write_text(
-        '{"version_owned": 1}',
-        encoding="utf-8",
-    )
+    legacy_global = b'{"chat_interval": 99, "legacy": "preserve"}\n'
+    (tmp_path / "config" / "global.json").write_bytes(legacy_global)
     (tmp_path / "config" / "user.json").write_text(
-        '{"keep": true}',
+        '{"chat_interval": 31}',
         encoding="utf-8",
     )
     (tmp_path / "data").mkdir()
@@ -208,16 +202,24 @@ def test_velopack_current_keeps_mutable_instance_data_in_install_root(
     assert env["DICEPP_MANAGER_PROCESS_CWD"] == str(tmp_path)
     for mutable in ("config", "data", "content", "manager"):
         assert not Path(env["DICEPP_PROJECT_ROOT"], mutable).is_relative_to(current)
-    assert (tmp_path / "config" / "global.json").read_text(
-        encoding="utf-8"
-    ) == '{"version_owned": 1}'
+    assert not (current / "config" / "global.json").exists()
+    assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
     assert (tmp_path / "config" / "bots" / "_template.json").read_text(
         encoding="utf-8"
     ) == '{"template": 2}'
     assert (tmp_path / "config" / "user.json").read_text(
         encoding="utf-8"
-    ) == '{"keep": true}'
+    ) == '{"chat_interval": 31}'
     assert (tmp_path / "data" / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+    from plugins.DicePP.core.config.loader import ConfigLoader
+
+    bot_path = tmp_path / "config" / "bots" / "10001.json"
+    bot_path.write_text('{"nickname":"bot-layer"}', encoding="utf-8")
+    loaded = ConfigLoader(str(tmp_path / "config"), "10001").load()
+    assert loaded.chat_interval == 31
+    assert loaded.nickname == "bot-layer"
+    assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
 
 
 @pytest.mark.parametrize("flag", ["--background", "--manager-tray"])
@@ -393,18 +395,11 @@ def test_background_launcher_respects_startup_recovery_runtime_ownership(
     assert "background launch" in DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    "relative",
-    [
-        Path("config/global.json"),
-        Path("config/bots/_template.json"),
-    ],
-)
 def test_velopack_config_seed_rejects_symlink_destination(
     clean_launcher_env,
     tmp_path: Path,
-    relative: Path,
 ) -> None:
+    relative = Path("config/bots/_template.json")
     current = tmp_path / "current"
     source = current / relative
     source.parent.mkdir(parents=True)
@@ -432,7 +427,6 @@ def test_launcher_seed_rejects_redirected_config_ancestor(
 ) -> None:
     current = tmp_path / "current"
     (current / "config" / "bots").mkdir(parents=True)
-    (current / "config" / "global.json").write_text("{}", encoding="utf-8")
     (current / "config" / "bots" / "_template.json").write_text(
         "{}",
         encoding="utf-8",
@@ -461,7 +455,6 @@ def test_pyinstaller_seed_rejects_redirected_config_ancestor(
 ) -> None:
     current = tmp_path / "current"
     (current / "config" / "bots").mkdir(parents=True)
-    (current / "config" / "global.json").write_text("{}", encoding="utf-8")
     (current / "config" / "bots" / "_template.json").write_text(
         "{}",
         encoding="utf-8",
@@ -506,18 +499,15 @@ def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
     current = tmp_path / "current"
     current.mkdir()
     (current / "config" / "bots").mkdir(parents=True)
-    (current / "config" / "global.json").write_text(
-        '{"source": true}',
-        encoding="utf-8",
-    )
     (current / "config" / "bots" / "_template.json").write_text(
         '{"template": true}',
         encoding="utf-8",
     )
     (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "global.json").write_text(
-        '{"existing": true}',
-        encoding="utf-8",
+    legacy_global = b'{"chat_interval": 99, "legacy": "preserve"}\n'
+    (tmp_path / "config" / "global.json").write_bytes(legacy_global)
+    (tmp_path / "config" / "user.json").write_text(
+        '{"chat_interval":31}', encoding="utf-8"
     )
     executable = current / "DicePP.exe"
     executable.write_bytes(b"")
@@ -540,13 +530,21 @@ def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
     assert str(current / "DicePP-Runtime.exe") in module._launcher_environment[
         "DICEPP_MANAGER_PROCESS_COMMAND"
     ]
-    assert (tmp_path / "config" / "global.json").read_text(
-        encoding="utf-8"
-    ) == '{"existing": true}'
+    assert not (current / "config" / "global.json").exists()
+    assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
     assert (tmp_path / "config" / "bots" / "_template.json").read_text(
         encoding="utf-8"
     ) == '{"template": true}'
     assert Path.cwd() == tmp_path
+
+    from plugins.DicePP.core.config.loader import ConfigLoader
+
+    bot_path = tmp_path / "config" / "bots" / "10001.json"
+    bot_path.write_text('{"nickname":"bot-layer"}', encoding="utf-8")
+    loaded = ConfigLoader(str(tmp_path / "config"), "10001").load()
+    assert loaded.chat_interval == 31
+    assert loaded.nickname == "bot-layer"
+    assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
 
 
 def test_tray_operates_the_shared_runtime_unit_through_manager_client(tmp_dashboard_paths: Path) -> None:

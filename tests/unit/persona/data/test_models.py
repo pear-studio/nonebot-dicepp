@@ -122,9 +122,14 @@ class TestPersonaConfig:
     def test_default_values(self):
         """测试配置默认值"""
         config = PersonaConfig()
-        assert config.enabled == False
+        assert config.enabled is True
         assert config.whitelist_enabled == True
-        assert config.providers == {}
+        assert set(config.providers) == {
+            "minimax",
+            "deepseek",
+            "minimax_image",
+            "mimo",
+        }
         assert config.max_concurrent_requests == 2
         assert config.daily_limit == 20
 
@@ -159,7 +164,7 @@ class TestPersonaConfig:
     def test_extra_ignore(self):
         """旧配置字段应被忽略（extra='ignore'）"""
         config = PersonaConfig(decay_rate_per_hour=0.5, decay_daily_cap=5.0, relationship_refuse_prob_base=0.5, relationship_refuse_prob_max=0.9)
-        assert config.enabled == False
+        assert config.enabled is True
 
     # ── from_persona 消费端字段完整性 ──
     # 每个 from_persona 方法直接访问 persona.<field>，若字段未在 PersonaConfig

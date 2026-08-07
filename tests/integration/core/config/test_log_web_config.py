@@ -17,7 +17,7 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("layer", ["global.json", "user.json", "bots/bot1.json"])
+@pytest.mark.parametrize("layer", ["user.json", "bots/bot1.json"])
 def test_legacy_log_upload_config_migrates_and_rewrites_each_layer(
     tmp_path: Path,
     layer: str,
@@ -50,7 +50,7 @@ def test_legacy_log_upload_config_migrates_and_rewrites_each_layer(
 
 
 def test_new_web_config_wins_over_legacy_and_defaults_are_opt_in(tmp_path: Path):
-    path = tmp_path / "global.json"
+    path = tmp_path / "user.json"
     _write(
         path,
         {

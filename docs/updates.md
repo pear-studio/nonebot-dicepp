@@ -80,7 +80,7 @@ Manager 不会自动修改用户的 `docker-compose.yml`。如果目标版本调
 
 ## 更新配置
 
-版本发现配置位于 `config/global.json` 的 `update` 段，也可以在 `config/user.json` 中覆盖：
+版本发现使用程序内置默认值；需要调整时，在 `config/user.json` 的 `update` 段稀疏覆盖：
 
 ```json
 {
@@ -95,6 +95,8 @@ Manager 不会自动修改用户的 `docker-compose.yml`。如果目标版本调
 ```
 
 通常直接使用 Dashboard 配置编辑页即可。不了解预发布风险时保持 `stable`，不要开启 prerelease 频道。
+
+从仍随附 `config/global.json` 的版本升级时，新版本不会读取、迁移或删除该文件。升级前应确认它只包含旧 Runtime 自动规范化产生的差异，随后备份并移走；其中确需保留的设置先转写到 `config/user.json`。源码部署还应先处理被改脏的 tracked global，否则 Git 版本切换可能失败。
 
 ## 相关资料
 

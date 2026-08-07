@@ -139,7 +139,7 @@ class TestPathTraversal:
         """Paths containing ``..`` are rejected."""
         setup_auth(test_client)
         resp = test_client.get(
-            "/api/content/decks/..%2Fconfig%2Fglobal.json"
+            "/api/content/decks/..%2Fconfig%2Fuser.json"
         )
         assert resp.status_code == 400
         assert resp.json()["ok"] is False

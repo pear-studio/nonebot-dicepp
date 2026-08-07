@@ -56,9 +56,9 @@ DicePP/
 Velopack 激活版本时，程序文件实际位于 `DicePP/current/`；Manager 会把
 `DicePP/` 识别为稳定实例根，因此 `config/`、`content/`、`data/` 和 `manager/`
 不会被写进 `current/`。启动器通过 `DICEPP_APP_DIR` 保留当前程序目录，并把
-版本随附的 `config/global.json` 和 `config/bots/_template.json` 只在稳定实例
-根缺失时以竞争安全方式复制一次；既存普通文件保持不变，符号链接或 reparse
-目标会拒绝启动。`user.json`、账号配置和业务数据绝不覆盖。Velopack 生成的
+版本随附的 `config/bots/_template.json` 只在稳定实例根缺失时以竞争安全方式复制
+一次；既存普通文件保持不变，符号链接或 reparse 目标会拒绝启动。
+`user.json`、账号配置和业务数据绝不覆盖。Velopack 生成的
 Portable 和 Setup 都保留稳定根入口、`Update.exe` 与 `current/` 布局；区别只在
 首次部署是否运行安装器，不会形成两套数据位置或更新协议。
 

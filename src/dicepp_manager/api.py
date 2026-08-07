@@ -693,8 +693,8 @@ def create_manager_app(
         body = await _json_body(request)
         try:
             with manager_service.maintenance():
-                validate_user_candidate(settings.layout, body)
-                _write_managed_config(settings.layout.config_user, body)
+                canonical = validate_user_candidate(settings.layout, body)
+                _write_managed_config(settings.layout.config_user, canonical)
         except MaintenanceConflict as exc:
             return _maintenance_conflict_response(exc)
         except ConfigurationValidationError as exc:
@@ -729,8 +729,8 @@ def create_manager_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             with manager_service.maintenance():
-                validate_bot_candidate(settings.layout, bot_id, body)
-                _write_managed_config(path, body)
+                canonical = validate_bot_candidate(settings.layout, bot_id, body)
+                _write_managed_config(path, canonical)
         except MaintenanceConflict as exc:
             return _maintenance_conflict_response(exc)
         except ConfigurationValidationError as exc:

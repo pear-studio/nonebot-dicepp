@@ -5,23 +5,24 @@ Priority (high → low):
   1. Environment variables  (DICE_* prefix)
   2. Account config         config/bots/{account}.json
   3. Global user overrides  config/user.json
-  4. Global defaults        config/global.json
+  4. Pydantic defaults and built-in provider catalog
 """
 import json
 import os
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, get_args, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import SchemaSerializer, SchemaValidator
 
 from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.core.config.pydantic_models import BotConfig
 from plugins.DicePP.core.config.basic import Paths
 
 _BOTS_DIR = "bots"
-_GLOBAL_CONFIG = "global.json"
 _GLOBAL_USER = "user.json"
 _ACCOUNT_TEMPLATE = "_template.json"
 _COMMENT_METADATA_PREFIX = "_comment"
@@ -178,13 +179,20 @@ def _field_has_default(field: Any) -> bool:
 
 
 def _field_input_keys(name: str, field: Any) -> list[str]:
-    keys = [name]
+    keys: list[str] = []
     alias = getattr(field, "validation_alias", None)
     if isinstance(alias, str):
         keys.append(alias)
     choices = getattr(alias, "choices", None)
     if choices:
         keys.extend(str(choice) for choice in choices)
+    field_alias = getattr(field, "alias", None)
+    if isinstance(field_alias, str):
+        keys.append(field_alias)
+    # Keep the Python field name as a compatibility fallback, but only after
+    # every Pydantic validation alias.  When both are present Pydantic gives
+    # the alias precedence and canonicalization must select the same value.
+    keys.append(name)
     return list(dict.fromkeys(keys))
 
 
@@ -209,6 +217,57 @@ def _dump_json_value(annotation: Any, value: Any) -> Any:
     adapter = TypeAdapter(annotation)
     validated = adapter.validate_python(value)
     return adapter.dump_python(validated, mode="json")
+
+
+def _dump_model_field_json_value(
+    model_type: type[BaseModel],
+    field_name: str,
+    annotation: Any,
+    value: Any,
+) -> Any:
+    """Validate a scalar through its owning field, including field validators."""
+    field_schema = _locate_model_field_core_schema(model_type, field_name)
+    if field_schema is None:
+        return _dump_json_value(annotation, value)
+    validated = SchemaValidator(field_schema).validate_python(value)
+    return SchemaSerializer(field_schema).to_python(validated, mode="json")
+
+
+def _locate_model_field_core_schema(
+    model_type: type[BaseModel],
+    field_name: str,
+) -> Any | None:
+    """Unwrap Pydantic model core-schema wrappers and return one field schema."""
+    definitions: dict[str, Any] = {}
+    schema: Any = model_type.__pydantic_core_schema__
+    visited: set[int] = set()
+
+    while isinstance(schema, dict) and id(schema) not in visited:
+        visited.add(id(schema))
+        schema_type = schema.get("type")
+        if schema_type == "definitions":
+            for definition in schema.get("definitions", ()):
+                if isinstance(definition, dict) and isinstance(
+                    definition.get("ref"), str
+                ):
+                    definitions[definition["ref"]] = definition
+            schema = schema.get("schema")
+            continue
+        if schema_type == "definition-ref":
+            reference = schema.get("schema_ref")
+            schema = definitions.get(reference)
+            continue
+        if schema_type == "model-fields":
+            field_entry = schema.get("fields", {}).get(field_name)
+            return field_entry.get("schema") if isinstance(field_entry, dict) else None
+
+        # model, function-before/after/wrap, default, nullable and the other
+        # single-schema wrappers all expose their inner contract as `schema`.
+        nested = schema.get("schema")
+        if not isinstance(nested, dict):
+            return None
+        schema = nested
+    return None
 
 
 def _canonicalize_default_value(
@@ -261,6 +320,8 @@ def _canonicalize_model_dict(
         value = raw[input_key]
         try:
             canonical[output_key] = _canonicalize_field_value(
+                model_type,
+                name,
                 field.annotation,
                 value,
                 path=path,
@@ -320,6 +381,8 @@ def canonicalize_config_layer(
 
 
 def _canonicalize_field_value(
+    owner_model_type: type[BaseModel],
+    field_name: str,
     annotation: Any,
     value: Any,
     *,
@@ -372,7 +435,12 @@ def _canonicalize_field_value(
             canonical_items.append(item)
         return _dump_json_value(annotation, canonical_items)
 
-    return _dump_json_value(annotation, value)
+    return _dump_model_field_json_value(
+        owner_model_type,
+        field_name,
+        annotation,
+        value,
+    )
 
 
 def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -416,6 +484,59 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
     return _deep_merge(data, env_map)
 
 
+@dataclass(frozen=True)
+class ResolvedConfigLayers:
+    """Pure result of resolving user and account layers."""
+
+    config: BotConfig
+    user: Dict[str, Any]
+    account: Dict[str, Any]
+
+
+def resolve_config_layers(
+    user_raw: Dict[str, Any],
+    account_raw: Dict[str, Any],
+    *,
+    account: str = "",
+    user_path: Path | None = None,
+    account_path: Path | None = None,
+    apply_environment: bool = False,
+) -> ResolvedConfigLayers:
+    """Resolve config layers without reading or writing files.
+
+    This is the single acceptance contract shared by Runtime and Manager:
+    canonicalize each sparse layer, merge it over a fresh built-in model, then
+    validate cross-layer constraints on the final configuration.
+    """
+    canonical_user = canonicalize_config_layer(
+        user_raw,
+        fill_missing_defaults=False,
+        path=user_path,
+    )
+    canonical_account = canonicalize_config_layer(
+        account_raw,
+        fill_missing_defaults=False,
+        path=account_path,
+    )
+    merged = BotConfig().model_dump(mode="json", by_alias=True)
+    merged = _deep_merge(merged, canonical_user)
+    merged = _deep_merge(merged, canonical_account)
+    if apply_environment:
+        merged = _apply_env_overrides(merged)
+    try:
+        config = BotConfig.model_validate(merged)
+    except ValidationError as exc:
+        raise ConfigValidationError(
+            f"[Config] Configuration validation failed for account '{account}':\n{exc}",
+            validation_error=exc,
+        ) from exc
+    return ResolvedConfigLayers(
+        config=config,
+        user=canonical_user,
+        account=canonical_account,
+    )
+
+
 class ConfigLoader:
     """
     Loads BotConfig from layered JSON files and environment variables.
@@ -457,88 +578,34 @@ class ConfigLoader:
     # ── internals ───────────────────────────────────────────────────────────
 
     def _build_config(self) -> BotConfig:
-        rewrites: list[tuple[Path, Dict[str, Any], Dict[str, Any]]] = []
-
-        # Layer 4 (lowest): global defaults
-        global_path = self._data_path / _GLOBAL_CONFIG
-        global_disk_raw, global_can_rewrite = _load_json_file_for_rewrite(global_path)
-        global_raw = _migrate_legacy_log_web_config(global_disk_raw)
-        raw = self._canonicalize_layer(
-            global_path,
-            global_raw,
-            can_rewrite=global_can_rewrite,
-            fill_missing_defaults=True,
-            rewrites=rewrites,
-            original_raw=global_disk_raw,
-        )
-
-        # Layer 3: global user overrides (replaces old secrets.json)
+        # Layer 3: instance-wide user overrides
         user_path = self._data_path / _GLOBAL_USER
         user_disk_raw, user_can_rewrite = _load_json_file_for_rewrite(user_path)
-        user_raw = _migrate_legacy_log_web_config(user_disk_raw)
-        user_cfg = self._canonicalize_layer(
-            user_path,
-            user_raw,
-            can_rewrite=user_can_rewrite,
-            fill_missing_defaults=False,
-            rewrites=rewrites,
-            original_raw=user_disk_raw,
-        )
-        raw = _deep_merge(raw, user_cfg)
 
         # Layer 2: account config
         self._ensure_account_config()
         account_disk_raw, account_can_rewrite = _load_json_file_for_rewrite(self._account_config_path)
-        account_raw = _migrate_legacy_log_web_config(account_disk_raw)
-        account_cfg = self._canonicalize_layer(
-            self._account_config_path,
-            account_raw,
-            can_rewrite=account_can_rewrite,
-            fill_missing_defaults=False,
-            rewrites=rewrites,
-            original_raw=account_disk_raw,
+        resolved = resolve_config_layers(
+            user_disk_raw,
+            account_disk_raw,
+            account=self._account,
+            user_path=user_path,
+            account_path=self._account_config_path,
+            apply_environment=True,
         )
-        raw = _deep_merge(raw, account_cfg)
+        cfg = resolved.config
 
-        # Layer 1 (highest): environment variables
-        raw = _apply_env_overrides(raw)
-
-        # Validate and return typed config
-        try:
-            cfg = BotConfig.model_validate(raw)
-        except ValidationError as exc:
-            raise ConfigValidationError(
-                f"[Config] Configuration validation failed for account '{self._account}':\n{exc}"
-            ) from exc
-
-        for path, original, canonical in rewrites:
-            if original != canonical:
-                _write_json_file_atomic(path, canonical)
+        # Persistence deliberately remains a Runtime concern.  Malformed or
+        # unreadable files are represented by can_rewrite=False and left alone.
+        if user_can_rewrite and user_disk_raw != resolved.user:
+            _write_json_file_atomic(user_path, resolved.user)
+        if account_can_rewrite and account_disk_raw != resolved.account:
+            _write_json_file_atomic(self._account_config_path, resolved.account)
 
         if not cfg.master:
             logger.warning(f"[Config] [Warn] No master configured for account '{self._account}'. "
                            f"Edit {self._account_config_path} to set master IDs.")
         return cfg
-
-    def _canonicalize_layer(
-        self,
-        path: Path,
-        raw: Dict[str, Any],
-        *,
-        can_rewrite: bool,
-        fill_missing_defaults: bool,
-        rewrites: list[tuple[Path, Dict[str, Any], Dict[str, Any]]],
-        original_raw: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
-        if not can_rewrite:
-            return raw
-        canonical = canonicalize_config_layer(
-            raw,
-            path=path,
-            fill_missing_defaults=fill_missing_defaults,
-        )
-        rewrites.append((path, original_raw if original_raw is not None else raw, canonical))
-        return canonical
 
     @property
     def _account_config_path(self) -> Path:
@@ -562,3 +629,12 @@ class ConfigLoader:
 
 class ConfigValidationError(Exception):
     """Raised when Pydantic validation fails during config load/reload."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        validation_error: ValidationError | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.validation_error = validation_error

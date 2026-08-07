@@ -120,7 +120,7 @@ def test_manager_is_the_config_writer_and_conflicts_with_maintenance(tmp_path: P
         saved_bot = client.put(
             "/v1/config/bots/10001",
             headers=_auth(),
-            json={"enabled": True},
+            json={"nickname": "managed-bot"},
         )
         with service.maintenance():
             conflict = client.put(
@@ -141,7 +141,7 @@ def test_manager_is_the_config_writer_and_conflicts_with_maintenance(tmp_path: P
         "update": {"discovery_enabled": False}
     }
     assert json.loads(layout.bot_config_path("10001").read_text(encoding="utf-8")) == {
-        "enabled": True
+        "nickname": "managed-bot"
     }
     assert conflict.status_code == 409
     assert conflict.json()["code"] == "maintenance_conflict"

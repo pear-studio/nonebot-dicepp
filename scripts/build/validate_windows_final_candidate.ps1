@@ -111,6 +111,9 @@ try {
         throw "Portable must contain exactly one DicePP-Runtime.exe"
     }
     $programRoot = $runtimeMatches[0].Directory.FullName
+    if (Test-Path -LiteralPath (Join-Path $programRoot "config/global.json")) {
+        throw "Portable payload must not contain config/global.json"
+    }
     $runtime = Join-Path $programRoot "DicePP-Runtime.exe"
     $dashboard = Join-Path $programRoot "DicePP.exe"
     $dashboardApp = Join-Path $programRoot "DicePP-App.exe"
@@ -168,6 +171,9 @@ try {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Setup installation is incomplete: $path"
         }
+    }
+    if (Test-Path -LiteralPath (Join-Path $installRoot "current/config/global.json")) {
+        throw "Setup payload must not install config/global.json"
     }
     $forbiddenGuard = @(
         Get-ChildItem -LiteralPath $installRoot -Recurse -File |

@@ -28,7 +28,6 @@ def patch_paths(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
         project_root / "dashboard" / "data" / "dashboard.db",
     )
     monkeypatch.setattr(DashboardPaths, "CONFIG_DIR", project_root / "config")
-    monkeypatch.setattr(DashboardPaths, "CONFIG_GLOBAL", project_root / "config" / "global.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_USER", project_root / "config" / "user.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_BOTS_DIR", project_root / "config" / "bots")
     monkeypatch.setattr(DashboardPaths, "DATA_ROOT", project_root / "data")

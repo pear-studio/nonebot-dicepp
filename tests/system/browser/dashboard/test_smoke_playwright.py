@@ -84,11 +84,6 @@ def dashboard_url(tmp_path: Path) -> str:
     (tmp_path / "config" / "bots").mkdir(parents=True, exist_ok=True)
     (tmp_path / "dashboard" / "data").mkdir(parents=True, exist_ok=True)
 
-    # Minimal global.json
-    (tmp_path / "config" / "global.json").write_text(
-        json.dumps({"app": {"name": "dicepp-smoke", "version": "1.0.0"}})
-    )
-
     # Linux production deliberately has no web setup path. Seed the password
     # through the same database operation used by ``dashboard admin init`` so
     # this cross-platform browser test focuses on login and authenticated use.
@@ -356,18 +351,16 @@ def test_config_edit_requires_runtime_restart(dashboard_url: str, tmp_path: Path
             # 4. Switch to JSON view — simpler than field-level editing
             json_view.click()
 
-            # 5. Modify a field in the JSON textarea (e.g. app.name)
+            # 5. Modify a canonical BotConfig field in the JSON textarea.
             textarea = page.locator("textarea").first
             textarea.wait_for(state="visible", timeout=5000)
             expect(textarea).to_be_enabled(timeout=10000)
-            textarea.fill('{"app": {"name": "modified", "version": "1.0.0"}}')
+            textarea.fill('{"nickname": "modified"}')
 
             # 6. Click save and wait for the matching Dashboard response.  This
             # binds the subsequent disk assertion to this save rather than a
             # background request triggered while the editor initializes.
-            expected_user_config = {
-                "app": {"name": "modified", "version": "1.0.0"}
-            }
+            expected_user_config = {"nickname": "modified"}
             with page.expect_response(
                 lambda response: (
                     urlparse(response.url).path == "/api/config/user/save"

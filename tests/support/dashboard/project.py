@@ -32,18 +32,6 @@ def build_dashboard_project(
     for directory in directories:
         (project_root / directory).mkdir(parents=True, exist_ok=True)
 
-    (project_root / "config" / "global.json").write_text(
-        json.dumps(
-            {
-                "_comment": "Developer note — should NOT appear in config_merged",
-                "app": {"name": "test_dicepp", "version": "1.0.0"},
-                "persona_ai": {
-                    "enabled": False,
-                    "_comment_persona": "Persona setup notes",
-                },
-            }
-        )
-    )
     (project_root / "config" / "bots" / "test_bot.json").write_text(
         json.dumps({"master": ["test_master"], "enabled": True})
     )

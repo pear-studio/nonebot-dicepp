@@ -1,6 +1,5 @@
 """Tests for the ``/api/bots`` bot-discovery endpoint."""
 
-import json
 from pathlib import Path
 
 import pytest
@@ -36,10 +35,6 @@ class TestListBots:
         dirs = ["config/bots", "dashboard/data", "data/bots"]
         for d in dirs:
             (project_root / d).mkdir(parents=True, exist_ok=True)
-        (project_root / "config" / "global.json").write_text(
-            json.dumps({"app": {"name": "test"}})
-        )
-
         patch_paths(monkeypatch, project_root)
         db_path = init_test_db(project_root)
         app.state.dashboard_db = db_path

@@ -37,6 +37,18 @@ datas = [
         ),
         os.path.join("dashboard_config_schema"),
     ),
+    (
+        os.path.join(
+            PROJECT_ROOT,
+            "src",
+            "plugins",
+            "DicePP",
+            "core",
+            "config",
+            "builtin_providers.py",
+        ),
+        os.path.join("dashboard_config_schema"),
+    ),
     (os.path.join(PROJECT_ROOT, "templates"), "templates"),
 ]
 datas += copy_metadata("dicepp")

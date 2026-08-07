@@ -11,7 +11,7 @@ description: 运行 DicePP Persona 真实 LLM 功能回归，客观验收生活�
 
 1. 完整阅读 [references/scenarios.md](references/scenarios.md)。
 2. 向用户列出全部固定场景，结合回归范围标注推荐项，由用户选择。固定场景覆盖不足时可提出附加场景；不得为构造场景修改源码，数据库默认只读。
-3. 确认 skill 同目录存在 `test_llm.local.json`。它只能按正式 `config/user.json` 结构为 `config/global.json` 已有 provider 填写 `api_key`，不得定义自有 provider。
+3. 确认 skill 同目录存在 `test_llm.local.json`。它只能按正式 `config/user.json` 结构为内置 provider 填写 `api_key`，不得定义自有 provider。
 4. 运行离线准备脚本：
 
 ```bash

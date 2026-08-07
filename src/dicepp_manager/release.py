@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
-import math
 import os
 import platform as host_platform
 import re
@@ -17,9 +16,10 @@ import stat
 import threading
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
@@ -129,41 +129,48 @@ class _PublishedGeneration:
     token: str | None = None
 
 
+@lru_cache(maxsize=1)
+def _builtin_update_defaults():
+    """Load the canonical update defaults without Bot imports at module import."""
+    from plugins.DicePP.core.config.pydantic_models import UpdateConfig
+
+    return UpdateConfig()
+
+
 @dataclass(frozen=True, slots=True)
 class UpdateSettings:
-    discovery_enabled: bool = True
-    auto_download: bool = False
-    channel: str = "stable"
-    check_interval_hours: float = 24.0
-    cache_versions: int = 2
+    discovery_enabled: bool = field(
+        default_factory=lambda: _builtin_update_defaults().discovery_enabled
+    )
+    auto_download: bool = field(
+        default_factory=lambda: _builtin_update_defaults().auto_download
+    )
+    channel: str = field(
+        default_factory=lambda: _builtin_update_defaults().channel
+    )
+    check_interval_hours: float = field(
+        default_factory=lambda: _builtin_update_defaults().check_interval_hours
+    )
+    cache_versions: int = field(
+        default_factory=lambda: _builtin_update_defaults().cache_versions
+    )
 
     def __post_init__(self) -> None:
-        if type(self.discovery_enabled) is not bool:
-            raise ValueError("update.discovery_enabled must be a boolean")
-        if type(self.auto_download) is not bool:
-            raise ValueError("update.auto_download must be a boolean")
-        if type(self.channel) is not str or self.channel not in {
-            "stable",
-            "prerelease",
-        }:
-            raise ValueError("update.channel must be stable or prerelease")
-        interval = self.check_interval_hours
-        if (
-            isinstance(interval, bool)
-            or type(interval) not in {int, float}
-            or not math.isfinite(float(interval))
-            or interval <= 0
-        ):
-            raise ValueError(
-                "update.check_interval_hours must be a finite positive number"
-            )
-        if type(self.cache_versions) is not int or not 1 <= self.cache_versions <= 20:
-            raise ValueError("update.cache_versions must be an integer between 1 and 20")
+        type(_builtin_update_defaults()).model_validate(
+            {
+                "discovery_enabled": self.discovery_enabled,
+                "auto_download": self.auto_download,
+                "channel": self.channel,
+                "check_interval_hours": self.check_interval_hours,
+                "cache_versions": self.cache_versions,
+            }
+        )
 
     @classmethod
     def from_layout(cls, layout) -> "UpdateSettings":
+        defaults = _builtin_update_defaults()
         merged: dict[str, Any] = {}
-        for path in (layout.config_global, layout.config_user):
+        for path in (layout.config_user,):
             try:
                 value = json.loads(path.read_text(encoding="utf-8"))
             except FileNotFoundError:
@@ -175,19 +182,24 @@ class UpdateSettings:
                 raise ValueError(f"update settings in {path} must be an object")
             merged.update(section)
         return cls(
-            discovery_enabled=_strict_bool(merged, "discovery_enabled", True),
-            auto_download=_strict_bool(merged, "auto_download", False),
-            channel=merged.get("channel", "stable"),
-            check_interval_hours=merged.get("check_interval_hours", 24.0),
-            cache_versions=merged.get("cache_versions", 2),
+            discovery_enabled=merged.get(
+                "discovery_enabled",
+                defaults.discovery_enabled,
+            ),
+            auto_download=merged.get(
+                "auto_download",
+                defaults.auto_download,
+            ),
+            channel=merged.get("channel", defaults.channel),
+            check_interval_hours=merged.get(
+                "check_interval_hours",
+                defaults.check_interval_hours,
+            ),
+            cache_versions=merged.get(
+                "cache_versions",
+                defaults.cache_versions,
+            ),
         )
-
-
-def _strict_bool(values: Mapping[str, Any], key: str, default: bool) -> bool:
-    value = values.get(key, default)
-    if type(value) is not bool:
-        raise ValueError(f"update.{key} must be a boolean")
-    return value
 
 
 def current_target(

@@ -62,15 +62,18 @@ def _dashboard_exe() -> Path:
     return exe
 
 
+@pytest.fixture(scope="module", autouse=True)
+def package_tree_does_not_ship_global_config() -> None:
+    """Inspect the built package tree; this suite is opt-in without artifacts."""
+    package_root = _dashboard_exe().parent
+    assert not (package_root / "config" / "global.json").exists()
+
+
 def _launch_env(tmp_path: Path) -> tuple[dict[str, str], str]:
     """Mirror the package-smoke environment, minus any stdio redirection."""
     project_root = tmp_path / "dicepp-project"
     (project_root / "config" / "bots").mkdir(parents=True, exist_ok=True)
     (project_root / "dashboard" / "data").mkdir(parents=True, exist_ok=True)
-    (project_root / "config" / "global.json").write_text(
-        json.dumps({"app": {"name": "dicepp-windows-detached", "version": "1.0.0"}})
-    )
-
     port = find_free_port()
     manager_port = find_free_port()
     while manager_port == port:

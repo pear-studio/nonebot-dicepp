@@ -13,6 +13,11 @@ from fastapi.testclient import TestClient
 from dicepp_data import InstanceLayout
 from dicepp_manager.api import create_manager_app
 from dicepp_manager.config import ManagerSettings
+from dicepp_manager.config_validation import (
+    ConfigurationValidationError,
+    validate_bot_candidate,
+    validate_user_candidate,
+)
 from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
 
@@ -151,7 +156,9 @@ def test_clean_query_database_dry_run_still_requires_confirmation(
     assert payload["report"]["issues"] == []
 
 
-def test_invalid_update_is_rejected_without_replacing_user_document(tmp_path: Path) -> None:
+def test_recoverable_update_error_is_canonical_before_manager_persists_it(tmp_path: Path) -> None:
+    from dicepp_manager.release import UpdateSettings
+
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_user.parent.mkdir(parents=True)
     before = b'{"app":{"name":"keep"}}\n'
@@ -164,19 +171,14 @@ def test_invalid_update_is_rejected_without_replacing_user_document(tmp_path: Pa
             json={"update": {"cache_versions": True}},
         )
 
-    assert response.status_code == 422
-    payload = response.json()
-    assert payload["ok"] is False
-    assert payload["code"] == "invalid_configuration"
-    assert payload["message"] == "Configuration validation failed"
-    assert any(error["field"].endswith("update.cache_versions") for error in payload["errors"])
-    assert {error["message"] for error in payload["errors"]} == {
-        "Invalid configuration value"
+    assert response.status_code == 200
+    assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
+        "update": {"cache_versions": 2}
     }
-    assert layout.config_user.read_bytes() == before
+    assert UpdateSettings.from_layout(layout).cache_versions == 2
 
 
-def test_user_candidate_is_checked_against_each_existing_bot(tmp_path: Path) -> None:
+def test_recoverable_error_in_existing_bot_does_not_block_user_save(tmp_path: Path) -> None:
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_user.parent.mkdir(parents=True)
     before = b'{"app":{"name":"keep"}}\n'
@@ -195,12 +197,10 @@ def test_user_candidate_is_checked_against_each_existing_bot(tmp_path: Path) -> 
             json={"update": {"channel": "stable"}},
         )
 
-    assert response.status_code == 422
-    assert any(
-        error["field"].startswith("bots.broken.update.cache_versions")
-        for error in response.json()["errors"]
-    )
-    assert layout.config_user.read_bytes() == before
+    assert response.status_code == 200
+    assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
+        "update": {"channel": "stable"}
+    }
 
 
 def test_user_candidate_is_checked_against_future_bot_fallback(tmp_path: Path) -> None:
@@ -373,9 +373,171 @@ def test_query_database_enablement_rejects_unknown_or_unsafe_names(tmp_path: Pat
     assert unsafe.status_code == 404
 
 
+def test_sparse_provider_api_key_uses_builtin_catalog(tmp_path: Path) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+
+    with TestClient(_app(layout)) as client:
+        response = client.put(
+            "/v1/config/user",
+            headers=_auth(),
+            json={
+                "persona_ai": {
+                    "providers": {"minimax": {"api_key": "test-key"}}
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
+        "persona_ai": {"providers": {"minimax": {"api_key": "test-key"}}}
+    }
+
+
+def test_manager_persists_exact_resolver_user_and_account_layers(tmp_path: Path) -> None:
+    from plugins.DicePP.core.config.loader import resolve_config_layers
+
+    layout = InstanceLayout.from_root(tmp_path)
+    candidate_user = {
+        "obsolete_plain_field": True,
+        "chat_interval": "not-a-number",
+        "persona_ai": {"providers": {"minimax": {"api_key": "test-key"}}},
+    }
+    expected_user = resolve_config_layers(candidate_user, {}).user
+
+    with TestClient(_app(layout)) as client:
+        user_response = client.put(
+            "/v1/config/user", headers=_auth(), json=candidate_user
+        )
+
+        persisted_user = json.loads(layout.config_user.read_text(encoding="utf-8"))
+        candidate_bot = {
+            "obsolete_bot_field": True,
+            "nickname": "canonical-bot",
+            "persona_ai": {"providers": {"minimax": {"enabled": False}}},
+        }
+        expected_account = resolve_config_layers(
+            persisted_user, candidate_bot
+        ).account
+        bot_response = client.put(
+            "/v1/config/bots/10001", headers=_auth(), json=candidate_bot
+        )
+
+    assert user_response.status_code == 200
+    assert persisted_user == expected_user
+    assert "obsolete_plain_field" not in persisted_user
+    assert persisted_user["chat_interval"] == 20
+    assert persisted_user["persona_ai"]["providers"]["minimax"] == {
+        "api_key": "test-key"
+    }
+    assert bot_response.status_code == 200
+    persisted_bot = json.loads(
+        layout.bot_config_path("10001").read_text(encoding="utf-8")
+    )
+    assert persisted_bot == expected_account
+    assert "obsolete_bot_field" not in persisted_bot
+    assert persisted_bot["persona_ai"]["providers"]["minimax"] == {
+        "enabled": False
+    }
+
+
 def test_validator_uses_the_runtime_canonical_bot_config_model() -> None:
     """A packaged Manager must not drift to a Dashboard-local schema copy."""
-    import dicepp_manager.config_validation as validation
+    from plugins.DicePP.core.config.loader import resolve_config_layers
     from plugins.DicePP.core.config.pydantic_models import BotConfig
 
-    assert validation.BotConfig is BotConfig
+    assert type(resolve_config_layers({}, {}).config) is BotConfig
+
+
+@pytest.mark.parametrize(
+    ("user", "bot", "accepted"),
+    [
+        ({"chat_interval": "not-a-number"}, {}, True),
+        ({"master": "not-a-list"}, {}, False),
+        ({"obsolete_plain_field": True}, {}, True),
+        ({"unknown_api_key": "secret"}, {}, False),
+        (
+            {"persona_ai": {"providers": {"minimax": {"api_key": "test-key"}}}},
+            {},
+            True,
+        ),
+        (
+            {"persona_ai": {"segment_soft_limit": 130}},
+            {"persona_ai": {"segment_hard_limit": 120}},
+            False,
+        ),
+    ],
+    ids=(
+        "recoverable-ordinary-error",
+        "critical-field-error",
+        "unknown-ordinary-field",
+        "unknown-critical-field",
+        "sparse-provider",
+        "cross-layer-constraint",
+    ),
+)
+def test_manager_and_runtime_share_layer_acceptance_matrix(
+    tmp_path: Path,
+    user: dict,
+    bot: dict,
+    accepted: bool,
+) -> None:
+    from plugins.DicePP.core.config.loader import ConfigLoader, ConfigValidationError
+
+    layout = InstanceLayout.from_root(tmp_path)
+    bot_path = layout.bot_config_path("10001")
+    bot_path.parent.mkdir(parents=True)
+    bot_path.write_text(json.dumps(bot), encoding="utf-8")
+
+    if accepted:
+        validate_user_candidate(layout, user)
+    else:
+        with pytest.raises(ConfigurationValidationError):
+            validate_user_candidate(layout, user)
+
+    layout.config_user.write_text(json.dumps(user), encoding="utf-8")
+    loader = ConfigLoader(str(layout.config_dir), "10001")
+    if accepted:
+        loaded = loader.load()
+        if "obsolete_plain_field" in user:
+            assert "obsolete_plain_field" not in loaded.model_dump()
+        if user.get("chat_interval") == "not-a-number":
+            assert loaded.chat_interval == 20
+        if "persona_ai" in user and "providers" in user["persona_ai"]:
+            assert loaded.persona_ai.providers["minimax"].api_key == "test-key"
+            assert loaded.persona_ai.providers["minimax"].base_url
+    else:
+        with pytest.raises(ConfigValidationError):
+            loader.load()
+
+
+def test_manager_and_runtime_resolve_the_same_sparse_layers(tmp_path: Path) -> None:
+    from plugins.DicePP.core.config.loader import ConfigLoader
+
+    layout = InstanceLayout.from_root(tmp_path)
+    user = {
+        "chat_interval": 31,
+        "persona_ai": {
+            "providers": {"minimax": {"api_key": "test-key"}},
+        },
+    }
+    bot = {
+        "chat_interval": 7,
+        "persona_ai": {"providers": {"minimax": {"enabled": False}}},
+    }
+
+    validate_user_candidate(layout, user)
+    layout.config_dir.mkdir(parents=True)
+    layout.config_user.write_text(json.dumps(user), encoding="utf-8")
+    validate_bot_candidate(layout, "10001", bot)
+    bot_path = layout.bot_config_path("10001")
+    bot_path.parent.mkdir(parents=True)
+    bot_path.write_text(json.dumps(bot), encoding="utf-8")
+
+    loaded = ConfigLoader(str(layout.config_dir), "10001").load()
+
+    assert loaded.chat_interval == 7
+    assert loaded.persona_ai.providers["minimax"].api_key == "test-key"
+    assert loaded.persona_ai.providers["minimax"].enabled is False
+    assert loaded.persona_ai.providers["minimax"].base_url == (
+        "https://api.minimaxi.com/v1"
+    )

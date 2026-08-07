@@ -344,10 +344,7 @@ def sync_version_owned_config(program_dir: Path, instance_root: Path) -> None:
     """Seed missing version-owned defaults without overwriting an instance."""
     if program_dir == instance_root:
         return
-    for relative in (
-        Path("config/global.json"),
-        Path("config/bots/_template.json"),
-    ):
+    for relative in (Path("config/bots/_template.json"),):
         source = program_dir / relative
         if not source.is_file() or source.is_symlink():
             continue

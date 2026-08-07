@@ -708,6 +708,7 @@ def test_post_commit_accepts_only_restore_failed_before_manual_finalize(
     )
     monkeypatch.setattr(orch, "_wait_upgrade_complete", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(orch, "_verify_handoff_target_objects", lambda *_args: None)
+    monkeypatch.setattr(orch, "_verify_sentinels", lambda *_args, **_kwargs: None)
     orch._harness_control_dir = tmp_path
     scenario = "manager_handoff_commit_crash_window"
 
@@ -727,6 +728,129 @@ def test_post_commit_accepts_only_restore_failed_before_manual_finalize(
         ):
             orch._run_daemon_restart_after_commit(scenario)
         assert "manual" not in events
+
+
+@pytest.mark.parametrize(
+    ("method_name", "expected_state"),
+    [
+        ("_run_daemon_restart_before_commit", "source_restored"),
+        ("_run_daemon_restart_after_commit", "cleanup_pending"),
+    ],
+)
+def test_daemon_restart_terminal_paths_verify_legacy_global_sentinel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method_name: str,
+    expected_state: str,
+) -> None:
+    class Sandbox:
+        def restart(self) -> None:
+            pass
+
+    orch = _orchestrator(tmp_path, sandbox=Sandbox())
+    scenario = "manager_handoff_commit_crash_window"
+    tx_dir = tmp_path / "tx"
+    tx_dir.mkdir()
+    request = {
+        "transaction_id": "a" * 32,
+        "operation_id": "operation-1",
+        "manager": {"name": "dicepp-manager"},
+    }
+    decision = {**request, "value": "commit"}
+    restored = {**request, "value": "source-restored"}
+    committed_result = {**request, "value": "target-committed"}
+    verified: list[tuple[str, bool]] = []
+    orch._sentinel_digests = {"config/global.json": "legacy-digest"}
+
+    for name in (
+        "_prepare_compose",
+        "_start_source",
+        "_verify_source_healthy",
+        "_trigger_upgrade",
+        "_verify_journal_binding",
+        "_verify_handoff_document_binding",
+        "_wait_rollback_complete",
+        "_verify_handoff_source_objects",
+        "_verify_dashboard_db_source",
+        "_verify_handoff_rollback_journal",
+        "_verify_post_commit_recovery_material",
+        "_run_manual_handoff_helper",
+        "_wait_upgrade_complete",
+        "_verify_handoff_target_objects",
+    ):
+        monkeypatch.setattr(orch, name, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        orch,
+        "_verify_sentinels",
+        lambda called_scenario, require_mutation=False: verified.append(
+            (called_scenario, require_mutation)
+        )
+        if "config/global.json" in orch._sentinel_digests
+        else pytest.fail("legacy global sentinel was not in the unified set"),
+    )
+    monkeypatch.setattr(
+        orch,
+        "_wait_control_document",
+        lambda _name: {
+            "mode": (
+                "daemon_before_commit"
+                if method_name.endswith("before_commit")
+                else "daemon_after_commit"
+            )
+        },
+    )
+    monkeypatch.setattr(orch, "_find_handoff_container", lambda *_args: "updater")
+    monkeypatch.setattr(
+        orch,
+        "_docker_cmd",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    monkeypatch.setattr(
+        orch,
+        "_wait_optional_handoff_document",
+        lambda *_args, **_kwargs: None,
+    )
+    orch._harness_control_dir = tmp_path
+
+    if method_name.endswith("before_commit"):
+        monkeypatch.setattr(
+            orch,
+            "_wait_handoff_document",
+            lambda kind, **_kwargs: (
+                request if kind == "request" else restored,
+                tx_dir,
+            ),
+        )
+        monkeypatch.setattr(
+            orch,
+            "_read_journal",
+            lambda: {**request, "status": "rolled_back"},
+        )
+    else:
+        monkeypatch.setattr(
+            orch,
+            "_wait_handoff_document",
+            lambda kind, **_kwargs: (
+                request
+                if kind == "request"
+                else decision
+                if kind == "decision"
+                else committed_result,
+                tx_dir,
+            ),
+        )
+        journals = iter(
+            [
+                {**request, "status": "interrupted", "phase": "cleanup_pending"},
+                {**request, "status": "committed", "phase": "committed"},
+            ]
+        )
+        monkeypatch.setattr(orch, "_read_journal", lambda: next(journals))
+
+    state = getattr(orch, method_name)(scenario)
+
+    assert state == expected_state
+    assert verified == [(scenario, False)]
 
 
 def test_observed_cleanup_pending_then_manual_recovery_is_passed(
@@ -846,6 +970,17 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
         "manager_handoff_commit",
         SCENARIO_ASSERTIONS["manager_handoff_commit"] | {"future_assertion"},
     )
+    verified: list[tuple[str, bool]] = []
+    orch._sentinel_digests = {"config/global.json": "legacy-digest"}
+    monkeypatch.setattr(
+        orch,
+        "_verify_sentinels",
+        lambda scenario, require_mutation=False: verified.append(
+            (scenario, require_mutation)
+        )
+        if "config/global.json" in orch._sentinel_digests
+        else pytest.fail("legacy global sentinel was not in the unified set"),
+    )
 
     result = orch.linux_manager_handoff_success()
 
@@ -854,6 +989,7 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
     assert result["observations"]["handoff_protocol"] == "1"
     assert type(result["observations"]["handoff_protocol"]) is str
     assert read_paths == [orch._seeded_bundle_path]
+    assert verified == [("manager_handoff_commit", False)]
 
 
 def test_dashboard_snapshot_verification_falls_back_to_source_manager(

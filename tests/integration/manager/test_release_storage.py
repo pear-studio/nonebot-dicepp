@@ -191,19 +191,6 @@ def _json_bytes(value) -> bytes:
 def test_update_settings_default_and_user_overlay(tmp_path: Path) -> None:
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_dir.mkdir()
-    layout.config_global.write_text(
-        json.dumps(
-            {
-                "update": {
-                    "discovery_enabled": True,
-                    "auto_download": False,
-                    "channel": "stable",
-                    "cache_versions": 2,
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
     layout.config_user.write_text(
         json.dumps({"update": {"channel": "prerelease"}}),
         encoding="utf-8",

@@ -52,10 +52,7 @@ def _configure_launcher_environment(
 def _sync_version_owned_config(program_dir: str, install_root: str) -> None:
     if os.path.normcase(program_dir) == os.path.normcase(install_root):
         return
-    for relative in (
-        os.path.join("config", "global.json"),
-        os.path.join("config", "bots", "_template.json"),
-    ):
+    for relative in (os.path.join("config", "bots", "_template.json"),):
         source = os.path.join(program_dir, relative)
         if not os.path.isfile(source) or os.path.islink(source):
             continue

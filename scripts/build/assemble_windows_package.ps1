@@ -41,8 +41,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "Windows launcher shim assembly failed with exit code $LASTEXITCODE"
 }
 
-Copy-RequiredFile -Source "config/global.json" -Destination (Join-Path $DistDir "config/global.json")
 Copy-RequiredFile -Source "config/bots/_template.json" -Destination (Join-Path $DistDir "config/bots/_template.json")
+
+$forbiddenGlobal = Join-Path $DistDir "config/global.json"
+if (Test-Path -LiteralPath $forbiddenGlobal) {
+    throw "Windows distribution must not contain config/global.json"
+}
 
 $localizedReadmeName = ([char]0x4f7f) + ([char]0x7528) + ([char]0x8bf4) + ([char]0x660e) + ".md"
 Copy-RequiredFile -Source "docs/windows-package-readme.md" -Destination (Join-Path $DistDir $localizedReadmeName)

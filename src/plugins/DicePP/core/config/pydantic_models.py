@@ -3,7 +3,7 @@ Pydantic models for DicePP configuration.
 
 All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
-  global defaults < global user overrides < persona < account overrides < env vars
+  model defaults < user overrides < account overrides < env vars
 """
 from typing import List, Literal, Optional, Dict
 
@@ -15,6 +15,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from .builtin_providers import builtin_provider_catalog_data
 
 
 # ── Dashboard layout metadata ─────────────────────────────────────────────────
@@ -100,6 +102,14 @@ class ProviderConfig(BaseModel):
     enabled: bool = Field(default=True, title="启用")
 
 
+def _builtin_provider_catalog() -> Dict[str, ProviderConfig]:
+    """Construct catalog entries using this schema module's own model types."""
+    return {
+        name: ProviderConfig.model_validate(value)
+        for name, value in builtin_provider_catalog_data().items()
+    }
+
+
 class PersonaConfig(BaseModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -111,10 +121,10 @@ class PersonaConfig(BaseModel):
 
     # ── 基本设置 ─────────────────────────────────────────────────────────────
 
-    enabled: bool = Field(default=False, title="启用 Persona")
+    enabled: bool = Field(default=True, title="启用 Persona")
     daily_report_enabled: bool = Field(default=True, title="日报")
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
-    character_name: str = Field(default="default", title="角色名")
+    character_name: str = Field(default="qiqi.local", title="角色名")
     character_path: str = Field(default="./content/characters", title="角色路径")
 
     whitelist_enabled: bool = Field(default=True, title="白名单")
@@ -136,7 +146,7 @@ class PersonaConfig(BaseModel):
     # ── 模型与提供商 ─────────────────────────────────────────────────────────
 
     providers: Dict[str, ProviderConfig] = Field(
-        default_factory=dict, title="模型提供商",
+        default_factory=_builtin_provider_catalog, title="模型提供商",
         json_schema_extra={"dashboard_section": "providers"},
     )
 
@@ -203,7 +213,7 @@ class PersonaConfig(BaseModel):
 
     # Phase 3: 工具调用
     tools_max_rounds: int = Field(
-        default=5, title="工具最大轮次",
+        default=10, title="工具最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
     background_llm_max_rounds: int = Field(
@@ -561,7 +571,7 @@ class PersonaConfig(BaseModel):
 
     # Phase 7a: LLM Trace & Observability
     trace_enabled: bool = Field(
-        default=False, title="LLM 追踪",
+        default=True, title="LLM 追踪",
         json_schema_extra={"dashboard_section": "group_limits"},
     )
     trace_max_age_days: int = Field(
@@ -588,7 +598,7 @@ class PersonaConfig(BaseModel):
     )
 
     observation_store_raw_digest: bool = Field(
-        default=False, title="存储原始摘要",
+        default=True, title="存储原始摘要",
         json_schema_extra={"dashboard_section": "group_limits"},
     )
 
@@ -802,7 +812,20 @@ class BotConfig(BaseModel):
     # ── 运行参数 ─────────────────────────────────────────────────────────────
 
     agreement: str = Field(
-        default="", title="用户协议",
+        default=(
+            "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议视为同意并承诺遵守此协议，否则请移除骰娘。\n"
+            "2.不允许禁言骰娘或刷屏掷骰等对骰娘的不友善行为，这些行为将会提高骰娘被制裁的风险。"
+            "开关骰娘响应请使用.bot on/off。\n"
+            "3.邀请骰娘入群应已事先得到群内同意。因擅自邀请而使骰娘遭遇不友善行为时，"
+            "邀请者因未履行预见义务而将承担连带责任。\n"
+            "4.禁止将骰娘用于赌博及其他违法犯罪行为，禁止将本骰娘用作TRPG外的用途，禁止拉入非TRPG群。\n"
+            "5.对于设置敏感昵称等无法预见但有可能招致言论审查的行为，骰娘可能会出于自我保护而拒绝提供服务\n"
+            "6.由于技术以及资金原因，无法保证骰娘100%的时间稳定运行，可能不定时停机维护或遭遇冻结，敬请谅解。\n"
+            "7.对于违反协议的行为，骰娘将视情况终止对用户和所在群提供服务。\n"
+            "8.本协议内容可能改动，请注意查看最新协议。\n"
+            "9.本服务最终解释权归服务提供方所有。"
+        ),
+        title="用户协议",
         json_schema_extra={"dashboard_section": "runtime"},
     )
     command_split: str = Field(

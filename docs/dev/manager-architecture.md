@@ -41,7 +41,7 @@ Bot、Dashboard 与 Manager 通过同一 `InstanceLayout` 解析实例根目录�
 
 `DATA_CATALOG` 是受管理持久化资产的唯一事实来源。每个 `DataAsset` 定义稳定 ID、逻辑区域和安全路径模板、类型、归档 profile、恢复授权范围，以及 SQLite 所需的 schema 引用。业务代码通过资产的 `resolve()` 或 `iter_matches()` 定位动态文件，不得重新拼接 glob 或把整个 `config/`、`data/` 当作默认写入授权根。
 
-当前 Catalog 覆盖用户与 Bot 配置、实例数据库、Bot 核心/日志数据库、Persona 数据库、本地图片，以及完整归档中的用户 `content/`。发布随附的全局配置和模板、Dashboard 数据、Manager 数据，以及其他 NoneBot 插件和 NapCat/LLOneBot 数据不属于这个 Catalog。
+当前 Catalog 覆盖用户与 Bot 配置、实例数据库、Bot 核心/日志数据库、Persona 数据库、本地图片，以及完整归档中的用户 `content/`。发布随附的 Bot 配置模板、Dashboard 数据、Manager 数据，以及其他 NoneBot 插件和 NapCat/LLOneBot 数据不属于这个 Catalog；程序默认值与内置 provider/model 目录属于代码，不是归档资产。
 
 每个 SQLite 文件独立保存 schema 元数据与迁移历史。`SchemaTarget` 仍是建表、版本读取和 forward migration 的执行事实来源；Catalog 只序列化 schema 身份。新数据库直接创建最新 schema，旧版本只允许按连续迁移向前升级，版本高于当前程序的数据库会被拒绝。生产降级不属于 schema migration 的常规路径，需依赖归档恢复或人工应急处理。
 

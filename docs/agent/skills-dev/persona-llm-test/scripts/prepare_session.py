@@ -62,8 +62,8 @@ def find_repo_root(script_path: Path | None = None) -> Path:
     start = (script_path or Path(__file__)).resolve()
     for parent in start.parents:
         if (parent / "pyproject.toml").is_file() and (
-            parent / "config" / "global.json"
-        ).is_file():
+            parent / "src" / "plugins" / "DicePP"
+        ).is_dir():
             return parent
     raise PreparationError("无法从脚本路径定位 DicePP 仓库根目录")
 
@@ -110,13 +110,13 @@ def validate_override_paths(
     *,
     prefix: tuple[str, ...] = (),
 ) -> None:
-    """Require every override path to be explicitly maintained in global.json."""
+    """Require every override path to exist in the runtime default model."""
     for key, value in override.items():
         path = prefix + (key,)
         dotted = ".".join(path)
         if key not in base:
             raise PreparationError(
-                f"测试覆盖字段已漂移，config/global.json 中不存在: {dotted}"
+                f"测试覆盖字段已漂移，BotConfig 默认配置中不存在: {dotted}"
             )
         base_value = base[key]
         if isinstance(value, dict):
@@ -129,7 +129,7 @@ def validate_override_paths(
 
 def validate_local_credentials(
     local_config: Mapping[str, Any],
-    global_config: Mapping[str, Any],
+    default_config: Mapping[str, Any],
 ) -> dict[str, str]:
     if set(local_config) != {"persona_ai"}:
         raise PreparationError(
@@ -146,20 +146,20 @@ def validate_local_credentials(
             "test_llm.local.json 至少要为一个正式 provider 配置 api_key"
         )
 
-    global_persona = global_config.get("persona_ai")
-    global_providers = (
-        global_persona.get("providers")
-        if isinstance(global_persona, dict)
+    default_persona = default_config.get("persona_ai")
+    builtin_providers = (
+        default_persona.get("providers")
+        if isinstance(default_persona, dict)
         else None
     )
-    if not isinstance(global_providers, dict):
+    if not isinstance(builtin_providers, dict):
         raise PreparationError(
-            "config/global.json 缺少 persona_ai.providers"
+            "BotConfig 默认配置缺少 persona_ai.providers"
         )
 
     result: dict[str, str] = {}
     for provider_name, provider_override in providers.items():
-        if provider_name not in global_providers:
+        if provider_name not in builtin_providers:
             raise PreparationError(
                 f"不允许自定义 provider: {provider_name}"
             )
@@ -175,7 +175,7 @@ def validate_local_credentials(
             raise PreparationError(
                 f"provider {provider_name!r} 的 api_key 不能为空"
             )
-        if "api_key" not in global_providers[provider_name]:
+        if "api_key" not in builtin_providers[provider_name]:
             raise PreparationError(
                 f"正式 provider {provider_name!r} 缺少 api_key 字段"
             )
@@ -335,14 +335,14 @@ def validate_character_assets(
 
 
 def build_session_user_config(
-    global_config: Mapping[str, Any],
+    default_config: Mapping[str, Any],
     test_overrides: Mapping[str, Any],
     credentials: Mapping[str, str],
     character_path: Path,
 ) -> dict[str, Any]:
-    global_providers = global_config["persona_ai"]["providers"]
+    builtin_providers = default_config["persona_ai"]["providers"]
     provider_overrides: dict[str, dict[str, Any]] = {}
-    for provider_name, provider_config in global_providers.items():
+    for provider_name, provider_config in builtin_providers.items():
         has_key = provider_name in credentials
         provider_overrides[provider_name] = {
             "enabled": bool(
@@ -367,11 +367,11 @@ def build_session_user_config(
 
 def validate_merged_config(
     bot_config_type: Any,
-    global_config: Mapping[str, Any],
+    default_config: Mapping[str, Any],
     user_config: Mapping[str, Any],
     account_config: Mapping[str, Any],
 ) -> Any:
-    merged = deep_merge(global_config, user_config)
+    merged = deep_merge(default_config, user_config)
     merged = deep_merge(merged, account_config)
     try:
         return bot_config_type.model_validate(merged)
@@ -486,12 +486,12 @@ def estimate_agent_runs(
 
 
 def configured_probe_models(
-    global_config: Mapping[str, Any],
+    default_config: Mapping[str, Any],
     credentials: Mapping[str, str],
 ) -> tuple[str, ...]:
     models: list[str] = []
     for provider_name in credentials:
-        provider = global_config["persona_ai"]["providers"][provider_name]
+        provider = default_config["persona_ai"]["providers"][provider_name]
         if not provider.get("enabled", True):
             continue
         for model in provider.get("models", []):
@@ -538,19 +538,11 @@ def prepare_session(
     credential_path = skill_dir / "test_llm.local.json"
     assert_git_ignored(repo_root, credential_path)
 
-    global_config = load_json_object(
-        repo_root / "config" / "global.json",
-        "正式全局配置",
-    )
     test_overrides = load_json_object(
         skill_dir / "assets" / "test-overrides.json",
         "测试覆盖配置",
     )
     local_config = load_json_object(credential_path, "本地 LLM 凭据")
-
-    validate_override_paths(global_config, test_overrides)
-    credentials = validate_local_credentials(local_config, global_config)
-    probe_models = configured_probe_models(global_config, credentials)
 
     (
         bot_config_type,
@@ -558,6 +550,10 @@ def prepare_session(
         persona_model_type,
         shell_session,
     ) = import_runtime_types(repo_root)
+    default_config = bot_config_type().model_dump(mode="json", by_alias=True)
+    validate_override_paths(default_config, test_overrides)
+    credentials = validate_local_credentials(local_config, default_config)
+    probe_models = configured_probe_models(default_config, credentials)
     character_asset_root = skill_dir / "assets"
     character = validate_character_assets(
         character_asset_root,
@@ -569,7 +565,7 @@ def prepare_session(
     session_path = shell_session.get_session_dir(name)
     character_path = session_path / "content" / "characters"
     user_config = build_session_user_config(
-        global_config,
+        default_config,
         test_overrides,
         credentials,
         character_path,
@@ -580,7 +576,7 @@ def prepare_session(
     }
     validated = validate_merged_config(
         bot_config_type,
-        global_config,
+        default_config,
         user_config,
         account_config,
     )
@@ -593,7 +589,6 @@ def prepare_session(
             name,
             group_id=TEST_GROUP_ID,
         )
-        write_json(created_path / "config" / "global.json", global_config)
         write_json(created_path / "config" / "user.json", user_config)
         write_json(
             created_path

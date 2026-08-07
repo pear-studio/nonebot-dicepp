@@ -915,10 +915,14 @@ async def data_table(
 _pydantic_module_cache = None
 
 
+class DashboardConfigSchemaError(RuntimeError):
+    """Raised when the required standalone Dashboard schema cannot be loaded."""
+
+
 def _load_pydantic_models_module():
     """Load the standalone config schema without importing the bot package.
 
-    Returns the module on success, or None.
+    Returns the module on success and raises if the required asset is missing.
     Module reference is cached so _cached_config_field_metadata() and
     _cached_config_layout() share a single import.  PyInstaller onefile builds
     carry the canonical schema as a minimal data asset under ``_MEIPASS``;
@@ -929,6 +933,7 @@ def _load_pydantic_models_module():
         return _pydantic_module_cache
 
     import importlib.util
+    import types
 
     source_relative_path = Path("src/plugins/DicePP/core/config/pydantic_models.py")
     frozen_root = getattr(sys, "_MEIPASS", None)
@@ -948,27 +953,42 @@ def _load_pydantic_models_module():
     )
     _pydantic_path = next((path for path in candidates if path.exists()), None)
     if _pydantic_path is None:
-        return None
+        raise DashboardConfigSchemaError(
+            "Dashboard configuration schema asset is missing"
+        )
 
+    package_name = "_dicepp_dashboard_config_schema"
+    module_name = f"{package_name}.pydantic_models"
     try:
+        sys.modules.pop(module_name, None)
+        sys.modules.pop(f"{package_name}.builtin_providers", None)
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(_pydantic_path.parent)]
+        package.__package__ = package_name
+        sys.modules[package_name] = package
         spec = importlib.util.spec_from_file_location(
-            "dicepp_pydantic_models",
+            module_name,
             str(_pydantic_path),
         )
-        if spec is None:
-            return None
+        if spec is None or spec.loader is None:
+            raise DashboardConfigSchemaError(
+                f"Cannot create schema loader for {_pydantic_path}"
+            )
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
         spec.loader.exec_module(mod)
         _pydantic_module_cache = mod
         return mod
-    except (FileNotFoundError, ModuleNotFoundError):
-        return None
-    except Exception:
+    except DashboardConfigSchemaError:
+        raise
+    except Exception as exc:
         import logging
         logging.getLogger("dashboard").exception(
             "Unexpected error loading config field metadata from %s", _pydantic_path
         )
-        return None
+        raise DashboardConfigSchemaError(
+            f"Cannot load Dashboard configuration schema from {_pydantic_path}"
+        ) from exc
 
 
 def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
@@ -1045,8 +1065,6 @@ def _get_config_field_metadata() -> dict:
     field-level json_schema_extra (Field) can override section per-field.
     """
     mod = _load_pydantic_models_module()
-    if mod is None:
-        return {}
 
     try:
         BotConfig = mod.BotConfig
@@ -1077,11 +1095,11 @@ def _cached_config_field_metadata() -> dict:
 
 
 def _cached_config_layout() -> dict:
-    """Return DASHBOARD_LAYOUT from pydantic_models or empty dict."""
+    """Return DASHBOARD_LAYOUT from the required schema module."""
     global _config_layout_cache
     if _config_layout_cache is None:
         mod = _load_pydantic_models_module()
-        _config_layout_cache = getattr(mod, "DASHBOARD_LAYOUT", {}) if mod else {}
+        _config_layout_cache = getattr(mod, "DASHBOARD_LAYOUT", {})
     return _config_layout_cache
 
 
@@ -1111,8 +1129,9 @@ def _find_meta(dotted: str, meta: dict) -> dict:
 
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
 async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
-    """Merge global.json + user.json + bots/{bot_id}.json with source annotation."""
-    global_cfg = _read_json_safe(DashboardPaths.CONFIG_GLOBAL)
+    """Merge code defaults + user.json + bots/{bot_id}.json with source annotation."""
+    models = _load_pydantic_models_module()
+    default_cfg = models.BotConfig().model_dump(mode="json", by_alias=True)
     try:
         user_cfg = await _get_manager_client(request).get_user_config()
     except ManagerClientError as exc:
@@ -1148,7 +1167,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
                     result_annotated[dotted] = {"value": value, "source": source}
 
     # Merge user over default
-    _annotate_deep(global_cfg, user_cfg, "user")
+    _annotate_deep(default_cfg, user_cfg, "user")
 
     # Merge bot over user+default
     if bot_id:

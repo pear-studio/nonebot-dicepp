@@ -277,6 +277,12 @@ _HANDOFF_FILENAMES = {
     "result": "linux-manager-switch.result.json",
 }
 
+_MUTABLE_SENTINEL_DAMAGE: dict[str, bytes] = {
+    "config/user.json": b'{"damaged_after_archive":true}\n',
+    "data/local_images/sentinel.bin": b"damaged-after-pre-upgrade-archive",
+}
+_MUTABLE_SENTINEL_PATHS = frozenset(_MUTABLE_SENTINEL_DAMAGE)
+
 
 def run_linux_scenario(context: dict[str, Any], work_dir: Path) -> dict[str, Any]:
     """Execute a single upgrade scenario against real Docker images.
@@ -1612,6 +1618,7 @@ class _LinuxUpgradeOrchestrator:
                     scenario,
                     "target bundle does not declare Linux Manager handoff v1",
                 )
+            self._verify_sentinels(scenario)
         except _ScenarioExpectationFailure as exc:
             return self._scenario_failed(scenario, exc)
         return _build_scenario_result(
@@ -1838,25 +1845,34 @@ class _LinuxUpgradeOrchestrator:
         packages_dir = instance / "manager" / "packages" / self.target_version
         packages_dir.mkdir(parents=True, exist_ok=True)
 
-        # 2. Minimal global config: prerelease channel, no network discovery.
-        (instance / "config" / "global.json").write_text(
-            json.dumps(
-                {"update": {"channel": "prerelease", "discovery_enabled": False}}
-            ),
-            encoding="utf-8",
-        )
+        # 2. Minimal instance override: prerelease channel, no network discovery.
         # Catalog-owned sentinels make rollback assertions observable.  They
         # deliberately use regular-backup assets instead of arbitrary files.
         user_sentinel = instance / "config" / "user.json"
         user_sentinel.write_text(
-            "{}\n",
+            json.dumps(
+                {
+                    "chat_interval": 31,
+                    "update": {"channel": "prerelease", "discovery_enabled": False},
+                }
+            ) + "\n",
             encoding="utf-8",
+        )
+        # Simulate an instance upgraded from a release that shipped global.json.
+        # It is an immutable compatibility sentinel: no current component may
+        # read, migrate, rewrite, delete, or restore it to different bytes.
+        legacy_global_sentinel = instance / "config" / "global.json"
+        legacy_global_sentinel.write_bytes(
+            b'{"chat_interval":99,"legacy":"preserve"}\n'
         )
         image_sentinel = instance / "data" / "local_images" / "sentinel.bin"
         image_sentinel.parent.mkdir(parents=True, exist_ok=True)
         image_sentinel.write_bytes(os.urandom(64))
         self._sentinel_digests = {
             user_sentinel.relative_to(instance).as_posix(): _sha256_file(user_sentinel),
+            legacy_global_sentinel.relative_to(instance).as_posix(): _sha256_file(
+                legacy_global_sentinel
+            ),
             image_sentinel.relative_to(instance).as_posix(): _sha256_file(image_sentinel),
         }
         self._sentinel_original_bytes = {
@@ -2576,9 +2592,11 @@ class _LinuxUpgradeOrchestrator:
         if self._instance_dir is None:
             return False
         return all(
-            (self._instance_dir / relative).is_file()
-            and _sha256_file(self._instance_dir / relative) != expected
-            for relative, expected in self._sentinel_digests.items()
+            relative in self._sentinel_digests
+            and (self._instance_dir / relative).is_file()
+            and _sha256_file(self._instance_dir / relative)
+            != self._sentinel_digests[relative]
+            for relative in _MUTABLE_SENTINEL_PATHS
         )
 
     def _verify_dashboard_db_source(self, scenario: str) -> None:
@@ -2946,6 +2964,9 @@ class _LinuxUpgradeOrchestrator:
         journal = self._read_journal()
         self._verify_journal_binding(scenario, journal, request)
         self._verify_handoff_rollback_journal(scenario, journal)
+        # This path never injects catalog mutation; it must still prove that
+        # every compatibility sentinel, including legacy global.json, survived.
+        self._verify_sentinels(scenario)
         return "source_restored"
 
     def _run_daemon_restart_after_commit(self, scenario: str) -> str:
@@ -3039,19 +3060,19 @@ class _LinuxUpgradeOrchestrator:
             raise self._expectation_failure(
                 scenario, "post-commit recovery did not converge to committed"
             )
+        self._verify_sentinels(scenario)
         return "cleanup_pending"
 
     def _mutate_sentinels_for_failure(self) -> None:
         """Damage both catalog-owned sentinels after the safety archive exists."""
         if self._instance_dir is None or not self._sentinel_digests:
             raise _OrchestratorUnavailable("rollback sentinels are not prepared")
-        config = self._instance_dir / "config" / "user.json"
-        data = self._instance_dir / "data" / "local_images" / "sentinel.bin"
-        config.write_text('{"damaged_after_archive":true}\n', encoding="utf-8")
-        data.write_bytes(b"damaged-after-pre-upgrade-archive")
+        for relative, damaged_bytes in _MUTABLE_SENTINEL_DAMAGE.items():
+            (self._instance_dir / relative).write_bytes(damaged_bytes)
         if any(
-            _sha256_file(self._instance_dir / relative) == original
-            for relative, original in self._sentinel_digests.items()
+            _sha256_file(self._instance_dir / relative)
+            == self._sentinel_digests[relative]
+            for relative in _MUTABLE_SENTINEL_PATHS
         ):
             raise _OrchestratorUnavailable(
                 "failed to mutate both rollback sentinels"

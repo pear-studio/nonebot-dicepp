@@ -62,7 +62,6 @@ def _derive_paths(layout: InstanceLayout) -> dict[str, Path]:
     return {
         "PROJECT_ROOT": layout.root,
         "CONFIG_DIR": layout.config_dir,
-        "CONFIG_GLOBAL": layout.config_global,
         "CONFIG_USER": layout.config_user,
         "CONFIG_BOTS_DIR": layout.config_bots_dir,
         "DATA_DIR": layout.data_root,
@@ -82,7 +81,6 @@ class Paths:
     # single source of truth for what each path resolves to.
     PROJECT_ROOT: Path
     CONFIG_DIR: Path
-    CONFIG_GLOBAL: Path
     CONFIG_USER: Path
     CONFIG_BOTS_DIR: Path
     DATA_DIR: Path
