@@ -24,6 +24,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -1701,7 +1702,9 @@ class _LinuxUpgradeOrchestrator:
             f"      DICEPP_HANDOFF_HARNESS_TARGET: {json.dumps(self.target_version)}",
         ]
         if self._use_socket_proxy:
-            proxy_path = instance / "manager" / "docker-proxy.sock"
+            proxy_path = Path(tempfile.gettempdir()) / (
+                f"dicepp-upgrade-{uuid4().hex}.sock"
+            )
             self._docker_proxy = _DockerSocketProxy(
                 proxy_path,
                 on_create_failure=self._mutate_sentinels_for_failure,
