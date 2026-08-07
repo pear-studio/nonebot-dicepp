@@ -110,6 +110,13 @@ def test_seal_consumes_validation_declarations_and_exposes_unique_artifact() -> 
         "artifact_digest": "${{ steps.upload.outputs.artifact-digest }}",
         "artifact_url": "${{ steps.upload.outputs.artifact-url }}",
     }
+    assert receipt["if"] == (
+        "always() && needs.candidate-metadata.result == 'success' && "
+        "needs.quality-gate.result == 'success' && "
+        "needs.windows-final.result == 'success' && "
+        "needs.linux-final.result == 'success' && "
+        "needs.upgrade-evidence.result == 'success'"
+    )
     diagnostics = _step(receipt, "Upload candidate seal diagnostics")
     assert diagnostics["if"] == "always()"
 

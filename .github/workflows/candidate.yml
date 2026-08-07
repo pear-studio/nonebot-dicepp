@@ -574,6 +574,13 @@ jobs:
 
   receipt:
     name: Seal Final Candidate Receipt
+    if: >-
+      always() &&
+      needs.candidate-metadata.result == 'success' &&
+      needs.quality-gate.result == 'success' &&
+      needs.windows-final.result == 'success' &&
+      needs.linux-final.result == 'success' &&
+      needs.upgrade-evidence.result == 'success'
     runs-on: ubuntu-latest
     needs:
       - candidate-metadata
