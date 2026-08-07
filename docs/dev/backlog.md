@@ -53,8 +53,10 @@
     - 验收时机：`B-260731-b6f811` 及本轮其他代码修改已完成；rc20 作为不支持自动升级的手工基线，只要求最终 Windows/Linux 候选字节与首装/手工迁移验收，不以 rc19→rc20 矩阵阻塞发布。任何后续代码提交都会使已生成 Candidate 失效，必须从冻结和验收重新开始。
     - 冻结后一次性确认远端最小配置：启用 Immutable Releases、建立受保护的 `refs/tags/v*` ruleset、授予仓库 Actions 对两个 GHCR package 的 Write access；发布运行时只使用 `GITHUB_TOKEN`。
     - 验收顺序：push 冻结 SHA 并等待普通 CI → 对同一 SHA 触发 Final Candidate → 核对 30 天 artifact、Receipt、所有资产摘要和 GHCR candidate digest → 显式触发 Promotion。`B-260802-eb74ca` 与 `B-260802-3e3e23` 的真实跨版本验收在 rc20→rc21 独立执行，不阻塞 `automatic_upgrade: no` 的 rc20。
-    - Promotion 会真实创建 tag、GitHub Release、正式 GHCR version tag 并最后更新 `latest`，不得作为无副作用的试运行；应使用计划公开的 RC 或正式版本。
-    - 关闭条件：记录成功的 Candidate run ID、run attempt、artifact ID/digest 和 Promotion run；确认公开 tag、Release metadata/assets、版本镜像及 `latest` 均与 Receipt 一致，且冲突状态 fail closed、精确同身份中断状态可幂等恢复。全部满足后才删除本条。
+    - Promotion 会真实创建 tag、GitHub Release 和正式 GHCR version tag，正式稳定版还会最后更新 `latest`；不得将其作为无副作用的试运行，应使用计划公开的 RC 或正式版本。
+    - rc20 验收结果（2026-08-07）：Candidate run `31161368711` / attempt `1` 在冻结 SHA `34d976b16f67df81a679acd47f3e1f83d7d9c102` 上成功，artifact `8987530103` 摘要为 `sha256:b4407c5f9303a5d6fe12202fa6b0f750d132a651e16385b0073520e2d03a51ed`；Promotion run `31162380770` 成功发布 `v3.0.0rc20`。公开 tag、Release 七份资产和两个 GHCR 版本 manifest 均与 Receipt 一致，Immutable Releases 与 `refs/tags/v*` 防更新/防删除规则仍启用。
+    - `latest` 只在正式稳定版发布时更新；RC Promotion 按设计跳过该步，不构成验收缺口。
+    - 关闭条件：记录成功的 Candidate run ID、run attempt、artifact ID/digest 和 Promotion run；确认公开 tag、Release metadata/assets 与版本镜像均与 Receipt 一致，正式稳定版还需确认 `latest`；冲突状态必须 fail closed，精确同身份的中断状态必须可幂等恢复。rc20 已满足本条关闭条件，待 backlog 清理确认后删除。
 
 ## dice_hub
 
@@ -116,7 +118,7 @@
     - 新 Manager 完成 migration、本地硬健康检查并提交升级后立即最佳努力删除程序备份、恢复描述与根恢复入口；清理失败只告警，不把已成功的新版重新判失败。
     - rc20 作为 `automatic_upgrade: no` 的手工迁移起点：不扫描、迁移、清理或恢复 rc19 及更旧 Guard 状态，旧遗留物不得阻止 rc20 启动。rc20 Candidate 验证无 Guard 的最终包结构、首装/手工迁移与 Linux 现有矩阵；不得用 rc19→rc20 宣称新 Windows 协议已通过。
     - 当前状态（2026-08-05）：Windows 简化恢复基线与 Linux Manager handoff 代码主体均已完成。Linux 已补齐宿主 bind 来源解析、固定 `dicepp-current` alias、目标 Manager 前置身份门禁、独立 handoff coordinator、三类真实 Docker 场景及 release evidence 全场景门禁；Manager 全域回归和固定摘要 DinD 启动/端口重映射/重启/精确清理烟测已通过。后续 agent 不应重新实现这些路径，除非真实 candidate 验收失败。
-    - 剩余验收（保持 open）：先用 rc20 最终 Candidate 完成简化基线检查；待 rc21 Candidate 存在后，矩阵必须直接消费冻结的 rc20 来源字节与 rc21 目标字节，分别执行 Linux handoff commit、目标 Manager 崩溃回退、daemon 重启前后按 durable decision 人工恢复，以及 Windows 健康提交/根恢复脚本。保存 candidate identity、冻结 SHA、journal、request/decision/result、Docker identity 和恢复结果；DinD 基础设施烟测或 mock 测试不得替代这次独立验收。
+    - 剩余验收（保持 open）：rc20 最终 Candidate 的简化基线检查已在 run `31161368711` 通过；待 rc21 Candidate 存在后，矩阵必须直接消费冻结的 rc20 来源字节与 rc21 目标字节，分别执行 Linux handoff commit、目标 Manager 崩溃回退、daemon 重启前后按 durable decision 人工恢复，以及 Windows 健康提交/根恢复脚本。保存 candidate identity、冻结 SHA、journal、request/decision/result、Docker identity 和恢复结果；DinD 基础设施烟测或 mock 测试不得替代这次独立验收。
     - 第一次真实 Windows 新协议验收是 rc20→rc21：同一最终候选上验证健康提交后恢复材料清理，以及目标 `current/` 缺失/损坏时根 `DicePP-Recover.cmd` 仍能换回旧程序、恢复 pre-upgrade 数据和 RuntimeUnit 原状态。矩阵必须消费冻结 Candidate 字节；`automatic_upgrade: no` 的 validation-only 证据不进入 Receipt 或 Release assets。
     - 未来正式版只维护“上一正式版 → 当前正式版”。关闭条件：rc20 的简化基线验收通过，rc20→rc21 Windows 真实升级/人工恢复与当次 Linux 矩阵全部绑定冻结 SHA 通过外部验收。完成前本条保持 open。
 
