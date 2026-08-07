@@ -149,9 +149,13 @@ def _prepare(tmp_path: Path) -> tuple[Path, Path, dict[str, list[str]]]:
 
 
 def _fake_harness_run(command, *, cwd, check):
-    del cwd, check
+    del check
     context_path = Path(command[command.index("--context") + 1])
     output_path = Path(command[command.index("--output") + 1])
+    if not context_path.is_absolute():
+        context_path = Path(cwd) / context_path
+    if not output_path.is_absolute():
+        output_path = Path(cwd) / output_path
     context = json.loads(context_path.read_text(encoding="utf-8"))
     scenario = context["scenario"]
     failed = os.environ.get("DICEPP_TEST_FAIL_SCENARIO") == scenario
@@ -312,6 +316,7 @@ def test_validation_runner_allows_legacy_subset_but_assembler_rejects_it(
             source["scenarios"] = list(LINUX_REQUIRED_SCENARIOS)[:4]
     matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
     monkeypatch.setattr(matrix_runner.subprocess, "run", _fake_harness_run)
+    monkeypatch.chdir(tmp_path)
 
     output = tmp_path / "linux-result.json"
     run_platform(
@@ -322,7 +327,7 @@ def test_validation_runner_allows_legacy_subset_but_assembler_rejects_it(
         target_commit_sha=COMMIT_SHA,
         target_asset_specs=assets["linux"],
         source_cache=cache,
-        work_root=tmp_path / "linux-work",
+        work_root=Path("linux-work"),
         output=output,
     )
 

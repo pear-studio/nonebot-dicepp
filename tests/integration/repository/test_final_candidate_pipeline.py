@@ -126,13 +126,11 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     assert "size = $item.Length" in windows
     assert "Portable must not contain DicePP-UpdateGuard.exe" in windows
     assert "Setup must not install DicePP-UpdateGuard.exe" in windows
-    assert windows.count("Assert-ManualMigrationSentinels") == 3
+    assert windows.count("Assert-ManualMigrationSentinels") == 2
+    assert windows.count("Write-ManualMigrationSentinels") == 2
     assert windows.count('"manager\\control\\user-preserved.txt"') == 2
     assert windows.index("Write-ManualMigrationSentinels $extractRoot") < windows.index(
-        "Expand-Archive"
-    )
-    assert windows.index("Write-ManualMigrationSentinels $installRoot") < windows.index(
-        '-Scenario "final-setup-install"'
+        "[System.IO.Compression.ZipFile]::ExtractToDirectory"
     )
 
     linux_declaration = linux.index('if [ -n "$VALIDATED_SUMMARY" ]')

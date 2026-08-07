@@ -74,7 +74,9 @@ Manager 不会自动修改用户的 `docker-compose.yml`。如果目标版本调
 
 如果目录仍被占用或移动失败，脚本会停止并保留恢复材料。关闭占用程序后再重试，不要手工拼接新旧 `current/`，也不要直接启动 `DicePP-Runtime.exe`。
 
-第一次安装、旧目录迁入、指定旧版本或不兼容升级使用目标 Release 的官方 Portable 或 Setup。详细步骤见 [Windows 部署的版本更新与旧版迁移](./windows.md#版本更新与旧版迁移)。
+第一次安装可以使用目标 Release 的 Portable 或 Setup。旧目录迁入、指定旧版本或不兼容
+升级若要保留现有自包含目录，应使用 Portable；Setup 只能安装到新的空目录，再恢复归档。
+详细步骤见 [Windows 部署的版本更新与旧版迁移](./windows.md#版本更新与旧版迁移)。
 
 ## 更新配置
 

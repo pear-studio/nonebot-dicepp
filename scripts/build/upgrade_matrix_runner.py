@@ -145,6 +145,7 @@ def _run_harness(
     if entrypoint.is_symlink() or not entrypoint.is_file():
         raise ValueError(f"tracked upgrade harness entrypoint is unavailable: {entrypoint}")
     work_dir.mkdir(parents=True, exist_ok=False)
+    work_dir = work_dir.resolve()
     context_path = work_dir / "context.json"
     result_path = work_dir / "result.json"
     context_path.write_text(

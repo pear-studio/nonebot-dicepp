@@ -217,10 +217,11 @@ Bot↔Manager 控制凭据单独位于 `manager/control/control-token`，与 HTT
 如果 `current/` 仍被占用或目录移动失败，脚本会停止并保留全部恢复材料。关闭占用程序后
 再重试，不要手工复制、删除或拼接新旧程序树。
 
-第一次安装、旧目录迁入、指定安装较旧版本、人工回退、灾难恢复或 Dashboard 明确提示
-不兼容时，先创建并验证归档，退出旧 `DicePP.exe`，再使用目标 Release 的官方 Portable
-或 Setup 完成手工迁移。普通升级和恢复完成后都只启动 `DicePP.exe`，不要手动启动
-`DicePP-Runtime.exe`。
+第一次安装可以把 Portable 或 Setup 安装到新的空目录。旧目录迁入、指定安装较旧版本、
+人工回退、灾难恢复或 Dashboard 明确提示不兼容时，先创建并验证归档，退出旧
+`DicePP.exe`：需要保留现有自包含目录时，只使用 Portable 覆盖解压；Setup 会重建目标
+安装目录，只能安装到新的空目录，再按下方流程恢复归档和自定义内容。普通升级和恢复
+完成后都只启动 `DicePP.exe`，不要手动启动 `DicePP-Runtime.exe`。
 
 从不具备精确归档能力的旧目录迁移时按手动流程处理：
 

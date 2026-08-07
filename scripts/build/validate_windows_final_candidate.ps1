@@ -98,7 +98,11 @@ $portablePath = Join-Path $artifactRootPath $portableName
 $extractRoot = Join-Path $env:RUNNER_TEMP "dicepp-portable-$([guid]::NewGuid())"
 try {
     Write-ManualMigrationSentinels $extractRoot
-    Expand-Archive -LiteralPath $portablePath -DestinationPath $extractRoot
+    [System.IO.Compression.ZipFile]::ExtractToDirectory(
+        $portablePath,
+        $extractRoot,
+        $false
+    )
     Assert-ManualMigrationSentinels $extractRoot
     $runtimeMatches = @(
         Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "DicePP-Runtime.exe"
@@ -147,14 +151,12 @@ try {
 $setupPath = Join-Path $artifactRootPath $setupName
 $installRoot = Join-Path $env:RUNNER_TEMP "dicepp-setup-$([guid]::NewGuid())"
 try {
-    Write-ManualMigrationSentinels $installRoot
     Invoke-DicePPProcess `
         -FilePath $setupPath `
         -Arguments @("--silent", "--installto", $installRoot) `
         -TimeoutSeconds 20 `
         -Scenario "final-setup-install" `
         -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
-    Assert-ManualMigrationSentinels $installRoot
     $stableDashboard = Join-Path $installRoot "DicePP.exe"
     $payloadDashboard = Join-Path $installRoot "current\DicePP.exe"
     foreach ($path in @($stableDashboard, $payloadDashboard)) {
