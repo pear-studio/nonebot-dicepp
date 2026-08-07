@@ -28,6 +28,7 @@ def build_linux_bundle_bytes(
     image_archive_path: str | None = None,
     archive_member: bytes | None = None,
     automatic_upgrade: bool = True,
+    include_checksums: bool = False,
 ) -> bytes:
     """Return a zip archive with ``docker-compose.yml`` and a manifest.
 
@@ -82,12 +83,25 @@ def build_linux_bundle_bytes(
             },
         ],
     }
+    manifest_bytes = json.dumps(manifest).encode("utf-8")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
         archive.writestr("docker-compose.yml", compose)
-        archive.writestr("dicepp-package.json", json.dumps(manifest))
+        archive.writestr("dicepp-package.json", manifest_bytes)
         if archive_member is not None:
             archive.writestr(manifest["image_archive"]["path"], archive_member)
+        if include_checksums:
+            members = {
+                "docker-compose.yml": compose.encode("utf-8"),
+                "dicepp-package.json": manifest_bytes,
+            }
+            if archive_member is not None:
+                members[manifest["image_archive"]["path"]] = archive_member
+            checksums = "".join(
+                f"{hashlib.sha256(payload).hexdigest()}  {name}\n"
+                for name, payload in members.items()
+            )
+            archive.writestr("checksums.sha256", checksums)
     return buffer.getvalue()
 
 
@@ -131,6 +145,7 @@ def write_linux_bundle(
     image_archive_path: str | None = None,
     archive_member: bytes | None = None,
     automatic_upgrade: bool = True,
+    include_checksums: bool = False,
 ) -> Path:
     """Write a Linux release bundle fixture to ``path`` and return it."""
     compose = compose or (
@@ -150,6 +165,7 @@ def write_linux_bundle(
             image_archive_path=image_archive_path,
             archive_member=archive_member,
             automatic_upgrade=automatic_upgrade,
+            include_checksums=include_checksums,
         )
     )
     return path

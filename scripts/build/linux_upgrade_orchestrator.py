@@ -1110,6 +1110,11 @@ def _copy_validation_bundle(
         "automatic_upgrade": True,
         "linux_manager_handoff_protocol": 1,
     }
+    patched_manifest_bytes = json.dumps(
+        patched_manifest,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
     try:
         with zipfile.ZipFile(source, "r") as source_archive:
             manifest_members = [
@@ -1121,18 +1126,41 @@ def _copy_validation_bundle(
                 raise _OrchestratorUnavailable(
                     "target bundle manifest member is not unique"
                 )
+            checksum_members = [
+                info
+                for info in source_archive.infolist()
+                if info.filename == "checksums.sha256"
+            ]
+            if len(checksum_members) != 1:
+                raise _OrchestratorUnavailable(
+                    "target bundle checksum member is not unique"
+                )
+            checksums_raw = source_archive.read(checksum_members[0])
+            checksums_lines = checksums_raw.decode("utf-8").splitlines()
+            manifest_digest = hashlib.sha256(patched_manifest_bytes).hexdigest()
+            manifest_checksum_replaced = False
+            patched_checksum_lines: list[str] = []
+            for line in checksums_lines:
+                digest, separator, name = line.partition("  ")
+                if separator and name == "dicepp-package.json":
+                    line = f"{manifest_digest}  {name}"
+                    manifest_checksum_replaced = True
+                patched_checksum_lines.append(line)
+            if not manifest_checksum_replaced:
+                raise _OrchestratorUnavailable(
+                    "target bundle checksums do not cover dicepp-package.json"
+                )
+            patched_checksums = (
+                "\n".join(patched_checksum_lines) + "\n"
+            ).encode("utf-8")
             with zipfile.ZipFile(destination, "x") as target_archive:
                 target_archive.comment = source_archive.comment
                 for info in source_archive.infolist():
                     if info.filename == "dicepp-package.json":
-                        target_archive.writestr(
-                            info,
-                            json.dumps(
-                                patched_manifest,
-                                ensure_ascii=False,
-                                separators=(",", ":"),
-                            ).encode("utf-8"),
-                        )
+                        target_archive.writestr(info, patched_manifest_bytes)
+                        continue
+                    if info.filename == "checksums.sha256":
+                        target_archive.writestr(info, patched_checksums)
                         continue
                     with source_archive.open(info, "r") as source_member:
                         with target_archive.open(
@@ -1145,7 +1173,7 @@ def _copy_validation_bundle(
                                 target_member,
                                 length=1024 * 1024,
                             )
-    except (OSError, zipfile.BadZipFile) as exc:
+    except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as exc:
         raise _OrchestratorUnavailable(
             f"cannot derive validation-only target bundle: {exc}"
         ) from exc

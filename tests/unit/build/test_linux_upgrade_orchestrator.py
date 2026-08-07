@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import shutil
@@ -855,6 +856,7 @@ def test_prepare_compose_derives_non_promotable_bundle_for_manual_policy(
         compose=compose,
         automatic_upgrade=False,
         archive_member=b"final-image-bytes",
+        include_checksums=True,
     )
     original_digest = _sha256_file(target_bundle)
     orch = _LinuxUpgradeOrchestrator(
@@ -878,6 +880,14 @@ def test_prepare_compose_derives_non_promotable_bundle_for_manual_policy(
     final_image = read_bundle_member(target_bundle, "images/test.tar.zst")
     validation_image = read_bundle_member(seeded, "images/test.tar.zst")
     assert validation_image == final_image == b"final-image-bytes"
+    final_checksums = read_bundle_member(target_bundle, "checksums.sha256")
+    validation_checksums = read_bundle_member(seeded, "checksums.sha256")
+    assert final_checksums != validation_checksums
+    seeded_manifest_bytes = read_bundle_member(seeded, "dicepp-package.json")
+    assert (
+        f"{hashlib.sha256(seeded_manifest_bytes).hexdigest()}  dicepp-package.json"
+        in validation_checksums.decode("utf-8").splitlines()
+    )
     state = json.loads(
         (orch._instance_dir / "manager/state/release-state.json").read_text(
             encoding="utf-8"
