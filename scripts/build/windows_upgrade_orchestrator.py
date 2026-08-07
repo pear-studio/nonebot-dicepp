@@ -640,7 +640,10 @@ def _healthy_commit(
         and isinstance(detail, dict)
         and detail.get("phase") == "committed"
     )
-    target_status = _wait_runtime_healthy(target_client)
+    try:
+        target_status = _wait_runtime_healthy(target_client)
+    except WindowsMatrixError as exc:
+        raise WindowsMatrixError(f"{exc}; last_operation={last!r}") from exc
     current_tree = _tree_digest(root / "current")
     layout = InstanceLayout.from_root(root)
     recovery_clean = (
@@ -768,7 +771,10 @@ def _manual_restore(
         time.sleep(0.2)
     last = upgrade_status.get("last_operation")
     detail = last.get("detail") if isinstance(last, dict) else None
-    source_status = _wait_runtime_healthy(source_client)
+    try:
+        source_status = _wait_runtime_healthy(source_client)
+    except WindowsMatrixError as exc:
+        raise WindowsMatrixError(f"{exc}; last_operation={last!r}") from exc
     runtime_units = source_status.get("runtime_units")
     data_restored = _read_marker(InstanceLayout.from_root(root).config_user) == "source"
     source_restarted = source_status.get("health", {}).get("dicepp_version") == source_version

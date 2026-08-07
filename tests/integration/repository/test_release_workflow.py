@@ -479,6 +479,28 @@ def test_automatic_upgrade_evidence_requires_both_final_platform_artifacts_befor
         "windows-upgrade-matrix",
         "Install project dependencies",
     )["run"] == "uv sync --frozen"
+    windows_result = _step(
+        CANDIDATE_WORKFLOW,
+        "windows-upgrade-matrix",
+        "Upload Windows matrix result",
+    )["with"]
+    linux_result = _step(
+        CANDIDATE_WORKFLOW,
+        "linux-upgrade-matrix",
+        "Upload Linux matrix result",
+    )["with"]
+    assert windows_result["path"] == "dist/upgrade-result"
+    assert linux_result["path"] == "dist/upgrade-result"
+    assert "dist/upgrade-work" in _step(
+        CANDIDATE_WORKFLOW,
+        "windows-upgrade-matrix",
+        "Upload Windows matrix diagnostics",
+    )["with"]["path"]
+    assert "dist/upgrade-work" in _step(
+        CANDIDATE_WORKFLOW,
+        "linux-upgrade-matrix",
+        "Upload Linux matrix diagnostics",
+    )["with"]["path"]
     assert "${{ vars." not in windows_run
     assert "${{ vars." not in linux_run
     runner_text = (
@@ -646,7 +668,7 @@ def test_linux_upgrade_diagnostics_exclude_runtime_credentials() -> None:
     upload = _step(
         CANDIDATE_WORKFLOW,
         "linux-upgrade-matrix",
-        "Upload Linux matrix result and diagnostics",
+        "Upload Linux matrix diagnostics",
     )
     assert "exclude" not in upload["with"]
     paths = upload["with"]["path"]

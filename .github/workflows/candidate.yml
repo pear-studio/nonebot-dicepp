@@ -437,14 +437,20 @@ jobs:
             --source-cache dist/upgrade-cache `
             --work-root dist/upgrade-work `
             --output dist/upgrade-result/windows.json
-      - name: Upload Windows matrix result and diagnostics
+      - name: Upload Windows matrix result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dicepp-upgrade-result-windows-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            dist/upgrade-result
-            dist/upgrade-work
+          path: dist/upgrade-result
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows matrix diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-upgrade-diagnostics-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/upgrade-work
           if-no-files-found: error
           retention-days: 30
 
@@ -496,13 +502,20 @@ jobs:
         if: always()
         run: |
           sudo chmod -R a+rX dist/upgrade-result dist/upgrade-work 2>/dev/null || true
-      - name: Upload Linux matrix result and diagnostics
+      - name: Upload Linux matrix result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/upgrade-result
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Linux matrix diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dicepp-upgrade-diagnostics-linux-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            dist/upgrade-result
             dist/upgrade-work
             !dist/upgrade-work/**/manager/state/api-token
             !dist/upgrade-work/**/manager/control/**

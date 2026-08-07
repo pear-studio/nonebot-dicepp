@@ -3012,6 +3012,10 @@ class _LinuxUpgradeOrchestrator:
             self._cleanup_handoff_containers()
         except _OrchestratorUnavailable as exc:
             errors.append(str(exc))
+        try:
+            self._cleanup_compose_project_containers()
+        except _OrchestratorUnavailable as exc:
+            errors.append(str(exc))
         for image_ref in self._owned_image_refs:
             try:
                 self._docker_cmd("rmi", image_ref)
@@ -3023,6 +3027,31 @@ class _LinuxUpgradeOrchestrator:
             errors.append(str(exc))
         if errors:
             raise _OrchestratorUnavailable("cleanup failed: " + "; ".join(errors))
+
+    def _cleanup_compose_project_containers(self) -> None:
+        """Remove residual containers owned by this unique Compose project."""
+        result = self._docker_cmd(
+            "ps",
+            "-aq",
+            "--filter",
+            f"label=com.docker.compose.project={self._compose_project}",
+            "--format",
+            "{{.ID}}",
+        )
+        for container_id in {
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        }:
+            project = self._docker_cmd(
+                "inspect",
+                "--format",
+                '{{index .Config.Labels "com.docker.compose.project"}}',
+                container_id,
+            ).stdout.strip()
+            if project != self._compose_project:
+                raise _OrchestratorUnavailable(
+                    "Compose container ownership changed; refusing cleanup"
+                )
+            self._docker_cmd("rm", "-f", container_id)
 
     def _cleanup_handoff_containers(self) -> None:
         """Remove only containers proven to belong to observed transactions."""

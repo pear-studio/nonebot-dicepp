@@ -699,6 +699,43 @@ def test_orchestrator_builds_image_tag_with_v_prefix(tmp_path: Path) -> None:
     assert orch._image_tag == "v3.0.0rc19"
 
 
+def test_cleanup_removes_only_exact_compose_project_containers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def docker_cmd(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("ps", "-aq"):
+            stdout = "container-b\ncontainer-a\n"
+        elif args[0] == "inspect":
+            stdout = orch._compose_project + "\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orch, "_docker_cmd", docker_cmd)
+
+    orch._cleanup_compose_project_containers()
+
+    for container_id in ("container-a", "container-b"):
+        assert (
+            "inspect",
+            "--format",
+            '{{index .Config.Labels "com.docker.compose.project"}}',
+            container_id,
+        ) in calls
+        assert ("rm", "-f", container_id) in calls
+
+
 # ---------------------------------------------------------------------------
 # _read_journal
 # ---------------------------------------------------------------------------
