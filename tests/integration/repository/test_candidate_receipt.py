@@ -105,41 +105,9 @@ def _candidate_digest() -> str:
 
 def _upgrade_matrix() -> dict:
     root = find_repository_root(Path(__file__))
-    matrix = json.loads(
+    return json.loads(
         (root / "scripts/build/upgrade_matrix.json").read_text(encoding="utf-8")
     )
-    # Production intentionally has no Windows source during the rc20 manual
-    # protocol break. Receipt cryptographic tests use a closed synthetic matrix
-    # so they continue to protect the future automatic-upgrade path itself.
-    # The tracked rc19 Linux row deliberately pins only the classic four
-    # validation-only scenarios; release evidence must instead prove the full
-    # platform contract, represented here by omitting that optional subset.
-    for source in matrix["supported_sources"]:
-        if source["platform"] == "linux":
-            source.pop("scenarios", None)
-    matrix["supported_sources"].insert(
-        0,
-        {
-            "platform": "windows",
-            "arch": "amd64",
-            "source_version": "3.0.0rc20",
-            "assets": [
-                {
-                    "purpose": "portable",
-                    "name": "source-portable.zip",
-                    "url": "https://example.invalid/source-portable.zip",
-                    "sha256": "7" * 64,
-                },
-                {
-                    "purpose": "velopack-bundle",
-                    "name": "source-velopack.zip",
-                    "url": "https://example.invalid/source-velopack.zip",
-                    "sha256": "8" * 64,
-                },
-            ],
-        },
-    )
-    return matrix
 
 
 def _upgrade_matrix_path(tmp_path: Path) -> Path:

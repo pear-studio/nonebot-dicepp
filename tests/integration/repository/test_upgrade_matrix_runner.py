@@ -37,7 +37,7 @@ ROOT = next(
 )
 
 
-def test_transition_registry_allows_linux_validation_but_blocks_release_evidence() -> None:
+def test_transition_registry_allows_both_platform_validations_but_blocks_release_evidence() -> None:
     registry = json.loads(
         (ROOT / "scripts/build/upgrade_protocol_registry.json").read_text(
             encoding="utf-8"
@@ -54,6 +54,9 @@ def test_transition_registry_allows_linux_validation_but_blocks_release_evidence
     validate_upgrade_protocol_registry(registry, repository_root=ROOT)
     validate_upgrade_matrix_platform_coverage(
         matrix, platform="linux", arch="amd64"
+    )
+    validate_upgrade_matrix_platform_coverage(
+        matrix, platform="windows", arch="amd64"
     )
     assert required_scenarios_for(
         matrix, platform="windows", arch="amd64"
@@ -78,8 +81,7 @@ def test_transition_registry_allows_linux_validation_but_blocks_release_evidence
     ]
     with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):
         validate_upgrade_protocol_registry_ready(registry)
-    with pytest.raises(ValueError, match="windows/amd64"):
-        validate_upgrade_matrix_coverage(matrix)
+    validate_upgrade_matrix_coverage(matrix)
 
 
 def _sha(payload: bytes) -> str:

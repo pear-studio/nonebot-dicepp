@@ -540,7 +540,7 @@ def test_release_with_empty_matrix_reports_source_gap_before_missing_evidence(
         )
 
 
-def test_tracked_registry_and_manual_transition_matrix_fail_closed() -> None:
+def test_tracked_registry_blocks_promotion_while_rc20_matrix_covers_both_platforms() -> None:
     root = find_repository_root(Path(__file__))
     registry = json.loads(
         (root / "scripts/build/upgrade_protocol_registry.json").read_text(
@@ -559,8 +559,7 @@ def test_tracked_registry_and_manual_transition_matrix_fail_closed() -> None:
     assert required_scenarios_for(
         validated_matrix, platform="linux", arch="amd64"
     ) == LINUX_REQUIRED_SCENARIOS
-    with pytest.raises(ValueError, match="windows/amd64"):
-        validate_upgrade_matrix_coverage(validated_matrix)
+    validate_upgrade_matrix_coverage(validated_matrix)
 
     assert {
         (
@@ -571,9 +570,28 @@ def test_tracked_registry_and_manual_transition_matrix_fail_closed() -> None:
         for row in matrix["supported_sources"]
     } == {
         (
+            "windows",
+            "3.0.0rc20",
+            (
+                (
+                    "portable",
+                    "27deaae390af392bf19bd8adf025a3079326ac00ed9559dd4caaedad53704d73",
+                ),
+                (
+                    "velopack-bundle",
+                    "98ac5eeebbfc535cb7e9aa963304386c5906c0183502c5d5a3c4f78ebb36a911",
+                ),
+            ),
+        ),
+        (
             "linux",
-            "3.0.0rc19",
-            (("linux-bundle", "2d1cc5452112abab31baba9e9d4d276a344bf8534b0c2098b35078d56e4d5dd6"),),
+            "3.0.0rc20",
+            (
+                (
+                    "linux-bundle",
+                    "557a1fedebd20d40176abf8717afa21f1251830b57f114fdb314bc3023a2c2c0",
+                ),
+            ),
         ),
     }
     with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):

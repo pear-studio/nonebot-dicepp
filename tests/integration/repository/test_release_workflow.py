@@ -473,6 +473,12 @@ def test_automatic_upgrade_evidence_requires_both_final_platform_artifacts_befor
     assert "linux-bundle=" in linux_run
     assert "check-readiness" in windows_run
     assert "check-readiness" in linux_run
+    assert "uv run python scripts/build/upgrade_matrix_runner.py" in windows_run
+    assert _step(
+        CANDIDATE_WORKFLOW,
+        "windows-upgrade-matrix",
+        "Install project dependencies",
+    )["run"] == "uv sync --frozen"
     assert "${{ vars." not in windows_run
     assert "${{ vars." not in linux_run
     runner_text = (
@@ -504,7 +510,7 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     automatic_condition = (
         "needs.candidate-metadata.outputs.automatic_upgrade == 'true'"
     )
-    assert windows["if"] == automatic_condition
+    assert windows["if"] == linux_condition
     assert linux["if"] == linux_condition
 
     combinations = {
@@ -546,7 +552,7 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
         if automatic_upgrade:
             expected = windows_success and linux_success
         elif exercise_matrix:
-            expected = linux_success
+            expected = windows_success and linux_success
         else:
             expected = True
         assert actual is expected, (
@@ -575,7 +581,7 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     assert "continue-on-error" not in linux
 
 
-def test_manual_windows_protocol_break_is_not_misrepresented_as_matrix_evidence():
+def test_validation_only_windows_matrix_is_not_misrepresented_as_release_evidence():
     windows = _job(CANDIDATE_WORKFLOW, "windows-upgrade-matrix")
     linux = _job(CANDIDATE_WORKFLOW, "linux-upgrade-matrix")
     evidence = _job(CANDIDATE_WORKFLOW, "upgrade-evidence")
@@ -588,13 +594,16 @@ def test_manual_windows_protocol_break_is_not_misrepresented_as_matrix_evidence(
         (ROOT / "scripts/build/upgrade_matrix.json").read_text(encoding="utf-8")
     )
 
-    assert windows["if"] == (
-        "needs.candidate-metadata.outputs.automatic_upgrade == 'true'"
-    )
+    assert "inputs.exercise_upgrade_matrix == true" in windows["if"]
     assert "inputs.exercise_upgrade_matrix == true" in linux["if"]
-    assert not any(
-        source["platform"] == "windows" for source in matrix["supported_sources"]
-    )
+    sources = {
+        (source["platform"], source["source_version"])
+        for source in matrix["supported_sources"]
+    }
+    assert sources == {
+        ("windows", "3.0.0rc20"),
+        ("linux", "3.0.0rc20"),
+    }
     windows_contract = next(
         item
         for item in registry["contracts"]
@@ -606,7 +615,8 @@ def test_manual_windows_protocol_break_is_not_misrepresented_as_matrix_evidence(
         "upgrade-evidence",
         "Record validation-only transition coverage",
     )["run"]
-    assert "manual-migration package validation" in transition
+    assert "Windows: pinned rc20 source" in transition
+    assert "Linux: pinned rc20 source" in transition
     assert "No upgrade evidence is promotable" in transition
 
 

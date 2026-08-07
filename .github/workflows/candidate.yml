@@ -393,11 +393,9 @@ jobs:
 
   windows-upgrade-matrix:
     name: Exercise Final Windows Bytes From Supported Sources
-    # The first simplified-protocol release is a manual migration boundary.
-    # Until that release is public and pinned as a source, Windows has no
-    # legitimate cross-version matrix cell. automatic_upgrade=true still
-    # enters this job and fails closed at registry readiness.
-    if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'
+    if: >-
+      needs.candidate-metadata.outputs.automatic_upgrade == 'true' ||
+      inputs.exercise_upgrade_matrix == true
     runs-on: windows-latest
     timeout-minutes: 60
     needs: [candidate-metadata, windows-final]
@@ -410,6 +408,11 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        with:
+          version: "0.11.16"
+      - name: Install project dependencies
+        run: uv sync --frozen
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dicepp-final-windows-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -417,9 +420,12 @@ jobs:
       - name: Run the Windows cross-version matrix against final bytes
         shell: pwsh
         run: |
-          python scripts/build/upgrade_evidence.py check-readiness `
-            --registry scripts/build/upgrade_protocol_registry.json
-          python scripts/build/upgrade_matrix_runner.py run-platform `
+          if ("${{ needs.candidate-metadata.outputs.automatic_upgrade }}" -eq "true") {
+            uv run python scripts/build/upgrade_evidence.py check-readiness `
+              --registry scripts/build/upgrade_protocol_registry.json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          uv run python scripts/build/upgrade_matrix_runner.py run-platform `
             --matrix scripts/build/upgrade_matrix.json `
             --platform windows `
             --arch amd64 `
@@ -515,6 +521,7 @@ jobs:
         inputs.exercise_upgrade_matrix != true) ||
        (needs.candidate-metadata.outputs.automatic_upgrade != 'true' &&
         inputs.exercise_upgrade_matrix == true &&
+        needs.windows-upgrade-matrix.result == 'success' &&
         needs.linux-upgrade-matrix.result == 'success') ||
        (needs.candidate-metadata.outputs.automatic_upgrade == 'true' &&
         needs.windows-upgrade-matrix.result == 'success' &&
@@ -568,8 +575,8 @@ jobs:
           needs.candidate-metadata.outputs.automatic_upgrade != 'true' &&
           inputs.exercise_upgrade_matrix == true
         run: |
-          echo "Windows: manual-migration package validation (windows-final)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Linux: pinned supported-source cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows: pinned rc20 source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux: pinned rc20 source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
           echo "No upgrade evidence is promotable while automatic_upgrade is false." >> "$GITHUB_STEP_SUMMARY"
 
   receipt:
