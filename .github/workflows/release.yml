@@ -132,6 +132,12 @@ jobs:
             echo "workflow_ref=$EXPECTED_WORKFLOW_REF"
           } >> "$GITHUB_OUTPUT"
 
+      # Checkout before extracting the selected artifact: checkout's default
+      # clean step would otherwise remove dist/candidate as an untracked path.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+
       - name: Download and authenticate the selected artifact archive
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,11 +180,6 @@ jobs:
                   with archive.open(member) as source, (root / path.name).open("xb") as target:
                       shutil.copyfileobj(source, target)
           PY
-
-      # actions/checkout v4; update by resolving refs/tags/v4 and reviewing the pinned commit.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.sha }}
 
       - name: Install receipt verifier dependency
         run: |

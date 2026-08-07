@@ -189,6 +189,18 @@ def test_read_only_gate_authenticates_every_selected_github_identity():
 
 
 def test_artifact_archive_and_each_candidate_file_are_verified_before_promotion():
+    steps = _job(RELEASE_WORKFLOW, "verify-candidate")["steps"]
+    checkout_index = next(
+        index
+        for index, step in enumerate(steps)
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    download_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name")
+        == "Download and authenticate the selected artifact archive"
+    )
     download = _step(
         RELEASE_WORKFLOW,
         "verify-candidate",
@@ -205,6 +217,7 @@ def test_artifact_archive_and_each_candidate_file_are_verified_before_promotion(
         "Re-verify sealed bytes before publishing",
     )["run"]
 
+    assert checkout_index < download_index
     assert "sha256sum candidate-artifact.zip" in download
     assert 'ACTUAL_DIGEST" != "$EXPECTED_DIGEST' in download
     assert "path.name != member.filename" in download
