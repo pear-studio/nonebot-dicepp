@@ -787,6 +787,78 @@ def test_target_health_requires_target_manager_version(
     assert observed == [("3.0.0rc21", 120)]
 
 
+def test_scenario_reset_moves_owned_current_aliases_back_to_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.build.linux_upgrade_orchestrator as orch_module
+
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._source_image_ids = {"bot": "source-bot", "dashboard": "source-dashboard"}
+    orch._target_image_ids = {"bot": "target-bot", "dashboard": "target-dashboard"}
+    aliases = {
+        "ghcr.io/pear-studio/nonebot-dicepp:dicepp-current": "target-bot",
+        "ghcr.io/pear-studio/dicepp-dashboard:dicepp-current": "target-dashboard",
+    }
+    monkeypatch.setattr(
+        orch_module,
+        "_optional_docker_image_id",
+        lambda reference, *, docker_env=None: aliases[reference],
+    )
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        orch,
+        "_docker_cmd",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    orch._reset_current_aliases_for_source()
+
+    assert calls == [
+        (
+            "tag",
+            "source-bot",
+            "ghcr.io/pear-studio/nonebot-dicepp:dicepp-current",
+        ),
+        (
+            "tag",
+            "source-dashboard",
+            "ghcr.io/pear-studio/dicepp-dashboard:dicepp-current",
+        ),
+    ]
+
+
+def test_scenario_reset_refuses_foreign_current_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import scripts.build.linux_upgrade_orchestrator as orch_module
+
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._source_image_ids = {"bot": "source-bot", "dashboard": "source-dashboard"}
+    orch._target_image_ids = {"bot": "target-bot", "dashboard": "target-dashboard"}
+    monkeypatch.setattr(
+        orch_module,
+        "_optional_docker_image_id",
+        lambda reference, *, docker_env=None: "foreign-image",
+    )
+
+    with pytest.raises(_OrchestratorUnavailable, match="outside the isolated matrix"):
+        orch._reset_current_aliases_for_source()
+
+
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:
     orch = _LinuxUpgradeOrchestrator(
         source_bundle=tmp_path / "src.zip",

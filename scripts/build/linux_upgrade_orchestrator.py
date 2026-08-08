@@ -36,6 +36,11 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+_CURRENT_IMAGE_ALIASES = {
+    "bot": "ghcr.io/pear-studio/nonebot-dicepp:dicepp-current",
+    "dashboard": "ghcr.io/pear-studio/dicepp-dashboard:dicepp-current",
+}
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -2057,6 +2062,7 @@ class _LinuxUpgradeOrchestrator:
         self._network_id = network_id
         self._owns_dice_network = True
         self._load_images()
+        self._reset_current_aliases_for_source()
         env = self._effective_docker_env({"DICEPP_IMAGE_TAG": self._image_tag})
         self._compose_started = True
         self._compose("up", "-d", "--wait", env=env)
@@ -2113,6 +2119,36 @@ class _LinuxUpgradeOrchestrator:
                 raise _OrchestratorUnavailable(
                     f"{label} bundle does not contain bot and dashboard images"
                 )
+
+    def _reset_current_aliases_for_source(self) -> None:
+        """Reset aliases left by an earlier scenario to this source image.
+
+        All scenarios in one matrix share a Docker daemon.  A successful
+        commit intentionally moves the fixed ``dicepp-current`` aliases to
+        the target, while the next scenario starts again from the source.
+        Only aliases already bound to one of this matrix's exact image IDs
+        may be retagged; foreign Docker state remains fail-closed.
+        """
+        allowed_ids = set(self._source_image_ids.values()) | set(
+            self._target_image_ids.values()
+        )
+        for role, reference in _CURRENT_IMAGE_ALIASES.items():
+            current_id = _optional_docker_image_id(
+                reference, docker_env=self._effective_docker_env()
+            )
+            if current_id is None:
+                continue
+            if current_id not in allowed_ids:
+                raise _OrchestratorUnavailable(
+                    f"current alias {reference!r} points outside the isolated matrix"
+                )
+            source_id = self._source_image_ids.get(role)
+            if not isinstance(source_id, str) or not source_id:
+                raise _OrchestratorUnavailable(
+                    f"source {role} image identity is unavailable"
+                )
+            if current_id != source_id:
+                self._docker_cmd("tag", source_id, reference)
 
     def _find_container_name(self, service: str) -> str:
         result = self._docker_cmd(
