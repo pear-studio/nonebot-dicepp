@@ -3088,7 +3088,10 @@ class _LinuxUpgradeOrchestrator:
             transaction_id = labels.get("io.dicepp.upgrade-transaction")
             if project != self._compose_project and transaction_id not in self._transaction_ids:
                 raise _OrchestratorUnavailable(
-                    "image container is outside the isolated project; refusing cleanup"
+                    "image container is outside the isolated project; refusing cleanup: "
+                    f"image={image_ref!r}, container={container_id!r}, "
+                    f"project={project!r}, transaction={transaction_id!r}, "
+                    f"label_keys={sorted(labels)!r}"
                 )
             self._docker_cmd("rm", "-f", container_id)
 

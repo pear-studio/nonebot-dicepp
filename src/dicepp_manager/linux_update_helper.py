@@ -289,14 +289,32 @@ async def _finalize_committed(
         target_id, request["restart_policies"]["manager"]
     )
     if source_backup_id is not None:
-        identity = await primitives.inspect(source_backup_id)
+        current_backup_id = await primitives.list_by_name(expected["backup_name"])
+        if current_backup_id is None:
+            # A target Manager recovery task can race the original switch
+            # helper after the durable commit.  Once the exact target above is
+            # verified, an absent source backup is the already-cleaned state.
+            return
+        if current_backup_id != source_backup_id:
+            raise HelperError("source backup identity changed at commit cleanup")
+        try:
+            identity = await primitives.inspect(source_backup_id)
+        except DockerRuntimeError:
+            if await primitives.list_by_name(expected["backup_name"]) is None:
+                return
+            raise
         if (
             identity.container_id != expected["container_id"]
             or identity.image_id != expected["image_id"]
             or identity.name != expected["backup_name"]
         ):
             raise HelperError("source backup identity does not match the request")
-        await primitives.delete(identity.container_id)
+        try:
+            await primitives.delete(identity.container_id)
+        except DockerRuntimeError:
+            if await primitives.list_by_name(expected["backup_name"]) is None:
+                return
+            raise
 
 
 async def _write_failed_result(

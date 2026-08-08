@@ -34,6 +34,7 @@ from dicepp_manager.linux_handoff import (
 )
 from dicepp_manager.linux_update_helper import (
     HelperError,
+    _finalize_committed,
     main,
     run_finalize_committed,
     run_restore_source,
@@ -664,6 +665,34 @@ class TestManualRecovery:
         assert result["value"] == RESULT_TARGET_COMMITTED
         assert "c" * 64 not in primitives.by_id
         assert primitives.by_name["dicepp-manager"].cid == "new-dicepp-manager"
+
+    async def test_finalize_committed_accepts_already_deleted_bound_backup(
+        self, environment
+    ) -> None:
+        primitives = environment["primitives"]
+        request = environment["request"]
+        source = primitives.by_id["c" * 64]
+        await primitives.rename(source.cid, "dicepp-manager.aaaaaaaa")
+        await primitives.create(
+            "dicepp-manager",
+            {"Image": MANAGER_NEW_IMG, "Labels": {}, "HostConfig": {}},
+            extra_labels={
+                "io.dicepp.upgrade-transaction": "a" * 32,
+                "io.dicepp.upgrade-role": "manager",
+            },
+            restart_policy="no",
+        )
+        await primitives.delete(source.cid)
+
+        await _finalize_committed(
+            primitives,
+            request,
+            source_backup_id=source.cid,
+        )
+
+        target = primitives.by_name["dicepp-manager"]
+        assert target.cid == "new-dicepp-manager"
+        assert target.restart == "unless-stopped"
 
     @pytest.mark.parametrize(
         "success_value", [RESULT_TARGET_COMMITTED, RESULT_SOURCE_RESTORED]
