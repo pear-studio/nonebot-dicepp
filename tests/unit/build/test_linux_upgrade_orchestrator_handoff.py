@@ -215,6 +215,7 @@ def test_dind_uses_audited_official_digest_by_default(
 
     monkeypatch.setattr(sandbox, "_outer", outer)
     monkeypatch.setattr(sandbox, "_wait_inner", lambda: None)
+    monkeypatch.setattr(sandbox, "_wait_local_inner", lambda: None)
 
     sandbox.start()
 
@@ -241,6 +242,37 @@ def test_dind_wait_requires_three_consecutive_connections(
     sandbox._wait_inner(timeout=5)
 
     assert attempts == [1, 2, 3, 4, 5]
+
+
+def test_dind_waits_for_container_local_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = _DockerDaemonSandbox(tmp_path)
+    sandbox.container_id = "a" * 64
+    attempts: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(sandbox, "_verify_owned", lambda: None)
+
+    def outer(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        attempts.append(args)
+        if len(attempts) < 3:
+            raise _OrchestratorUnavailable("local socket is not ready")
+        return subprocess.CompletedProcess(args, 0, "27.0.0\n", "")
+
+    monkeypatch.setattr(sandbox, "_outer", outer)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    sandbox._wait_local_inner(timeout=5)
+
+    assert len(attempts) == 3
+    assert attempts[-1] == (
+        "exec",
+        "a" * 64,
+        "docker",
+        "info",
+        "--format",
+        "{{.ServerVersion}}",
+    )
 
 
 def test_dind_local_docker_command_verifies_owned_container(
@@ -443,6 +475,9 @@ def test_dind_restart_refreshes_changed_loopback_endpoint(
 
     monkeypatch.setattr(sandbox, "_outer", outer)
     monkeypatch.setattr(sandbox, "_wait_inner", wait_inner)
+    monkeypatch.setattr(
+        sandbox, "_wait_local_inner", lambda: waited_with.append("local-socket")
+    )
 
     sandbox.restart()
 
@@ -456,7 +491,7 @@ def test_dind_restart_refreshes_changed_loopback_endpoint(
         ("restart", "-t", "10", sandbox.container_id),
         ("port", sandbox.container_id, "2375/tcp"),
     ]
-    assert waited_with == ["tcp://127.0.0.1:32769"]
+    assert waited_with == ["tcp://127.0.0.1:32769", "local-socket"]
 
 
 @pytest.mark.parametrize(

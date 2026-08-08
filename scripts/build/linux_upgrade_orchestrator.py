@@ -795,6 +795,30 @@ class _DockerDaemonSandbox:
         self.docker_env = self._host_env()
         self.docker_env["DOCKER_HOST"] = f"tcp://{endpoints[0]}"
 
+    def _wait_local_inner(self, timeout: float = 90) -> None:
+        self._verify_owned()
+        assert self.container_id is not None
+        deadline = time.monotonic() + timeout
+        last_error = "nested daemon local socket did not answer"
+        while time.monotonic() < deadline:
+            try:
+                self._outer(
+                    "exec",
+                    self.container_id,
+                    "docker",
+                    "info",
+                    "--format",
+                    "{{.ServerVersion}}",
+                    timeout=10,
+                )
+                return
+            except _OrchestratorUnavailable as exc:
+                last_error = str(exc)
+                time.sleep(1)
+        raise _OrchestratorUnavailable(
+            f"isolated Docker local socket did not become ready: {last_error}"
+        )
+
     def manager_api_request(
         self,
         manager_name: str,
@@ -883,6 +907,7 @@ class _DockerDaemonSandbox:
             self.container_id = container_id
             self._refresh_endpoint()
             self._wait_inner()
+            self._wait_local_inner()
         except Exception:
             self.cleanup()
             raise
@@ -912,6 +937,7 @@ class _DockerDaemonSandbox:
         self._outer("restart", "-t", "10", self.container_id, timeout=60)
         self._refresh_endpoint()
         self._wait_inner()
+        self._wait_local_inner()
 
     def docker_cmd(
         self,
