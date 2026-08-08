@@ -710,6 +710,53 @@ def test_trigger_upgrade_tolerates_confirm_connection_loss(tmp_path: Path) -> No
     orch._trigger_upgrade("healthy_commit")
 
 
+def test_wait_upgrade_complete_retains_committed_transaction_for_cleanup(
+    tmp_path: Path,
+) -> None:
+    """Commit removes recovery files, but teardown still owns its updater."""
+
+    transaction_id = "a" * 32
+
+    class CommittedApi:
+        def status(self) -> dict:
+            return {
+                "active_operation": None,
+                "last_operation": {
+                    "status": "succeeded",
+                    "detail": {"transaction_id": transaction_id},
+                },
+            }
+
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._api = CommittedApi()  # type: ignore[assignment]
+
+    orch._wait_upgrade_complete("healthy_commit", timeout=0.1)
+
+    assert orch._transaction_ids == {transaction_id}
+
+
+def test_operation_cleanup_identity_rejects_non_protocol_id(tmp_path: Path) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+
+    orch._record_operation_transaction(
+        {"status": "succeeded", "detail": {"transaction_id": "foreign"}}
+    )
+
+    assert orch._transaction_ids == set()
+
+
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:
     orch = _LinuxUpgradeOrchestrator(
         source_bundle=tmp_path / "src.zip",

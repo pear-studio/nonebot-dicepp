@@ -2828,6 +2828,7 @@ class _LinuxUpgradeOrchestrator:
                 continue
             if status.get("active_operation") is None:
                 last = status.get("last_operation") or {}
+                self._record_operation_transaction(last)
                 if last.get("status") == "succeeded":
                     return
                 if last.get("status") == "failed":
@@ -2854,6 +2855,7 @@ class _LinuxUpgradeOrchestrator:
                 continue
             if status.get("active_operation") is None:
                 last = status.get("last_operation") or {}
+                self._record_operation_transaction(last)
                 detail = last.get("detail") or {}
                 if last.get("status") == "failed" and detail.get(
                     "rolled_back"
@@ -2880,6 +2882,7 @@ class _LinuxUpgradeOrchestrator:
                 continue
             if status.get("active_operation") is None:
                 last = status.get("last_operation") or {}
+                self._record_operation_transaction(last)
                 if last.get("status") == "failed":
                     return
                 if last.get("status") == "succeeded":
@@ -2890,6 +2893,28 @@ class _LinuxUpgradeOrchestrator:
         raise self._expectation_failure(
             scenario, f"apply failure did not reach a terminal state within {timeout}s"
         )
+
+    def _record_operation_transaction(self, operation: Any) -> None:
+        """Retain an API-observed transaction for isolated teardown.
+
+        Successful commit convergence removes its recovery directory, so the
+        immutable request is no longer available when teardown begins.  The
+        terminal operation is returned by the authenticated Manager belonging
+        to this isolated Compose instance; retain only its protocol-shaped
+        transaction id.  Cleanup still re-verifies that exact label on every
+        container before removal.
+        """
+        if not isinstance(operation, dict):
+            return
+        detail = operation.get("detail")
+        if not isinstance(detail, dict):
+            return
+        transaction_id = detail.get("transaction_id")
+        if (
+            isinstance(transaction_id, str)
+            and re.fullmatch(r"[0-9a-f]{32}", transaction_id) is not None
+        ):
+            self._transaction_ids.add(transaction_id)
 
     def _inject_health_failure(
         self, scenario: str, timeout: float = 180
