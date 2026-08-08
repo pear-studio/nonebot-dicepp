@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -857,6 +858,52 @@ def test_scenario_reset_refuses_foreign_current_alias(
 
     with pytest.raises(_OrchestratorUnavailable, match="outside the isolated matrix"):
         orch._reset_current_aliases_for_source()
+
+
+def test_retry_reseed_falls_back_to_verified_manager_container(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = write_linux_bundle(tmp_path / "source.zip", version="3.0.0rc20")
+    target = write_linux_bundle(tmp_path / "target.zip", version="3.0.0rc21")
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=source,
+        source_version="3.0.0rc20",
+        target_bundle=target,
+        target_version="3.0.0rc21",
+        work_dir=tmp_path / "work",
+    )
+    orch._work_dir.mkdir(parents=True)
+    orch._instance_dir = tmp_path / "instance"
+    orch._instance_dir.mkdir()
+    orch._seeded_bundle_path = target
+    orch._container_names = {"manager": "dicepp-manager"}
+    real_write = orch._write_seeded_release
+
+    def permission_denied_on_instance(instance, packages_dir, *args) -> None:
+        if instance == orch._instance_dir:
+            raise PermissionError("root-owned release state")
+        real_write(instance, packages_dir, *args)
+
+    monkeypatch.setattr(
+        orch, "_write_seeded_release", permission_denied_on_instance
+    )
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        orch,
+        "_docker_cmd",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    orch._reseed_target_release_for_retry()
+
+    assert len(calls) == 1
+    assert calls[0][:4] == ("exec", "dicepp-manager", "python", "-c")
+    decoded = json.loads(base64.b64decode(calls[0][-1]))
+    assert set(decoded) == {
+        "/app/manager/state/release-state.json",
+        "/app/manager/packages/3.0.0rc21/verified-release.json",
+    }
 
 
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:

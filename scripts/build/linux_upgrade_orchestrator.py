@@ -15,6 +15,7 @@ directory.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -1993,14 +1994,72 @@ class _LinuxUpgradeOrchestrator:
                 "verified target bundle was lost before retry"
             )
         manifest = _read_bundle_manifest(self._seeded_bundle_path)
-        self._write_seeded_release(
-            self._instance_dir,
-            self._seeded_bundle_path.parent,
+        arguments = (
             manifest,
             self._seeded_bundle_path.name,
             self._seeded_bundle_path.stat().st_size,
             _sha256_file(self._seeded_bundle_path),
         )
+        try:
+            self._write_seeded_release(
+                self._instance_dir,
+                self._seeded_bundle_path.parent,
+                *arguments,
+            )
+        except OSError:
+            # The container may have atomically replaced release-state.json
+            # as root during rollback.  Recreate the exact payloads in a
+            # runner-owned staging directory, then install those bytes from
+            # the already verified source Manager container whose bind mount
+            # owns the real paths.
+            with tempfile.TemporaryDirectory(
+                prefix="dicepp-release-reseed-", dir=self._work_dir
+            ) as raw_staging:
+                staging = Path(raw_staging)
+                (staging / "manager" / "state").mkdir(parents=True)
+                staged_packages = staging / "manager" / "packages" / self.target_version
+                staged_packages.mkdir(parents=True)
+                self._write_seeded_release(
+                    staging,
+                    staged_packages,
+                    *arguments,
+                )
+                payloads = {
+                    "/app/manager/state/release-state.json": (
+                        staging / "manager" / "state" / "release-state.json"
+                    ).read_bytes(),
+                    (
+                        f"/app/manager/packages/{self.target_version}/"
+                        "verified-release.json"
+                    ): (staged_packages / "verified-release.json").read_bytes(),
+                }
+            manager_name = self._container_names.get("manager")
+            if not manager_name:
+                raise _OrchestratorUnavailable(
+                    "source Manager container is unavailable for retry reseed"
+                )
+            encoded = base64.b64encode(
+                json.dumps(
+                    {
+                        path: base64.b64encode(content).decode("ascii")
+                        for path, content in payloads.items()
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).decode("ascii")
+            installer = (
+                "import base64, json, pathlib, sys\n"
+                "items = json.loads(base64.b64decode(sys.argv[1]))\n"
+                "for raw_path, content in items.items():\n"
+                "    path = pathlib.Path(raw_path)\n"
+                "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+                "    temporary = path.with_name('.' + path.name + '.matrix.tmp')\n"
+                "    temporary.write_bytes(base64.b64decode(content))\n"
+                "    temporary.replace(path)\n"
+            )
+            self._docker_cmd(
+                "exec", manager_name, "python", "-c", installer, encoded
+            )
 
     # -- Docker / Compose helpers --------------------------------------------
 
