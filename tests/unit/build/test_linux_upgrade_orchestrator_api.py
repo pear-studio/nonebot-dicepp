@@ -55,17 +55,20 @@ class _FakeDocker:
 
     def __init__(self, bot_image_id: str = SOURCE_BOT_ID) -> None:
         self.calls: list[tuple[list[str], dict]] = []
-        self.stopped: list[str] = []
+        self.killed: list[str] = []
         self.bot_image_id = bot_image_id
         self.dashboard_image_id = SOURCE_DASH_ID
+        self.bot_running = True
 
     def switch_to_target(self) -> None:
         self.bot_image_id = TARGET_BOT_ID
         self.dashboard_image_id = TARGET_DASH_ID
+        self.bot_running = True
 
     def restore_source(self) -> None:
         self.bot_image_id = SOURCE_BOT_ID
         self.dashboard_image_id = SOURCE_DASH_ID
+        self.bot_running = True
 
     def __call__(
         self,
@@ -96,12 +99,13 @@ class _FakeDocker:
                 else self.bot_image_id
             )
             if "{{json .}}" in argv:
+                running = self.bot_running if name == BOT_NAME else True
                 stdout = json.dumps(
                     {
                         "Image": image_id,
                         "State": {
-                            "Running": True,
-                            "Status": "running",
+                            "Running": running,
+                            "Status": "running" if running else "exited",
                             "StartedAt": "2026-01-01T00:00:00Z",
                         },
                     }
@@ -111,8 +115,9 @@ class _FakeDocker:
             return subprocess.CompletedProcess(
                 argv, 0, stdout=stdout + "\n", stderr=""
             )
-        if "stop" in argv:
-            self.stopped.append(argv[-1])
+        if "kill" in argv:
+            self.killed.append(argv[-1])
+            self.bot_running = False
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
 
 
@@ -385,7 +390,7 @@ def test_healthy_commit_fails_when_journal_not_committed(
 # ---------------------------------------------------------------------------
 
 
-def test_target_health_failure_injects_docker_stop(
+def test_target_health_failure_kills_target_before_rollback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     no_sleep: None,
@@ -410,8 +415,9 @@ def test_target_health_failure_injects_docker_stop(
         "journal_status": "rolled_back",
         "rollback_marker_status": "restored",
     }
-    # The injected failure is a docker stop on the managed bot container.
-    assert fake_docker.stopped == [BOT_NAME]
+    # The injected failure is synchronous and leaves the target non-running
+    # before the Manager health gate can commit.
+    assert fake_docker.killed == [BOT_NAME]
 
 
 def test_target_health_failure_rollback_fails_on_commit(

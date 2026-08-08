@@ -2956,7 +2956,7 @@ class _LinuxUpgradeOrchestrator:
     def _inject_health_failure(
         self, scenario: str, timeout: float = 180
     ) -> None:
-        """Wait for the bot to switch to the target image, then stop it."""
+        """Wait for the bot to switch to the target image, then kill it."""
         bot_name = self._container_names.get("bot")
         if not bot_name:
             raise _OrchestratorUnavailable("bot container is not started")
@@ -2966,7 +2966,17 @@ class _LinuxUpgradeOrchestrator:
             try:
                 if self._bot_image_id() == target_bot_id:
                     self._mutate_sentinels_for_failure()
-                    self._docker_cmd("stop", "-t", "10", bot_name)
+                    # A graceful stop leaves the container reported as
+                    # running during its timeout, allowing the Manager's
+                    # short consecutive health gate to commit first.  Kill is
+                    # synchronous and the restart policy is ``no`` throughout
+                    # handoff, making the injected failure deterministic.
+                    self._docker_cmd("kill", bot_name)
+                    if self._container_state("bot")["running"] is not False:
+                        raise self._expectation_failure(
+                            scenario,
+                            "target bot remained running after failure injection",
+                        )
                     return
             except _OrchestratorUnavailable:
                 # The container may be recreated mid-switch; keep polling.
