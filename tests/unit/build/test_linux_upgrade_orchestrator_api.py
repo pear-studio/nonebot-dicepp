@@ -236,6 +236,17 @@ def _rolled_back_journal() -> dict:
     }
 
 
+def _legacy_linux_rolled_back_journal() -> dict:
+    return {
+        "status": "rolled_back",
+        "detail": {
+            "platform_protocol": "linux-manager-handoff-v1",
+            "rolled_back": True,
+            "rollback_status": "succeeded",
+        },
+    }
+
+
 class _InfiniteRunning:
     """A status sequence that always reports a running operation."""
 
@@ -418,6 +429,30 @@ def test_target_health_failure_kills_target_before_rollback(
     # The injected failure is synchronous and leaves the target non-running
     # before the Manager health gate can commit.
     assert fake_docker.killed == [BOT_NAME]
+
+
+def test_rc20_linux_rollback_journal_is_accepted_with_object_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The released source Manager cannot emit the newer rollback_result."""
+
+    fake_api = _FakeManagerApi()
+    fake_api.status_responses = [_running_status(), _rolled_back_status()]
+    fake_docker = _FakeDocker()
+    fake_api.on_confirm = fake_docker.switch_to_target
+    orch = _make_orchestrator(
+        tmp_path,
+        monkeypatch,
+        fake_api=fake_api,
+        fake_docker=fake_docker,
+    )
+    monkeypatch.setattr(orch, "_read_journal", _legacy_linux_rolled_back_journal)
+
+    result = orch.target_health_failure_rollback()
+
+    assert result["status"] == "passed"
+    assert result["observations"]["rollback_marker_status"] == "restored"
 
 
 def test_target_health_failure_rollback_fails_on_commit(

@@ -3060,13 +3060,20 @@ class _LinuxUpgradeOrchestrator:
         status = journal.get("status")
         detail = journal.get("detail")
         rollback_result = detail.get("rollback_result") if isinstance(detail, dict) else None
-        if (
-            status != "rolled_back"
-            or not isinstance(detail, dict)
-            or not isinstance(rollback_result, dict)
-            or rollback_result.get("succeeded") is not True
-            or rollback_result.get("program_restored") is not True
-            or rollback_result.get("data_restored") is not True
+        linux_handoff_restored = (
+            isinstance(detail, dict)
+            and detail.get("platform_protocol") == "linux-manager-handoff-v1"
+            and detail.get("rolled_back") is True
+            and detail.get("rollback_status") == "succeeded"
+        )
+        generic_restored = (
+            isinstance(rollback_result, dict)
+            and rollback_result.get("succeeded") is True
+            and rollback_result.get("program_restored") is True
+            and rollback_result.get("data_restored") is True
+        )
+        if status != "rolled_back" or not (
+            linux_handoff_restored or generic_restored
         ):
             raise self._expectation_failure(
                 scenario,
@@ -3077,6 +3084,13 @@ class _LinuxUpgradeOrchestrator:
 
     def _rollback_program_status(self, journal: dict[str, Any]) -> str:
         detail = journal.get("detail")
+        if (
+            isinstance(detail, dict)
+            and detail.get("platform_protocol") == "linux-manager-handoff-v1"
+            and detail.get("rolled_back") is True
+            and detail.get("rollback_status") == "succeeded"
+        ):
+            return "restored"
         rollback_result = detail.get("rollback_result") if isinstance(detail, dict) else None
         program = rollback_result.get("program") if isinstance(rollback_result, dict) else None
         status = program.get("status") if isinstance(program, dict) else None
