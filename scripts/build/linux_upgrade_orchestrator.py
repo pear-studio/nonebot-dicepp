@@ -739,6 +739,7 @@ class _DockerDaemonSandbox:
             raise _OrchestratorUnavailable("isolated Docker endpoint is unavailable")
         deadline = time.monotonic() + timeout
         last_error = "nested daemon did not answer"
+        consecutive_successes = 0
         while time.monotonic() < deadline:
             try:
                 _docker(
@@ -749,10 +750,15 @@ class _DockerDaemonSandbox:
                     timeout=10,
                     env=self.docker_env,
                 )
-                return
             except _OrchestratorUnavailable as exc:
                 last_error = str(exc)
+                consecutive_successes = 0
                 time.sleep(1)
+                continue
+            consecutive_successes += 1
+            if consecutive_successes >= 3:
+                return
+            time.sleep(0.5)
         raise _OrchestratorUnavailable(
             f"isolated Docker daemon did not become ready: {last_error}"
         )

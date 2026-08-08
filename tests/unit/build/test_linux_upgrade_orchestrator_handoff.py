@@ -222,6 +222,27 @@ def test_dind_uses_audited_official_digest_by_default(
     assert _DEFAULT_DIND_IMAGE in run_call
 
 
+def test_dind_wait_requires_three_consecutive_connections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = _DockerDaemonSandbox(tmp_path)
+    sandbox.docker_env = {"DOCKER_HOST": "tcp://127.0.0.1:32768"}
+    attempts: list[int] = []
+
+    def docker(*_args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 2:
+            raise _OrchestratorUnavailable("connection reset by peer")
+        return subprocess.CompletedProcess([], 0, "27.0.0\n", "")
+
+    monkeypatch.setattr(module, "_docker", docker)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    sandbox._wait_inner(timeout=5)
+
+    assert attempts == [1, 2, 3, 4, 5]
+
+
 def test_dind_local_docker_command_verifies_owned_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
