@@ -449,6 +449,7 @@ def _load_docker_image_from_bundle(
     label: str,
     *,
     docker_env: dict[str, str] | None = None,
+    docker_runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> dict[str, str]:
     """Extract and ``docker load`` images from a Linux release bundle.
 
@@ -506,47 +507,60 @@ def _load_docker_image_from_bundle(
     else:
         tar_path = archive_path
 
-    try:
-        subprocess.run(
-            ["docker", "load", "-i", str(tar_path)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=docker_env,
-            check=True,
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-        raise _OrchestratorUnavailable(
-            f"cannot docker load {label} images: {exc}"
-        ) from exc
-
-    images: dict[str, str] = {}
-    for item in package["images"]:
-        role = item["role"]
-        image_ref = item["reference"]
+    if docker_runner is not None:
+        docker_runner("load", "-i", str(tar_path), timeout=120)
+    else:
         try:
-            result = subprocess.run(
-                [
-                    "docker", "image", "inspect",
-                    "--format", "{{.Id}}",
-                    image_ref,
-                ],
+            subprocess.run(
+                ["docker", "load", "-i", str(tar_path)],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=120,
                 env=docker_env,
                 check=True,
             )
-            images[role] = result.stdout.strip()
         except (
             subprocess.CalledProcessError,
             subprocess.TimeoutExpired,
             OSError,
         ) as exc:
             raise _OrchestratorUnavailable(
-                f"cannot inspect {label} image {image_ref!r} "
-                f"after docker load: {exc}"
+                f"cannot docker load {label} images: {exc}"
             ) from exc
+
+    images: dict[str, str] = {}
+    for item in package["images"]:
+        role = item["role"]
+        image_ref = item["reference"]
+        if docker_runner is not None:
+            result = docker_runner(
+                "image", "inspect", "--format", "{{.Id}}", image_ref, timeout=30
+            )
+            images[role] = result.stdout.strip()
+        else:
+            try:
+                result = subprocess.run(
+                    [
+                        "docker", "image", "inspect",
+                        "--format", "{{.Id}}",
+                        image_ref,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    env=docker_env,
+                    check=True,
+                )
+                images[role] = result.stdout.strip()
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                OSError,
+            ) as exc:
+                raise _OrchestratorUnavailable(
+                    f"cannot inspect {label} image {image_ref!r} "
+                    f"after docker load: {exc}"
+                ) from exc
     return images
 
 
@@ -900,14 +914,22 @@ class _DockerDaemonSandbox:
         self._wait_inner()
 
     def docker_cmd(
-        self, *args: str, timeout: float = 60
+        self,
+        *args: str,
+        timeout: float = 60,
+        cwd: str | os.PathLike[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run Docker CLI against the verified nested daemon's local socket."""
         self._verify_owned()
         assert self.container_id is not None
-        return self._outer(
-            "exec", self.container_id, "docker", *args, timeout=timeout
-        )
+        exec_args: list[str] = ["exec"]
+        if cwd is not None:
+            exec_args.extend(("--workdir", os.fspath(cwd)))
+        if env is not None and "DICEPP_IMAGE_TAG" in env:
+            exec_args.extend(("--env", f"DICEPP_IMAGE_TAG={env['DICEPP_IMAGE_TAG']}"))
+        exec_args.extend((self.container_id, "docker", *args))
+        return self._outer(*exec_args, timeout=timeout)
 
     def cleanup(self) -> None:
         if self.container_id is None:
@@ -2115,6 +2137,13 @@ class _LinuxUpgradeOrchestrator:
         cwd: str | os.PathLike[str] | None = None,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if self._daemon_sandbox is not None:
+            return self._daemon_sandbox.docker_cmd(
+                *args,
+                timeout=timeout,
+                cwd=cwd,
+                env=env if env is not None else self._effective_docker_env(),
+            )
         return _docker(
             "docker",
             *args,
@@ -2224,9 +2253,7 @@ class _LinuxUpgradeOrchestrator:
                     )
                 reference = item["reference"]
                 expected_id = item.get("image_id")
-                existing = _optional_docker_image_id(
-                    reference, docker_env=self._effective_docker_env()
-                )
+                existing = self._optional_image_id(reference)
                 if existing is not None and existing != expected_id:
                     raise _OrchestratorUnavailable(
                         f"image reference {reference!r} already points to unrelated bytes"
@@ -2238,6 +2265,9 @@ class _LinuxUpgradeOrchestrator:
                 self._work_dir,
                 label,
                 docker_env=self._effective_docker_env(),
+                docker_runner=(
+                    self._docker_cmd if self._daemon_sandbox is not None else None
+                ),
             )
             if set(images) != {"bot", "dashboard"}:
                 raise _OrchestratorUnavailable(
@@ -2257,9 +2287,7 @@ class _LinuxUpgradeOrchestrator:
             self._target_image_ids.values()
         )
         for role, reference in _CURRENT_IMAGE_ALIASES.items():
-            current_id = _optional_docker_image_id(
-                reference, docker_env=self._effective_docker_env()
-            )
+            current_id = self._optional_image_id(reference)
             if current_id is None:
                 continue
             if current_id not in allowed_ids:
@@ -2294,18 +2322,57 @@ class _LinuxUpgradeOrchestrator:
 
     def _assert_isolated_docker_namespace(self) -> None:
         for name in ("dicepp", "dicepp-dashboard", "dicepp-manager"):
-            if _docker_object_exists(
-                "container", name, docker_env=self._effective_docker_env()
-            ):
+            if self._object_exists("container", name):
                 raise _OrchestratorUnavailable(
                     f"Docker container {name!r} already exists; refusing to touch a shared instance"
                 )
-        if _docker_object_exists(
-            "network", "dice-net", docker_env=self._effective_docker_env()
-        ):
+        if self._object_exists("network", "dice-net"):
             raise _OrchestratorUnavailable(
                 "Docker network 'dice-net' already exists; refusing to join a shared instance"
             )
+
+    def _object_exists(self, kind: str, name: str) -> bool:
+        if self._daemon_sandbox is None:
+            return _docker_object_exists(
+                kind, name, docker_env=self._effective_docker_env()
+            )
+        if kind == "container":
+            result = self._docker_cmd(
+                "ps", "-aq", "--filter", f"name=^/{name}$"
+            )
+        elif kind == "network":
+            result = self._docker_cmd(
+                "network", "ls", "-q", "--filter", f"name=^{name}$"
+            )
+        else:
+            raise _OrchestratorUnavailable(
+                f"unsupported isolated Docker object kind: {kind!r}"
+            )
+        identifiers = {
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        }
+        if len(identifiers) > 1:
+            raise _OrchestratorUnavailable(
+                f"isolated Docker {kind} {name!r} is not unique"
+            )
+        return bool(identifiers)
+
+    def _optional_image_id(self, reference: str) -> str | None:
+        if self._daemon_sandbox is None:
+            return _optional_docker_image_id(
+                reference, docker_env=self._effective_docker_env()
+            )
+        result = self._docker_cmd(
+            "image", "ls", "--quiet", "--no-trunc", reference
+        )
+        identifiers = {
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        }
+        if len(identifiers) > 1:
+            raise _OrchestratorUnavailable(
+                f"isolated Docker image reference {reference!r} is not unique"
+            )
+        return next(iter(identifiers), None)
 
     def _container_state(self, role: str) -> dict[str, Any]:
         name = self._container_names.get(role)
@@ -2546,9 +2613,7 @@ class _LinuxUpgradeOrchestrator:
             reference = record.get("name")
             if not isinstance(reference, str):
                 raise self._expectation_failure(scenario, "current alias name is invalid")
-            actual = _optional_docker_image_id(
-                reference, docker_env=self._effective_docker_env()
-            )
+            actual = self._optional_image_id(reference)
             if actual != expected_by_role[role]:
                 raise self._expectation_failure(
                     scenario, f"current alias {reference!r} points at unexpected bytes"
@@ -2585,11 +2650,7 @@ class _LinuxUpgradeOrchestrator:
         self._verify_aliases(
             scenario, request["current_aliases"], target=True
         )
-        if _docker_object_exists(
-            "container",
-            request["manager"]["backup_name"],
-            docker_env=self._effective_docker_env(),
-        ):
+        if self._object_exists("container", request["manager"]["backup_name"]):
             raise self._expectation_failure(
                 scenario, "source Manager backup still exists after commit"
             )

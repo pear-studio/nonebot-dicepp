@@ -267,6 +267,44 @@ def test_dind_local_docker_command_verifies_owned_container(
     ]
 
 
+def test_dind_local_compose_forwards_only_safe_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = _DockerDaemonSandbox(tmp_path)
+    sandbox.container_id = "a" * 64
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(sandbox, "_verify_owned", lambda: None)
+
+    def outer(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(sandbox, "_outer", outer)
+
+    sandbox.docker_cmd(
+        "compose",
+        "up",
+        cwd=tmp_path,
+        env={"DICEPP_IMAGE_TAG": "v3.0.0rc20", "SECRET": "must-not-leak"},
+    )
+
+    assert calls == [
+        (
+            "exec",
+            "--workdir",
+            str(tmp_path),
+            "--env",
+            "DICEPP_IMAGE_TAG=v3.0.0rc20",
+            "a" * 64,
+            "docker",
+            "compose",
+            "up",
+        )
+    ]
+    assert "must-not-leak" not in repr(calls)
+
+
 def test_manager_api_client_uses_nested_requester_instead_of_host_http(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -457,6 +495,39 @@ def _orchestrator(tmp_path: Path, *, sandbox: object | None = None) -> _LinuxUpg
         work_dir=tmp_path / "work",
         daemon_sandbox=sandbox,
     )
+
+
+def test_dind_namespace_checks_use_local_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    class Sandbox:
+        docker_env = {"DOCKER_HOST": "tcp://probe-only"}
+
+        def docker_cmd(
+            self, *args: str, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+    orch = _orchestrator(tmp_path, sandbox=Sandbox())
+    monkeypatch.setattr(
+        module,
+        "_docker_object_exists",
+        lambda *_args, **_kwargs: pytest.fail(
+            "DinD namespace checks must not use the published TCP endpoint"
+        ),
+    )
+
+    orch._assert_isolated_docker_namespace()
+
+    assert calls == [
+        ("ps", "-aq", "--filter", "name=^/dicepp$"),
+        ("ps", "-aq", "--filter", "name=^/dicepp-dashboard$"),
+        ("ps", "-aq", "--filter", "name=^/dicepp-manager$"),
+        ("network", "ls", "-q", "--filter", "name=^dice-net$"),
+    ]
 
 
 def test_post_commit_invalid_journal_cannot_reach_manual_helper(
