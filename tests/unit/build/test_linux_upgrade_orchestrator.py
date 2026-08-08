@@ -736,6 +736,62 @@ def test_cleanup_removes_only_exact_compose_project_containers(
         assert ("rm", "-f", container_id) in calls
 
 
+def test_cleanup_rechecks_owned_image_users_after_handoff_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._transaction_ids.add("tx-owned")
+    calls: list[tuple[str, ...]] = []
+
+    def docker_cmd(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("ps", "-aq"):
+            stdout = "compose-owned\ntransaction-owned\n"
+        elif args[-1] == "compose-owned":
+            stdout = json.dumps({"com.docker.compose.project": orch._compose_project})
+        elif args[-1] == "transaction-owned":
+            stdout = json.dumps({"io.dicepp.upgrade-transaction": "tx-owned"})
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orch, "_docker_cmd", docker_cmd)
+
+    orch._cleanup_owned_image_containers("example.invalid/dicepp:v3.0.0rc20")
+
+    assert ("rm", "-f", "compose-owned") in calls
+    assert ("rm", "-f", "transaction-owned") in calls
+
+
+def test_cleanup_refuses_unowned_image_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+
+    def docker_cmd(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        stdout = "unowned\n" if args[:2] == ("ps", "-aq") else "{}"
+        return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(orch, "_docker_cmd", docker_cmd)
+
+    with pytest.raises(_OrchestratorUnavailable, match="outside the isolated project"):
+        orch._cleanup_owned_image_containers("example.invalid/dicepp:v3.0.0rc20")
+
+
 # ---------------------------------------------------------------------------
 # _read_journal
 # ---------------------------------------------------------------------------

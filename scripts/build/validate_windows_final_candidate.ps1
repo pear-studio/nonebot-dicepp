@@ -113,6 +113,10 @@ try {
     $programRoot = $runtimeMatches[0].Directory.FullName
     $runtime = Join-Path $programRoot "DicePP-Runtime.exe"
     $dashboard = Join-Path $programRoot "DicePP.exe"
+    $dashboardApp = Join-Path $programRoot "DicePP-App.exe"
+    if (-not (Test-Path -LiteralPath $dashboardApp -PathType Leaf)) {
+        throw "Portable internal Dashboard application is missing"
+    }
     $forbiddenGuard = @(
         Get-ChildItem -LiteralPath $extractRoot -Recurse -File |
             Where-Object { $_.Name -eq "DicePP-UpdateGuard.exe" }
@@ -159,7 +163,8 @@ try {
         -DiagnosticsRoot $ProcessDiagnosticsRoot | Out-Null
     $stableDashboard = Join-Path $installRoot "DicePP.exe"
     $payloadDashboard = Join-Path $installRoot "current\DicePP.exe"
-    foreach ($path in @($stableDashboard, $payloadDashboard)) {
+    $payloadDashboardApp = Join-Path $installRoot "current\DicePP-App.exe"
+    foreach ($path in @($stableDashboard, $payloadDashboard, $payloadDashboardApp)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Setup installation is incomplete: $path"
         }

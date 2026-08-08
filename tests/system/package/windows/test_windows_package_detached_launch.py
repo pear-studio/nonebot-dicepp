@@ -47,6 +47,7 @@ pytestmark = [
 # 等价于 Explorer 双击——sys.stdout/sys.stderr/stdin 均为 None。
 _DETACHED_PROCESS = 0x00000008
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
+_PACKAGE_EXECUTABLES = frozenset({"dicepp.exe", "dicepp-app.exe"})
 
 
 def _dashboard_exe() -> Path:
@@ -128,7 +129,7 @@ def _owned_package_processes(exe: Path) -> dict[int, psutil.Process]:
         except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
             continue
         if (
-            process_exe.name.casefold() == "dicepp.exe"
+            process_exe.name.casefold() in _PACKAGE_EXECUTABLES
             and process_exe.is_relative_to(package_root)
         ):
             processes[process.pid] = process
@@ -168,7 +169,7 @@ def _owned_listener_pids(exe: Path, ports: set[int]) -> set[int]:
         except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
             continue
         if (
-            process_exe.name.casefold() == "dicepp.exe"
+            process_exe.name.casefold() in _PACKAGE_EXECUTABLES
             and process_exe.is_relative_to(package_root)
         ):
             pids.add(connection.pid)

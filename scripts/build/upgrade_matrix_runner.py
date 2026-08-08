@@ -141,7 +141,7 @@ def _source_asset(asset: dict[str, str], cache: Path) -> Path:
 
 def _run_harness(
     entrypoint: Path, *, context: dict[str, Any], work_dir: Path
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], subprocess.CompletedProcess[Any]]:
     if entrypoint.is_symlink() or not entrypoint.is_file():
         raise ValueError(f"tracked upgrade harness entrypoint is unavailable: {entrypoint}")
     work_dir.mkdir(parents=True, exist_ok=False)
@@ -151,7 +151,7 @@ def _run_harness(
     context_path.write_text(
         json.dumps(context, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    subprocess.run(
+    completed = subprocess.run(
         [
             sys.executable,
             str(entrypoint.resolve()),
@@ -161,7 +161,7 @@ def _run_harness(
             str(result_path),
         ],
         cwd=work_dir,
-        check=True,
+        check=False,
     )
     result = load_json_object(result_path, label="upgrade harness result")
     if set(result) != {
@@ -193,13 +193,15 @@ def _run_harness(
         "assertions": result["assertions"],
         "observations": result["observations"],
     }
-    return validate_scenario_result(
-        scenario,
-        expected_platform=context["platform"],
-        expected_name=context["scenario"],
-        expected_source_version=context["source_version"],
-        expected_target_version=context["target_version"],
-    )
+    if completed.returncode == 0:
+        scenario = validate_scenario_result(
+            scenario,
+            expected_platform=context["platform"],
+            expected_name=context["scenario"],
+            expected_source_version=context["source_version"],
+            expected_target_version=context["target_version"],
+        )
+    return scenario, completed
 
 
 def run_platform(
@@ -251,6 +253,7 @@ def run_platform(
     except KeyError as exc:
         raise ValueError(f"unsupported upgrade harness platform: {platform}") from exc
     results: list[dict[str, Any]] = []
+    failed_harness: subprocess.CompletedProcess[Any] | None = None
     for source in sources:
         source_paths = [
             (asset, _source_asset(asset, source_cache / source["source_version"]))
@@ -290,9 +293,13 @@ def run_platform(
                 ],
             }
             scenario_dir = work_root / f"{source['source_version']}-{scenario}"
-            scenarios.append(
-                _run_harness(entrypoint, context=context, work_dir=scenario_dir)
+            scenario_result, completed = _run_harness(
+                entrypoint, context=context, work_dir=scenario_dir
             )
+            scenarios.append(scenario_result)
+            if completed.returncode != 0:
+                failed_harness = completed
+                break
         results.append(
             {
                 "platform": platform,
@@ -309,6 +316,8 @@ def run_platform(
                 "scenarios": scenarios,
             }
         )
+        if failed_harness is not None:
+            break
     payload = {
         "contract_version": PLATFORM_RESULT_CONTRACT_VERSION,
         "target": {
@@ -333,6 +342,13 @@ def run_platform(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    if failed_harness is not None:
+        raise subprocess.CalledProcessError(
+            failed_harness.returncode,
+            failed_harness.args,
+            output=failed_harness.stdout,
+            stderr=failed_harness.stderr,
+        )
     return payload
 
 

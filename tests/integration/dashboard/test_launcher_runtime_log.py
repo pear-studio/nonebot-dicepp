@@ -91,6 +91,17 @@ class FakeManagerClient:
         return self.operations[operation_id]
 
 
+def test_frozen_autostart_uses_stable_root_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = tmp_path / "current"
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(current / "DicePP-App.exe"))
+
+    assert launcher.autostart_launcher_path() == tmp_path / "DicePP.exe"
+
+
 def test_manager_readiness_waits_for_durable_startup_recovery(monkeypatch) -> None:
     class ReadinessClient:
         def __init__(self) -> None:

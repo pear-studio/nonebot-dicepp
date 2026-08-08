@@ -464,6 +464,14 @@ def resolve_launcher_roots(
     return program, instance
 
 
+def autostart_launcher_path() -> Path:
+    """Return the stable root entry, not the version-owned frozen process."""
+    if not getattr(sys, "frozen", False):
+        return Path(sys.executable)
+    _program, instance = resolve_launcher_roots(Path(sys.executable).parent)
+    return instance / "DicePP.exe"
+
+
 def should_open_browser() -> bool:
     return os.environ.get("DICEPP_DASHBOARD_OPEN_BROWSER", "1").strip() != "0"
 
@@ -530,7 +538,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             dashboard_alive=dashboard_server.is_alive,
         )
         if os.name == "nt":
-            controller.configure_autostart(WindowsAutostart(sys.executable))
+            controller.configure_autostart(WindowsAutostart(autostart_launcher_path()))
         tray = build_tray(controller, fake=fake_tray)
         controller._stop_tray = tray.stop
         manager_state = getattr(manager_app, "state", None)
@@ -622,7 +630,7 @@ def main() -> None:
         dashboard_main()
         return
     if args.autostart:
-        adapter = WindowsAutostart(sys.executable)
+        adapter = WindowsAutostart(autostart_launcher_path())
         if args.autostart == "enable":
             adapter.set_enabled(True)
         elif args.autostart == "disable":

@@ -36,6 +36,11 @@ if (Test-Path -LiteralPath $LauncherSource -PathType Leaf) {
     }
 }
 
+& (Join-Path $PSScriptRoot "build_windows_launcher_shim.ps1") -DistDir $DistDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows launcher shim assembly failed with exit code $LASTEXITCODE"
+}
+
 Copy-RequiredFile -Source "config/global.json" -Destination (Join-Path $DistDir "config/global.json")
 Copy-RequiredFile -Source "config/bots/_template.json" -Destination (Join-Path $DistDir "config/bots/_template.json")
 

@@ -507,3 +507,12 @@ def test_tracked_platform_entrypoint_fails_closed_until_real_e2e_exists(
     # prerequisite is missing (Docker, valid bundles, etc.).
     assert isinstance(unavailable["observations"].get("reason"), str)
     assert len(unavailable["observations"]["reason"]) > 0
+    platform_result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert platform_result["results"][0]["scenarios"] == [
+        {
+            "name": "healthy_commit",
+            "status": "unavailable",
+            "assertions": {},
+            "observations": unavailable["observations"],
+        }
+    ]

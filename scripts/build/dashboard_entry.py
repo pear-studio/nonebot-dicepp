@@ -203,6 +203,17 @@ def _is_velopack_hook(argv: list[str] | None = None) -> bool:
     return any(argument in hooks for argument in arguments)
 
 
+def _ensure_windowed_standard_streams() -> None:
+    """Give libraries a harmless sink when a GUI process has no console."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(
+                sys,
+                name,
+                open(os.devnull, "w", encoding="utf-8", buffering=1),
+            )
+
+
 def _append_bootstrap_failure(app_dir: str, exc: BaseException) -> None:
     """Best-effort logging before the regular launcher logger exists."""
     try:
@@ -241,6 +252,9 @@ else:
 # import: the installer holds file locks and enforces a short timeout.
 if _is_velopack_hook():
     raise SystemExit(0)
+
+
+_ensure_windowed_standard_streams()
 
 
 try:

@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -272,6 +273,7 @@ def _manager_environment(root: Path, port: int) -> dict[str, str]:
             "DICEPP_PROJECT_ROOT": str(root),
             "DICEPP_MANAGER_HOST": "127.0.0.1",
             "DICEPP_MANAGER_PORT": str(port),
+            "DICEPP_MANAGER_URL": f"http://127.0.0.1:{port}",
             "DICEPP_MANAGER_RUNTIME": "process",
             "DICEPP_MANAGER_RUNTIME_UNIT_ID": "dicepp-runtime",
             "DICEPP_MANAGER_PROCESS_COMMAND": runtime_command,
@@ -322,16 +324,26 @@ def _wait_manager(
 ) -> tuple[ManagerClient, dict[str, Any]]:
     deadline = time.monotonic() + timeout
     last_error = "Manager did not answer"
+    last_observation: str | None = None
     while time.monotonic() < deadline:
         client = _client(root, port)
         try:
+            # /v1/health is the post-bind readiness boundary for Windows
+            # startup recovery.  Polling /v1/status alone leaves the recovery
+            # task waiting forever while the target Runtime stays quiesced.
+            readiness = asyncio.run(client.health())
             status = asyncio.run(client.status())
             health = status.get("health")
             if isinstance(health, dict) and health.get("dicepp_version") == version:
                 return client, status
-            last_error = f"unexpected health: {health!r}"
+            last_observation = (
+                f"unexpected status health: {health!r}; readiness={readiness!r}"
+            )
+            last_error = last_observation
         except (ManagerClientError, OSError, ValueError) as exc:
             last_error = str(exc) or type(exc).__name__
+            if last_observation is not None:
+                last_error = f"{last_error}; last response: {last_observation}"
         time.sleep(0.2)
     raise WindowsMatrixError(
         f"Manager {version} did not become ready on port {port}: {last_error}"
@@ -363,15 +375,6 @@ def _wait_operation(
     return current
 
 
-def _start_runtime(client: ManagerClient) -> None:
-    operation = asyncio.run(client.operate("dicepp-runtime", "start"))
-    _wait_operation(client, operation)
-    status = asyncio.run(client.status())
-    units = status.get("runtime_units")
-    if not _runtime_is_healthy(units):
-        raise WindowsMatrixError(f"RuntimeUnit did not start: {units!r}")
-
-
 def _runtime_is_healthy(units: Any) -> bool:
     if not isinstance(units, list) or len(units) != 1:
         return False
@@ -380,6 +383,25 @@ def _runtime_is_healthy(units: Any) -> bool:
         isinstance(runtime, dict)
         and runtime.get("runtime_state") == "running"
         and runtime.get("health") == "healthy"
+    )
+
+
+def _manual_restore_journal_passed(last: Any, runtime_units: Any) -> bool:
+    if not isinstance(last, dict) or last.get("status") != "failed":
+        return False
+    detail = last.get("detail")
+    if not isinstance(detail, dict):
+        return False
+    manual = detail.get("manual_restore")
+    return (
+        detail.get("phase") == "manual_restored"
+        and detail.get("rollback_status") == "succeeded"
+        and detail.get("rolled_back") is True
+        and isinstance(manual, dict)
+        and manual.get("requested") is True
+        and manual.get("program_directory_restored") is True
+        and manual.get("data_runtime_restored") is True
+        and _runtime_is_healthy(runtime_units)
     )
 
 
@@ -398,6 +420,27 @@ def _wait_runtime_healthy(
     raise WindowsMatrixError(
         "RuntimeUnit did not recover to healthy state: "
         f"{last_status.get('runtime_units')!r}"
+    )
+
+
+def _wait_launcher_started(root: Path, *, timeout: float = 60) -> None:
+    """Wait for the packaged source launcher to install its handoff callback."""
+    log_path = InstanceLayout.from_root(root).runtime_log
+    deadline = time.monotonic() + timeout
+    last_log = ""
+    while time.monotonic() < deadline:
+        try:
+            last_log = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            last_log = ""
+        if "launcher | startup complete" in last_log:
+            return
+        if "launcher | fatal error" in last_log:
+            break
+        time.sleep(0.1)
+    raise WindowsMatrixError(
+        "Packaged launcher did not reach its upgrade handoff boundary: "
+        + last_log[-2000:]
     )
 
 
@@ -427,33 +470,53 @@ def _stop_runtime_best_effort(root: Path, port: int) -> None:
         pass
 
 
-def _stop_root_processes(root: Path) -> None:
+def _stop_root_processes(root: Path, *, required: bool = True) -> None:
     env = os.environ.copy()
     env["DICEPP_MATRIX_ROOT"] = str(root.resolve())
     script = r"""
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath($env:DICEPP_MATRIX_ROOT).TrimEnd('\') + '\'
-$processes = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.ExecutablePath -and
-    [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
-        $root,
-        [StringComparison]::OrdinalIgnoreCase
-    )
-})
-foreach ($process in $processes) {
-    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+$deadline = [DateTime]::UtcNow.AddSeconds(15)
+do {
+    $processes = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -and
+        [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+            $root,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    })
+    foreach ($process in $processes) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($processes.Count -gt 0) {
+        Start-Sleep -Milliseconds 100
+    }
+} while ($processes.Count -gt 0 -and [DateTime]::UtcNow -lt $deadline)
+if ($processes.Count -gt 0) {
+    $processes | ForEach-Object {
+        "pid=$($_.ProcessId) path=$($_.ExecutablePath)"
+    }
+    exit 4
 }
 """
-    subprocess.run(
+    completed = subprocess.run(
         ["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
         env=env,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         timeout=30,
         check=False,
     )
+    if required and completed.returncode != 0:
+        raise WindowsMatrixError(
+            "Isolated Windows package processes did not stop: "
+            + completed.stdout.strip()[-2000:]
+        )
 
 
 class _PortBlocker:
@@ -615,21 +678,26 @@ def _healthy_commit(
     _launch_manager(root, env)
     client, status = _wait_manager(root, port, version=source_version)
     source_started = status.get("health", {}).get("dicepp_version") == source_version
-    _start_runtime(client)
+    _wait_launcher_started(root)
+    _wait_runtime_healthy(client)
     operation = _confirm_upgrade(client, target_version)
     target_client, target_status = _wait_manager(
         root,
         port,
         version=target_version,
-        timeout=120,
+        # Velopack itself may spend 60s waiting for the source process and 15s
+        # in each lifecycle hook before the target cold start begins.
+        timeout=180,
     )
     target_started = target_status.get("health", {}).get("dicepp_version") == target_version
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + 120
     upgrade_status: dict[str, Any] = {}
     while time.monotonic() < deadline:
+        readiness = asyncio.run(target_client.health())
         upgrade_status = asyncio.run(target_client.upgrade_status())
         last = upgrade_status.get("last_operation")
-        if isinstance(last, dict) and last.get("status") not in {"queued", "running"}:
+        handoff = readiness.get("upgrade_handoff")
+        if isinstance(handoff, dict) and handoff.get("pending") is False:
             break
         time.sleep(0.2)
     last = upgrade_status.get("last_operation")
@@ -701,14 +769,15 @@ def _manual_restore(
     client, status = _wait_manager(root, port, version=source_version)
     if status.get("health", {}).get("dicepp_version") != source_version:
         raise WindowsMatrixError("Source Manager did not start")
-    _start_runtime(client)
+    _wait_launcher_started(root)
+    _wait_runtime_healthy(client)
     blocker = _PortBlocker(port)
     blocker.start()
     try:
         _confirm_upgrade(client, target_version)
         blocker.wait(timeout=45)
         _wait_current_version(root, target_version, timeout=120)
-        target_failure_observed = True
+        target_failure_observed = _tree_digest(root / "current") == target_tree
         layout = InstanceLayout.from_root(root)
         recovery_dirs = [
             path
@@ -724,36 +793,60 @@ def _manual_restore(
         if not recovery_material_preserved:
             raise WindowsMatrixError("Source recovery material was not preserved")
         _stop_root_processes(root)
+        # The injected port conflict has already proved the target-start
+        # failure.  Remove that artificial fault before exercising the user
+        # recovery entrypoint so the restored source can start normally.
+        blocker.close()
         _write_user_config(layout.config_user, "target-mutated")
-        recovery = subprocess.run(
-            [os.environ["COMSPEC"], "/d", "/c", str(root / "DicePP-Recover.cmd")],
-            cwd=root,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            timeout=30,
-            check=False,
-        )
+        recovery_output_path = layout.manager_state_dir / "manual-recovery-output.log"
+        with recovery_output_path.open("wb") as recovery_output:
+            recovery = subprocess.run(
+                [
+                    os.environ["COMSPEC"],
+                    "/d",
+                    "/c",
+                    str(root / "DicePP-Recover.cmd"),
+                ],
+                cwd=root,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=recovery_output,
+                stderr=subprocess.STDOUT,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=30,
+                check=False,
+            )
         if recovery.returncode != 0:
             raise WindowsMatrixError(
                 "Root recovery script failed: "
-                + recovery.stdout.decode("utf-8", errors="replace")[-2000:]
+                + recovery_output_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[-2000:]
             )
+        restored_version = _program_version(root)
+        restored_tree = _tree_digest(root / "current")
+        failed_current = recovery_dirs[0] / "failed-current"
+        failed_tree = _tree_digest(failed_current) if failed_current.is_dir() else None
+        restore_marker = recovery_dirs[0] / "manual-restore.requested"
+        # The restored source Manager may consume the marker and clean
+        # failed-current before this process resumes.  Those are transient
+        # implementation artifacts; the stable proof is the restored tree
+        # here plus the manual_restored journal checked below.
         manual_restore_invoked = (
-            _program_version(root) == source_version
-            and _tree_digest(root / "current") == source_tree
-            and (recovery_dirs[0] / "failed-current").is_dir()
-            and _tree_digest(recovery_dirs[0] / "failed-current") == target_tree
-            and (recovery_dirs[0] / "manual-restore.requested").is_file()
+            restored_version == source_version and restored_tree == source_tree
         )
         if not manual_restore_invoked:
-            raise WindowsMatrixError("Root recovery did not swap whole program trees")
+            raise WindowsMatrixError(
+                "Root recovery did not swap whole program trees: "
+                f"restored_version={restored_version!r}, "
+                f"expected_version={source_version!r}, "
+                f"restored_tree_matches={restored_tree == source_tree!r}, "
+                f"failed_current_exists={failed_current.is_dir()!r}, "
+                f"failed_tree_matches={failed_tree == target_tree!r}, "
+                f"restore_marker_exists={restore_marker.is_file()!r}"
+            )
     finally:
         blocker.close()
-    _stop_root_processes(root)
-    _launch_manager(root, env)
     source_client, source_status = _wait_manager(
         root,
         port,
@@ -778,17 +871,7 @@ def _manual_restore(
     runtime_units = source_status.get("runtime_units")
     data_restored = _read_marker(InstanceLayout.from_root(root).config_user) == "source"
     source_restarted = source_status.get("health", {}).get("dicepp_version") == source_version
-    journal_manually_restored = (
-        isinstance(last, dict)
-        and last.get("status") == "failed"
-        and isinstance(detail, dict)
-        and detail.get("phase") == "manual_restored"
-        and detail.get("rollback_status") == "succeeded"
-        and detail.get("rolled_back") is True
-        and isinstance(detail.get("manual_restore"), dict)
-        and detail["manual_restore"].get("data_runtime_restored") is True
-        and _runtime_is_healthy(runtime_units)
-    )
+    journal_manually_restored = _manual_restore_journal_passed(last, runtime_units)
     whole_program_tree_restored = _tree_digest(root / "current") == source_tree
     if not all(
         (
@@ -841,6 +924,59 @@ def _remove_temp_tree(path: Path) -> None:
             return
         except OSError:
             time.sleep(0.5)
+
+
+def _copy_runtime_diagnostics(root: Path, diagnostics_dir: Path) -> None:
+    """Preserve isolated launcher/Velopack logs before deleting the instance."""
+    layout = InstanceLayout.from_root(root)
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    if layout.logs_dir.is_dir():
+        for log_path in layout.logs_dir.glob("dicepp-runtime*.log"):
+            if log_path.is_symlink() or not log_path.is_file():
+                continue
+            shutil.copyfile(log_path, diagnostics_dir / log_path.name)
+    if layout.manager_recovery_dir.is_dir():
+        for log_path in layout.manager_recovery_dir.glob("*/velopack-output.log"):
+            if log_path.is_symlink() or not log_path.is_file():
+                continue
+            shutil.copyfile(
+                log_path,
+                diagnostics_dir / f"velopack-{log_path.parent.name}.log",
+            )
+    if layout.manager_db.is_file():
+        snapshot: dict[str, Any] = {}
+        try:
+            database_uri = f"{layout.manager_db.resolve().as_uri()}?mode=ro"
+            with sqlite3.connect(database_uri, uri=True, timeout=3) as connection:
+                connection.row_factory = sqlite3.Row
+                for key, table, order_by in (
+                    ("journal", "manager_journal", "updated_at DESC, rowid DESC"),
+                    (
+                        "operation",
+                        "manager_operations",
+                        "updated_at DESC, rowid DESC",
+                    ),
+                ):
+                    row = connection.execute(
+                        f"SELECT * FROM {table} ORDER BY {order_by} LIMIT 1"
+                    ).fetchone()
+                    if row is None:
+                        snapshot[key] = None
+                        continue
+                    record = dict(row)
+                    detail = record.get("detail")
+                    if isinstance(detail, str):
+                        try:
+                            record["detail"] = json.loads(detail)
+                        except json.JSONDecodeError:
+                            record["detail"] = {"unparsed": detail}
+                    snapshot[key] = record
+        except sqlite3.Error as exc:
+            snapshot = {"error": f"{type(exc).__name__}: {exc}"}
+        (diagnostics_dir / "manager-state.json").write_text(
+            json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
 
 
 def run_windows_scenario(
@@ -947,7 +1083,8 @@ def run_windows_scenario(
                     _stop_runtime_best_effort(root, port)
             except (OSError, ValueError):
                 pass
-            _stop_root_processes(root)
+            _stop_root_processes(root, required=False)
+            _copy_runtime_diagnostics(root, diagnostics_dir)
         _remove_temp_tree(temporary)
 
 

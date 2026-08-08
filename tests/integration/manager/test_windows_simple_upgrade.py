@@ -139,6 +139,44 @@ def _empty_runtime_coordinator(
         store,
         service,
     )
+
+
+def test_velopack_handoff_resets_pyinstaller_child_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _layout, adapter = _adapter(tmp_path)
+    captured: dict[str, object] = {}
+
+    class Process:
+        pid = 4321
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return Process()
+
+    monkeypatch.setenv("_PYI_PARENT_PROCESS_LEVEL", "1")
+    monkeypatch.delenv("PYINSTALLER_RESET_ENVIRONMENT", raising=False)
+    monkeypatch.setattr(
+        "dicepp_manager.windows_upgrade.subprocess.Popen",
+        fake_popen,
+    )
+
+    pid = adapter._start_velopack(
+        [str(tmp_path / "Update.exe"), "apply"],
+        tmp_path / "velopack.log",
+    )
+
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["_PYI_PARENT_PROCESS_LEVEL"] == "1"
+    assert environment["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert "PYINSTALLER_RESET_ENVIRONMENT" not in os.environ
+    assert captured["command"][-1] == "apply"
+    assert pid == 4321
+
+
 @pytest.mark.asyncio
 async def test_windows_apply_starts_only_after_complete_recovery_material_exists(
     tmp_path: Path,

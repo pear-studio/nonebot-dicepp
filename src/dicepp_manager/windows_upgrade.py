@@ -703,8 +703,15 @@ exit /b 1
                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             )
         with log_path.open("ab", buffering=0) as output:
+            environment = os.environ.copy()
+            # Update.exe outlives this frozen process and launches the next
+            # DicePP.exe instance (including Velopack lifecycle hooks).  Since
+            # PyInstaller 6.9, a same-executable child otherwise reuses its
+            # parent's bootloader state and can hang after the source exits.
+            environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
             process = subprocess.Popen(
                 command,
+                env=environment,
                 stdin=subprocess.DEVNULL,
                 stdout=output,
                 stderr=subprocess.STDOUT,

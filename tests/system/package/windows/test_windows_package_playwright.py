@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 import sys
-import warnings
 from pathlib import Path
 
 import pytest
@@ -17,6 +16,9 @@ from tests.support.dashboard.playwright import (
     wait_for_server,
 )
 from tests.support.dashboard.paths import repo_root
+from tests.system.package.windows.test_windows_package_detached_launch import (
+    _stop_process_tree,
+)
 
 from playwright.sync_api import sync_playwright
 
@@ -117,32 +119,7 @@ def dashboard_exe_url(tmp_path: Path) -> str:
                 f"{log_path.read_text(encoding='utf-8', errors='replace')}"
             )
         finally:
-            _stop_packaged_process_tree(proc)
-
-
-def _stop_packaged_process_tree(proc: subprocess.Popen[object]) -> None:
-    """Terminate the onefile parent and extracted child before the next test."""
-    # PyInstaller onefile can leave the extracted child alive when only its
-    # bootstrap parent is terminated.  Kill the verified test-owned process
-    # tree in one operation so its Dashboard and Manager ports are released.
-    result = subprocess.run(
-        ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
-    )
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        warnings.warn(
-            "Packaged Dashboard 进程树等待 10 秒后仍未退出："
-            f"{result.stderr.strip() or result.stdout.strip()}",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        proc.kill()
-        proc.wait()
+            _stop_process_tree(proc, exe, {port, manager_port})
 
 
 def test_windows_dashboard_exe_shows_setup_validation(dashboard_exe_url: str) -> None:

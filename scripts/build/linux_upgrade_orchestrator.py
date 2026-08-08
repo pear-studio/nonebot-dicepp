@@ -3018,6 +3018,7 @@ class _LinuxUpgradeOrchestrator:
             errors.append(str(exc))
         for image_ref in self._owned_image_refs:
             try:
+                self._cleanup_owned_image_containers(image_ref)
                 self._docker_cmd("rmi", image_ref)
             except _OrchestratorUnavailable as exc:
                 errors.append(str(exc))
@@ -3050,6 +3051,44 @@ class _LinuxUpgradeOrchestrator:
             if project != self._compose_project:
                 raise _OrchestratorUnavailable(
                     "Compose container ownership changed; refusing cleanup"
+                )
+            self._docker_cmd("rm", "-f", container_id)
+
+    def _cleanup_owned_image_containers(self, image_ref: str) -> None:
+        """Close the post-handoff cleanup race before removing a loaded image.
+
+        A recovering Manager can recreate a source Runtime after the earlier
+        Compose/transaction sweeps.  Re-enumerate users of an image that this
+        harness loaded into an initially image-free daemon, but still require
+        the exact project or an observed transaction label before removal.
+        """
+        result = self._docker_cmd(
+            "ps",
+            "-aq",
+            "--filter",
+            f"ancestor={image_ref}",
+            "--format",
+            "{{.ID}}",
+        )
+        for container_id in {
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        }:
+            inspected = self._docker_cmd(
+                "inspect", "--format", "{{json .Config.Labels}}", container_id
+            ).stdout.strip()
+            try:
+                labels = json.loads(inspected)
+            except json.JSONDecodeError as exc:
+                raise _OrchestratorUnavailable(
+                    "cannot verify container labels before image cleanup"
+                ) from exc
+            if not isinstance(labels, dict):
+                labels = {}
+            project = labels.get("com.docker.compose.project")
+            transaction_id = labels.get("io.dicepp.upgrade-transaction")
+            if project != self._compose_project and transaction_id not in self._transaction_ids:
+                raise _OrchestratorUnavailable(
+                    "image container is outside the isolated project; refusing cleanup"
                 )
             self._docker_cmd("rm", "-f", container_id)
 
