@@ -1674,6 +1674,8 @@ class _LinuxUpgradeOrchestrator:
             raise _OrchestratorUnavailable(
                 "daemon restart scenario requires the isolated Docker sandbox"
             )
+        original_sandbox = self._daemon_sandbox
+        fresh_sandbox: _DockerDaemonSandbox | None = None
         before = self._fork_daemon_case("before-commit", "daemon_before_commit")
         try:
             try:
@@ -1684,20 +1686,30 @@ class _LinuxUpgradeOrchestrator:
             # case.  The first injected daemon restart may legitimately leave
             # its inner dockerd unavailable, so destroy the verified sandbox
             # boundary and start a clean DinD before the post-commit case.
-            self._daemon_sandbox.cleanup()
-            self._daemon_sandbox.start()
-            if self._daemon_sandbox.docker_env is None:
-                raise _OrchestratorUnavailable(
-                    "fresh isolated Docker endpoint is unavailable"
-                )
-            self._docker_env = dict(self._daemon_sandbox.docker_env)
-            after = self._fork_daemon_case("after-commit", "daemon_after_commit")
+            original_sandbox.cleanup()
+            fresh_sandbox = _DockerDaemonSandbox(self._work_dir)
             try:
-                after_state = after._run_daemon_restart_after_commit(scenario)
+                fresh_sandbox.start()
+                if fresh_sandbox.docker_env is None:
+                    raise _OrchestratorUnavailable(
+                        "fresh isolated Docker endpoint is unavailable"
+                    )
+                self._daemon_sandbox = fresh_sandbox
+                self._docker_env = dict(fresh_sandbox.docker_env)
+                after = self._fork_daemon_case(
+                    "after-commit", "daemon_after_commit"
+                )
+                try:
+                    after_state = after._run_daemon_restart_after_commit(scenario)
+                finally:
+                    after.cleanup()
             finally:
-                after.cleanup()
+                fresh_sandbox.cleanup()
         except _ScenarioExpectationFailure as exc:
             return self._scenario_failed(scenario, exc)
+        finally:
+            self._daemon_sandbox = original_sandbox
+            self._docker_env = original_sandbox.docker_env
         manual_after = after_state == "cleanup_pending"
         assertions = {
             "crash_before_commit_allowed_source_restore": (

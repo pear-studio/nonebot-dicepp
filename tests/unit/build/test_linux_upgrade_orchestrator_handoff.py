@@ -591,11 +591,25 @@ def test_observed_cleanup_pending_then_manual_recovery_is_passed(
         docker_env: dict[str, str] | None = {"DOCKER_HOST": "tcp://initial"}
 
         def cleanup(self) -> None:
-            events.append("sandbox.cleanup")
+            events.append("original.cleanup")
+            self.docker_env = None
 
         def start(self) -> None:
-            events.append("sandbox.start")
+            pytest.fail("the original sandbox must not be reused")
+
+    class FreshSandbox:
+        docker_env: dict[str, str] | None = None
+
+        def __init__(self, _work_root: Path) -> None:
+            events.append("fresh.created")
+
+        def start(self) -> None:
+            events.append("fresh.start")
             self.docker_env = {"DOCKER_HOST": "tcp://fresh"}
+
+        def cleanup(self) -> None:
+            events.append("fresh.cleanup")
+            self.docker_env = None
 
     orch = _orchestrator(tmp_path, sandbox=Sandbox())
 
@@ -615,6 +629,7 @@ def test_observed_cleanup_pending_then_manual_recovery_is_passed(
 
     children = iter([Before(), After()])
     monkeypatch.setattr(orch, "_fork_daemon_case", lambda *_args: next(children))
+    monkeypatch.setattr(module, "_DockerDaemonSandbox", FreshSandbox)
 
     result = orch.linux_manager_handoff_daemon_restart()
 
@@ -622,11 +637,14 @@ def test_observed_cleanup_pending_then_manual_recovery_is_passed(
     assert result["observations"]["crash_after_commit_final_state"] == "cleanup_pending"
     assert events == [
         "before.cleanup",
-        "sandbox.cleanup",
-        "sandbox.start",
+        "original.cleanup",
+        "fresh.created",
+        "fresh.start",
         "after.cleanup",
+        "fresh.cleanup",
     ]
-    assert orch._docker_env == {"DOCKER_HOST": "tcp://fresh"}
+    assert isinstance(orch._daemon_sandbox, Sandbox)
+    assert orch._docker_env is None
     assert result["assertions"] == {
         "crash_before_commit_allowed_source_restore": True,
         "crash_after_commit_never_rolled_back": True,
