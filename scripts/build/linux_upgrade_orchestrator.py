@@ -3269,6 +3269,14 @@ class _LinuxUpgradeOrchestrator:
         except _OrchestratorUnavailable as exc:
             errors.append(str(exc))
         if errors:
+            if self._daemon_sandbox is not None:
+                # A daemon-restart scenario may intentionally leave dockerd
+                # unavailable after all durable assertions have completed.
+                # The verified DinD container is the isolation boundary; the
+                # entry point removes that entire container immediately after
+                # orchestrator cleanup, which destroys every nested object.
+                self._daemon_sandbox._verify_owned()
+                return
             raise _OrchestratorUnavailable("cleanup failed: " + "; ".join(errors))
 
     def _discover_cleanup_transaction_ids(self) -> None:

@@ -1042,6 +1042,44 @@ def test_cleanup_routes_nested_daemon_commands_through_local_socket(
     assert calls[0][:2] == ("ps", "-aq")
 
 
+def test_unreachable_inner_cleanup_defers_only_to_verified_sandbox(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    ownership: list[str] = []
+
+    class Sandbox:
+        def _verify_owned(self) -> None:
+            ownership.append("verified")
+
+    monkeypatch.setattr(orch, "_discover_cleanup_transaction_ids", lambda: None)
+    monkeypatch.setattr(orch, "_cleanup_handoff_containers", lambda: None)
+    monkeypatch.setattr(
+        orch,
+        "_cleanup_compose_project_containers",
+        lambda: (_ for _ in ()).throw(
+            _OrchestratorUnavailable("nested daemon is unavailable")
+        ),
+    )
+    monkeypatch.setattr(orch, "_cleanup_owned_network", lambda: None)
+    orch._daemon_sandbox = Sandbox()  # type: ignore[assignment]
+
+    orch.cleanup()
+
+    assert ownership == ["verified"]
+
+    orch._daemon_sandbox = None
+    with pytest.raises(_OrchestratorUnavailable, match="nested daemon is unavailable"):
+        orch.cleanup()
+
+
 def test_cleanup_rechecks_owned_image_users_after_handoff_race(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
