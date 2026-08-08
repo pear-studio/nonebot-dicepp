@@ -893,6 +893,16 @@ class _DockerDaemonSandbox:
         self._refresh_endpoint()
         self._wait_inner()
 
+    def docker_cmd(
+        self, *args: str, timeout: float = 60
+    ) -> subprocess.CompletedProcess[str]:
+        """Run Docker CLI against the verified nested daemon's local socket."""
+        self._verify_owned()
+        assert self.container_id is not None
+        return self._outer(
+            "exec", self.container_id, "docker", *args, timeout=timeout
+        )
+
     def cleanup(self) -> None:
         if self.container_id is None:
             return
@@ -3251,7 +3261,7 @@ class _LinuxUpgradeOrchestrator:
         for image_ref in self._owned_image_refs:
             try:
                 self._cleanup_owned_image_containers(image_ref)
-                self._docker_cmd("rmi", image_ref)
+                self._cleanup_docker_cmd("rmi", image_ref)
             except _OrchestratorUnavailable as exc:
                 errors.append(str(exc))
         try:
@@ -3346,7 +3356,7 @@ class _LinuxUpgradeOrchestrator:
                 raise _OrchestratorUnavailable(
                     "Compose container ownership changed; refusing cleanup"
                 )
-            self._docker_cmd("rm", "-f", container_id)
+            self._cleanup_docker_cmd("rm", "-f", container_id)
 
     def _cleanup_owned_image_containers(self, image_ref: str) -> None:
         """Close the post-handoff cleanup race before removing a loaded image.
@@ -3387,7 +3397,7 @@ class _LinuxUpgradeOrchestrator:
                     f"project={project!r}, transaction={transaction_id!r}, "
                     f"label_keys={sorted(labels)!r}"
                 )
-            self._docker_cmd("rm", "-f", container_id)
+            self._cleanup_docker_cmd("rm", "-f", container_id)
 
     def _cleanup_handoff_containers(self) -> None:
         """Remove only containers proven to belong to observed transactions."""
@@ -3419,7 +3429,7 @@ class _LinuxUpgradeOrchestrator:
                         raise _OrchestratorUnavailable(
                             "transaction container ownership changed; refusing cleanup"
                         )
-                    self._docker_cmd("rm", "-f", container_id)
+                    self._cleanup_docker_cmd("rm", "-f", container_id)
                 except _OrchestratorUnavailable as exc:
                     raise _OrchestratorUnavailable(
                         f"cannot remove owned transaction container {container_id}: {exc}"
@@ -3448,7 +3458,7 @@ class _LinuxUpgradeOrchestrator:
             raise _OrchestratorUnavailable(
                 "dice-net ownership changed; refusing cleanup"
             )
-        self._docker_cmd("network", "rm", self._network_id)
+        self._cleanup_docker_cmd("network", "rm", self._network_id)
         self._network_id = None
         self._owns_dice_network = False
 
@@ -3456,6 +3466,8 @@ class _LinuxUpgradeOrchestrator:
         self, *args: str
     ) -> subprocess.CompletedProcess[str]:
         """Retry only idempotent cleanup discovery after daemon handoff gaps."""
+        if self._daemon_sandbox is not None:
+            return self._cleanup_docker_cmd(*args)
         last_error: _OrchestratorUnavailable | None = None
         for attempt in range(3):
             try:
@@ -3464,12 +3476,16 @@ class _LinuxUpgradeOrchestrator:
                 last_error = exc
                 if attempt == 2:
                     break
-                if self._daemon_sandbox is not None:
-                    self._daemon_sandbox._verify_owned()
-                    self._daemon_sandbox._wait_inner(timeout=30)
                 time.sleep(1)
         assert last_error is not None
         raise last_error
+
+    def _cleanup_docker_cmd(
+        self, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        if self._daemon_sandbox is not None:
+            return self._daemon_sandbox.docker_cmd(*args)
+        return self._docker_cmd(*args)
 
 
 # ---------------------------------------------------------------------------

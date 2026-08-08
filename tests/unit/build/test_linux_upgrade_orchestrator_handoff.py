@@ -222,6 +222,30 @@ def test_dind_uses_audited_official_digest_by_default(
     assert _DEFAULT_DIND_IMAGE in run_call
 
 
+def test_dind_local_docker_command_verifies_owned_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = _DockerDaemonSandbox(tmp_path)
+    sandbox.container_id = "a" * 64
+    events: list[object] = []
+
+    monkeypatch.setattr(sandbox, "_verify_owned", lambda: events.append("verified"))
+
+    def outer(*args: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+        events.append((args, timeout))
+        return subprocess.CompletedProcess(args, 0, "nested\n", "")
+
+    monkeypatch.setattr(sandbox, "_outer", outer)
+
+    result = sandbox.docker_cmd("ps", "-aq", timeout=30)
+
+    assert result.stdout == "nested\n"
+    assert events == [
+        "verified",
+        (("exec", "a" * 64, "docker", "ps", "-aq"), 30),
+    ]
+
+
 def test_manager_api_client_uses_nested_requester_instead_of_host_http(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

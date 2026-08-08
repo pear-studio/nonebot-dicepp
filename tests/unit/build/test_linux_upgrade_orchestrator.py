@@ -990,16 +990,6 @@ def test_cleanup_retries_transient_readonly_enumeration(
         work_dir=tmp_path,
     )
     calls: list[tuple[str, ...]] = []
-    readiness: list[object] = []
-
-    class Sandbox:
-        def _verify_owned(self) -> None:
-            readiness.append("verified")
-
-        def _wait_inner(self, *, timeout: float) -> None:
-            readiness.append(timeout)
-
-    orch._daemon_sandbox = Sandbox()  # type: ignore[assignment]
 
     def docker_cmd(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
         calls.append(args)
@@ -1015,7 +1005,41 @@ def test_cleanup_retries_transient_readonly_enumeration(
     ps_calls = [call for call in calls if call[:2] == ("ps", "-aq")]
     assert len(ps_calls) == 2
     assert ps_calls[0] == ps_calls[1]
-    assert readiness == ["verified", 30]
+
+
+def test_cleanup_routes_nested_daemon_commands_through_local_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    calls: list[tuple[str, ...]] = []
+
+    class Sandbox:
+        def docker_cmd(
+            self, *args: str, **_kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    orch._daemon_sandbox = Sandbox()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        orch,
+        "_docker_cmd",
+        lambda *_args, **_kwargs: pytest.fail(
+            "nested cleanup must not use the published TCP endpoint"
+        ),
+    )
+
+    orch._cleanup_compose_project_containers()
+
+    assert len(calls) == 1
+    assert calls[0][:2] == ("ps", "-aq")
 
 
 def test_cleanup_rechecks_owned_image_users_after_handoff_race(
