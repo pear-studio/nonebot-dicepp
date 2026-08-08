@@ -3325,7 +3325,7 @@ class _LinuxUpgradeOrchestrator:
 
     def _cleanup_compose_project_containers(self) -> None:
         """Remove residual containers owned by this unique Compose project."""
-        result = self._docker_cmd(
+        result = self._cleanup_readonly_docker_cmd(
             "ps",
             "-aq",
             "--filter",
@@ -3336,7 +3336,7 @@ class _LinuxUpgradeOrchestrator:
         for container_id in {
             line.strip() for line in result.stdout.splitlines() if line.strip()
         }:
-            project = self._docker_cmd(
+            project = self._cleanup_readonly_docker_cmd(
                 "inspect",
                 "--format",
                 '{{index .Config.Labels "com.docker.compose.project"}}',
@@ -3356,7 +3356,7 @@ class _LinuxUpgradeOrchestrator:
         harness loaded into an initially image-free daemon, but still require
         the exact project or an observed transaction label before removal.
         """
-        result = self._docker_cmd(
+        result = self._cleanup_readonly_docker_cmd(
             "ps",
             "-aq",
             "--filter",
@@ -3367,7 +3367,7 @@ class _LinuxUpgradeOrchestrator:
         for container_id in {
             line.strip() for line in result.stdout.splitlines() if line.strip()
         }:
-            inspected = self._docker_cmd(
+            inspected = self._cleanup_readonly_docker_cmd(
                 "inspect", "--format", "{{json .Config.Labels}}", container_id
             ).stdout.strip()
             try:
@@ -3393,7 +3393,7 @@ class _LinuxUpgradeOrchestrator:
         """Remove only containers proven to belong to observed transactions."""
         for transaction_id in sorted(self._transaction_ids):
             try:
-                result = self._docker_cmd(
+                result = self._cleanup_readonly_docker_cmd(
                     "ps",
                     "-aq",
                     "--filter",
@@ -3409,7 +3409,7 @@ class _LinuxUpgradeOrchestrator:
                 line.strip() for line in result.stdout.splitlines() if line.strip()
             }:
                 try:
-                    inspected = self._docker_cmd(
+                    inspected = self._cleanup_readonly_docker_cmd(
                         "inspect",
                         "--format",
                         '{{index .Config.Labels "io.dicepp.upgrade-transaction"}}',
@@ -3432,7 +3432,7 @@ class _LinuxUpgradeOrchestrator:
             raise _OrchestratorUnavailable(
                 "owned dice-net network id was not recorded"
             )
-        inspected = self._docker_cmd(
+        inspected = self._cleanup_readonly_docker_cmd(
             "network",
             "inspect",
             "--format",
@@ -3451,6 +3451,25 @@ class _LinuxUpgradeOrchestrator:
         self._docker_cmd("network", "rm", self._network_id)
         self._network_id = None
         self._owns_dice_network = False
+
+    def _cleanup_readonly_docker_cmd(
+        self, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Retry only idempotent cleanup discovery after daemon handoff gaps."""
+        last_error: _OrchestratorUnavailable | None = None
+        for attempt in range(3):
+            try:
+                return self._docker_cmd(*args)
+            except _OrchestratorUnavailable as exc:
+                last_error = exc
+                if attempt == 2:
+                    break
+                if self._daemon_sandbox is not None:
+                    self._daemon_sandbox._verify_owned()
+                    self._daemon_sandbox._wait_inner(timeout=30)
+                time.sleep(1)
+        assert last_error is not None
+        raise last_error
 
 
 # ---------------------------------------------------------------------------

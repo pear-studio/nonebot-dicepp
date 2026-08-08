@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -975,6 +976,46 @@ def test_cleanup_removes_only_exact_compose_project_containers(
             container_id,
         ) in calls
         assert ("rm", "-f", container_id) in calls
+
+
+def test_cleanup_retries_transient_readonly_enumeration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    calls: list[tuple[str, ...]] = []
+    readiness: list[object] = []
+
+    class Sandbox:
+        def _verify_owned(self) -> None:
+            readiness.append("verified")
+
+        def _wait_inner(self, *, timeout: float) -> None:
+            readiness.append(timeout)
+
+    orch._daemon_sandbox = Sandbox()  # type: ignore[assignment]
+
+    def docker_cmd(*args: str, **_kwargs) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ("ps", "-aq") and calls.count(args) == 1:
+            raise _OrchestratorUnavailable("connection reset by peer")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orch, "_docker_cmd", docker_cmd)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    orch._cleanup_compose_project_containers()
+
+    ps_calls = [call for call in calls if call[:2] == ("ps", "-aq")]
+    assert len(ps_calls) == 2
+    assert ps_calls[0] == ps_calls[1]
+    assert readiness == ["verified", 30]
 
 
 def test_cleanup_rechecks_owned_image_users_after_handoff_race(
