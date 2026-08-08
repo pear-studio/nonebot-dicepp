@@ -165,6 +165,7 @@ class _FakeManagerApi:
                 raise self.confirm_error
             if self.on_confirm is not None:
                 self.on_confirm()
+            self.health_version = TARGET_VERSION
             return 202, {
                 "ok": True,
                 "operation": {"status": "running", "action": "upgrade.install"},
@@ -180,6 +181,7 @@ class _FakeManagerApi:
                     and self.on_rollback is not None
                 ):
                     self.on_rollback()
+                    self.health_version = SOURCE_VERSION
                 return 200, response
             return 200, {
                 "ok": True,
@@ -537,7 +539,14 @@ def test_retry_after_rollback_full_flow(
     # Two upgrades were triggered on the same instance.
     confirm_calls = [call for call in fake_api.calls if "confirm" in call[1]]
     assert len(confirm_calls) == 2
-    assert fake_docker.stopped == [BOT_NAME]
+    assert fake_docker.killed == [BOT_NAME]
+    assert orch._instance_dir is not None
+    release_state = json.loads(
+        (orch._instance_dir / "manager" / "state" / "release-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert release_state["available"]["version"] == TARGET_VERSION
 
 
 # ---------------------------------------------------------------------------

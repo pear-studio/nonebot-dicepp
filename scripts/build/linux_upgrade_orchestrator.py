@@ -1425,6 +1425,7 @@ class _LinuxUpgradeOrchestrator:
             self._verify_source_restored(scenario)
             self._verify_sentinels(scenario, require_mutation=True)
             # Retry on the same instance.
+            self._reseed_target_release_for_retry()
             self._trigger_upgrade(scenario)
             self._wait_upgrade_complete(scenario)
             self._verify_target_healthy(scenario)
@@ -1972,6 +1973,33 @@ class _LinuxUpgradeOrchestrator:
         (packages_dir / "verified-release.json").write_text(
             json.dumps(verified, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
+        )
+
+    def _reseed_target_release_for_retry(self) -> None:
+        """Re-advertise the same verified target after a source rollback.
+
+        The released source Manager clears ``release-state.available`` after
+        an install attempt.  A retry on the same instance must therefore
+        model a fresh successful discovery/download while preserving the
+        exact final Candidate bundle already copied and verified by the
+        harness.
+        """
+        if self._instance_dir is None or self._seeded_bundle_path is None:
+            raise _OrchestratorUnavailable(
+                "verified target release is unavailable for retry"
+            )
+        if not self._seeded_bundle_path.is_file():
+            raise _OrchestratorUnavailable(
+                "verified target bundle was lost before retry"
+            )
+        manifest = _read_bundle_manifest(self._seeded_bundle_path)
+        self._write_seeded_release(
+            self._instance_dir,
+            self._seeded_bundle_path.parent,
+            manifest,
+            self._seeded_bundle_path.name,
+            self._seeded_bundle_path.stat().st_size,
+            _sha256_file(self._seeded_bundle_path),
         )
 
     # -- Docker / Compose helpers --------------------------------------------
