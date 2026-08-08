@@ -3009,6 +3009,10 @@ class _LinuxUpgradeOrchestrator:
         if self._docker_proxy is not None:
             self._docker_proxy.stop()
         try:
+            self._discover_cleanup_transaction_ids()
+        except _OrchestratorUnavailable as exc:
+            errors.append(str(exc))
+        try:
             self._cleanup_handoff_containers()
         except _OrchestratorUnavailable as exc:
             errors.append(str(exc))
@@ -3028,6 +3032,68 @@ class _LinuxUpgradeOrchestrator:
             errors.append(str(exc))
         if errors:
             raise _OrchestratorUnavailable("cleanup failed: " + "; ".join(errors))
+
+    def _discover_cleanup_transaction_ids(self) -> None:
+        """Bind cleanup to handoff requests persisted in the isolated instance."""
+        if self._instance_dir is None:
+            return
+        recovery_root = self._instance_dir / "manager" / "recovery"
+        if not recovery_root.is_dir():
+            return
+        for tx_dir in recovery_root.iterdir():
+            if tx_dir.is_symlink() or not tx_dir.is_dir():
+                continue
+            request_path = tx_dir / _HANDOFF_FILENAMES["request"]
+            if not request_path.is_file() or request_path.is_symlink():
+                continue
+            try:
+                request = json.loads(request_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise _OrchestratorUnavailable(
+                    "cannot verify a persisted handoff request for cleanup"
+                ) from exc
+            transaction_id = request.get("transaction_id")
+            operation_id = request.get("operation_id")
+            manager = request.get("manager")
+            bot = request.get("bot")
+            dashboard = request.get("dashboard")
+            targets = request.get("target_images")
+            manager_image = manager.get("image_id") if isinstance(manager, dict) else None
+            bot_image = bot.get("image_id") if isinstance(bot, dict) else None
+            dashboard_image = (
+                dashboard.get("image_id") if isinstance(dashboard, dict) else None
+            )
+            target_bot_image = targets.get("bot") if isinstance(targets, dict) else None
+            target_dashboard_image = (
+                targets.get("dashboard") if isinstance(targets, dict) else None
+            )
+            if not all(
+                (
+                    isinstance(transaction_id, str),
+                    transaction_id == tx_dir.name,
+                    re.fullmatch(r"[0-9a-f]{32}", transaction_id or "") is not None,
+                    isinstance(operation_id, str),
+                    re.fullmatch(r"[0-9a-f]{32}", operation_id or "") is not None,
+                    request.get("compose_project") == self._compose_project,
+                    request.get("source_version") == self.source_version,
+                    request.get("target_version") == self.target_version,
+                    isinstance(manager, dict),
+                    manager_image == self._source_image_ids.get("dashboard"),
+                    request.get("target_manager_image_id")
+                    == self._target_image_ids.get("dashboard"),
+                    isinstance(bot, dict),
+                    bot_image == self._source_image_ids.get("bot"),
+                    isinstance(dashboard, dict),
+                    dashboard_image == self._source_image_ids.get("dashboard"),
+                    isinstance(targets, dict),
+                    target_bot_image == self._target_image_ids.get("bot"),
+                    target_dashboard_image == self._target_image_ids.get("dashboard"),
+                )
+            ):
+                raise _OrchestratorUnavailable(
+                    "persisted handoff request is not bound to the isolated matrix"
+                )
+            self._transaction_ids.add(transaction_id)
 
     def _cleanup_compose_project_containers(self) -> None:
         """Remove residual containers owned by this unique Compose project."""

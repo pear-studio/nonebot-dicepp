@@ -792,6 +792,72 @@ def test_cleanup_refuses_unowned_image_user(
         orch._cleanup_owned_image_containers("example.invalid/dicepp:v3.0.0rc20")
 
 
+def test_cleanup_discovers_transaction_from_bound_isolated_request(
+    tmp_path: Path,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._instance_dir = tmp_path / "instance"
+    orch._source_image_ids = {"bot": "source-bot", "dashboard": "source-dashboard"}
+    orch._target_image_ids = {"bot": "target-bot", "dashboard": "target-dashboard"}
+    transaction_id = "a" * 32
+    request_dir = orch._instance_dir / "manager" / "recovery" / transaction_id
+    request_dir.mkdir(parents=True)
+    request = {
+        "transaction_id": transaction_id,
+        "operation_id": "b" * 32,
+        "compose_project": orch._compose_project,
+        "source_version": orch.source_version,
+        "target_version": orch.target_version,
+        "manager": {"image_id": "source-dashboard"},
+        "target_manager_image_id": "target-dashboard",
+        "bot": {"image_id": "source-bot"},
+        "dashboard": {"image_id": "source-dashboard"},
+        "target_images": {"bot": "target-bot", "dashboard": "target-dashboard"},
+    }
+    (request_dir / "linux-manager-switch.request.json").write_text(
+        json.dumps(request), encoding="utf-8"
+    )
+
+    orch._discover_cleanup_transaction_ids()
+
+    assert orch._transaction_ids == {transaction_id}
+
+
+def test_cleanup_refuses_foreign_persisted_handoff_request(tmp_path: Path) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    orch._instance_dir = tmp_path / "instance"
+    transaction_id = "a" * 32
+    request_dir = orch._instance_dir / "manager" / "recovery" / transaction_id
+    request_dir.mkdir(parents=True)
+    (request_dir / "linux-manager-switch.request.json").write_text(
+        json.dumps(
+            {
+                "transaction_id": transaction_id,
+                "operation_id": "b" * 32,
+                "compose_project": "another-project",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(_OrchestratorUnavailable, match="not bound"):
+        orch._discover_cleanup_transaction_ids()
+
+    assert orch._transaction_ids == set()
+
+
 # ---------------------------------------------------------------------------
 # _read_journal
 # ---------------------------------------------------------------------------
