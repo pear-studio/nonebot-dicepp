@@ -2459,9 +2459,36 @@ class _LinuxUpgradeOrchestrator:
                     "SELECT value FROM dicepp_harness_sentinel WHERE id = 1"
                 ).fetchone()
         except sqlite3.Error as exc:
-            raise self._expectation_failure(
-                scenario, f"Dashboard database cannot be verified: {exc}"
-            ) from exc
+            # Rollback is performed by the Manager container and may restore
+            # the database with ownership that prevents the runner user from
+            # opening it.  The source Manager identity has already been
+            # verified, so use its exact fixed bind mount as a read-only
+            # fallback without changing host permissions.
+            manager_name = self._container_names.get("manager")
+            if not manager_name:
+                raise self._expectation_failure(
+                    scenario, f"Dashboard database cannot be verified: {exc}"
+                ) from exc
+            query = (
+                "import json, sqlite3\n"
+                "database = "
+                "'file:/app/dashboard/data/dashboard.db?mode=ro&immutable=1'\n"
+                "with sqlite3.connect(database, uri=True) as connection:\n"
+                "    row = connection.execute("
+                "'SELECT value FROM dicepp_harness_sentinel WHERE id = 1'"
+                ").fetchone()\n"
+                "print(json.dumps(row))\n"
+            )
+            completed = self._docker_cmd(
+                "exec", manager_name, "python", "-c", query
+            )
+            try:
+                decoded = json.loads(completed.stdout)
+            except (TypeError, json.JSONDecodeError) as decode_exc:
+                raise self._expectation_failure(
+                    scenario, "Dashboard database fallback returned invalid output"
+                ) from decode_exc
+            row = tuple(decoded) if isinstance(decoded, list) else None
         if row != (self._dashboard_db_expected,):
             raise self._expectation_failure(
                 scenario, "Dashboard database snapshot was not restored"

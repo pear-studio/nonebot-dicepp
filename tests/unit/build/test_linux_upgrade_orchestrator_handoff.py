@@ -559,6 +559,35 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
     assert read_paths == [orch._seeded_bundle_path]
 
 
+def test_dashboard_snapshot_verification_falls_back_to_source_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orch = _orchestrator(tmp_path)
+    orch._instance_dir = tmp_path / "instance"
+    orch._container_names = {"manager": "source-manager"}
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        module.sqlite3,
+        "connect",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            module.sqlite3.OperationalError("unable to open database file")
+        ),
+    )
+
+    def docker_cmd(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, '["source"]\n', "")
+
+    monkeypatch.setattr(orch, "_docker_cmd", docker_cmd)
+
+    orch._verify_dashboard_db_source("manager_handoff_rollback")
+
+    assert len(calls) == 1
+    assert calls[0][:4] == ("exec", "source-manager", "python", "-c")
+    assert "file:/app/dashboard/data/dashboard.db?mode=ro&immutable=1" in calls[0][4]
+
+
 def test_rollback_entry_emits_only_explicit_assertions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
