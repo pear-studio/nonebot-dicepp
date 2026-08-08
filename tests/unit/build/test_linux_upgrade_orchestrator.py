@@ -519,6 +519,19 @@ def test_http_json_connection_error_becomes_unavailable(
         _http_json("GET", "http://127.0.0.1:4091/v1/health", token="secret")
 
 
+def test_http_json_direct_connection_reset_becomes_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manager replacement may reset a live response outside URLError."""
+
+    def fake_urlopen(request: urllib.request.Request, timeout: object) -> object:
+        raise ConnectionResetError(104, "peer reset during manager switch")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(_OrchestratorUnavailable, match="unreachable"):
+        _http_json("GET", "http://127.0.0.1:4091/v1/health", token="secret")
+
+
 def test_http_json_rejects_non_object_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -671,6 +684,30 @@ def test_orchestrator_stores_public_versions(tmp_path: Path) -> None:
     )
     assert orch.source_version == "3.0.0rc19"
     assert orch.target_version == "3.1.0"
+
+
+def test_trigger_upgrade_tolerates_confirm_connection_loss(tmp_path: Path) -> None:
+    """An accepted confirm may lose its response while Manager is replaced."""
+
+    class SwitchingApi:
+        def preview(self, version: str) -> dict:
+            assert version == "3.1.0"
+            return {"preview": {"confirmation_token": "tok-123"}}
+
+        def confirm(self, version: str, confirmation_token: str) -> dict:
+            assert (version, confirmation_token) == ("3.1.0", "tok-123")
+            raise _OrchestratorUnavailable("Manager API is unreachable: reset")
+
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc19",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.1.0",
+        work_dir=tmp_path,
+    )
+    orch._api = SwitchingApi()  # type: ignore[assignment]
+
+    orch._trigger_upgrade("healthy_commit")
 
 
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:

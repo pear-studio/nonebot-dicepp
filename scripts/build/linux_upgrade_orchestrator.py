@@ -977,6 +977,13 @@ def _http_json(
         raise _OrchestratorUnavailable(
             f"Manager API is unreachable: {exc.reason}"
         ) from exc
+    except (ConnectionError, TimeoutError) as exc:
+        # ``http.client`` can surface a peer reset directly while the
+        # Manager replaces its own container.  urllib does not consistently
+        # wrap that expected switch-window failure in ``URLError``.
+        raise _OrchestratorUnavailable(
+            f"Manager API is unreachable: {exc}"
+        ) from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise _OrchestratorUnavailable(
             f"Manager API returned invalid JSON: {exc}"
@@ -2786,7 +2793,6 @@ class _LinuxUpgradeOrchestrator:
         try:
             preview = self._api.preview(self.target_version)
             token = str(preview["preview"]["confirmation_token"])
-            self._api.confirm(self.target_version, token)
         except _ManagerApiError as exc:
             raise self._expectation_failure(
                 scenario, f"upgrade trigger was rejected: {exc.detail}"
@@ -2795,6 +2801,18 @@ class _LinuxUpgradeOrchestrator:
             raise self._expectation_failure(
                 scenario, f"preview response is invalid: {exc}"
             ) from exc
+        try:
+            self._api.confirm(self.target_version, token)
+        except _ManagerApiError as exc:
+            raise self._expectation_failure(
+                scenario, f"upgrade trigger was rejected: {exc.detail}"
+            ) from exc
+        except _OrchestratorUnavailable:
+            # Confirm is intentionally not retried: it is a non-idempotent
+            # request and the Manager may have accepted it immediately before
+            # replacing its own container.  The scenario's status waiter is
+            # the authoritative postcondition and tolerates this handoff gap.
+            return
 
     def _wait_upgrade_complete(
         self, scenario: str, timeout: float = 300
