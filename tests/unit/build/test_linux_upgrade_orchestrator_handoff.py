@@ -493,8 +493,17 @@ def test_post_commit_invalid_journal_cannot_reach_manual_helper(
 def test_observed_cleanup_pending_then_manual_recovery_is_passed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    events: list[str] = []
+
     class Sandbox:
-        pass
+        docker_env: dict[str, str] | None = {"DOCKER_HOST": "tcp://initial"}
+
+        def cleanup(self) -> None:
+            events.append("sandbox.cleanup")
+
+        def start(self) -> None:
+            events.append("sandbox.start")
+            self.docker_env = {"DOCKER_HOST": "tcp://fresh"}
 
     orch = _orchestrator(tmp_path, sandbox=Sandbox())
 
@@ -503,14 +512,14 @@ def test_observed_cleanup_pending_then_manual_recovery_is_passed(
             return "source_restored"
 
         def cleanup(self) -> None:
-            pass
+            events.append("before.cleanup")
 
     class After:
         def _run_daemon_restart_after_commit(self, _scenario: str) -> str:
             return "cleanup_pending"
 
         def cleanup(self) -> None:
-            pass
+            events.append("after.cleanup")
 
     children = iter([Before(), After()])
     monkeypatch.setattr(orch, "_fork_daemon_case", lambda *_args: next(children))
@@ -519,6 +528,13 @@ def test_observed_cleanup_pending_then_manual_recovery_is_passed(
 
     assert result["status"] == "passed"
     assert result["observations"]["crash_after_commit_final_state"] == "cleanup_pending"
+    assert events == [
+        "before.cleanup",
+        "sandbox.cleanup",
+        "sandbox.start",
+        "after.cleanup",
+    ]
+    assert orch._docker_env == {"DOCKER_HOST": "tcp://fresh"}
     assert result["assertions"] == {
         "crash_before_commit_allowed_source_restore": True,
         "crash_after_commit_never_rolled_back": True,

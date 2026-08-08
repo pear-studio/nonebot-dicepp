@@ -1647,12 +1647,23 @@ class _LinuxUpgradeOrchestrator:
                 "daemon restart scenario requires the isolated Docker sandbox"
             )
         before = self._fork_daemon_case("before-commit", "daemon_before_commit")
-        after = self._fork_daemon_case("after-commit", "daemon_after_commit")
         try:
             try:
                 before_state = before._run_daemon_restart_before_commit(scenario)
             finally:
                 before.cleanup()
+            # Each side of the durable commit point is an independent fault
+            # case.  The first injected daemon restart may legitimately leave
+            # its inner dockerd unavailable, so destroy the verified sandbox
+            # boundary and start a clean DinD before the post-commit case.
+            self._daemon_sandbox.cleanup()
+            self._daemon_sandbox.start()
+            if self._daemon_sandbox.docker_env is None:
+                raise _OrchestratorUnavailable(
+                    "fresh isolated Docker endpoint is unavailable"
+                )
+            self._docker_env = dict(self._daemon_sandbox.docker_env)
+            after = self._fork_daemon_case("after-commit", "daemon_after_commit")
             try:
                 after_state = after._run_daemon_restart_after_commit(scenario)
             finally:
