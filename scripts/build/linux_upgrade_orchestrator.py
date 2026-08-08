@@ -1536,7 +1536,11 @@ class _LinuxUpgradeOrchestrator:
                     "handoff journal is not committed",
                     journal_status=journal.get("status", "unavailable"),
                 )
-            protocol = _read_bundle_manifest(self._target_bundle).get(
+            if self._seeded_bundle_path is None:
+                raise _OrchestratorUnavailable(
+                    "verified target bundle is unavailable after handoff"
+                )
+            protocol = _read_bundle_manifest(self._seeded_bundle_path).get(
                 "linux_manager_handoff_protocol"
             )
             if protocol != 1:

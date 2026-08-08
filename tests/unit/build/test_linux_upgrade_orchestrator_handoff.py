@@ -507,6 +507,7 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     orch = _orchestrator(tmp_path)
+    orch._seeded_bundle_path = tmp_path / "validated-target.zip"
     request = {"transaction_id": "a" * 32, "operation_id": "operation-1"}
     decision = {**request, "value": "commit"}
     for name in (
@@ -536,11 +537,13 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
             "detail": {},
         },
     )
-    monkeypatch.setattr(
-        module,
-        "_read_bundle_manifest",
-        lambda _path: {"linux_manager_handoff_protocol": 1},
-    )
+    read_paths: list[Path] = []
+
+    def read_manifest(path: Path) -> dict[str, int]:
+        read_paths.append(path)
+        return {"linux_manager_handoff_protocol": 1}
+
+    monkeypatch.setattr(module, "_read_bundle_manifest", read_manifest)
     monkeypatch.setitem(
         SCENARIO_ASSERTIONS,
         "manager_handoff_commit",
@@ -553,6 +556,7 @@ def test_commit_entry_emits_only_explicit_assertions_and_protocol_type(
     assert "future_assertion" not in result["assertions"]
     assert result["observations"]["handoff_protocol"] == "1"
     assert type(result["observations"]["handoff_protocol"]) is str
+    assert read_paths == [orch._seeded_bundle_path]
 
 
 def test_rollback_entry_emits_only_explicit_assertions(
