@@ -1993,6 +1993,11 @@ class _LinuxUpgradeOrchestrator:
             raise _OrchestratorUnavailable(
                 "verified target bundle was lost before retry"
             )
+        manager_name = self._container_names.get("manager")
+        if not manager_name:
+            raise _OrchestratorUnavailable(
+                "source Manager container is unavailable for retry reseed"
+            )
         manifest = _read_bundle_manifest(self._seeded_bundle_path)
         arguments = (
             manifest,
@@ -2033,11 +2038,6 @@ class _LinuxUpgradeOrchestrator:
                         "verified-release.json"
                     ): (staged_packages / "verified-release.json").read_bytes(),
                 }
-            manager_name = self._container_names.get("manager")
-            if not manager_name:
-                raise _OrchestratorUnavailable(
-                    "source Manager container is unavailable for retry reseed"
-                )
             encoded = base64.b64encode(
                 json.dumps(
                     {
@@ -2060,6 +2060,12 @@ class _LinuxUpgradeOrchestrator:
             self._docker_cmd(
                 "exec", manager_name, "python", "-c", installer, encoded
             )
+        # Release discovery state is loaded when the Manager starts.  The
+        # rollback source process has already cached the cleared state from
+        # the first attempt, so restart only that same Manager container to
+        # reload the freshly persisted Candidate before requesting preview.
+        self._docker_cmd("restart", manager_name, timeout=120)
+        self._wait_health(self.source_version, timeout=120)
 
     # -- Docker / Compose helpers --------------------------------------------
 

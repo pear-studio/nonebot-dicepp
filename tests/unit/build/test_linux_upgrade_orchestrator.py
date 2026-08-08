@@ -894,16 +894,24 @@ def test_retry_reseed_falls_back_to_verified_manager_container(
         "_docker_cmd",
         lambda *args, **kwargs: calls.append(args),
     )
+    health_waits: list[tuple[str, float]] = []
+    monkeypatch.setattr(
+        orch,
+        "_wait_health",
+        lambda version, timeout: health_waits.append((version, timeout)),
+    )
 
     orch._reseed_target_release_for_retry()
 
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0][:4] == ("exec", "dicepp-manager", "python", "-c")
     decoded = json.loads(base64.b64decode(calls[0][-1]))
     assert set(decoded) == {
         "/app/manager/state/release-state.json",
         "/app/manager/packages/3.0.0rc21/verified-release.json",
     }
+    assert calls[1] == ("restart", "dicepp-manager")
+    assert health_waits == [("3.0.0rc20", 120)]
 
 
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:
