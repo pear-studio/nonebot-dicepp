@@ -2995,10 +2995,19 @@ class _LinuxUpgradeOrchestrator:
             self._verify_handoff_document_binding(
                 scenario, premature_result, request, kind="result"
             )
-            raise self._expectation_failure(
-                scenario,
-                "post-commit restart did not preserve the cleanup_pending window",
-            )
+            # A graceful DinD restart can resume the paused Updater while the
+            # Docker socket is already shutting down.  The helper then records
+            # a bound restore-failed result, but the durable commit still makes
+            # rollback forbidden and the transaction remains cleanup_pending.
+            # Manual finalize is specifically required to overwrite this
+            # non-terminal failure.  Either success value means this fault
+            # injection did not preserve the recovery window we need to prove.
+            if premature_result.get("value") != "restore-failed":
+                raise self._expectation_failure(
+                    scenario,
+                    "post-commit restart did not preserve the cleanup_pending window",
+                    premature_result=premature_result.get("value", "unavailable"),
+                )
 
         if journal.get("status") != "interrupted" or journal.get("phase") != "cleanup_pending":
             raise self._expectation_failure(

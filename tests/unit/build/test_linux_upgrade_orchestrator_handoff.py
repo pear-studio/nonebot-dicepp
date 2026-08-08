@@ -617,6 +617,118 @@ def test_post_commit_invalid_journal_cannot_reach_manual_helper(
     assert events == ["restart"]
 
 
+@pytest.mark.parametrize(
+    ("premature_value", "manual_expected"),
+    [
+        ("restore-failed", True),
+        ("source-restored", False),
+        ("target-committed", False),
+    ],
+)
+def test_post_commit_accepts_only_restore_failed_before_manual_finalize(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    premature_value: str,
+    manual_expected: bool,
+) -> None:
+    events: list[str] = []
+
+    class Sandbox:
+        def restart(self) -> None:
+            events.append("restart")
+
+    orch = _orchestrator(tmp_path, sandbox=Sandbox())
+    tx_dir = tmp_path / "tx"
+    tx_dir.mkdir()
+    request = {
+        "transaction_id": "a" * 32,
+        "operation_id": "b" * 32,
+        "manager": {"name": "dicepp-manager"},
+    }
+    decision = {**request, "value": "commit"}
+    premature = {**request, "value": premature_value}
+    manual_result = {**request, "value": "target-committed"}
+    journals = iter(
+        [
+            {
+                "transaction_id": request["transaction_id"],
+                "operation_id": request["operation_id"],
+                "status": "interrupted",
+                "phase": "cleanup_pending",
+            },
+            {
+                "transaction_id": request["transaction_id"],
+                "operation_id": request["operation_id"],
+                "status": "committed",
+                "phase": "cleanup_complete",
+            },
+        ]
+    )
+    monkeypatch.setattr(orch, "_prepare_compose", lambda: None)
+    monkeypatch.setattr(orch, "_start_source", lambda: None)
+    monkeypatch.setattr(orch, "_verify_source_healthy", lambda: None)
+    monkeypatch.setattr(orch, "_trigger_upgrade", lambda _scenario: None)
+    monkeypatch.setattr(
+        orch, "_wait_control_document", lambda _name: {"mode": "daemon_after_commit"}
+    )
+    monkeypatch.setattr(orch, "_find_handoff_container", lambda *_args: "updater")
+    monkeypatch.setattr(
+        orch,
+        "_docker_cmd",
+        lambda *args, **_kwargs: events.append("docker:" + args[0]),
+    )
+
+    def wait_document(kind: str, **_kwargs: object):
+        return {
+            "request": (request, tx_dir),
+            "decision": (decision, tx_dir),
+            "result": (manual_result, tx_dir),
+        }[kind]
+
+    monkeypatch.setattr(orch, "_wait_handoff_document", wait_document)
+    monkeypatch.setattr(
+        orch,
+        "_wait_optional_handoff_document",
+        lambda *_args, **_kwargs: premature,
+    )
+    monkeypatch.setattr(orch, "_read_journal", lambda: next(journals))
+    monkeypatch.setattr(
+        orch, "_verify_handoff_document_binding", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(orch, "_verify_journal_binding", lambda *_args: None)
+    monkeypatch.setattr(
+        orch,
+        "_verify_post_commit_recovery_material",
+        lambda *_args: events.append("material"),
+    )
+    monkeypatch.setattr(
+        orch,
+        "_run_manual_handoff_helper",
+        lambda *_args, **_kwargs: events.append("manual"),
+    )
+    monkeypatch.setattr(orch, "_wait_upgrade_complete", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(orch, "_verify_handoff_target_objects", lambda *_args: None)
+    orch._harness_control_dir = tmp_path
+    scenario = "manager_handoff_commit_crash_window"
+
+    if manual_expected:
+        assert orch._run_daemon_restart_after_commit(scenario) == "cleanup_pending"
+        assert events == [
+            "docker:pause",
+            "restart",
+            "material",
+            "manual",
+            "docker:start",
+        ]
+    else:
+        with pytest.raises(
+            _ScenarioExpectationFailure,
+            match="did not preserve the cleanup_pending window",
+        ):
+            orch._run_daemon_restart_after_commit(scenario)
+        assert "manual" not in events
+
+
 def test_observed_cleanup_pending_then_manual_recovery_is_passed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

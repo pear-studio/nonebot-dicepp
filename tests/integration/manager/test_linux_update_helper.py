@@ -635,7 +635,7 @@ class TestManualRecovery:
                 environment["primitives"], environment["request"], environment["tx_dir"]
             )
 
-    async def test_finalize_committed_deletes_source_backup(
+    async def test_finalize_committed_overwrites_restore_failed_and_deletes_backup(
         self, environment
     ) -> None:
         tx = environment["tx_dir"]
@@ -655,6 +655,18 @@ class TestManualRecovery:
             },
             restart_policy="no",
         )
+        write_result(
+            tx / "linux-manager-switch.result.json",
+            result_payload(
+                RESULT_RESTORE_FAILED,
+                error={
+                    "container_id": "f" * 64,
+                    "image_id": MANAGER_NEW_IMG,
+                    "summary": "Docker socket request failed",
+                },
+            ),
+            root=tx,
+        )
 
         code = await run_finalize_committed(
             primitives, environment["request"], tx
@@ -663,8 +675,11 @@ class TestManualRecovery:
         assert code == 0
         result = _read_json(tx / "linux-manager-switch.result.json")
         assert result["value"] == RESULT_TARGET_COMMITTED
+        assert "error" not in result
         assert "c" * 64 not in primitives.by_id
-        assert primitives.by_name["dicepp-manager"].cid == "new-dicepp-manager"
+        target = primitives.by_name["dicepp-manager"]
+        assert target.cid == "new-dicepp-manager"
+        assert target.restart == "unless-stopped"
 
     async def test_finalize_committed_accepts_already_deleted_bound_backup(
         self, environment
