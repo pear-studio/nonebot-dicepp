@@ -757,6 +757,36 @@ def test_operation_cleanup_identity_rejects_non_protocol_id(tmp_path: Path) -> N
     assert orch._transaction_ids == set()
 
 
+def test_target_health_requires_target_manager_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+    target_ids = {"bot": "target-bot", "dashboard": "target-dashboard"}
+    orch._target_image_ids = target_ids
+    observed: list[tuple[str, float]] = []
+    monkeypatch.setattr(
+        orch,
+        "_wait_health",
+        lambda version, timeout: observed.append((version, timeout)),
+    )
+    monkeypatch.setattr(
+        orch,
+        "_container_state",
+        lambda role: {"running": True, "image_id": target_ids[role]},
+    )
+
+    orch._verify_target_healthy("healthy_commit")
+
+    assert observed == [("3.0.0rc21", 120)]
+
+
 def test_orchestrator_generates_unique_compose_project(tmp_path: Path) -> None:
     orch = _LinuxUpgradeOrchestrator(
         source_bundle=tmp_path / "src.zip",

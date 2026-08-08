@@ -2220,9 +2220,10 @@ class _LinuxUpgradeOrchestrator:
                 )
 
     def _verify_target_healthy(self, scenario: str) -> None:
-        # The Manager container itself is never switched, so /v1/health keeps
-        # reporting the source version after a successful upgrade.
-        self._wait_health(self.source_version, timeout=120)
+        # Linux handoff replaces the Manager together with the managed
+        # runtimes.  A committed upgrade must therefore expose the target
+        # package version from the new Manager health endpoint.
+        self._wait_health(self.target_version, timeout=120)
         for role in ("bot", "dashboard"):
             state = self._container_state(role)
             if not state["running"] or state["image_id"] != self._target_image_ids.get(
