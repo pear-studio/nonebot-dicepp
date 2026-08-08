@@ -1056,6 +1056,8 @@ def test_unreachable_inner_cleanup_defers_only_to_verified_sandbox(
     ownership: list[str] = []
 
     class Sandbox:
+        container_id = "owned-sandbox"
+
         def _verify_owned(self) -> None:
             ownership.append("verified")
 
@@ -1078,6 +1080,39 @@ def test_unreachable_inner_cleanup_defers_only_to_verified_sandbox(
     orch._daemon_sandbox = None
     with pytest.raises(_OrchestratorUnavailable, match="nested daemon is unavailable"):
         orch.cleanup()
+
+
+def test_cleanup_is_idempotent_after_verified_sandbox_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _LinuxUpgradeOrchestrator(
+        source_bundle=tmp_path / "src.zip",
+        source_version="3.0.0rc20",
+        target_bundle=tmp_path / "tgt.zip",
+        target_version="3.0.0rc21",
+        work_dir=tmp_path,
+    )
+
+    class RemovedSandbox:
+        container_id = None
+
+        def _verify_owned(self) -> None:
+            pytest.fail("a removed sandbox must not be verified again")
+
+    monkeypatch.setattr(orch, "_discover_cleanup_transaction_ids", lambda: None)
+    monkeypatch.setattr(orch, "_cleanup_handoff_containers", lambda: None)
+    monkeypatch.setattr(
+        orch,
+        "_cleanup_compose_project_containers",
+        lambda: (_ for _ in ()).throw(
+            _OrchestratorUnavailable("isolated Docker daemon is not started")
+        ),
+    )
+    monkeypatch.setattr(orch, "_cleanup_owned_network", lambda: None)
+    orch._daemon_sandbox = RemovedSandbox()  # type: ignore[assignment]
+
+    orch.cleanup()
 
 
 def test_cleanup_rechecks_owned_image_users_after_handoff_race(

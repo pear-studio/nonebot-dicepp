@@ -3391,6 +3391,12 @@ class _LinuxUpgradeOrchestrator:
                 # The verified DinD container is the isolation boundary; the
                 # entry point removes that entire container immediately after
                 # orchestrator cleanup, which destroys every nested object.
+                # The two crash-window cases additionally remove their verified
+                # boundaries before returning.  In that state cleanup is already
+                # complete and must stay idempotent; a non-null container id still
+                # requires a fresh ownership check before cleanup may be deferred.
+                if self._daemon_sandbox.container_id is None:
+                    return
                 self._daemon_sandbox._verify_owned()
                 return
             raise _OrchestratorUnavailable("cleanup failed: " + "; ".join(errors))
