@@ -23,6 +23,7 @@ CONTROL_GATE_SKIPPED_NO_BOUND_BOTS = "skipped_no_bound_bots"
 CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL = (
     "skipped_no_active_control_channel"
 )
+DEFAULT_CONTROL_HEALTH_TIMEOUT = 120.0
 
 _CONTROL_GATE_SKIP_REASONS = {
     CONTROL_GATE_SKIPPED_NO_BOUND_BOTS: "no_bound_bots",
@@ -45,6 +46,7 @@ class MaintenanceRuntimeSupport:
         service: ManagerService,
         control_probe: HealthProbe | None = None,
         health_timeout: float = 20.0,
+        control_health_timeout: float = DEFAULT_CONTROL_HEALTH_TIMEOUT,
         health_interval: float = 0.5,
         health_consecutive: int = 3,
     ) -> None:
@@ -52,6 +54,7 @@ class MaintenanceRuntimeSupport:
         self.service = service
         self.control_probe = control_probe
         self.health_timeout = health_timeout
+        self.control_health_timeout = control_health_timeout
         self.health_interval = health_interval
         self.health_consecutive = health_consecutive
 
@@ -217,9 +220,18 @@ class MaintenanceRuntimeSupport:
         ):
             effective_baseline = None if observe_optional_control else control_baseline
             try:
+                # The enforced target gate must allow real Bot authentication
+                # and first-heartbeat startup time.  Post-rollback control is
+                # warning-only and keeps the shorter local health budget so a
+                # successful restoration is reported promptly.
                 control = await self._run_probe(
                     self.control_probe,
                     "control",
+                    timeout=(
+                        self.health_timeout
+                        if control_failure_is_warning
+                        else self.control_health_timeout
+                    ),
                     predicate=lambda result: _heartbeat_is_newer(
                         result.get("heartbeat"), effective_baseline
                     ),
@@ -335,10 +347,11 @@ class MaintenanceRuntimeSupport:
         probe: HealthProbe | None,
         name: str,
         *,
+        timeout: float,
         predicate: Callable[[dict[str, Any]], bool] | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any]:
-        deadline = asyncio.get_running_loop().time() + self.health_timeout
+        deadline = asyncio.get_running_loop().time() + timeout
         consecutive = 0
         last: dict[str, Any] = {}
         while asyncio.get_running_loop().time() < deadline:

@@ -29,6 +29,7 @@ from .maintenance_runtime import (
     CONTROL_GATE_ENFORCED,
     CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL,
     CONTROL_GATE_SKIPPED_NO_BOUND_BOTS,
+    DEFAULT_CONTROL_HEALTH_TIMEOUT,
     HealthProbe,
     MaintenanceRuntimeSupport,
 )
@@ -56,6 +57,7 @@ class ArchiveCoordinator:
         control_probe: HealthProbe | None = None,
         fault_hook: FaultHook | None = None,
         health_timeout: float = 20.0,
+        control_health_timeout: float = DEFAULT_CONTROL_HEALTH_TIMEOUT,
         health_interval: float = 0.5,
         health_consecutive: int = 3,
     ) -> None:
@@ -68,6 +70,7 @@ class ArchiveCoordinator:
             service=service,
             control_probe=control_probe,
             health_timeout=health_timeout,
+            control_health_timeout=control_health_timeout,
             health_interval=health_interval,
             health_consecutive=health_consecutive,
         )
@@ -90,6 +93,14 @@ class ArchiveCoordinator:
     @health_timeout.setter
     def health_timeout(self, value: float) -> None:
         self.runtime_support.health_timeout = value
+
+    @property
+    def control_health_timeout(self) -> float:
+        return self.runtime_support.control_health_timeout
+
+    @control_health_timeout.setter
+    def control_health_timeout(self, value: float) -> None:
+        self.runtime_support.control_health_timeout = value
 
     @property
     def health_interval(self) -> float:

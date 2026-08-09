@@ -587,6 +587,7 @@ async def test_failed_manual_data_restore_keeps_all_program_recovery_material(
         service=service,
         control_probe=lambda: {"ok": True, "status": "ok"},
         health_timeout=0.05,
+        control_health_timeout=0.05,
         health_interval=0.001,
     )
     coordinator = UpgradeCoordinator(
@@ -735,6 +736,7 @@ async def test_target_health_failure_quiesces_restarted_runtime_before_recovery(
         service=service,
         control_probe=lambda: {"ok": True, "status": "ok"},
         health_timeout=0.01,
+        control_health_timeout=0.01,
         health_interval=0.001,
     )
     coordinator = UpgradeCoordinator(

@@ -217,6 +217,7 @@ def _setup(
             "heartbeat": f"2026-07-23T00:00:{runtime.heartbeat:02d}+00:00",
         },
         health_timeout=0.1,
+        control_health_timeout=0.1,
         health_interval=0.001,
         health_consecutive=1,
     )

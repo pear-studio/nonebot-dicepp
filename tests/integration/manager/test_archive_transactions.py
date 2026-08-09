@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import hashlib
 import json
@@ -125,6 +126,7 @@ def _coordinator(
         },
         fault_hook=fault_hook,
         health_timeout=0.5,
+        control_health_timeout=0.5,
         health_interval=0.001,
         health_consecutive=1,
     )
@@ -1500,6 +1502,7 @@ async def test_control_heartbeat_must_advance_after_target_restart(
         "heartbeat": "2026-07-23T00:00:01+00:00",
     }
     coordinator.health_timeout = 0.01
+    coordinator.control_health_timeout = 0.01
     _write(layout.config_user, '{"target": true}')
     target, _ = create_archive(layout=layout)
     _write(layout.config_user, '{"before": true}')
@@ -1511,6 +1514,77 @@ async def test_control_heartbeat_must_advance_after_target_restart(
     assert "heartbeat did not advance" in raised.value.detail["error"]
     assert json.loads(layout.config_user.read_text()) == {"before": True}
     assert runtime.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_control_heartbeat_can_arrive_after_runtime_health_timeout(
+    tmp_path: Path,
+) -> None:
+    """Slow Bot authentication gets the control budget, not the shorter
+    RuntimeUnit health budget used to detect a broken container quickly."""
+    _layout, _runtime, _service, coordinator = _coordinator(tmp_path)
+    coordinator.health_timeout = 0.01
+    coordinator.control_health_timeout = 0.05
+    coordinator.health_interval = 0.005
+    coordinator.health_consecutive = 1
+    calls = {"count": 0}
+
+    def delayed_control_probe() -> dict:
+        calls["count"] += 1
+        heartbeat = (
+            "2026-07-23T00:00:02+00:00"
+            if calls["count"] >= 3
+            else "2026-07-23T00:00:01+00:00"
+        )
+        return {
+            "ok": True,
+            "status": "ok",
+            "active_authenticated_sessions": 1,
+            "heartbeat": heartbeat,
+        }
+
+    coordinator.control_probe = delayed_control_probe
+
+    health = await coordinator.runtime_support.hard_health(
+        ["dicepp-runtime"],
+        control_baseline="2026-07-23T00:00:01+00:00",
+    )
+
+    assert calls["count"] == 3
+    assert health["control"]["heartbeat"] == "2026-07-23T00:00:02+00:00"
+
+
+@pytest.mark.asyncio
+async def test_warning_only_control_health_keeps_short_rollback_budget(
+    tmp_path: Path,
+) -> None:
+    """A successful local rollback must not wait for the longer target
+    startup budget before reporting a degraded control warning."""
+    _layout, _runtime, _service, coordinator = _coordinator(tmp_path)
+    coordinator.health_timeout = 0.01
+    coordinator.control_health_timeout = 0.5
+    coordinator.health_interval = 0.001
+    coordinator.health_consecutive = 1
+    coordinator.control_probe = lambda: {
+        "ok": False,
+        "status": "failed",
+        "active_authenticated_sessions": 0,
+    }
+
+    health = await asyncio.wait_for(
+        coordinator.runtime_support.hard_health(
+            ["dicepp-runtime"],
+            control_baseline="2026-07-23T00:00:01+00:00",
+            control_failure_is_warning=True,
+        ),
+        timeout=0.1,
+    )
+
+    assert health["control"] == {
+        "ok": False,
+        "status": "degraded",
+        "warning": "Bot control heartbeat did not advance after restart",
+    }
 
 
 def _no_heartbeat_control_probe() -> dict:

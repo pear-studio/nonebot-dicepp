@@ -276,6 +276,7 @@ def _coordinator(
         service=service,
         control_probe=lambda: {"ok": True, "status": "ok"},
         health_timeout=0.1,
+        control_health_timeout=0.1,
         health_interval=0.001,
         health_consecutive=1,
     )
