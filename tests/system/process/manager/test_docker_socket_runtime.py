@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import threading
+import time
 import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,10 +14,14 @@ from dicepp_manager.docker_runtime import (
     DockerRuntimeError,
     DockerSocketRuntimeAdapter,
 )
+from dicepp_manager.docker_handoff import DockerHandoffExecutor
 
 
 @contextmanager
-def _fake_docker_socket(path: Path, responses: list[tuple[int, bytes]]):
+def _fake_docker_socket(
+    path: Path,
+    responses: list[tuple[int, bytes] | tuple[int, bytes, float]],
+):
     requests: list[str] = []
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(path))
@@ -24,7 +29,9 @@ def _fake_docker_socket(path: Path, responses: list[tuple[int, bytes]]):
 
     def serve() -> None:
         try:
-            for status, body in responses:
+            for response in responses:
+                status, body = response[:2]
+                delay = response[2] if len(response) == 3 else 0.0
                 connection, _ = server.accept()
                 with connection:
                     raw = b""
@@ -34,10 +41,13 @@ def _fake_docker_socket(path: Path, responses: list[tuple[int, bytes]]):
                             break
                         raw += chunk
                     requests.append(raw.decode("ascii").split("\r\n", 1)[0])
+                    if delay:
+                        time.sleep(delay)
                     reason = {
                         200: "OK",
                         204: "No Content",
                         304: "Not Modified",
+                        404: "Not Found",
                         500: "Error",
                     }[status]
                     connection.sendall(
@@ -96,6 +106,48 @@ async def test_docker_socket_real_http_filters_and_fixed_action_endpoints(
         ]
     }
     assert requests[1] == f"POST {expected_path} HTTP/1.1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets are unavailable")
+async def test_handoff_stop_allows_response_beyond_default_socket_timeout(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "slow-stop.sock"
+    container_id = "f" * 64
+    with _fake_docker_socket(socket_path, [(204, b"", 0.15)]) as requests:
+        adapter = DockerSocketRuntimeAdapter(
+            socket_path=str(socket_path),
+            allowed_runtime_units={"manager-helper"},
+            timeout=0.05,
+        )
+        await DockerHandoffExecutor(adapter).stop(container_id)
+
+    assert requests == [
+        f"POST /containers/{container_id}/stop?t=30 HTTP/1.1"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets are unavailable")
+async def test_handoff_bound_delete_accepts_exact_container_already_absent(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "missing-delete.sock"
+    container_id = "f" * 64
+    with _fake_docker_socket(
+        socket_path,
+        [(404, b'{"message":"No such container"}')],
+    ) as requests:
+        adapter = DockerSocketRuntimeAdapter(
+            socket_path=str(socket_path),
+            allowed_runtime_units={"manager-helper"},
+        )
+        await DockerHandoffExecutor(adapter).delete(container_id, missing_ok=True)
+
+    assert requests == [
+        f"DELETE /containers/{container_id}?v=0&force=0 HTTP/1.1"
+    ]
 
 
 @pytest.mark.asyncio

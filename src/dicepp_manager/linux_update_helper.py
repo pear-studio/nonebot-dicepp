@@ -245,7 +245,10 @@ async def _restore_source_manager(
             primitives, request, target_identity.container_id
         )
         await primitives.stop(verified.container_id)
-        await primitives.delete(verified.container_id)
+        # A timed-out stop may reconcile by proving that this exact target was
+        # already removed.  Only this bound rollback target permits an
+        # idempotent DELETE; source-backup cleanup keeps its stricter recheck.
+        await primitives.delete(verified.container_id, missing_ok=True)
     backup_id = await primitives.list_by_name(expected["backup_name"])
     if backup_id is None:
         raise HelperError(

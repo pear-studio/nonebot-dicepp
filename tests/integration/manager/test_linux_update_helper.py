@@ -137,9 +137,13 @@ class FakePrimitives:
         self.ops.append(("start", container_id))
         self.by_id[container_id].running = True
 
-    async def delete(self, container_id: str) -> None:
+    async def delete(self, container_id: str, *, missing_ok: bool = False) -> None:
         self.ops.append(("delete", container_id))
-        container = self.by_id.pop(container_id)
+        container = self.by_id.pop(container_id, None)
+        if container is None:
+            if missing_ok:
+                return
+            raise RuntimeError(f"container {container_id} not found")
         self.by_name.pop(container.name, None)
 
     async def rename(self, container_id: str, new_name: str) -> None:

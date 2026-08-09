@@ -226,11 +226,7 @@ class DockerHandoffExecutor:
         return result
 
     async def stop(self, container_id: str) -> None:
-        await self.runtime._request(
-            "POST",
-            f"/containers/{container_id}/stop?t=30",
-            expected={204, 304},
-        )
+        await self.runtime._stop_container(container_id, grace_seconds=30)
 
     async def start(self, container_id: str) -> None:
         await self.runtime._request(
@@ -239,11 +235,11 @@ class DockerHandoffExecutor:
             expected={204, 304},
         )
 
-    async def delete(self, container_id: str) -> None:
+    async def delete(self, container_id: str, *, missing_ok: bool = False) -> None:
         await self.runtime._request(
             "DELETE",
             f"/containers/{container_id}?v=0&force=0",
-            expected={204},
+            expected={204, 404} if missing_ok else {204},
         )
 
     async def rename(self, container_id: str, new_name: str) -> None:

@@ -66,6 +66,13 @@ class Runtime:
         assert unit == "dicepp-runtime"
         return "a" * 64
 
+    async def _stop_container(self, container_id, *, grace_seconds=30):
+        await self._request(
+            "POST",
+            f"/containers/{container_id}/stop?t={grace_seconds}",
+            expected={204, 304},
+        )
+
     async def _request(
         self, method, path, *, expected, raw=False, json_body=None
     ):

@@ -15,6 +15,8 @@ from .deployment import DEPLOYMENT_SCHEMA_LABEL, DEPLOYMENT_SCHEMA_VERSION, RUNT
 from .models import ManagerAction, RuntimeLogs, RuntimeUnitStatus
 
 _SAFE_UNIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_SAFE_CONTAINER_ID = re.compile(r"^[0-9a-fA-F]{12,64}$")
+_DOCKER_STOP_RESPONSE_MARGIN = 30.0
 
 
 class DockerRuntimeError(RuntimeError):
@@ -188,8 +190,15 @@ class DockerSocketRuntimeAdapter:
             raise ValueError(f"Unsupported Manager action: {action}")
         async with self._lock:
             container_id = await self._resolve_container(runtime_unit_id)
-            suffix = "?t=10" if action in {"stop", "restart"} else ""
-            await self._request("POST", f"/containers/{container_id}/{action}{suffix}", expected={204, 304})
+            if action == "stop":
+                await self._stop_container(container_id, grace_seconds=10)
+            else:
+                suffix = "?t=10" if action == "restart" else ""
+                await self._request(
+                    "POST",
+                    f"/containers/{container_id}/{action}{suffix}",
+                    expected={204, 304},
+                )
         state = "stopped" if action == "stop" else "running"
         return RuntimeUnitStatus(
             runtime_unit_id,
@@ -198,6 +207,84 @@ class DockerSocketRuntimeAdapter:
             f"Docker container {action} completed",
             {"container_id": container_id},
         )
+
+    async def _stop_container(
+        self,
+        container_id: str,
+        *,
+        grace_seconds: int = 30,
+    ) -> None:
+        """Stop one exact container with room for Docker's grace interval.
+
+        Docker may finish the stop after the client has timed out waiting for
+        the HTTP response.  Only an exact-id inspect proving that the container
+        is stopped (or already absent) may reconcile that ambiguous outcome.
+        """
+        if not _SAFE_CONTAINER_ID.fullmatch(container_id):
+            raise DockerRuntimeError("Docker container id is invalid")
+        if grace_seconds <= 0:
+            raise ValueError("Docker stop grace must be greater than zero")
+        request_timeout = max(
+            self._timeout,
+            grace_seconds + _DOCKER_STOP_RESPONSE_MARGIN,
+        )
+        try:
+            await self._request(
+                "POST",
+                f"/containers/{container_id}/stop?t={grace_seconds}",
+                expected={204, 304},
+                timeout=request_timeout,
+            )
+        except DockerRuntimeError as stop_error:
+            if stop_error.detail.get("timeout") is not True:
+                raise
+            await self._verify_stop_after_timeout(container_id, stop_error)
+
+    async def _verify_stop_after_timeout(
+        self,
+        container_id: str,
+        stop_error: DockerRuntimeError,
+    ) -> None:
+        try:
+            payload = await self._request(
+                "GET",
+                f"/containers/{container_id}/json",
+                expected={200},
+            )
+        except DockerRuntimeError as verify_error:
+            if verify_error.detail.get("status_code") == 404:
+                return
+            raise DockerRuntimeError(
+                "Docker stop timed out and exact container state could not be verified",
+                detail={
+                    "container_id": container_id,
+                    "timeout": True,
+                    "verification_error": str(verify_error),
+                },
+            ) from stop_error
+        actual_id = payload.get("Id") if isinstance(payload, dict) else None
+        state = payload.get("State") if isinstance(payload, dict) else None
+        if (
+            not isinstance(actual_id, str)
+            or not _SAFE_CONTAINER_ID.fullmatch(actual_id)
+            or not actual_id.lower().startswith(container_id.lower())
+            or not isinstance(state, dict)
+        ):
+            raise DockerRuntimeError(
+                "Docker stop timed out and exact container identity is invalid",
+                detail={"container_id": container_id, "timeout": True},
+            ) from stop_error
+        if state.get("Running") is False:
+            return
+        raise DockerRuntimeError(
+            "Docker stop timed out and the exact container is still running "
+            "or its running state is unavailable",
+            detail={
+                "container_id": actual_id,
+                "timeout": True,
+                "running": state.get("Running"),
+            },
+        ) from stop_error
 
     async def logs(self, runtime_unit_id: str, lines: int) -> RuntimeLogs:
         if not 1 <= lines <= 1000:
@@ -262,7 +349,7 @@ class DockerSocketRuntimeAdapter:
         if len(payload) != 1:
             raise DockerRuntimeError(f"Expected exactly one labelled container for RuntimeUnit {runtime_unit_id}")
         container_id = payload[0].get("Id") if isinstance(payload[0], dict) else None
-        if not isinstance(container_id, str) or not re.fullmatch(r"[0-9a-fA-F]{12,64}", container_id):
+        if not isinstance(container_id, str) or not _SAFE_CONTAINER_ID.fullmatch(container_id):
             raise DockerRuntimeError("Docker returned an invalid container id")
         return container_id
 
@@ -274,9 +361,12 @@ class DockerSocketRuntimeAdapter:
         expected: set[int],
         raw: bool = False,
         json_body: dict | None = None,
+        timeout: float | None = None,
     ):
+        if timeout is not None and timeout <= 0:
+            raise ValueError("Docker request timeout must be greater than zero")
         return await asyncio.to_thread(
-            self._request_sync, method, path, expected, raw, json_body
+            self._request_sync, method, path, expected, raw, json_body, timeout
         )
 
     def _request_sync(
@@ -286,8 +376,10 @@ class DockerSocketRuntimeAdapter:
         expected: set[int],
         raw: bool,
         json_body: dict | None = None,
+        timeout: float | None = None,
     ):
-        connection = _UnixSocketConnection(self._socket_path, self._timeout)
+        request_timeout = self._timeout if timeout is None else timeout
+        connection = _UnixSocketConnection(self._socket_path, request_timeout)
         try:
             body = (
                 json.dumps(json_body, separators=(",", ":")).encode("utf-8")
@@ -306,7 +398,15 @@ class DockerSocketRuntimeAdapter:
             response = connection.getresponse()
             body = response.read()
         except (OSError, http.client.HTTPException) as exc:
-            raise DockerRuntimeError(f"Docker socket request failed: {exc}") from exc
+            detail = (
+                {"timeout": True, "timeout_seconds": request_timeout}
+                if isinstance(exc, TimeoutError)
+                else None
+            )
+            raise DockerRuntimeError(
+                f"Docker socket request failed: {exc}",
+                detail=detail,
+            ) from exc
         finally:
             connection.close()
         if response.status not in expected:

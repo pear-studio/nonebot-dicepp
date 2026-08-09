@@ -90,12 +90,21 @@ def _inspect(
 class Runtime:
     def __init__(self) -> None:
         self.requests: list[tuple] = []
+        self.expected_statuses: list[set[int]] = []
         self.containers: dict[str, dict] = {
             "c" * 64: _inspect(),
         }
 
+    async def _stop_container(self, container_id, *, grace_seconds=30):
+        await self._request(
+            "POST",
+            f"/containers/{container_id}/stop?t={grace_seconds}",
+            expected={204, 304},
+        )
+
     async def _request(self, method, path, *, expected, raw=False, json_body=None):
         self.requests.append((method, path, json_body))
+        self.expected_statuses.append(expected)
         if path.startswith("/containers/") and path.endswith("/json"):
             container_id = path.removeprefix("/containers/").removesuffix("/json")
             matches = [
@@ -163,6 +172,17 @@ class TestIdentity:
 
 
 class TestPrimitives:
+    async def test_delete_only_accepts_missing_when_explicitly_bound(
+        self, executor
+    ) -> None:
+        container_id = "c" * 64
+
+        await executor.delete(container_id)
+        assert executor.runtime.expected_statuses[-1] == {204}
+
+        await executor.delete(container_id, missing_ok=True)
+        assert executor.runtime.expected_statuses[-1] == {204, 404}
+
     async def test_create_merges_labels_and_restart_policy(self, executor) -> None:
         config = {
             "Image": MANAGER_NEW_ID,

@@ -359,15 +359,11 @@ class DockerSocketUpgradeExecutor:
                     "existing identity does not match the captured or "
                     "transaction identity"
                 )
-            await self.runtime._request(
-                "POST",
-                f"/containers/{current_id}/stop?t=30",
-                expected={204, 304},
-            )
+            await self.runtime._stop_container(current_id, grace_seconds=30)
             await self.runtime._request(
                 "DELETE",
                 f"/containers/{current_id}?v=0&force=0",
-                expected={204},
+                expected={204, 404},
             )
         created = await self.runtime._request(
             "POST",
