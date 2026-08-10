@@ -120,8 +120,10 @@ Windows Portable/Setup、Velopack bundle、Linux amd64 bundle、`docker-compose.
 `dicepp-release.json`、receipt，以及 `自动升级: yes` 时与该候选绑定的
 `dicepp-upgrade-evidence.json`。Promotion 不执行构建、`vpk`、`docker save` 或 zip。
 
-在 backlog `B-260802-3e3e23` 完成并通过明确验收前，所有 release metadata 的
-`自动升级` 必须填写 `no`；现有证据链能力不等于该 backlog 已完成。
+release metadata 只有在升级协议 registry 全部就绪，并且 Final Candidate 通过与
+当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵时，才能把
+`自动升级` 填写为 `yes`。任一协议仍待验证、平台结果缺失或身份不匹配时必须填写
+`no`；validation-only 矩阵结果不得进入 Receipt 或 Release assets。
 
 `manager` 变更范围本身不再是一律手工的标志。变更 Manager 的 Linux 发布必须
 在 release manifest 与 bundle 内层 manifest 中声明受支持的

@@ -631,7 +631,7 @@ def test_validation_only_windows_matrix_is_not_misrepresented_as_release_evidenc
         for item in registry["contracts"]
         if item["name"] == "windows_current_backup_manual_restore"
     )
-    assert windows_contract["verification_status"] == "awaiting_published_source"
+    assert windows_contract["verification_status"] == "verified"
     transition = _step(
         CANDIDATE_WORKFLOW,
         "upgrade-evidence",
@@ -746,13 +746,14 @@ def test_version_bump_defaults_cannot_create_a_partial_commit_or_tag():
     assert "默认只改文件，不自动 commit/tag" in source
 
 
-def test_release_docs_record_temporary_upgrade_gate_and_remote_acceptance():
+def test_release_docs_record_candidate_bound_upgrade_gate_and_remote_acceptance():
     docs = RELEASE_README.read_text(encoding="utf-8")
     skill = VERSION_RELEASE_SKILL.read_text(encoding="utf-8")
 
     for text in (docs, skill):
-        assert "B-260802-3e3e23" in text
-        assert "自动升级" in text and "no" in text
+        assert "完成并通过明确验收前" not in text
+        assert "自动升级" in text and "Windows/Linux 跨版本矩阵" in text
+        assert "validation-only" in text and "Receipt" in text
         assert "30 天" in text
     for contract in (
         "Immutable Releases",

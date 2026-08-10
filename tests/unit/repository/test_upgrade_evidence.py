@@ -540,7 +540,7 @@ def test_release_with_empty_matrix_reports_source_gap_before_missing_evidence(
         )
 
 
-def test_tracked_registry_blocks_promotion_while_rc20_matrix_covers_both_platforms() -> None:
+def test_tracked_registry_is_ready_with_pinned_rc20_sources_for_both_platforms() -> None:
     root = find_repository_root(Path(__file__))
     registry = json.loads(
         (root / "scripts/build/upgrade_protocol_registry.json").read_text(
@@ -594,8 +594,7 @@ def test_tracked_registry_blocks_promotion_while_rc20_matrix_covers_both_platfor
             ),
         ),
     }
-    with pytest.raises(ValueError, match="windows_current_backup_manual_restore"):
-        validate_upgrade_protocol_registry_ready(registry)
+    assert validate_upgrade_protocol_registry_ready(registry) == registry
 
 
 def test_release_evidence_rejects_validation_only_legacy_source_subset() -> None:
@@ -695,5 +694,6 @@ def test_tracked_registry_declares_linux_manager_handoff_protocol() -> None:
     assert contract["medium"] == "json-files-in-recovery-directory"
     assert contract["producer"] == "LinuxBundleUpgradeAdapter"
     assert contract["format_versions"] == [1]
-    assert contract["verification_status"] == "awaiting_published_source"
+    assert contract["verification_status"] == "verified"
     assert contract["support_window"] == "previous published handoff release to current"
+    validate_upgrade_protocol_registry_ready(registry)

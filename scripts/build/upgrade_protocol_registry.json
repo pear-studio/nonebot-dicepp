@@ -11,7 +11,7 @@
       "producer": "SimpleWindowsVelopackUpgradeAdapter",
       "consumers": ["manual recovery script", "source Manager startup recovery"],
       "format_versions": [1],
-      "verification_status": "awaiting_published_source",
+      "verification_status": "verified",
       "support_window": "previous published simplified-protocol release to current",
       "compatibility_fixtures": []
     },
@@ -64,7 +64,7 @@
         "UpgradeCoordinator"
       ],
       "format_versions": [1],
-      "verification_status": "awaiting_published_source",
+      "verification_status": "verified",
       "support_window": "previous published handoff release to current",
       "compatibility_fixtures": []
     },

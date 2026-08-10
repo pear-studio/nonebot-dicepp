@@ -40,8 +40,10 @@ metadata:
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
-- 在 backlog `B-260802-3e3e23` 完成并通过明确验收前，release metadata 的
-  `自动升级` 必须填写 `no`；不得因为候选证据文件存在就提前填写 `yes`。
+- release metadata 只有在升级协议 registry 全部就绪，并且 Final Candidate 通过与
+  当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵时，才能把
+  `自动升级` 填写为 `yes`。任一协议仍待验证、平台结果缺失或身份不匹配时必须填写
+  `no`；不得因为存在 validation-only 结果就提前填写 `yes`。
 
 ## Preconditions
 
@@ -285,9 +287,10 @@ metadata:
    `dicepp-final-candidate-{run_id}-{run_attempt}`，并包含 receipt 及 receipt
    逐文件摘要声明的全部最终 Release 原字节。
 
-   当前在 backlog `B-260802-3e3e23` 完成并通过明确验收前，`自动升级` 必须为
-   `no`。未来解除该临时门禁后，`yes` 候选仍必须验证与该 commit 和 candidate
-   identities 绑定的 `dicepp-upgrade-evidence.json`，缺失或不匹配不得晋升。
+   `自动升级: yes` 候选必须先确认升级协议 registry 全部就绪，并验证与该 commit、
+   candidate identities 和最终发布字节绑定的 `dicepp-upgrade-evidence.json`；
+   缺失、不完整或不匹配时不得晋升。`automatic_upgrade: no` 的 validation-only
+   矩阵只能用于验收，不得进入 Receipt 或 Release assets。
 
    Candidate artifact 只保留 30 天，且 Promotion 要求它的 `head_sha` 仍等于
    当前 default branch HEAD。必须在 master 再次前进之前尽快晋升，30 天只是
