@@ -19,11 +19,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
 import dicepp_manager.linux_handoff_coordinator as handoff_coordinator_module
 from dicepp_data import InstanceLayout
+from dicepp_manager.api import create_manager_app
 from dicepp_manager.archive import create_archive
 from dicepp_manager.archive_coordinator import ArchiveCoordinator
+from dicepp_manager.config import ManagerSettings
 from dicepp_manager.dashboard_db import snapshot_for_transaction
 from dicepp_manager.linux_handoff import (
     DECISION_COMMIT,
@@ -48,6 +51,8 @@ from dicepp_manager.upgrade import (
     UpgradeTransactionError,
     VerifiedUpgradePackage,
 )
+from dicepp_control.control_token import ensure_token
+from dicepp_control.protocol import auth, encode, status
 from tests.support.handoff_fixtures import (
     decision_payload,
     request_payload,
@@ -289,6 +294,8 @@ def _coordinator(
     )
     runtime_support = RuntimeSupport()
     coordinator.runtime_support = runtime_support
+    service.archive_coordinator = archive
+    service.upgrade_coordinator = coordinator
     return coordinator, runtime_support
 
 
@@ -368,6 +375,128 @@ def _decision(tx_dir: Path, layout: InstanceLayout) -> str | None:
 
 
 @pytest.mark.asyncio
+async def test_target_takeover_waits_for_api_bind_before_runtime_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup discovery must not run takeover inside ASGI lifespan startup."""
+    monkeypatch.setattr(handoff_coordinator_module, "get_version", lambda: TARGET_VERSION)
+    layout, _data, service = _setup(tmp_path)
+    request = request_payload(
+        transaction_id=TRANSACTION_ID,
+        operation_id=OPERATION_ID,
+        source_version=SOURCE_VERSION,
+        target_version=TARGET_VERSION,
+    )
+    staged, tx_dir = _staged(layout, request)
+    current = _current(request)
+    platform = PlatformAdapter(fail_identity=True)
+    coordinator, runtime_support = _coordinator(layout, service, platform)
+    _journal(coordinator, _detail(staged, current))
+
+    recovered = await coordinator.recover(prepare_windows_handoff_only=True)
+
+    assert recovered == [{
+        "transaction_id": TRANSACTION_ID,
+        "action": "awaiting_api_bind",
+        "owns_runtime_state": True,
+    }]
+    assert platform.calls == []
+    assert runtime_support.migration_calls == 0
+    assert runtime_support.restarts == []
+    assert _decision(tx_dir, layout) is None
+    assert service._startup_maintenance_active is True
+
+
+def test_linux_takeover_accepts_real_control_websocket_heartbeat_after_bind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The takeover health gate observes a heartbeat through the real ASGI WS."""
+    monkeypatch.setattr(handoff_coordinator_module, "get_version", lambda: TARGET_VERSION)
+    monkeypatch.setattr(handoff_coordinator_module, "_LINUX_RESULT_POLL_SECONDS", 0.01)
+    layout, _data, service = _setup(tmp_path)
+    request = request_payload(
+        transaction_id=TRANSACTION_ID,
+        operation_id=OPERATION_ID,
+        source_version=SOURCE_VERSION,
+        target_version=TARGET_VERSION,
+    )
+    staged, tx_dir = _staged(layout, request)
+    current = _current(request)
+    platform = PlatformAdapter()
+    coordinator, _runtime_support = _coordinator(layout, service, platform)
+
+    class ControlHeartbeatRuntimeSupport(RuntimeSupport):
+        async def hard_health(self, original, **kwargs):
+            deadline = asyncio.get_running_loop().time() + 1
+            while asyncio.get_running_loop().time() < deadline:
+                control = service.control_service.probe()
+                if control.get("ok") is True and control.get("heartbeat"):
+                    return {"status": "ok", "ok": True, "control": control}
+                await asyncio.sleep(0.01)
+            raise AssertionError("control heartbeat was unavailable after API bind")
+
+    runtime_support = ControlHeartbeatRuntimeSupport()
+    coordinator.runtime_support = runtime_support
+    _journal(coordinator, _detail(staged, current))
+    app = create_manager_app(
+        ManagerSettings(layout=layout, release_scheduler_enabled=False),
+        service=service,
+        api_token="manager-secret",
+    )
+
+    with TestClient(app) as client:
+        pending = client.get(
+            "/v1/health",
+            headers={"Authorization": "Bearer manager-secret"},
+        )
+        assert pending.status_code == 200
+        assert pending.json()["upgrade_handoff"]["pending"] is True
+
+        with client.websocket_connect("/v1/control/ws") as ws:
+            ws.send_text(encode(auth("bot-1", ensure_token(layout.root))))
+            assert ws.receive_json()["payload"]["ok"] is True
+            ws.send_text(encode(status("bot-1", TARGET_VERSION)))
+
+            for _ in range(100):
+                if _decision(tx_dir, layout) == DECISION_COMMIT:
+                    break
+                time.sleep(0.01)
+            assert _decision(tx_dir, layout) == DECISION_COMMIT
+            write_result(
+                tx_dir / _RESULT_FILENAME,
+                result_payload(
+                    transaction_id=TRANSACTION_ID,
+                    operation_id=OPERATION_ID,
+                ),
+                root=layout.manager_recovery_dir,
+            )
+
+            for _ in range(100):
+                terminal = client.get(
+                    "/v1/health",
+                    headers={"Authorization": "Bearer manager-secret"},
+                )
+                if terminal.json()["upgrade_handoff"]["pending"] is False:
+                    break
+                time.sleep(0.01)
+
+        assert terminal.status_code == 200
+        assert terminal.json()["upgrade_handoff"] == {
+            "owns_runtime_state": True,
+            "pending": False,
+            "results": [{
+                "transaction_id": TRANSACTION_ID,
+                "action": "committed",
+                "owns_runtime_state": True,
+            }],
+        }
+        assert runtime_support.restarts == [["dicepp-runtime"]]
+        assert not tx_dir.exists()
+
+
+@pytest.mark.asyncio
 async def test_target_takeover_writes_commit_and_converges_after_updater(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -405,7 +534,11 @@ async def test_target_takeover_writes_commit_and_converges_after_updater(
     recovered = await coordinator.recover()
     await updater
 
-    assert recovered == [{"transaction_id": TRANSACTION_ID, "action": "committed"}]
+    assert recovered == [{
+        "transaction_id": TRANSACTION_ID,
+        "action": "committed",
+        "owns_runtime_state": True,
+    }]
     journal = coordinator.store.get_journal(TRANSACTION_ID)
     assert journal["phase"] == "committed"
     assert journal["status"] == "committed"
@@ -456,6 +589,7 @@ async def test_target_takeover_commit_without_updater_result_stays_cleanup_pendi
             "transaction_id": TRANSACTION_ID,
             "action": "cleanup_pending",
             "manual_recovery_required": True,
+            "owns_runtime_state": True,
         }
     ]
     # The commit decision stays durable and the recovery material is kept
@@ -505,6 +639,7 @@ async def test_unverified_target_manager_cannot_migrate_or_choose_direction(
             "action": "target_manager_identity_invalid",
             "manual_recovery_required": True,
             "error": "injected target Manager identity failure",
+            "owns_runtime_state": True,
         }
     ]
     assert _decision(tx_dir, layout) is None
@@ -596,7 +731,11 @@ async def test_existing_commit_decision_converges_without_rewrite(
 
     recovered = await coordinator.recover()
 
-    assert recovered == [{"transaction_id": TRANSACTION_ID, "action": "committed"}]
+    assert recovered == [{
+        "transaction_id": TRANSACTION_ID,
+        "action": "committed",
+        "owns_runtime_state": True,
+    }]
     # The durable commit decision is never rewritten.
     assert writes == []
     journal = coordinator.store.get_journal(TRANSACTION_ID)
@@ -730,7 +869,11 @@ async def test_source_restore_applies_preupgrade_data_after_updater_confirmed(
 
     recovered = await coordinator.recover()
 
-    assert recovered == [{"transaction_id": TRANSACTION_ID, "action": "rolled_back"}]
+    assert recovered == [{
+        "transaction_id": TRANSACTION_ID,
+        "action": "rolled_back",
+        "owns_runtime_state": True,
+    }]
     assert json.loads(data_file.read_text(encoding="utf-8"))["value"] == "old data"
     # The Dashboard DB was restored from the transaction snapshot by the WAL
     # safe flow, with the target-written rows replaced.
@@ -1196,6 +1339,7 @@ async def test_background_convergence_loop_finishes_committed_after_result(
             "transaction_id": TRANSACTION_ID,
             "action": "cleanup_pending",
             "manual_recovery_required": True,
+            "owns_runtime_state": True,
         }
     ]
     assert coordinator._convergence_tasks

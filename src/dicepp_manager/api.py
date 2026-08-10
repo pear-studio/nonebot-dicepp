@@ -333,7 +333,7 @@ def create_manager_app(
     @app.get("/v1/health", dependencies=auth)
     async def health():
         # This route can only run after Uvicorn has completed ASGI startup and
-        # bound the authenticated local API.  Windows target recovery waits
+        # bound the authenticated local API.  Manager handoff recovery waits
         # for this boundary before running migrations and local hard health.
         upgrade_coordinator.mark_api_ready()
         handoff_task = startup_recovery.get("task")

@@ -1546,6 +1546,9 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
         prepare_windows_handoff_only: bool = False,
         allow_startup_recovery: bool = False,
     ) -> list[dict[str, Any]]:
+        # ``prepare_windows_handoff_only`` predates Linux Manager handoff.
+        # Keep the keyword compatible, but treat it as the startup prepare
+        # phase for every handoff whose recovery depends on the Manager API.
         recovered: list[dict[str, Any]] = []
         runtime_state_owned: set[str] = set()
         # The startup maintenance gate blocks user-submitted operations while
@@ -1611,6 +1614,18 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                     and linux_tx_dir
                     and updater_created
                 ):
+                    runtime_state_owned.add(transaction_id)
+                    if prepare_windows_handoff_only:
+                        # Target takeover waits for a Bot heartbeat reported
+                        # through this Manager's control WebSocket.  Running it
+                        # inside ASGI lifespan startup would wait on an endpoint
+                        # that cannot listen until lifespan yields.
+                        self.service.set_startup_maintenance_gate(True)
+                        recovered.append({
+                            "transaction_id": transaction_id,
+                            "action": "awaiting_api_bind",
+                        })
+                        continue
                     linux_result = await self._recover_linux_manager_handoff(
                         journal,
                         operation,
