@@ -29,6 +29,14 @@ class AgentResult:
     raw_response: str = ""
 
 
+@dataclass(frozen=True)
+class DailyTickResult:
+    """一次日终生成的不可变结果，确保日记正文与目标日期保持配对。"""
+
+    diary: Optional[str] = None
+    diary_date: Optional[str] = None
+
+
 @dataclass
 class EventGenerationResult:
     """System Agent 生成的结构化事件结果"""

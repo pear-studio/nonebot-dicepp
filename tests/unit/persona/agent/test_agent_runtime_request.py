@@ -158,6 +158,34 @@ class TestEmptyResponse:
         assert result.output is None
 
     @pytest.mark.asyncio
+    async def test_loop_forwards_runtime_timeout_to_every_gateway_call(self, mock_llm):
+        """Runtime 配置的后台超时传入 Gateway，且不充当 Agent 总预算。"""
+        mock_llm.complete.side_effect = [
+            _make_llm_result(content="", tool_calls=[
+                _make_tc("search", {"query": "first"}),
+            ]),
+            _make_llm_result(content="done", tool_calls=[]),
+        ]
+        background_loop = AgentLoop(
+            llm_gateway=mock_llm,
+            event_bus=None,
+            llm_timeout=90,
+        )
+
+        result = await background_loop.run(
+            buffer=MessageBuffer.from_initial([{"role": "user", "content": "hi"}]),
+            state=_make_state(),
+            toolkit=_mock_toolkit(),
+            output_spec=None,
+            limits=LoopLimits(max_rounds=3),
+            selection=CHAT,
+            interaction_id="i1",
+        )
+
+        assert result.output.text == "done"
+        assert [call.kwargs["timeout"] for call in mock_llm.complete.await_args_list] == [90, 90]
+
+    @pytest.mark.asyncio
     async def test_no_output_nonempty_text_returns_completed(self, loop, mock_llm):
         """output=None 且模型返回文本时，应正常完成。"""
         mock_llm.complete.return_value = _make_llm_result(content="hello world", tool_calls=[])

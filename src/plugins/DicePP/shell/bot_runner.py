@@ -516,7 +516,12 @@ class BotRunner:
             next_minute = current + dt.timedelta(minutes=1)
             if next_minute.date() != current.date():
                 try:
-                    await life_sim.tick_daily()
+                    daily_result = await life_sim.tick_daily()
+                    if daily_result.diary and daily_result.diary_date:
+                        await life_sim.run_daily_planning(
+                            daily_result.diary,
+                            daily_result.diary_date,
+                        )
                 except asyncio.CancelledError:
                     raise
                 except Exception:

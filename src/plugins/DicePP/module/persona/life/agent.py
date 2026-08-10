@@ -41,6 +41,7 @@ class Agent(ABC):
         self._cached_state = None  # DMAgent 专用：在 super().run() 前设置以跳过 load_state()
         self._cached_system_prompt: Optional[str] = None  # DMAgent 专用：在 super().run() 前设置以跳过重复构建
         self._max_rounds = config.background_llm_max_rounds if config else 10
+        self._llm_timeout = config.background_llm_timeout_seconds if config else 90
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
         # A2: Registry 注入 — 不为 None 时 Conversation 由 registry 托管
@@ -116,6 +117,7 @@ class Agent(ABC):
             router=self.router,
             store=self.store,
             limits=LoopLimits(max_rounds=self._max_rounds),
+            llm_timeout=self._llm_timeout,
         )
         self._conversation = _Conv(runtime=runtime)
         self._system_prompt = system_prompt

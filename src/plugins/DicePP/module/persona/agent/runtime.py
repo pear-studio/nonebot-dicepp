@@ -40,10 +40,12 @@ class AgentRuntime:
         router: LLMRouter,
         store: PersonaDataStore,
         limits: Optional[LoopLimits] = None,
+        llm_timeout: Optional[int] = None,
     ) -> None:
         self._router = router
         self._store = store
         self._limits = limits or LoopLimits()
+        self._llm_timeout = llm_timeout
 
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         """接受 AgentRunRequest，走 ToolKit + OutputSpec 路径。"""
@@ -79,6 +81,7 @@ class AgentRuntime:
         loop = AgentLoop(
             llm_gateway=gateway, event_bus=bus,
             limits=self._limits,
+            llm_timeout=self._llm_timeout,
         )
 
         # OutputSpec 协议从首次调用起就是稳定 prompt 的一部分。复制消息

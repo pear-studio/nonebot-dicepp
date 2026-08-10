@@ -294,14 +294,16 @@ class TestCharacterLifeDiary:
     async def test_generate_diary_no_events_skips(self, diary_generator, mock_data_store):
         mock_data_store.get_daily_events.return_value = []
         result = await diary_generator.generate_diary()
-        assert result is None
+        assert result.diary is None
+        assert result.diary_date is not None
 
     @pytest.mark.asyncio
     async def test_generate_diary_success(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         set_test_clock(fake_now)
         result = await diary_generator.generate_diary()
-        assert result == '今天过得很充实'
+        assert result.diary == '今天过得很充实'
+        assert result.diary_date == '2024-01-01'
         mock_event_agent.char.diary.assert_called_once()
         mock_data_store.save_diary.assert_called_once()
 
@@ -314,7 +316,8 @@ class TestCharacterLifeDiary:
         fake_now = datetime(2024, 1, 2, 0, 0, 0)
         set_test_clock(fake_now)
         result = await diary_generator.generate_diary()
-        assert result == '今天过得很充实'
+        assert result.diary == '今天过得很充实'
+        assert result.diary_date == '2024-01-01'
         mock_data_store.get_daily_events.assert_called_once_with('2024-01-01')
         mock_data_store.get_diary.assert_called_once_with('2023-12-31')
         mock_event_agent.char.diary.assert_called_once()
@@ -341,7 +344,8 @@ class TestCharacterLifeDiary:
         ]
 
         result = await diary_generator.generate_diary()
-        assert result is not None
+        assert result.diary is not None
+        assert result.diary_date == '2099-06-15'
 
         # 关键断言：日期基于注入时钟，而非 wall_now(tz) 的真实墙钟
         mock_data_store.get_daily_events.assert_called_once_with('2099-06-15')

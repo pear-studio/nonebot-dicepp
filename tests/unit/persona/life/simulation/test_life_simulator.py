@@ -6,13 +6,14 @@ LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
    则调用 scheduler.schedule_share 调度延迟分享
 2. tick() 调用 scheduler.tick，将返回的消息逐条 send 出去
 3. tick() 内部异常不向上抛（保护调度器）
-4. tick_daily() 依次 prune_traces → decay_batch → diary，返回 diary
-5. tick_daily() 内部异常返回 None
+4. tick_daily() 依次 prune_traces → decay_batch → diary，返回原子的正文/日期结果
+5. tick_daily() 内部异常返回空结果
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+from plugins.DicePP.module.persona.life.types import DailyTickResult
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
@@ -30,7 +31,10 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天
     scheduler.share_event_to_targets = AsyncMock(return_value=[])
     scheduler.schedule_share = MagicMock()
     diary_generator = MagicMock()
-    diary_generator.generate_diary = AsyncMock(return_value=diary)
+    diary_generator.generate_diary = AsyncMock(return_value=DailyTickResult(
+        diary=diary,
+        diary_date="2026-07-12",
+    ))
     character = MagicMock()
     character.extensions = MagicMock()
     port = MagicMock()
@@ -82,7 +86,7 @@ async def test_tick_daily_runs_diary_generation():
     """tick_daily 触发日记生成并返回内容"""
     sim = _make_simulator(diary='今天充实')
     result = await sim.tick_daily()
-    assert result == '今天充实'
+    assert result == DailyTickResult(diary='今天充实', diary_date="2026-07-12")
     sim.diary_generator.generate_diary.assert_called_once()
 
 @pytest.mark.asyncio
@@ -90,7 +94,8 @@ async def test_tick_daily_returns_none_on_no_events():
     """diary_generator 返回 None → tick_daily 返回 None"""
     sim = _make_simulator(diary=None)
     result = await sim.tick_daily()
-    assert result is None
+    assert result.diary is None
+    assert result.diary_date == "2026-07-12"
 
 @pytest.mark.asyncio
 async def test_tick_daily_swallows_exceptions():
@@ -98,7 +103,7 @@ async def test_tick_daily_swallows_exceptions():
     sim = _make_simulator()
     sim.diary_generator.generate_diary = AsyncMock(side_effect=RuntimeError('boom'))
     result = await sim.tick_daily()
-    assert result is None
+    assert result == DailyTickResult()
 
 @pytest.mark.asyncio
 async def test_tick_daily_calls_run_cleanup():
@@ -140,81 +145,44 @@ async def test_tick_daily_applies_relationship_decay():
 
 
 @pytest.mark.asyncio
-async def test_tick_daily_sa_planning_calls_run_not_plan():
-    """_run_sa_planning 应调用 sa_agent.run() 而非不存在的 plan()
+async def test_tick_daily_does_not_wait_for_sa_planning():
+    """日记生成完成后 tick_daily 立即返回，不把 SA 放在日报关键路径。"""
+    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
 
-    Before fix: AttributeError swallowed, 'SA 规划失败' warning logged.
-    After fix: sa_agent.run() called once with valid interaction_id.
-    """
+    sim = _make_simulator(diary='今天充实')
+    sa_agent = MagicMock(spec=SAAgent)
+    sa_agent.run = AsyncMock()
+    sim.sa_agent = sa_agent
+
+    result = await sim.tick_daily()
+
+    assert result.diary == '今天充实'
+    sa_agent.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_daily_planning_uses_explicit_diary_date_and_content():
+    """后台 SA 使用已捕获的日记日期与内容，不在执行时重新读取当前日期。"""
     from plugins.DicePP.module.persona.life.sa_agent import SAAgent
     from plugins.DicePP.module.persona.life.types import AgentResult
 
     sim = _make_simulator(diary='今天充实')
-    sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")
-    sim.store.get_daily_events = AsyncMock(return_value=[])
-    sim.store.get_diary = AsyncMock(return_value="今天充实")
+    event = MagicMock(description="旧日事件", reaction="旧日反应")
+    sim.store.get_daily_events = AsyncMock(return_value=[event])
     sim.store.get_story_deck_count = AsyncMock(return_value=0)
-
     sa_agent = MagicMock(spec=SAAgent)
     sa_agent.run = AsyncMock(return_value=AgentResult(success=True, data=None))
     sim.sa_agent = sa_agent
 
-    result = await sim.tick_daily()
+    await sim.run_daily_planning("显式日记", "2026-07-12")
 
-    assert result == '今天充实'
-    sa_agent.run.assert_awaited_once()
-    call_kwargs = sa_agent.run.call_args.kwargs
-    assert 'interaction_id' in call_kwargs
-    iid = call_kwargs['interaction_id']
-    assert isinstance(iid, str)
-    assert len(iid) == 32
-    assert all(c in '0123456789abcdef' for c in iid)
-
-@pytest.mark.asyncio
-async def test_tick_daily_sa_compact_called_after_successful_planning():
-    """tick_daily 在 SA 规划成功后调用 SA compact_conversation（用后即弃）。"""
-    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
-    from plugins.DicePP.module.persona.life.types import AgentResult
-
-    sim = _make_simulator(diary='今天充实')
-    sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")
-    sim.store.get_daily_events = AsyncMock(return_value=[])
-    sim.store.get_diary = AsyncMock(return_value="今天充实")
-    sim.store.get_story_deck_count = AsyncMock(return_value=0)
-
-    sa_agent = MagicMock(spec=SAAgent)
-    sa_agent.run = AsyncMock(return_value=AgentResult(success=True, data=None))
-    sa_agent.compact_conversation = AsyncMock()
-    sim.sa_agent = sa_agent
-
-    result = await sim.tick_daily()
-
-    assert result == '今天充实'
-    sa_agent.run.assert_awaited_once()
-    sa_agent.compact_conversation.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_tick_daily_sa_compact_called_even_on_failure():
-    """SA 规划失败时，tick_daily 仍应调用 compact_conversation 丢弃 conv。"""
-    from plugins.DicePP.module.persona.life.sa_agent import SAAgent
-    from plugins.DicePP.module.persona.life.types import AgentResult
-
-    sim = _make_simulator(diary='今天充实')
-    sim.character_life._get_today_str = MagicMock(return_value="2026-07-12")
-    sim.store.get_daily_events = AsyncMock(return_value=[])
-    sim.store.get_diary = AsyncMock(return_value="今天充实")
-    sim.store.get_story_deck_count = AsyncMock(return_value=0)
-
-    sa_agent = MagicMock(spec=SAAgent)
-    sa_agent.run = AsyncMock(return_value=AgentResult(success=False, data=None, error="模拟失败"))
-    sa_agent.compact_conversation = AsyncMock()
-    sim.sa_agent = sa_agent
-
-    result = await sim.tick_daily()
-
-    assert result == '今天充实'
-    sa_agent.run.assert_awaited_once()
-    sa_agent.compact_conversation.assert_awaited_once()
+    sim.store.get_daily_events.assert_awaited_once_with("2026-07-12")
+    context = sa_agent.run.await_args.args[0]
+    assert context["diary_text"] == "显式日记"
+    assert "旧日事件 (旧日反应)" in context["events_text"]
+    interaction_id = sa_agent.run.await_args.kwargs["interaction_id"]
+    assert len(interaction_id) == 32
+    assert all(c in '0123456789abcdef' for c in interaction_id)
 
 @pytest.mark.asyncio
 async def test_tick_daily_sa_compact_not_called_without_sa_agent():
@@ -223,7 +191,7 @@ async def test_tick_daily_sa_compact_not_called_without_sa_agent():
     sim.sa_agent = None
 
     result = await sim.tick_daily()
-    assert result == '今天充实'
+    assert result.diary == '今天充实'
 
 
 # ── R9: tick_daily finally 块 ──────────────────────────────
@@ -248,8 +216,8 @@ async def test_tick_daily_close_in_finally():
 
     result = await sim.tick_daily()
 
-    # tick_daily 应返回 None（因为异常）
-    assert result is None
+    # tick_daily 应返回空原子结果（因为异常）
+    assert result == DailyTickResult()
     # finally 块仍调用了 compact_conversation
     dm_agent.compact_conversation.assert_awaited_once()
     character_agent.compact_conversation.assert_awaited_once()

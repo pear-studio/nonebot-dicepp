@@ -4,6 +4,7 @@ PersonaApp 是工厂 create_persona 的返回值，持有 chat/life/store/port �
 测试聚焦 `update_character` 的正确传播。
 """
 
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
@@ -55,3 +56,41 @@ async def test_shutdown_closes_store():
     await cmd.shutdown()
 
     app.store.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_daily_then_sa_before_closing_store():
+    """shutdown 按 daily → SA → store 的顺序收口，且禁止再调度日终任务。"""
+    bot = MagicMock()
+    bot.config.persona_ai = PersonaConfig(enabled=True)
+    app = _make_app()
+    order = []
+    daily_started = asyncio.Event()
+    sa_started = asyncio.Event()
+
+    async def blocked(label, started):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            order.append(label)
+
+    app.store.close = AsyncMock(side_effect=lambda: order.append("store"))
+    cmd = PersonaCommand(bot)
+    cmd.app = app
+    cmd.enabled = True
+    cmd._async_tick_daily_task = asyncio.create_task(
+        blocked("daily", daily_started)
+    )
+    cmd._async_sa_daily_task = asyncio.create_task(blocked("sa", sa_started))
+    await daily_started.wait()
+    await sa_started.wait()
+
+    await cmd.shutdown()
+
+    assert order == ["daily", "sa", "store"]
+    assert cmd._async_tick_daily_task is None
+    assert cmd._async_sa_daily_task is None
+    assert cmd.tick_daily() == []
+    cmd._schedule_daily_planning("diary", "2026-08-07")
+    assert cmd._async_sa_daily_task is None

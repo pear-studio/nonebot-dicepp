@@ -59,7 +59,6 @@ class DailyReportGenerator:
         router=None,
         character=None,
         config=None,
-        character_agent=None,
     ):
         self._bot = bot
         self._port = port
@@ -67,18 +66,12 @@ class DailyReportGenerator:
         self._router = router
         self._character = character
         self._config = config
-        self._character_agent = character_agent
 
     def set_app(self, app) -> None:
         """PersonaApp 就位后注入引用"""
         self._store = app.store
         self._router = app.get_router() if hasattr(app, "get_router") else self._router
         self._character = app.get_character() if hasattr(app, "get_character") else self._character
-        # 从 PersonaApp 获取 CharacterAgent 实例，避免重复创建
-        if hasattr(app, 'get_character_agent'):
-            ca = app.get_character_agent()
-            if ca is not None:
-                self._character_agent = ca
 
     # ── 入口 ───────────────────────────────────────────────────
 
@@ -94,15 +87,17 @@ class DailyReportGenerator:
 
         # 段 1：开场白 + 日记 + 角色状态
         seg1 = self._build_segment_1(opening, diary, character_state)
-        await self._port.send(
-            master_id, "", seg1, message_type=MessageType.SYSTEM_LOG,
-        )
-
         # 段 2：运营统计
         seg2 = await self._build_segment_2(core_stats)
-        await self._port.send(
-            master_id, "", seg2, message_type=MessageType.SYSTEM_LOG,
-        )
+
+        # 两段先完整构造，再连续投递；单段失败不阻断另一段。
+        for segment_number, segment in enumerate((seg1, seg2), start=1):
+            try:
+                await self._port.send(
+                    master_id, "", segment, message_type=MessageType.SYSTEM_LOG,
+                )
+            except Exception:
+                logger.exception(f"日报第 {segment_number} 段发送失败")
 
     async def generate_snapshot(self) -> str:
         """手动快照 — 使用 cur_day_val，直接返回文本"""
@@ -371,20 +366,14 @@ class DailyReportGenerator:
         if voice_enabled and self._character and self._router:
             try:
                 summary = await self._build_summary(diary, core_stats)
-                # 使用共享的 CharacterAgent 实例（由 PersonaApp 注入），避免重复创建
-                if self._character_agent is not None:
-                    agent = self._character_agent
-                else:
-                    # 回退路径：正常情况下不应触发（set_app() 已注入 character_agent）
-                    # 保留以防独立构造场景（测试/手动快照）。tool_registry 在此路径不需要：
-                    # opening() 使用 AgentRuntime.run() 而非 _run_life_collect_loop。
-                    logger.warning("CharacterAgent 未注入，使用临时实例生成开场白（非正常路径）")
-                    from ..life.character_agent import CharacterAgent
-                    agent = CharacterAgent(
-                        store=self._store,
-                        router=self._router,
-                        config=self._config,
-                    )
+                # opening 是一次性短请求，不复用 Life Character Conversation，
+                # 避免继承昨日历史、触发摘要或污染新一日会话。
+                from ..life.character_agent import CharacterAgent
+                agent = CharacterAgent(
+                    store=self._store,
+                    router=self._router,
+                    config=self._config,
+                )
                 context = {
                     "mode": "opening",
                     "character_name": self._character.name,

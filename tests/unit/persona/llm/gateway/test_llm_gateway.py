@@ -121,6 +121,22 @@ class TestLLMGateway:
         assert result.usage["input"] == 10
         assert result.usage["output"] == 5
         assert result.error is None
+        assert provider.generate.await_args.kwargs["timeout"] == 30
+
+    @pytest.mark.asyncio
+    async def test_complete_forwards_background_timeout_override_per_attempt(
+        self, gateway, mock_router,
+    ):
+        """后台 override 直接传给 Provider，不包裹整个 Gateway 调用。"""
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        await gateway.complete(_make_request(), _make_state(), timeout=90)
+
+        assert provider.generate.await_args.kwargs["timeout"] == 90
 
     @pytest.mark.asyncio
     async def test_deepseek_renders_runtime_instruction_as_latest_reminder(

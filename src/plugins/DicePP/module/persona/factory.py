@@ -41,6 +41,7 @@ from .life.simulator import LifeSimulator, LifeConfig
 from .life.share_scheduler import ShareScheduler
 from .life.protocols import SleepGate
 from .life.target import TargetSelector
+from .life.types import DailyTickResult
 from .life.dm_agent import DMAgent
 from .life.character_agent import CharacterAgent
 from .life.sa_agent import SAAgent
@@ -171,8 +172,11 @@ class PersonaApp:
     async def tick(self) -> None:
         await self.life.tick()
 
-    async def tick_daily(self) -> Optional[str]:
+    async def tick_daily(self) -> DailyTickResult:
         return await self.life.tick_daily()
+
+    async def run_daily_planning(self, diary: str, diary_date: str) -> None:
+        await self.life.run_daily_planning(diary, diary_date)
 
 
 @dataclass
@@ -457,6 +461,7 @@ async def _build_life(
         runtime_factory=lambda: AgentRuntime(
             router=_router, store=store,
             limits=LoopLimits(max_rounds=max_rounds),
+            llm_timeout=config.background_llm_timeout_seconds,
         ),
         change_source_factory=lambda scope: (
             [CharacterStateChangeSource(store)]

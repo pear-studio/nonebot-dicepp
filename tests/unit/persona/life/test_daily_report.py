@@ -3,6 +3,7 @@ DailyReportGenerator 单元测试
 
 覆盖 per-table 容错、diary=None 降级、数据收集正确性、段结构。
 """
+import asyncio
 import pytest
 import json
 from unittest.mock import MagicMock, AsyncMock, PropertyMock, patch
@@ -15,6 +16,7 @@ from plugins.DicePP.module.persona.report.daily_report import (
     DailyReportGenerator, _DIARY_UNAVAILABLE,
 )
 from plugins.DicePP.module.persona.life.types import AgentResult
+from plugins.DicePP.module.persona.life.types import DailyTickResult
 from plugins.DicePP.module.persona.gateway.port import MessagePort
 from plugins.DicePP.utils.time import wall_now, get_current_date_int
 from plugins.DicePP.core.message_types import MessageType
@@ -87,6 +89,37 @@ class TestDailyReportGenerator:
         # 段 2 含运营统计（新格式）
         assert "活跃用户" in seg2_cmd.msg
         assert "指令分布" in seg2_cmd.msg
+
+    @pytest.mark.asyncio
+    async def test_builds_both_segments_before_send_and_second_survives_false_result(self):
+        """两段先构造；真实 port 的 False 结果不让运营统计陪葬。"""
+        bot = _make_mock_bot()
+        port = MagicMock()
+        events = []
+
+        async def send(_user_id, _group_id, content, **_kwargs):
+            events.append(("send", content))
+            if len([event for event in events if event[0] == "send"]) == 1:
+                return False
+            return True
+
+        port.send = AsyncMock(side_effect=send)
+        gen = DailyReportGenerator(bot=bot, port=port)
+        gen._collect_core_stats = AsyncMock(return_value=gen._empty_core_stats())
+        gen._fetch_character_state = AsyncMock(return_value=None)
+        gen._generate_opening = AsyncMock(return_value="opening")
+
+        async def build_segment_2(_stats):
+            events.append(("build", "segment 2"))
+            return "segment 2"
+
+        gen._build_segment_2 = AsyncMock(side_effect=build_segment_2)
+
+        await gen.generate_and_send("diary")
+
+        assert events[0] == ("build", "segment 2")
+        assert [event[0] for event in events] == ["build", "send", "send"]
+        assert events[-1] == ("send", "segment 2")
 
     # ── diary=None 降级 ─────────────────────────────────────────
 
@@ -184,6 +217,14 @@ class TestDailyReportGenerator:
 
         target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
         core_stats = gen._empty_core_stats()
+        shared_agent = MagicMock()
+        shared_agent.opening = AsyncMock()
+        app = MagicMock()
+        app.store = MagicMock()
+        app.get_router.return_value = gen._router
+        app.get_character.return_value = gen._character
+        app.get_character_agent.return_value = shared_agent
+        gen.set_app(app)
         with patch(target) as mock_char_agent_cls:
             mock_agent = MagicMock()
             mock_agent.opening = AsyncMock(return_value=AgentResult(success=True, data=mock_opening))
@@ -191,6 +232,12 @@ class TestDailyReportGenerator:
             opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         assert opening == mock_opening
+        shared_agent.opening.assert_not_awaited()
+        mock_char_agent_cls.assert_called_once_with(
+            store=gen._store,
+            router=gen._router,
+            config=gen._config,
+        )
 
     @pytest.mark.asyncio
     async def test_voice_llm_exception_falls_back_to_template(self):
@@ -616,7 +663,7 @@ class TestTickDailyIntegration:
 
     @pytest.mark.asyncio
     async def test_generate_and_send_called_during_run_daily(self):
-        """_run_daily() 获取 diary 后调用 generate_and_send"""
+        """_run_daily() 在两段日报完成后才启动 SA。"""
         from plugins.DicePP.module.persona.command import PersonaCommand
 
         bot = _make_mock_bot()
@@ -624,23 +671,33 @@ class TestTickDailyIntegration:
         cmd.enabled = True
         cmd.config = bot.config.persona_ai
 
-        port, _mock_bot = _make_mock_port()
-        gen = DailyReportGenerator(bot=bot, port=port)
+        order = []
+        gen = MagicMock()
+        gen.generate_and_send = AsyncMock(side_effect=lambda diary: order.append(("report", diary)))
         cmd.report_generator = gen
 
         # 构造最小 mock app
         mock_app = MagicMock()
-        mock_app.tick_daily = AsyncMock(return_value="diary content")
+        mock_app.tick_daily = AsyncMock(
+            side_effect=lambda: order.append(("diary", None)) or DailyTickResult(
+                diary="diary content",
+                diary_date="2026-08-07",
+            )
+        )
+        mock_app.run_daily_planning = AsyncMock(
+            side_effect=lambda diary, date: order.append(("sa", diary, date))
+        )
         cmd.app = mock_app
         cmd.data_store = MagicMock()
 
-        # 直接调用 _run_daily 内部逻辑
-        diary = await mock_app.tick_daily()
-        await gen.generate_and_send(diary) if cmd.config.daily_report_enabled else None
+        await cmd._run_daily()
+        await asyncio.sleep(0)
 
-        calls = _mock_bot.proxy.process_bot_command.await_args_list
-        assert len(calls) == 2
-        assert "diary content" in calls[0].args[0].msg
+        assert order == [
+            ("diary", None),
+            ("report", "diary content"),
+            ("sa", "diary content", "2026-08-07"),
+        ]
 
     @pytest.mark.asyncio
     async def test_daily_report_disabled_skips_generate(self):
@@ -657,12 +714,80 @@ class TestTickDailyIntegration:
         gen.generate_and_send = AsyncMock()
         cmd.report_generator = gen
 
-        # 模拟 _run_daily 的条件分支
-        diary = "test diary"
-        if cmd.report_generator and cmd.config.daily_report_enabled:
-            await cmd.report_generator.generate_and_send(diary)
+        cmd.app = MagicMock()
+        cmd.app.tick_daily = AsyncMock(return_value=DailyTickResult())
+
+        await cmd._run_daily()
 
         gen.generate_and_send.assert_not_awaited()
+        cmd.app.run_daily_planning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_diary_none_still_sends_fallback_report_and_skips_sa(self):
+        """无日记时仍发送降级日报，但不创建 SA 任务。"""
+        from plugins.DicePP.module.persona.command import PersonaCommand
+
+        bot = _make_mock_bot()
+        cmd = PersonaCommand(bot)
+        cmd.config = bot.config.persona_ai
+        cmd.app = MagicMock()
+        cmd.app.tick_daily = AsyncMock(return_value=DailyTickResult(diary_date="2026-08-07"))
+        cmd.report_generator = MagicMock()
+        cmd.report_generator.generate_and_send = AsyncMock()
+
+        await cmd._run_daily()
+
+        cmd.report_generator.generate_and_send.assert_awaited_once_with(None)
+        cmd.app.run_daily_planning.assert_not_called()
+        assert cmd._async_sa_daily_task is None
+
+    @pytest.mark.asyncio
+    async def test_timeout_from_tick_daily_is_not_converted_to_master_notification(self):
+        """Command 不再持有五分钟总超时及第三条 Master 告警。"""
+        from plugins.DicePP.module.persona.command import PersonaCommand
+
+        bot = _make_mock_bot()
+        cmd = PersonaCommand(bot)
+        cmd.config = bot.config.persona_ai
+        cmd.app = MagicMock()
+        cmd.app.tick_daily = AsyncMock(side_effect=asyncio.TimeoutError())
+        cmd.report_generator = MagicMock()
+        cmd.report_generator.send_master_notification = AsyncMock()
+
+        with pytest.raises(asyncio.TimeoutError):
+            await cmd._run_daily()
+
+        cmd.report_generator.send_master_notification.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_report_await_cannot_mismatch_atomic_diary_and_date(self):
+        """报告期间另一轮日终完成，也不会覆盖本轮交给 SA 的 diary/date。"""
+        from plugins.DicePP.module.persona.command import PersonaCommand
+
+        bot = _make_mock_bot()
+        cmd = PersonaCommand(bot)
+        cmd.config = bot.config.persona_ai
+        first = DailyTickResult(diary="first diary", diary_date="2026-08-07")
+        second = DailyTickResult(diary="second diary", diary_date="2026-08-08")
+        cmd.app = MagicMock()
+        cmd.app.tick_daily = AsyncMock(side_effect=[first, second])
+        cmd.app.run_daily_planning = AsyncMock()
+        cmd.report_generator = MagicMock()
+
+        async def report_with_overlapping_daily(_diary):
+            assert await cmd.app.tick_daily() == second
+
+        cmd.report_generator.generate_and_send = AsyncMock(
+            side_effect=report_with_overlapping_daily
+        )
+
+        await cmd._run_daily()
+        task = cmd._async_sa_daily_task
+        await task
+
+        cmd.app.run_daily_planning.assert_awaited_once_with(
+            "first diary", "2026-08-07"
+        )
 
 
 class TestFlagDisplayOrder:

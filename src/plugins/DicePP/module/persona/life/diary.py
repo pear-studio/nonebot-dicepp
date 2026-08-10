@@ -12,6 +12,7 @@ from datetime import timedelta
 from ..data.store import PersonaDataStore
 from ..character.models import Character
 from .character_agent import CharacterAgent
+from .types import DailyTickResult
 
 
 @dataclass
@@ -43,7 +44,7 @@ class DiaryGenerator:
         self.character_name = character.name
         self.character_description = character.description
 
-    async def generate_diary(self) -> Optional[str]:
+    async def generate_diary(self) -> DailyTickResult:
         """
         生成日记。
 
@@ -52,8 +53,9 @@ class DiaryGenerator:
         - 当前时间 < diary_time：今天刚开始，取昨天事件生成昨天日记
 
         Returns:
-            日记内容，如果失败则返回 None
+            不可变的日记正文与目标日期；失败时正文为 None。
         """
+        diary_date: Optional[str] = None
         try:
             from plugins.DicePP.utils.time import get_clock
             now = get_clock().now()
@@ -72,7 +74,7 @@ class DiaryGenerator:
             events = await self.store.get_daily_events(diary_date)
             if not events:
                 logger.debug("没有事件，跳过日记生成")
-                return None
+                return DailyTickResult(diary_date=diary_date)
 
             prev_diary = await self.store.get_diary(prev_date)
 
@@ -103,14 +105,14 @@ class DiaryGenerator:
 
             if not result.success or not result.data:
                 logger.warning("日记生成为空")
-                return None
+                return DailyTickResult(diary_date=diary_date)
 
             diary_content = result.data
             await self.store.save_diary(diary_date, diary_content)
 
             logger.info(f"生成日记: {len(diary_content)} 字")
-            return diary_content
+            return DailyTickResult(diary=diary_content, diary_date=diary_date)
 
         except Exception as e:
             logger.exception(f"生成日记失败: {e}")
-            return None
+            return DailyTickResult(diary_date=diary_date)

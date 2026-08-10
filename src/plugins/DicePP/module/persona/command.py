@@ -100,6 +100,8 @@ class PersonaCommand(UserCommandBase):
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
         self._async_tick_task: Optional[asyncio.Task] = None
         self._async_tick_daily_task: Optional[asyncio.Task] = None
+        self._async_sa_daily_task: Optional[asyncio.Task] = None
+        self._shutting_down = False
         # 管理员子命令分发器（在 delay_init 后由外部补齐）
         self._admin_handlers: Dict[str, Callable] = {}
         # 日报生成器（生命周期独立于 PersonaApp）
@@ -969,6 +971,22 @@ class PersonaCommand(UserCommandBase):
 
     async def shutdown(self) -> None:
         """Bot 关闭时清理资源"""
+        self._shutting_down = True
+        for task_attr in ("_async_tick_daily_task", "_async_sa_daily_task"):
+            task = getattr(self, task_attr)
+            if task is None:
+                continue
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(f"[Persona] shutdown 等待 {task_attr} 失败")
+            finally:
+                if getattr(self, task_attr) is task:
+                    setattr(self, task_attr, None)
         if self.app and self.app.store:
             await self.app.store.close()
 
@@ -1022,25 +1040,53 @@ class PersonaCommand(UserCommandBase):
             logger.error(f"[Persona] tick 失败: {e}")
             return []
 
+    def _schedule_daily_planning(self, diary: str, diary_date: str) -> None:
+        """在独立单槽任务中运行 SA 日终规划。"""
+        if self._shutting_down:
+            return
+        task = self._async_sa_daily_task
+        if task is not None and not task.done():
+            logger.warning("[Persona] SA 日终规划仍在运行，跳过重复调度")
+            return
+
+        async def _run_sa_daily() -> None:
+            try:
+                await self.app.run_daily_planning(diary, diary_date)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[Persona] SA 日终规划异步任务失败")
+            finally:
+                current = asyncio.current_task()
+                if self._async_sa_daily_task is current:
+                    self._async_sa_daily_task = None
+
+        self._async_sa_daily_task = asyncio.create_task(_run_sa_daily())
+
+    async def _run_daily(self) -> None:
+        """生成日记与日报，全部投递结束后再调度独立 SA 规划。"""
+        result = await self.app.tick_daily()
+        diary = result.diary
+        if diary:
+            logger.info(f"[Persona] 生成日记: {len(diary)} 字")
+        if self.report_generator and self.config.daily_report_enabled:
+            await self.report_generator.generate_and_send(diary)
+
+        if not diary:
+            return
+        diary_date = result.diary_date
+        if not diary_date:
+            logger.warning("[Persona] 日记日期缺失，跳过 SA 日终规划")
+            return
+        self._schedule_daily_planning(diary, diary_date)
+
     def tick_daily(self) -> List[BotCommandBase]:
         """每天调用，生成日记（异步逻辑通过任务队列在运行中的事件循环里执行）。"""
-        if not self.enabled or not self.app:
+        if self._shutting_down or not self.enabled or not self.app:
             return []
 
         try:
             loop = asyncio.get_running_loop()
-
-            async def _run_daily() -> None:
-                try:
-                    diary = await asyncio.wait_for(self.app.tick_daily(), timeout=300)
-                    if diary:
-                        logger.info(f"[Persona] 生成日记: {len(diary)} 字")
-                    if self.report_generator and self.config.daily_report_enabled:
-                        await self.report_generator.generate_and_send(diary)
-                except asyncio.TimeoutError:
-                    logger.error("[Persona] tick_daily 超时(>5min)，日报生成失败")
-                    if self.report_generator:
-                        await self.report_generator.send_master_notification("日报生成超时(>5min)，请检查 LLM 服务状态")
 
             # 清理已完成的任务
             dt = self._async_tick_daily_task
@@ -1057,7 +1103,7 @@ class PersonaCommand(UserCommandBase):
 
             if loop.is_running():
                 if self._async_tick_daily_task is None or self._async_tick_daily_task.done():
-                    self._async_tick_daily_task = asyncio.create_task(_run_daily())
+                    self._async_tick_daily_task = asyncio.create_task(self._run_daily())
                 return []
 
             # unreachable: get_running_loop() 成功时 loop.is_running() 必为 True

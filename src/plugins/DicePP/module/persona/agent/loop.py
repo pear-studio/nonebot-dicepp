@@ -62,11 +62,13 @@ class AgentLoop:
         llm_gateway: LLMGateway,
         event_bus: Optional[AgentEventBus] = None,
         limits: Optional[LoopLimits] = None,
+        llm_timeout: Optional[int] = None,
     ) -> None:
         self._llm = llm_gateway
         self._event_bus = event_bus
 
         self._limits = limits or LoopLimits()
+        self._llm_timeout = llm_timeout
 
 
 
@@ -121,7 +123,8 @@ class AgentLoop:
             # LLM 调用
             try:
                 result = await self._llm.complete(
-                    request=req, state=state, timeout=None, run_id=state.run_id,
+                    request=req, state=state, timeout=self._llm_timeout,
+                    run_id=state.run_id,
                 )
             except Exception as e:
                 logger.warning(f"[AgentLoop] LLM 调用失败: {e}")

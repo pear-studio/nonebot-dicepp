@@ -20,6 +20,7 @@ from .diary import DiaryGenerator
 from .character_life import CharacterLife
 from .conversation_scope import ConversationScope
 from .share_scheduler import ShareScheduler
+from .types import DailyTickResult
 
 if TYPE_CHECKING:
     from plugins.DicePP.core.config.pydantic_models import PersonaConfig
@@ -137,36 +138,23 @@ class LifeSimulator:
             except Exception:
                 logger.exception("tick: 主动消息调度失败")
 
-    async def tick_daily(self) -> Optional[str]:
-        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划、Conversation compact。
+    async def tick_daily(self) -> DailyTickResult:
+        """每日调用 — 清理 trace、关系衰减、生成日记、Conversation compact。
 
         R9: DM/Character 的 compact_conversation 放在 finally 块，确保即使 cleanup、
         衰减或日记生成异常，日界 close 也会执行，避免 Conversation 跨虚构日泄漏。
         """
-        diary = None
         try:
             await self._run_cleanup()
             await self.apply_relationship_decay_batch()
-            diary = await self.diary_generator.generate_diary()
+            result = await self.diary_generator.generate_diary()
 
-            # Phase 1: SA Agent 规划
-            if diary and self.sa_agent:
-                try:
-                    await self._run_sa_planning()
-                except Exception as e:
-                    logger.warning(f"SA 规划失败: {e}", exc_info=True)
-                # SA 自身 compact（finally 保证，见 SAAgent）
-                try:
-                    await self.sa_agent.compact_conversation()
-                except Exception:
-                    logger.warning("SA compact_conversation 失败", exc_info=True)
-
-            if diary:
-                logger.info(f"生成日记: {len(diary)} 字")
-            return diary
+            if result.diary:
+                logger.info(f"生成日记: {len(result.diary)} 字")
+            return result
         except Exception as e:
             logger.exception(f"tick_daily 失败: {e}")
-            return None
+            return DailyTickResult()
         finally:
             # 日界 close 必须在 finally 执行——无论前序步骤是否异常，
             # DM/Character 的 Conversation 都必须关闭，防止跨虚构日复用。
@@ -180,12 +168,15 @@ class LifeSimulator:
                             exc_info=True,
                         )
 
-    async def _run_sa_planning(self) -> None:
-        """执行 SA 叙事规划"""
-        # 收集素材
-        today = self.character_life._get_today_str()
-        diary_text = await self.store.get_diary(today) or "（无）"
-        today_events = await self.store.get_daily_events(today)
+    async def run_daily_planning(self, diary: str, diary_date: str) -> None:
+        """在日报关键路径之外执行当日日记对应的 SA 规划。"""
+        if not diary or not self.sa_agent:
+            return
+        await self._run_sa_planning(diary, diary_date)
+
+    async def _run_sa_planning(self, diary_text: str, diary_date: str) -> None:
+        """使用显式日记日期执行 SA 叙事规划，避免后台延迟导致日期漂移。"""
+        today_events = await self.store.get_daily_events(diary_date)
         events_text = "\n".join(
             f"- {e.description} ({e.reaction})"
             for e in today_events[-10:]

@@ -10,6 +10,7 @@ import pytest
 
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.command import PersonaCommand
+from plugins.DicePP.module.persona.life.types import DailyTickResult
 from plugins.DicePP.shell import bot_runner as bot_runner_module
 from plugins.DicePP.core.command import BotSendMsgCommand
 from plugins.DicePP.core.communication import GroupMessagePort, PrivateMessagePort
@@ -44,6 +45,8 @@ class _FakeLife:
         self.sa_agent = object()
         self.tick_times: list[dt.datetime] = []
         self.daily_times: list[dt.datetime] = []
+        self.daily_result = DailyTickResult()
+        self.planning_calls: list[tuple[str, str]] = []
         self.tick_started = asyncio.Event()
         self._block_tick = block_tick
         self._life_date: dt.date | None = None
@@ -71,8 +74,12 @@ class _FakeLife:
             self.share_scheduler._fired_times.add("midday_18:00")
             self.share_scheduler._fired_dates["midday_18:00"] = now.date().isoformat()
 
-    async def tick_daily(self) -> None:
+    async def tick_daily(self) -> DailyTickResult:
         self.daily_times.append(get_clock().now())
+        return self.daily_result
+
+    async def run_daily_planning(self, diary: str, diary_date: str) -> None:
+        self.planning_calls.append((diary, diary_date))
 
 
 class _PostSendBot:
@@ -231,6 +238,7 @@ async def test_warp_advances_half_open_minutes_across_midnight_and_keeps_clock(
     assert life.tick_times[0] == start
     assert life.tick_times[-1] == start + dt.timedelta(minutes=1439)
     assert life.daily_times == [dt.datetime(2026, 7, 16, 23, 59, 17)]
+    assert life.planning_calls == []
     assert get_clock() is not original_clock
     assert get_clock().now() == start + dt.timedelta(days=1)
     assert len(progress) == 24
@@ -250,6 +258,24 @@ async def test_warp_advances_half_open_minutes_across_midnight_and_keeps_clock(
         "daily_runs": 1,
         "daily_errors": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_warp_runs_sa_once_with_atomic_diary_result(tmp_path):
+    """Shell 跨日用同一次 tick_daily 的正文/日期同步执行 SA。"""
+    start = dt.datetime(2026, 7, 16, 23, 59)
+    runner, life, _ = _make_started_runner(tmp_path, start)
+    life.daily_result = DailyTickResult(
+        diary="七月十六日日记",
+        diary_date="2026-07-16",
+    )
+
+    dry_run = await runner.warp(days=1, dry_run=True)
+    result = await runner.warp(days=1)
+
+    assert life.planning_calls == [("七月十六日日记", "2026-07-16")]
+    assert result["daily_runs"] == 1
+    assert dry_run["estimate"]["sa_agent_runs_max"] == len(life.planning_calls)
 
 
 @pytest.mark.asyncio
