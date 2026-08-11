@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -1452,6 +1453,77 @@ def test_updates_tab_confirms_verified_install_and_recovers_operation_status(
             browser.close()
 
 
+def test_data_browser_uses_resource_sidebar_and_fixed_workspace(
+    dashboard_url: str,
+) -> None:
+    """Data tables are selected from a resource list and keep raw cells bounded."""
+    requested_urls: list[str] = []
+
+    with sync_playwright() as playwright:
+        browser = launch_browser(playwright.chromium)
+        page = browser.new_page()
+
+        page.route(
+            "**/api/data/demo/tables",
+            lambda route: route.fulfill(
+                status=200,
+                json={
+                    "ok": True,
+                    "tables": [
+                        {"name": "group_stat", "label": "群组统计", "count": 1},
+                        {"name": "nickname", "label": "用户昵称", "count": 8},
+                    ],
+                },
+            ),
+        )
+
+        def _table_data(route) -> None:
+            requested_urls.append(route.request.url)
+            route.fulfill(
+                status=200,
+                json={
+                    "ok": True,
+                    "columns": ["group_id", "data", "updated_at"],
+                    "records": [
+                        {
+                            "group_id": "10001",
+                            "data": json.dumps({"nested": "x" * 500}),
+                            "updated_at": 1786428000,
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+
+        page.route("**/api/data/demo/table/group_stat?*", _table_data)
+        try:
+            _login(page, dashboard_url)
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.selectedBotId = 'demo';
+                }"""
+            )
+            page.get_by_role("button", name="数据浏览", exact=True).click()
+
+            expect(page.get_by_test_id("data-resource-sidebar")).to_be_visible()
+            expect(page.get_by_test_id("data-workspace")).to_contain_text("选择一个数据表")
+            table_button = page.get_by_test_id("data-table-group_stat")
+            expect(table_button).to_contain_text("群组统计")
+            expect(table_button).to_contain_text("group_stat")
+            expect(table_button).to_contain_text("1")
+
+            table_button.click()
+            expect(page.get_by_test_id("data-workspace")).to_contain_text("群组统计")
+            expect(page.get_by_test_id("data-workspace")).to_contain_text("每页 25 条")
+            expect(page.get_by_test_id("data-workspace").locator("pre").first).to_have_class(
+                re.compile(r"max-h-24")
+            )
+            assert any("limit=25" in url for url in requested_urls)
+        finally:
+            browser.close()
+
+
 def test_query_database_repair_previews_before_confirmation(
     dashboard_url: str,
     tmp_path: Path,
@@ -1581,10 +1653,15 @@ def test_query_database_repair_previews_before_confirmation(
         try:
             _login(page, dashboard_url)
             page.get_by_role("button", name="内容管理", exact=True).click()
-            page.get_by_role("button", name="查询", exact=True).click()
-            selector = page.get_by_test_id("query-database-select")
-            expect(selector).to_be_visible()
-            selector.select_option("rules")
+            database_button = page.get_by_test_id("query-database-rules")
+            expect(database_button).to_be_visible()
+            database_button.click()
+            query_parent = page.get_by_test_id("content-kind-queries")
+            query_parent.click()
+            expect(page.get_by_test_id("query-database-rules")).to_have_count(0)
+            expect(page.get_by_test_id("content-workspace")).to_contain_text("rules")
+            query_parent.click()
+            expect(page.get_by_test_id("query-database-rules")).to_be_visible()
             warning_card = page.get_by_test_id("query-stat-card").filter(has_text="警告")
             warning_card.click()
             repair_button = page.get_by_test_id("query-repair-button")
@@ -1631,8 +1708,8 @@ def test_query_database_repair_previews_before_confirmation(
             expect(page.get_by_test_id("query-repair-log")).to_contain_text(
                 '"stage": "completed"'
             )
-            expect(selector.locator("option")).to_contain_text(
-                ["-- 选择 --", "rules", "rules_backup（已停用）"]
+            expect(page.get_by_test_id("query-database-rules_backup")).to_contain_text(
+                "已停用"
             )
 
             page.evaluate(
