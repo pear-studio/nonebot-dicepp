@@ -615,85 +615,215 @@
       </div>
 
       <!-- Tab: 内容管理 -->
-      <div x-show="currentTab === 'content'" x-cloak>
-        <h2 class="text-xl font-bold mb-4">内容管理</h2>
-        <div class="flex gap-4 mb-4">
+      <div x-show="currentTab === 'content'" x-cloak class="h-full flex flex-col min-h-0">
+        <h2 class="text-xl font-bold mb-4 flex-shrink-0">内容管理</h2>
+        <div class="flex gap-4 mb-4 flex-shrink-0">
           <template x-for="dir in contentDirs" :key="dir">
-            <button @click="contentSubdir = dir; loadContentFiles(dir)" :class="contentSubdir === dir ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'" class="px-4 py-2 rounded-lg border text-sm font-medium transition">
+            <button @click="loadContentFiles(dir)" :class="contentSubdir === dir ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'" class="px-4 py-2 rounded-lg border text-sm font-medium transition">
               <span x-text="dirLabels[dir] || dir"></span>
             </button>
           </template>
         </div>
 
-        <!-- Special: queries has DB listing first -->
+        <!-- Special: query database audit -->
         <template x-if="contentSubdir === 'queries'">
-          <div>
-            <!-- Content skeleton -->
-            <div x-show="contentLoading" class="space-y-3 p-4">
+          <div class="flex-1 min-h-0 flex flex-col gap-4">
+            <div x-show="contentLoading" class="space-y-3 p-4 bg-white rounded-lg shadow">
               <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
               <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
               <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
             </div>
-            <template x-if="!contentLoading && queryDbs.length === 0">
-              <button @click="loadQueryDbs" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">加载数据库列表</button>
+
+            <template x-if="!contentLoading && queryDbListError">
+              <div class="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start justify-between gap-4">
+                <div>
+                  <div class="font-medium text-red-800">数据库列表加载失败</div>
+                  <div class="text-sm text-red-700 mt-1" x-text="queryDbListError"></div>
+                </div>
+                <button @click="loadQueryDbs" class="px-3 py-1.5 bg-white border border-red-300 text-red-700 rounded hover:bg-red-100 text-sm whitespace-nowrap">重新加载</button>
+              </div>
             </template>
-            <template x-if="queryDbs.length > 0">
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">选择数据库：</label>
-                <select x-model="selectedQueryDb" @change="loadQueryTables(); loadQueryEntries(1)" class="border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">-- 选择 --</option>
-                  <template x-for="db in queryDbs" :key="db">
-                    <option x-text="db" :value="db"></option>
-                  </template>
-                </select>
-                <!-- Table selector (only when >1 table) -->
-                <template x-if="queryTables.length > 1">
-                  <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">选择表：</label>
-                    <select x-model="selectedQueryTable" @change="loadQueryEntries(1)" class="border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <template x-for="t in queryTables" :key="t.name">
-                        <option :value="t.name" x-text="(t.label && t.label !== t.name) ? t.label + ' (' + t.name + ')' : t.name"></option>
-                      </template>
-                    </select>
+
+            <template x-if="!contentLoading && !queryDbListError && queryDbs.length === 0">
+              <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                <div>未发现查询数据库</div>
+                <button @click="loadQueryDbs" class="mt-3 text-sm text-blue-600 hover:text-blue-800">重新扫描</button>
+              </div>
+            </template>
+
+            <template x-if="!contentLoading && queryDbs.length > 0">
+              <div class="flex-1 min-h-0 flex flex-col gap-4">
+                <div class="flex-shrink-0">
+                  <label class="block text-sm font-medium text-gray-700 mb-1">选择数据库：</label>
+                  <select x-model="selectedQueryDb" @change="selectQueryDatabase()" class="w-full sm:w-80 border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">-- 选择 --</option>
+                    <template x-for="db in queryDbs" :key="db">
+                      <option x-text="db" :value="db"></option>
+                    </template>
+                  </select>
+                </div>
+
+                <template x-if="selectedQueryDb && queryLoading">
+                  <div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                    <div class="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2"></div>
+                    <div>正在检查数据库…</div>
                   </div>
                 </template>
-                <template x-if="queryEntries.length > 0">
-                  <div>
-                    <div class="bg-white rounded-lg shadow overflow-x-auto">
-                      <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                          <tr>
-                            <template x-for="col in queryColumns" :key="col">
-                              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap" x-text="col"></th>
-                            </template>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                          <template x-for="entry in queryEntries" :key="entry.rowid">
-                            <tr class="hover:bg-gray-50">
-                              <template x-for="col in queryColumns" :key="col">
-                                <td class="px-4 py-2 text-sm max-w-xs truncate" x-text="formatCell(entry[col])"></td>
-                              </template>
-                              <td class="px-4 py-2">
-                                <button @click="viewQueryEntry(entry)" class="text-blue-600 hover:text-blue-800 text-xs">查看</button>
-                              </td>
-                            </tr>
+
+                <template x-if="selectedQueryDb && !queryLoading && queryError">
+                  <div class="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start justify-between gap-4">
+                    <div>
+                      <div class="font-medium text-red-800">数据库检查失败</div>
+                      <div class="text-sm text-red-700 mt-1" x-text="queryError"></div>
+                    </div>
+                    <button @click="selectQueryDatabase()" class="px-3 py-1.5 bg-white border border-red-300 text-red-700 rounded hover:bg-red-100 text-sm whitespace-nowrap">重试</button>
+                  </div>
+                </template>
+
+                <template x-if="selectedQueryDb && queryLoaded && !queryError">
+                  <div class="flex-1 min-h-0 flex flex-col gap-4">
+                    <div class="relative flex-shrink-0" @click.outside="queryWarningsOpen = false" @keydown.escape.window="queryWarningsOpen = false">
+                      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <template x-for="card in queryStatCards()" :key="card.label">
+                          <div class="bg-white rounded-lg shadow p-4 transition" :class="card.label === '警告' ? 'cursor-pointer hover:ring-2 hover:ring-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-400' : ''" :role="card.label === '警告' ? 'button' : null" :tabindex="card.label === '警告' ? 0 : -1" :aria-expanded="card.label === '警告' ? String(queryWarningsOpen) : null" @click="card.label === '警告' && (queryWarningsOpen = !queryWarningsOpen)" @keydown.enter.prevent="card.label === '警告' && (queryWarningsOpen = !queryWarningsOpen)" @keydown.space.prevent="card.label === '警告' && (queryWarningsOpen = !queryWarningsOpen)" data-testid="query-stat-card">
+                            <div class="flex items-center justify-between gap-2">
+                              <div class="text-sm text-gray-500" x-text="card.label"></div>
+                              <span x-show="card.label === '警告'" class="text-xs" :class="queryStats.warning_count > 0 ? 'text-amber-700' : 'text-green-700'" x-text="queryWarningsOpen ? '收起' : '查看'"></span>
+                            </div>
+                            <div class="text-2xl font-semibold mt-1" :class="card.color" x-text="card.value"></div>
+                          </div>
+                        </template>
+                      </div>
+
+                      <div x-show="queryWarningsOpen" x-cloak class="absolute right-0 z-40 mt-2 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden" style="width: min(44rem, calc(100vw - 3rem));">
+                        <div class="px-4 py-3 border-b flex items-start justify-between gap-4">
+                          <div>
+                            <h3 class="font-medium text-gray-900" x-text="queryStats.warning_count > 0 ? '需要处理的问题' : '未发现需要处理的问题'"></h3>
+                            <p class="text-xs mt-1" :class="queryStats.warning_count > 0 ? 'text-gray-500' : 'text-green-700'" x-text="queryStats.warning_count > 0 ? '点击一项可只查看涉及的数据行。' : '当前数据库没有发现会影响查询的结构问题。'"></p>
+                          </div>
+                          <button type="button" @click="queryWarningsOpen = false" aria-label="关闭问题列表" class="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
+                        </div>
+                        <div x-show="queryStats.warning_count > 0 && queryWarningsLoading" class="p-6 text-center text-sm text-gray-500">正在加载问题…</div>
+                        <div x-show="queryStats.warning_count > 0 && !queryWarningsLoading && queryWarningsError" class="p-6 text-center">
+                          <div class="text-sm text-red-700" x-text="queryWarningsError"></div>
+                          <button @click="loadQueryWarnings(queryWarningsPage)" class="mt-2 text-sm text-blue-600 hover:text-blue-800">重新加载</button>
+                        </div>
+                        <div x-show="queryStats.warning_count > 0 && !queryWarningsLoading && !queryWarningsError" class="p-3 space-y-2 overflow-y-auto" style="max-height: min(28rem, 55vh);">
+                          <template x-for="warning in queryWarnings" :key="warning.id">
+                            <button @click="applyQueryWarning(warning)" class="w-full text-left border rounded-lg p-3 hover:bg-amber-50 hover:border-amber-300 transition" :class="queryWarningFilter?.id === warning.id ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-300' : 'border-gray-200'">
+                              <div class="font-medium text-sm text-gray-900" x-text="warning.title"></div>
+                              <div class="text-sm text-gray-600 mt-1 whitespace-pre-wrap" x-text="warning.message"></div>
+                            </button>
                           </template>
-                        </tbody>
-                      </table>
+                        </div>
+                        <div x-show="queryStats.warning_count > 0 && !queryWarningsLoading && !queryWarningsError && queryWarningsTotalPages > 1" class="flex items-center justify-between px-4 py-3 border-t">
+                          <button @click="loadQueryWarnings(queryWarningsPage - 1)" :disabled="queryWarningsPage <= 1" class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">上一页</button>
+                          <span class="text-sm text-gray-600" x-text="`第 ${queryWarningsPage} / ${queryWarningsTotalPages} 页`"></span>
+                          <button @click="loadQueryWarnings(queryWarningsPage + 1)" :disabled="queryWarningsPage >= queryWarningsTotalPages" class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">下一页</button>
+                        </div>
+                      </div>
                     </div>
-                    <div x-show="queryTotalPages > 1" class="flex items-center justify-between mt-2">
-                      <button @click="loadQueryEntries(queryPage - 1)" :disabled="queryPage <= 1" class="px-3 py-1 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">上一页</button>
-                      <span class="text-sm text-gray-600" x-text="`${queryPage} / ${queryTotalPages}`"></span>
-                      <button @click="loadQueryEntries(queryPage + 1)" :disabled="queryPage >= queryTotalPages" class="px-3 py-1 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">下一页</button>
+
+                    <div class="flex-1 min-h-0 bg-white rounded-lg shadow flex flex-col overflow-hidden">
+                      <div class="border-b px-4 pt-3 flex gap-5 flex-shrink-0">
+                        <button @click="switchQueryView('data')" class="pb-3 text-sm font-medium border-b-2" :class="queryView === 'data' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'">数据</button>
+                        <button @click="switchQueryView('redirects')" class="pb-3 text-sm font-medium border-b-2" :class="queryView === 'redirects' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'">重定向</button>
+                      </div>
+
+                      <div class="p-4 border-b space-y-3 flex-shrink-0">
+                        <div class="flex flex-col sm:flex-row gap-2">
+                          <input type="search" x-model="querySearch" @input.debounce.400ms="searchQueryRecords()" :placeholder="queryView === 'data' ? '搜索查询数据…' : '搜索别名或目标…'" class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <select x-show="queryView === 'data'" x-model="queryScope" @change="searchQueryRecords()" class="border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="all">全部</option>
+                            <option value="name">名称</option>
+                            <option value="english">英文</option>
+                            <option value="source">来源</option>
+                            <option value="content">内容</option>
+                          </select>
+                        </div>
+                        <div x-show="queryWarningFilter" class="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <span class="text-sm text-amber-800"><span class="font-medium">问题筛选：</span><span x-text="queryWarningFilter?.title"></span></span>
+                          <button @click="clearQueryWarning" class="text-sm text-amber-800 hover:text-amber-950 whitespace-nowrap">清除问题筛选</button>
+                        </div>
+                      </div>
+
+                      <div x-show="queryRecordsLoading && queryRecords.length === 0" class="p-8 text-center text-gray-500">正在加载数据…</div>
+
+                      <div x-show="!queryRecordsLoading && queryRecordsError" class="p-8 text-center">
+                        <div class="font-medium text-red-700">数据加载失败</div>
+                        <div class="text-sm text-red-600 mt-1" x-text="queryRecordsError"></div>
+                        <button @click="loadQueryRecords(queryPage)" class="mt-3 text-sm text-blue-600 hover:text-blue-800">重新加载</button>
+                      </div>
+
+                      <div x-show="!queryRecordsLoading && !queryRecordsError && queryRecords.length === 0" class="p-8 text-center text-gray-500" x-text="queryEmptyMessage()"></div>
+
+                      <div x-show="!queryRecordsError && queryRecords.length > 0" class="relative flex-1 min-h-0">
+                        <div class="h-full overflow-auto">
+                        <table x-show="queryView === 'data'" class="min-w-full divide-y divide-gray-200 table-fixed">
+                          <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                            <tr>
+                              <th class="w-1/5 px-4 py-3 text-left text-xs font-medium text-gray-500">名称</th>
+                              <th class="w-1/6 px-4 py-3 text-left text-xs font-medium text-gray-500">英文</th>
+                              <th class="w-1/6 px-4 py-3 text-left text-xs font-medium text-gray-500">来源</th>
+                              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">内容摘要</th>
+                            </tr>
+                          </thead>
+                          <template x-for="entry in queryRecords" :key="entry.rowid">
+                            <tbody class="divide-y divide-gray-100 border-b border-gray-200">
+                              <tr @click="toggleQueryEntry(entry.rowid)" class="cursor-pointer hover:bg-blue-50" :class="entry.valid === false ? 'bg-red-50' : ''">
+                                <td class="px-4 py-3 text-sm font-medium break-words">
+                                  <span x-text="entry.name || '（缺少名称）'"></span>
+                                  <span x-show="entry.valid === false" class="ml-1 text-xs text-red-600">无效</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-gray-600 break-words" x-text="entry.english || '-' "></td>
+                                <td class="px-4 py-3 text-sm text-gray-600 break-words" x-text="entry.source || '-' "></td>
+                                <td class="px-4 py-3 text-sm text-gray-600"><div class="whitespace-pre-wrap break-words" style="display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;" x-text="queryContentSummary(entry.content)"></div></td>
+                              </tr>
+                              <tr x-show="queryExpandedRowids.includes(entry.rowid)">
+                                <td colspan="4" class="px-4 py-4 bg-gray-50">
+                                  <div class="text-xs font-medium text-gray-500 mb-2">完整内容</div>
+                                  <pre class="whitespace-pre-wrap break-words font-sans text-sm text-gray-800" x-text="entry.content || '（缺少内容）'"></pre>
+                                </td>
+                              </tr>
+                            </tbody>
+                          </template>
+                        </table>
+
+                        <table x-show="queryView === 'redirects'" class="min-w-full divide-y divide-gray-200 table-fixed">
+                          <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                            <tr>
+                              <th class="w-1/2 px-4 py-3 text-left text-xs font-medium text-gray-500">别名</th>
+                              <th class="w-1/2 px-4 py-3 text-left text-xs font-medium text-gray-500">目标</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y divide-gray-200">
+                            <template x-for="entry in queryRecords" :key="entry.rowid">
+                              <tr class="hover:bg-gray-50" :class="entry.valid === false ? 'bg-red-50' : ''">
+                                <td class="px-4 py-3 text-sm font-medium break-words">
+                                  <span x-text="entry.name || '（缺少别名）'"></span>
+                                  <span x-show="entry.valid === false" class="ml-1 text-xs text-red-600">无效</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm text-gray-600 break-words" x-text="entry.target || '（缺少目标）'"></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                        </div>
+                        <div x-show="queryRecordsLoading" class="absolute inset-0 z-20 flex items-center justify-center bg-white bg-opacity-75 text-gray-600">
+                          <div class="flex items-center gap-2 rounded-lg bg-white px-4 py-3 shadow">
+                            <div class="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span class="text-sm">正在加载数据…</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div x-show="!queryRecordsError && queryTotalPages > 1" class="flex items-center justify-between px-4 py-3 border-t flex-shrink-0">
+                        <button @click="loadQueryRecords(queryPage - 1)" :disabled="queryRecordsLoading || queryPage <= 1" class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">上一页</button>
+                        <span class="text-sm text-gray-600" x-text="`第 ${queryPage} / ${queryTotalPages} 页，共 ${queryTotal} 条，每页 ${queryLimit} 条`"></span>
+                        <button @click="loadQueryRecords(queryPage + 1)" :disabled="queryRecordsLoading || queryPage >= queryTotalPages" class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">下一页</button>
+                      </div>
                     </div>
                   </div>
-                </template>
-                <template x-if="selectedQueryDb && queryEntries.length === 0 && !contentLoading">
-                  <div class="text-gray-500 text-center py-8">暂无数据</div>
                 </template>
               </div>
             </template>
@@ -1753,13 +1883,36 @@ function app() {
     viewingFileName: '',
     viewingFileContent: '',
     queryDbs: [],
+    queryDbListError: '',
     selectedQueryDb: '',
-    queryTables: [],
-    selectedQueryTable: 'data',
-    queryColumns: [],
-    queryEntries: [],
+    queryStats: { total_rows: 0, valid_rows: 0, redirect_rows: 0, warning_count: 0 },
+    queryWarnings: [],
+    queryWarningsTotal: 0,
+    queryWarningsPage: 1,
+    queryWarningsTotalPages: 1,
+    queryWarningsLimit: 20,
+    queryWarningsLoading: false,
+    queryWarningsError: '',
+    queryWarningsOpen: false,
+    queryView: 'data',
+    queryRecords: [],
+    queryTotal: 0,
     queryPage: 1,
     queryTotalPages: 1,
+    queryLimit: 20,
+    querySearch: '',
+    queryScope: 'all',
+    queryWarningFilter: null,
+    queryExpandedRowids: [],
+    queryLoading: false,
+    queryLoaded: false,
+    queryError: '',
+    queryRecordsLoading: false,
+    queryRecordsError: '',
+    queryRequestToken: 0,
+    queryRecordsRequestToken: 0,
+    queryWarningsRequestToken: 0,
+    queryDbListRequestToken: 0,
 
     // ── Tab: Monitor ──
     monitorBots: [],
@@ -2094,6 +2247,7 @@ function app() {
           this.loadPersonaConfig();
           this.loadManagerStatus();
           break;
+        case 'content': this.loadContentFiles(this.contentSubdir); break;
         case 'updates':
           this.loadReleaseStatus();
           this.loadUpgradeStatus(true);
@@ -2501,11 +2655,7 @@ function app() {
     async loadContentFiles(subdir) {
       this.contentSubdir = subdir;
       this.contentFiles = [];
-      this.queryDbs = [];
-      this.queryTables = [];
-      this.selectedQueryTable = 'data';
-      this.queryColumns = [];
-      this.queryEntries = [];
+      this.resetQueryAuditState(subdir === 'queries' ? false : true);
       if (subdir === 'queries') {
         await this.loadQueryDbs();
         return;
@@ -2521,53 +2671,240 @@ function app() {
       }
     },
 
+    resetQueryAuditState(keepDatabases = false) {
+      this.queryRequestToken += 1;
+      this.queryRecordsRequestToken += 1;
+      this.queryWarningsRequestToken += 1;
+      if (!keepDatabases) {
+        this.queryDbListRequestToken += 1;
+        this.queryDbs = [];
+        this.queryDbListError = '';
+      }
+      this.selectedQueryDb = '';
+      this.queryStats = { total_rows: 0, valid_rows: 0, redirect_rows: 0, warning_count: 0 };
+      this.queryWarnings = [];
+      this.queryWarningsTotal = 0;
+      this.queryWarningsPage = 1;
+      this.queryWarningsTotalPages = 1;
+      this.queryWarningsLoading = false;
+      this.queryWarningsError = '';
+      this.queryWarningsOpen = false;
+      this.queryView = 'data';
+      this.queryRecords = [];
+      this.queryTotal = 0;
+      this.queryPage = 1;
+      this.queryTotalPages = 1;
+      this.querySearch = '';
+      this.queryScope = 'all';
+      this.queryWarningFilter = null;
+      this.queryExpandedRowids = [];
+      this.queryLoading = false;
+      this.queryLoaded = false;
+      this.queryError = '';
+      this.queryRecordsLoading = false;
+      this.queryRecordsError = '';
+    },
+
     async loadQueryDbs() {
+      const token = ++this.queryDbListRequestToken;
       this.contentLoading = true;
+      this.queryDbListError = '';
       try {
         const data = await this.api('/api/content/queries');
+        if (token !== this.queryDbListRequestToken || this.contentSubdir !== 'queries') return;
         this.queryDbs = (data.files || []).map(f => f.name).filter(n => n.endsWith('.db')).map(n => n.slice(0, -3));
       } catch (err) {
+        if (token !== this.queryDbListRequestToken || this.contentSubdir !== 'queries') return;
         console?.warn('[DicePP] Failed to load query databases:', err);
         this.queryDbs = [];
+        this.queryDbListError = err.message || '无法读取数据库列表';
       } finally {
-        this.contentLoading = false;
+        if (token === this.queryDbListRequestToken) this.contentLoading = false;
       }
     },
 
-    async loadQueryTables() {
-      if (!this.selectedQueryDb) return;
+    async selectQueryDatabase() {
+      const database = this.selectedQueryDb;
+      const token = ++this.queryRequestToken;
+      this.queryRecordsRequestToken += 1;
+      this.queryWarningsRequestToken += 1;
+      this.queryStats = { total_rows: 0, valid_rows: 0, redirect_rows: 0, warning_count: 0 };
+      this.queryWarnings = [];
+      this.queryWarningsTotal = 0;
+      this.queryWarningsPage = 1;
+      this.queryWarningsTotalPages = 1;
+      this.queryWarningsError = '';
+      this.queryWarningsOpen = false;
+      this.queryView = 'data';
+      this.queryRecords = [];
+      this.queryTotal = 0;
+      this.queryPage = 1;
+      this.queryTotalPages = 1;
+      this.querySearch = '';
+      this.queryScope = 'all';
+      this.queryWarningFilter = null;
+      this.queryExpandedRowids = [];
+      this.queryLoaded = false;
+      this.queryError = '';
+      this.queryRecordsError = '';
+      if (!database) {
+        this.queryLoading = false;
+        return;
+      }
+
+      this.queryLoading = true;
       try {
-        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/tables`);
-        const raw = data.tables || [];
-        this.queryTables = raw.map(t => typeof t === 'string' ? {name: t, label: t} : t);
-        const names = this.queryTables.map(t => t.name);
-        this.selectedQueryTable = names.includes('data') ? 'data' : (names[0] || 'data');
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(database)}/audit`);
+        if (token !== this.queryRequestToken || database !== this.selectedQueryDb) return;
+        this.queryStats = {
+          total_rows: data.stats?.total_rows || 0,
+          valid_rows: data.stats?.valid_rows || 0,
+          redirect_rows: data.stats?.redirect_rows || 0,
+          warning_count: data.stats?.warning_count || 0,
+        };
+        await this.loadQueryWarnings(1, token);
+        if (token !== this.queryRequestToken || database !== this.selectedQueryDb) return;
+        await this.loadQueryRecords(1, token);
+        if (token !== this.queryRequestToken || database !== this.selectedQueryDb) return;
+        this.queryLoaded = true;
       } catch (err) {
-        console?.warn('[DicePP] Failed to load query tables:', err);
-        this.queryTables = [];
-        this.selectedQueryTable = 'data';
+        if (token !== this.queryRequestToken || database !== this.selectedQueryDb) return;
+        console?.warn('[DicePP] Failed to audit query database:', err);
+        this.queryError = err.message || '无法检查数据库';
+      }
+      finally {
+        if (token === this.queryRequestToken) this.queryLoading = false;
       }
     },
 
-    async loadQueryEntries(page) {
+    async loadQueryWarnings(page = 1, selectionToken = this.queryRequestToken) {
       if (!this.selectedQueryDb) return;
-      this.queryPage = page || 1;
-      this.contentLoading = true;
+      const warningsToken = ++this.queryWarningsRequestToken;
+      const database = this.selectedQueryDb;
+      const requestedPage = Math.max(1, page || 1);
+      const params = new URLSearchParams({
+        offset: String((requestedPage - 1) * this.queryWarningsLimit),
+        limit: String(this.queryWarningsLimit),
+      });
+
+      this.queryWarningsLoading = true;
+      this.queryWarningsError = '';
       try {
-        const limit = 100;
-        const offset = (this.queryPage - 1) * limit;
-        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/entries?offset=${offset}&limit=${limit}&table=${encodeURIComponent(this.selectedQueryTable)}`);
-        this.queryColumns = data.columns || [];
-        this.queryEntries = data.records || [];
-        this.queryTotalPages = Math.ceil((data.total || 0) / limit) || 1;
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(database)}/warnings?${params}`);
+        if (selectionToken !== this.queryRequestToken || warningsToken !== this.queryWarningsRequestToken || database !== this.selectedQueryDb) return;
+        this.queryWarnings = data.records || [];
+        this.queryWarningsTotal = data.total || 0;
+        this.queryWarningsPage = Math.floor((data.offset || 0) / (data.limit || this.queryWarningsLimit)) + 1;
+        this.queryWarningsTotalPages = Math.max(1, Math.ceil(this.queryWarningsTotal / (data.limit || this.queryWarningsLimit)));
       } catch (err) {
-        console?.warn('[DicePP] Failed to load query entries:', err);
-        this.queryColumns = [];
-        this.queryEntries = [];
+        if (selectionToken !== this.queryRequestToken || warningsToken !== this.queryWarningsRequestToken) return;
+        console?.warn('[DicePP] Failed to load query warnings:', err);
+        this.queryWarnings = [];
+        this.queryWarningsTotal = 0;
+        this.queryWarningsPage = requestedPage;
+        this.queryWarningsTotalPages = 1;
+        this.queryWarningsError = err.message || '无法读取问题列表';
+      } finally {
+        if (selectionToken === this.queryRequestToken && warningsToken === this.queryWarningsRequestToken) {
+          this.queryWarningsLoading = false;
+        }
+      }
+    },
+
+    async loadQueryRecords(page = 1, selectionToken = this.queryRequestToken) {
+      if (!this.selectedQueryDb) return;
+      const recordsToken = ++this.queryRecordsRequestToken;
+      const database = this.selectedQueryDb;
+      const view = this.queryView;
+      const requestedPage = Math.max(1, page || 1);
+      const params = new URLSearchParams({
+        offset: String((requestedPage - 1) * this.queryLimit),
+        limit: String(this.queryLimit),
+      });
+      const search = this.querySearch.trim();
+      if (search) params.set('q', search);
+      if (view === 'data') params.set('scope', this.queryScope);
+      const rowids = this.queryWarningFilter?.rowids || [];
+      if (rowids.length > 0) params.set('rowids', rowids.join(','));
+
+      this.queryRecordsLoading = true;
+      this.queryRecordsError = '';
+      this.queryExpandedRowids = [];
+      try {
+        const endpoint = view === 'data' ? 'entries' : 'redirects';
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(database)}/${endpoint}?${params}`);
+        if (selectionToken !== this.queryRequestToken || recordsToken !== this.queryRecordsRequestToken || database !== this.selectedQueryDb || view !== this.queryView) return;
+        this.queryRecords = data.records || [];
+        this.queryTotal = data.total || 0;
+        this.queryPage = Math.floor((data.offset || 0) / (data.limit || this.queryLimit)) + 1;
+        this.queryTotalPages = Math.max(1, Math.ceil(this.queryTotal / (data.limit || this.queryLimit)));
+      } catch (err) {
+        if (selectionToken !== this.queryRequestToken || recordsToken !== this.queryRecordsRequestToken) return;
+        console?.warn('[DicePP] Failed to load query records:', err);
+        this.queryRecords = [];
+        this.queryTotal = 0;
+        this.queryPage = requestedPage;
         this.queryTotalPages = 1;
+        this.queryRecordsError = err.message || '无法读取数据';
       } finally {
-        this.contentLoading = false;
+        if (selectionToken === this.queryRequestToken && recordsToken === this.queryRecordsRequestToken) {
+          this.queryRecordsLoading = false;
+        }
       }
+    },
+
+    searchQueryRecords() {
+      this.loadQueryRecords(1);
+    },
+
+    switchQueryView(view) {
+      if (view === this.queryView) return;
+      this.queryView = view;
+      this.queryWarningFilter = null;
+      this.queryExpandedRowids = [];
+      this.loadQueryRecords(1);
+    },
+
+    applyQueryWarning(warning) {
+      this.queryView = ['redirect', 'redirects'].includes(warning.view) ? 'redirects' : 'data';
+      this.queryWarningFilter = warning;
+      this.querySearch = '';
+      this.queryExpandedRowids = [];
+      this.queryWarningsOpen = false;
+      this.loadQueryRecords(1);
+    },
+
+    clearQueryWarning() {
+      this.queryWarningFilter = null;
+      this.loadQueryRecords(1);
+    },
+
+    toggleQueryEntry(rowid) {
+      this.queryExpandedRowids = this.queryExpandedRowids.includes(rowid)
+        ? this.queryExpandedRowids.filter(id => id !== rowid)
+        : [...this.queryExpandedRowids, rowid];
+    },
+
+    queryContentSummary(content) {
+      if (!content) return '（缺少内容）';
+      return String(content).replace(/\s+/g, ' ').trim();
+    },
+
+    queryStatCards() {
+      return [
+        { label: '总数据', value: this.queryStats.total_rows, color: 'text-gray-900' },
+        { label: '有效数据', value: this.queryStats.valid_rows, color: 'text-green-700' },
+        { label: '重定向', value: this.queryStats.redirect_rows, color: 'text-blue-700' },
+        { label: '警告', value: this.queryStats.warning_count, color: this.queryStats.warning_count > 0 ? 'text-amber-700' : 'text-green-700' },
+      ];
+    },
+
+    queryEmptyMessage() {
+      if (this.queryWarningFilter) return '这个问题没有匹配到可展示的数据行。';
+      if (this.querySearch.trim()) return '没有符合搜索条件的结果。';
+      if (this.queryView === 'data' && this.queryStats.total_rows === 0) return '这个数据库没有数据。';
+      if (this.queryView === 'redirects' && this.queryStats.redirect_rows === 0) return '这个数据库没有重定向数据。';
+      return '当前页没有数据。';
     },
 
     async viewFile(file) {
@@ -2581,12 +2918,6 @@ function app() {
         console?.warn('[DicePP] Failed to load file content:', err);
         this.viewingFileContent = '无法加载文件内容';
       }
-    },
-
-    async viewQueryEntry(entry) {
-      this.viewingFileName = `Entry #${entry.id}`;
-      this.viewingFileContent = JSON.stringify(entry, null, 2);
-      this.viewingFile = true;
     },
 
     // ── Manager ──

@@ -44,6 +44,12 @@ from .auth import (
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
 from .config import DashboardPaths
+from .query_audit import (
+    QueryAuditFormatError,
+    inspect_query_database,
+    list_query_entries,
+    list_query_redirects,
+)
 
 logger = logging.getLogger("dashboard")
 
@@ -78,6 +84,7 @@ app = FastAPI(title="DicePP Dashboard", version=get_version(), lifespan=lifespan
 _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_FAILURE_COOLDOWN_SECONDS = 30
 _LOGIN_FAILURE_STALE_SECONDS = 10 * 60
+_SQLITE_MAX_INT = 2**63 - 1
 
 
 # ── Exception handler ─────────────────────────────────────────────────────────
@@ -1823,82 +1830,135 @@ async def content_list(subdir: str, request: Request):
     return _ok({"files": files})
 
 
-@app.get("/api/content/queries/{db_name}/tables", dependencies=[Depends(require_auth)])
-async def content_queries_tables(db_name: str, request: Request):
-    """List tables in a query database."""
+def _query_database_path(db_name: str) -> Path:
+    """Resolve a validated query database name inside content/queries."""
     if not db_name or len(db_name) > 128 or db_name.endswith(".db"):
         _err("db_name 无效", 400)
-    if _is_path_traversal(db_name, DashboardPaths.CONTENT_DIR / "queries"):
-        _err("Path traversal detected", 400)
-
-    db_path = DashboardPaths.CONTENT_DIR / "queries" / f"{db_name}.db"
-    if not db_path.exists():
+    queries_dir = (DashboardPaths.CONTENT_DIR / "queries").resolve()
+    candidate = queries_dir / f"{db_name}.db"
+    try:
+        db_path = candidate.resolve(strict=True)
+    except FileNotFoundError:
         _err(f"Query database not found: {db_name}", 404)
+    try:
+        db_path.relative_to(queries_dir)
+    except ValueError:
+        _err("Path traversal detected", 400)
+    if not db_path.is_file():
+        _err(f"Query database is not a file: {db_name}", 400)
+    return db_path
+
+
+def _query_rowids(value: Optional[str]) -> Optional[list[int]]:
+    """Parse a bounded rowid filter supplied by a concrete audit warning."""
+    if value is None:
+        return None
+    if not value.strip():
+        return []
+    parts = value.split(",")
+    if len(parts) > 200:
+        _err("rowids 最多允许 200 项", 400)
+    try:
+        rowids = [int(part) for part in parts]
+    except ValueError:
+        _err("rowids 必须是用逗号分隔的正整数", 400)
+    if any(rowid <= 0 or rowid > _SQLITE_MAX_INT for rowid in rowids):
+        _err(f"rowids 必须是 1 到 {_SQLITE_MAX_INT} 之间的正整数", 400)
+    return list(dict.fromkeys(rowids))
+
+
+@app.get("/api/content/queries/{db_name}/audit", dependencies=[Depends(require_auth)])
+async def content_queries_audit(db_name: str, request: Request):
+    """Return summary statistics for a simple query database."""
+    db_path = _query_database_path(db_name)
 
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            table_names = [
-                row[0] for row in
-                conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
-            ]
-        tables = [{"name": t, "label": TABLE_LABELS.get(t, t)} for t in table_names]
-        return _ok({"tables": tables})
-    except sqlite3.OperationalError as e:
-        _err(f"Database error: {e}", 500)
+        result = inspect_query_database(db_path)
+        return _ok({"stats": result["stats"]})
+    except QueryAuditFormatError as exc:
+        _err(str(exc), 422)
+    except sqlite3.DatabaseError as e:
+        _err(f"数据库读取失败：{e}。请确认文件是有效且未损坏的 SQLite 查询库。", 500)
+
+
+@app.get("/api/content/queries/{db_name}/warnings", dependencies=[Depends(require_auth)])
+async def content_queries_warnings(
+    db_name: str,
+    request: Request,
+    offset: int = Query(0, ge=0, le=_SQLITE_MAX_INT),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Return concrete audit warnings without clustering them."""
+    db_path = _query_database_path(db_name)
+    try:
+        warnings = inspect_query_database(db_path)["warnings"]
+        return _ok({
+            "records": warnings[offset:offset + limit],
+            "total": len(warnings),
+            "offset": offset,
+            "limit": limit,
+        })
+    except QueryAuditFormatError as exc:
+        _err(str(exc), 422)
+    except sqlite3.DatabaseError as e:
+        _err(f"数据库读取失败：{e}。请确认文件是有效且未损坏的 SQLite 查询库。", 500)
 
 
 @app.get("/api/content/queries/{db_name}/entries", dependencies=[Depends(require_auth)])
 async def content_queries_entries(
     db_name: str,
     request: Request,
-    table: str = Query("data"),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=_SQLITE_MAX_INT),
+    limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = Query(None),
+    scope: str = Query("all"),
+    rowids: Optional[str] = Query(None),
 ):
-    """Paginated entries from content/queries/{db_name}.db."""
-    if not db_name or len(db_name) > 128 or db_name.endswith(".db"):
-        _err("db_name 无效", 400)
-    if _is_path_traversal(db_name, DashboardPaths.CONTENT_DIR / "queries"):
-        _err("Path traversal detected", 400)
-
-    db_path = DashboardPaths.CONTENT_DIR / "queries" / f"{db_name}.db"
-    if not db_path.exists():
-        _err(f"Query database not found: {db_name}", 404)
+    """Return a semantic, filtered page of simple query data."""
+    db_path = _query_database_path(db_name)
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-
-        # Validate table exists
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table,),
+        return _ok(
+            list_query_entries(
+                db_path,
+                offset=offset,
+                limit=limit,
+                query=q,
+                scope=scope,
+                rowids=_query_rowids(rowids),
+            )
         )
-        if not cursor.fetchone():
-            conn.close()
-            _err(f"Table '{table}' not found", 404)
+    except QueryAuditFormatError as exc:
+        _err(str(exc), 422)
+    except sqlite3.DatabaseError as e:
+        _err(f"数据库读取失败：{e}。请确认文件是有效且未损坏的 SQLite 查询库。", 500)
 
-        safe_table = table.replace('"', '""')
-        count_cursor = conn.execute(f'SELECT COUNT(*) FROM "{safe_table}"')
-        total = count_cursor.fetchone()[0]
 
-        cursor = conn.execute(
-            f'SELECT rowid, * FROM "{safe_table}" ORDER BY rowid LIMIT ? OFFSET ?',
-            (limit, offset),
+@app.get("/api/content/queries/{db_name}/redirects", dependencies=[Depends(require_auth)])
+async def content_queries_redirects(
+    db_name: str,
+    request: Request,
+    offset: int = Query(0, ge=0, le=_SQLITE_MAX_INT),
+    limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = Query(None),
+    rowids: Optional[str] = Query(None),
+):
+    """Return a semantic, filtered page of optional query redirects."""
+    db_path = _query_database_path(db_name)
+    try:
+        return _ok(
+            list_query_redirects(
+                db_path,
+                offset=offset,
+                limit=limit,
+                query=q,
+                rowids=_query_rowids(rowids),
+            )
         )
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
-        records = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-
-        return _ok({
-            "columns": columns,
-            "records": records,
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-        })
-    except sqlite3.OperationalError as e:
-        _err(f"Database error: {e}", 500)
+    except QueryAuditFormatError as exc:
+        _err(str(exc), 422)
+    except sqlite3.DatabaseError as e:
+        _err(f"数据库读取失败：{e}。请确认文件是有效且未损坏的 SQLite 查询库。", 500)
 
 
 @app.get("/api/content/{subdir}/{name:path}", dependencies=[Depends(require_auth)])

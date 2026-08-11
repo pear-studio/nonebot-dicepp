@@ -95,9 +95,31 @@ def build_dashboard_project(
         str(project_root / "content" / "queries" / "test_queries.db")
     )
     try:
-        connection.execute("CREATE TABLE IF NOT EXISTS data (id INTEGER, text TEXT)")
-        connection.execute("INSERT INTO data VALUES (1, 'entry1')")
-        connection.execute("INSERT INTO data VALUES (2, 'entry2')")
+        connection.execute(
+            "CREATE TABLE data (名称 TEXT, 英文 TEXT, 来源 TEXT, 分类 TEXT, 标签 TEXT, 内容 TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO data VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("火球术", "Fireball", "PHB", "法术", "火焰", "造成 8d6 火焰伤害。"),
+                ("火球术", "Fireball", "PHB", "法术", "火焰", "旧版造成 6d6 火焰伤害。"),
+                ("火球术", "Fireball", "PHB", "法术变体", "火焰", "分类不同的火球术。"),
+                ("火球术", "Fireball", "XGE", "法术", "火焰", "火球术的来源变体。"),
+                ("护盾术", "Shield", "PHB", "法术", "防护", "获得 AC 加值。"),
+                ("", "Orphan", "TEST", "", "", "没有名称的内容。"),
+                ("无内容词条", "Empty", "TEST", "", "", ""),
+            ],
+        )
+        connection.execute("CREATE TABLE redirect (名称 TEXT, 重定向 TEXT)")
+        connection.executemany(
+            "INSERT INTO redirect VALUES (?, ?)",
+            [
+                ("火球", "火球术"),
+                ("火球", "护盾术"),
+                ("失效别名", "不存在的词条"),
+                ("", "火球术"),
+            ],
+        )
         connection.commit()
     finally:
         connection.close()
