@@ -14,7 +14,7 @@ async def _list_databases_handler(parsed: BaseModel, ctx: ToolExecutionContext) 
 
 LIST_QUERY_DATABASES_TOOL = ToolSpec(
     name="list_query_databases",
-    description="列出所有可搜索的规则资料库，包括库名、条目数、主要分类等",
+    description="列出所有已启用且可搜索的规则资料库，包括库名和条目数",
     args_schema=_ListDatabasesArgs,
     handler=_list_databases_handler,
 )
@@ -46,7 +46,7 @@ def build_list_databases_tool(query, resolve_db, user_id="", group_id="") -> Too
 
     return ToolSpec(
         name="list_query_databases",
-        description="列出所有可搜索的规则资料库，包括库名、条目数、主要分类等",
+        description="列出所有已启用且可搜索的规则资料库，包括库名和条目数",
         args_schema=_ListDatabasesArgs,
         handler=handler,
     )

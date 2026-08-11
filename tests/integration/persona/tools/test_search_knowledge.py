@@ -56,7 +56,7 @@ async def test_search_knowledge_summary_mode(query_store):
     item = data["results"][0]
     assert item["name"] == "火球术"
     assert item["source"] == "PHB"
-    assert item["catalogue"] == "法术"
+    assert "catalogue" not in item
     assert len(item["snippet"]) <= 153
     assert "content" not in item
 
@@ -97,6 +97,16 @@ async def test_search_knowledge_empty_keyword(query_store):
     observation = await _execute(_tool(store, db_name), keyword="# &")
 
     assert "关键词" in observation
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_rejects_old_filter_syntax(query_store):
+    store, make_db = query_store
+    db_name = await make_db("SQOLD")
+
+    observation = await _execute(_tool(store, db_name), query="#法师")
+
+    assert observation == "查询格式错误。"
 
 
 @pytest.mark.asyncio
@@ -154,3 +164,4 @@ def test_tool_spec_format():
     assert SEARCH_KNOWLEDGE_TOOL.description
     properties = SEARCH_KNOWLEDGE_TOOL.args_schema.model_json_schema()["properties"]
     assert {"keyword", "query", "detail_index"}.issubset(properties)
+    assert {"tags", "category", "source"}.isdisjoint(properties)

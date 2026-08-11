@@ -1,9 +1,18 @@
 import os
 import re
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiosqlite
+
+from dicepp_data import (
+    QUERY_DATA_REQUIRED_FIELDS,
+    QUERY_REDIRECT_FIELDS,
+    QueryDatabaseState,
+    QueryDatabaseStateError,
+    load_query_database_state,
+    query_database_state_path,
+)
 
 from plugins.DicePP.core.config.basic import Paths
 from plugins.DicePP.utils import col_based_workbook_to_dict, create_parent_dir, read_xlsx
@@ -64,6 +73,23 @@ class QueryStore:
     def __init__(self, base_dir: Optional[str] = None):
         self._base_dir = base_dir or str(Paths.CONTENT_QUERIES_DIR)
         self._conns: Dict[str, aiosqlite.Connection] = {}
+        self._paths: Dict[str, str] = {}
+        self._state_cache: Dict[str, Tuple[Optional[Tuple[int, int]], QueryDatabaseState]] = {}
+
+    def _database_state(self, directory: Path) -> QueryDatabaseState:
+        state_path = query_database_state_path(directory)
+        try:
+            stat = state_path.stat()
+            signature: Optional[Tuple[int, int]] = (stat.st_mtime_ns, stat.st_size)
+        except FileNotFoundError:
+            signature = None
+        cache_key = str(directory.resolve())
+        cached = self._state_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        state = load_query_database_state(directory)
+        self._state_cache[cache_key] = (signature, state)
+        return state
 
     def _db_name_from_path(self, path: str) -> str:
         # 约定：xxx.db -> xxx
@@ -97,6 +123,7 @@ class QueryStore:
                 await conn.execute("PRAGMA journal_mode=WAL;")
                 await conn.create_function("regexp", 2, regexp)
                 self._conns[db_name] = conn
+                self._paths[db_name] = os.path.abspath(path)
             except PermissionError:
                 error_info.append(f"读取{path}时遇到错误: 权限不足")
             return "\n".join(error_info)
@@ -120,9 +147,35 @@ class QueryStore:
         return "\n".join(error_info)
 
     def has_database(self, db_name: str) -> bool:
+        if db_name not in self._conns:
+            return False
+        path = self._paths.get(db_name)
+        if path is None:
+            return True
+        try:
+            return self._database_state(Path(path).parent).is_enabled(db_name)
+        except QueryDatabaseStateError:
+            return False
+
+    def is_database_loaded(self, db_name: str) -> bool:
         return db_name in self._conns
 
+    def is_database_disabled(self, db_name: str) -> bool:
+        if db_name not in self._conns:
+            return False
+        path = self._paths.get(db_name)
+        if path is None:
+            return False
+        try:
+            return not self._database_state(Path(path).parent).is_enabled(db_name)
+        except QueryDatabaseStateError:
+            return True
+
     def list_databases(self) -> List[str]:
+        return [name for name in self._conns if self.has_database(name)]
+
+    def list_all_databases(self) -> List[str]:
+        """Return loaded databases including those disabled by the administrator."""
         return list(self._conns.keys())
 
     async def disconnect_database(self, db_name: str) -> None:
@@ -131,6 +184,7 @@ class QueryStore:
             return
         await conn.close()
         del self._conns[db_name]
+        self._paths.pop(db_name, None)
 
     async def close_all(self) -> None:
         for db_name in list(self._conns.keys()):
@@ -167,7 +221,34 @@ class QueryStore:
         conn = self._conns.get(db_name)
         if conn is None:
             raise RuntimeError(f"query database not loaded: {db_name}")
+        path = self._paths.get(db_name)
+        if path is not None:
+            try:
+                enabled = self._database_state(Path(path).parent).is_enabled(db_name)
+            except QueryDatabaseStateError as exc:
+                raise QueryStoreError(str(exc)) from exc
+            if not enabled:
+                raise QueryStoreError(f"查询数据库未启用: {db_name}")
         return conn
+
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        return '"' + identifier.replace('"', '""') + '"'
+
+    async def _table_columns(self, db_name: str, table: str) -> Set[str]:
+        rows = await self.fetchall(
+            db_name,
+            f"PRAGMA table_info({self._quote_identifier(table)})",
+        )
+        return {str(row[1]) for row in rows}
+
+    async def _table_exists(self, db_name: str, table: str) -> bool:
+        row = await self.fetchone(
+            db_name,
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        return row is not None
 
     async def execute(
         self,
@@ -382,42 +463,6 @@ class QueryStore:
         return f"{prefix} regexp ?", [pattern]
 
     @staticmethod
-    def _generate_search_sql_in(
-        command_list: List[str],
-        prefix: str = "来源",
-    ) -> Tuple[str, List[str]]:
-        words: List[str] = []
-        anti_words: List[str] = []
-        for command in command_list:
-            if command.startswith("-") and len(command) > 1:
-                anti_words.append(command[1:])
-            elif command.startswith("=") and len(command) > 1:
-                words.append(command[1:])
-            elif len(command) > 0:
-                words.append(command)
-
-        clauses: List[str] = []
-        params: List[str] = []
-
-        if words:
-            placeholders = ",".join(["?"] * len(words))
-            clauses.append(f"{prefix} in ({placeholders})")
-            params.extend(words)
-
-        if anti_words:
-            placeholders = ",".join(["?"] * len(anti_words))
-            clauses.append(f"{prefix} not in ({placeholders})")
-            params.extend(anti_words)
-
-        if not clauses:
-            return "1=0", []
-
-        if len(clauses) == 1:
-            return clauses[0], params
-
-        return f"({clauses[0]} OR {clauses[1]})", params
-
-    @staticmethod
     def _generate_search_conditions(
         condition_list: Dict[tuple, List[List[str]]],
     ) -> Tuple[str, List[Any]]:
@@ -435,13 +480,8 @@ class QueryStore:
             if "全部" in key_list:
                 for command in cmd_groups:
                     sql_part, part_params = QueryStore._generate_search_sql_regexp(
-                        command, "名称||英文||来源||分类||标签||内容"
+                        command, "名称||英文||来源||内容"
                     )
-                    key_sql_parts.append(sql_part)
-                    key_params.extend(part_params)
-            elif key_list == ("分类",):
-                for command in cmd_groups:
-                    sql_part, part_params = QueryStore._generate_search_sql_in(command, "分类")
                     key_sql_parts.append(sql_part)
                     key_params.extend(part_params)
             else:
@@ -466,9 +506,28 @@ class QueryStore:
         limit: int,
         offset: int,
     ) -> List[Dict[str, str]]:
-        """在单个数据库中执行搜索，返回 dict 列表（含 redirect 解析与去重）。"""
-        sql_search_command_prefix: str = "Select * From data Where "
-        sql_redirect_command_prefix: str = "Select * From redirect Where "
+        """Search one database through the four-field logical contract."""
+        data_columns = await self._table_columns(db_name, "data")
+        missing = [name for name in QUERY_DATA_REQUIRED_FIELDS if name not in data_columns]
+        if missing:
+            raise QueryStoreError(f"data 表缺少必要列: {'、'.join(missing)}")
+
+        def text_column(name: str) -> str:
+            if name not in data_columns:
+                return "''"
+            return f"COALESCE(CAST({self._quote_identifier(name)} AS TEXT), '')"
+
+        data_source = (
+            "(SELECT rowid AS _rowid, "
+            f"{text_column('名称')} AS 名称, "
+            f"{text_column('英文')} AS 英文, "
+            f"{text_column('来源')} AS 来源, "
+            f"{text_column('内容')} AS 内容 FROM data)"
+        )
+        sql_search_command_prefix = (
+            "SELECT 名称, 英文, 来源, '' AS 分类, '' AS 标签, 内容 "
+            f"FROM {data_source} WHERE "
+        )
 
         condition_list: Dict[tuple, List[List[str]]] = {}
         complete_name: str = ""
@@ -476,16 +535,12 @@ class QueryStore:
         can_single_query: bool = True
 
         for query_command in query_tokens:
+            if not query_command:
+                continue
             cmd_target = ["名称", "英文"]
-            if query_command[0] == "#":
-                cmd_target = ["来源", "分类", "标签"]
-                query_command = query_command[1:]
-                can_single_query = False
-            elif query_command[0] == "&":
-                cmd_target = ["分类"]
-                query_command = query_command[1:]
-                can_single_query = False
-            elif fulltext:
+            if query_command[0] in "#&":
+                raise QueryStoreError("查询格式错误。")
+            if fulltext:
                 cmd_target = ["全部"]
                 can_single_query = False
 
@@ -514,14 +569,51 @@ class QueryStore:
         for key_list in condition_list.keys():
             condition_size += len(condition_list[key_list])
         if condition_size == 0:
-            return []
+            raise QueryStoreError("查询格式错误。")
+
+        # An exact direct name/English match wins before the bounded fuzzy
+        # query so a large number of earlier partial matches cannot hide it.
+        if can_single_query and (complete_name or complete_name_en):
+            exact_parts: List[str] = []
+            exact_params: List[str] = []
+            if complete_name:
+                exact_parts.append("名称 = ?")
+                exact_params.append(complete_name)
+            if complete_name_en:
+                exact_parts.append("英文 = ? COLLATE NOCASE")
+                exact_params.append(complete_name_en)
+            exact_rows = await self.fetchall(
+                db_name,
+                sql_search_command_prefix
+                + "(" + " OR ".join(exact_parts) + ")"
+                + f" ORDER BY _rowid LIMIT {limit}",
+                exact_params,
+            )
+            if exact_rows:
+                exact_results: List[Dict[str, str]] = []
+                exact_seen: Set[Tuple[str, str]] = set()
+                for row in exact_rows:
+                    identity = (str(row[0]).strip(), str(row[2]).strip())
+                    if identity in exact_seen:
+                        continue
+                    exact_seen.add(identity)
+                    exact_results.append({
+                        "name": row[0], "name_en": row[1], "source": row[2],
+                        "catalogue": row[3], "tag": row[4], "content": row[5],
+                        "redirect_by": "",
+                    })
+                return exact_results[offset:offset + limit]
 
         # 主查询（SQL 层 LIMIT 减少 I/O）
         sql_condition, params = self._generate_search_conditions(condition_list)
+        if not sql_condition:
+            raise QueryStoreError("查询格式错误。")
         sql_limit = limit * 2  # 预留余量给 redirect 追加结果
         rows = await self.fetchall(
             db_name,
-            sql_search_command_prefix + sql_condition + f" LIMIT {sql_limit}",
+            sql_search_command_prefix
+            + sql_condition
+            + f" ORDER BY _rowid LIMIT {sql_limit}",
             params,
         )
         results: List[Dict[str, str]] = []
@@ -532,37 +624,42 @@ class QueryStore:
                 "redirect_by": "",
             })
 
-        # 处理重定向
+        # Optional redirects use the same deterministic physical-row ordering.
         redirect_condition_list: Dict[tuple, List[List[str]]] = {
-            ("名称",): []
-        }
-        sql_condition_list: Dict[tuple, List[List[str]]] = {
             ("名称",): []
         }
         for key_list in condition_list.keys():
             if "全部" in key_list or "名称" in key_list:
                 redirect_condition_list[("名称",)] += condition_list[key_list]
-            else:
-                sql_condition_list[key_list] = condition_list[key_list]
 
-        if len(redirect_condition_list[("名称",)]) != 0:
+        redirect_available = await self._table_exists(db_name, "redirect")
+        if redirect_available:
+            redirect_columns = await self._table_columns(db_name, "redirect")
+            redirect_available = all(name in redirect_columns for name in QUERY_REDIRECT_FIELDS)
+
+        if redirect_available and len(redirect_condition_list[("名称",)]) != 0:
             redirect_result: List[List[str]] = []
             sql_condition, params = self._generate_search_conditions(redirect_condition_list)
             redirect_rows = await self.fetchall(
                 db_name,
-                sql_redirect_command_prefix + sql_condition,
+                "SELECT 名称, 重定向 FROM redirect WHERE "
+                + sql_condition
+                + " ORDER BY rowid",
                 params,
             )
+            seen_redirects: Set[str] = set()
             for _data in redirect_rows:
-                redirect_result.append([_data[0], _data[1]])
+                alias = str(_data[0] or "")
+                if not alias or alias in seen_redirects:
+                    continue
+                seen_redirects.add(alias)
+                redirect_result.append([alias, str(_data[1] or "")])
 
             for _redirect in redirect_result:
-                sql_condition_list[("名称",)] = [[_redirect[1]]]
-                sql_condition, params = self._generate_search_conditions(sql_condition_list)
                 redirected_rows = await self.fetchall(
                     db_name,
-                    sql_search_command_prefix + sql_condition,
-                    params,
+                    sql_search_command_prefix + "名称 = ? ORDER BY _rowid",
+                    (_redirect[1],),
                 )
                 for _data in redirected_rows:
                     results.append({
@@ -572,31 +669,31 @@ class QueryStore:
                     })
 
         # 去重 + 精确匹配优先
-        dupe_list: Set[str] = set()
+        dupe_list: Set[Tuple[str, str]] = set()
         new_results: List[Dict[str, str]] = []
         found_equal: bool = False
         for r in results:
-            hash_word = r["name"] + "#" + r["source"] + "#" + r["catalogue"]
+            identity = (r["name"].strip(), r["source"].strip())
             if can_single_query:
                 if complete_name != "" and r["name"] == complete_name:
                     if not found_equal:
                         dupe_list.clear()
                         new_results.clear()
                     found_equal = True
-                    if hash_word not in dupe_list:
-                        dupe_list.add(hash_word)
+                    if identity not in dupe_list:
+                        dupe_list.add(identity)
                         new_results.append(r)
-                elif complete_name_en != "" and r["name"].lower() == complete_name_en:
+                elif complete_name_en != "" and r["name_en"].lower() == complete_name_en.lower():
                     if not found_equal:
                         dupe_list.clear()
                         new_results.clear()
                     found_equal = True
-                    if hash_word not in dupe_list:
-                        dupe_list.add(hash_word)
+                    if identity not in dupe_list:
+                        dupe_list.add(identity)
                         new_results.append(r)
             if not found_equal:
-                if hash_word not in dupe_list:
-                    dupe_list.add(hash_word)
+                if identity not in dupe_list:
+                    dupe_list.add(identity)
                     new_results.append(r)
 
         return new_results[offset:offset + limit]
@@ -657,7 +754,5 @@ class QueryStore:
             return None
         row = await self.fetchone(db_name, "SELECT COUNT(*) FROM data")
         rows = row[0] if row else 0
-        cat_rows = await self.fetchall(db_name, "SELECT DISTINCT 分类 FROM data")
-        categories = [r[0] for r in cat_rows if r[0]]
-        return {"name": db_name, "rows": rows, "categories": categories}
+        return {"name": db_name, "rows": rows}
 

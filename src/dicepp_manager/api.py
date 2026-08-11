@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
@@ -16,6 +17,12 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from dicepp_data import (
+    QueryDatabaseStateError,
+    is_query_database_name,
+    load_query_database_state,
+    set_query_database_enabled,
+)
 from dicepp_meta import get_version
 
 from .archive import (
@@ -38,6 +45,12 @@ from .config_validation import (
 )
 from .factory import create_manager_service
 from .models import ManagerAction, VALID_ACTIONS
+from .query_database import (
+    QueryDatabaseCoordinator,
+    QueryDatabaseNormalizationError,
+    prepare_query_database_candidate,
+    query_normalization_report_detail,
+)
 from .release import ReleaseError, ReleaseManager
 from .upgrade import (
     UnsupportedUpgradeAdapter,
@@ -49,6 +62,7 @@ from .upgrade import (
 )
 from .runtime import RuntimeOperationUnsupported
 from .maintenance import MaintenanceConflict
+from .maintenance_runtime import MaintenanceRuntimeSupport
 from .service import (
     MaintenanceReservation,
     ManagerService,
@@ -117,6 +131,23 @@ def _write_managed_config(path: Path, payload: dict) -> None:
         raise
 
 
+def _query_database_path(settings: ManagerSettings, database: str) -> Path:
+    if not is_query_database_name(database):
+        raise HTTPException(status_code=400, detail="Invalid query database name")
+    directory = (settings.layout.content_dir / "queries").resolve()
+    candidate = directory / f"{database}.db"
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(directory)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Query database not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Query database escapes content directory") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=400, detail="Query database is not a file")
+    return resolved
+
+
 def create_manager_app(
     settings: ManagerSettings,
     *,
@@ -147,6 +178,21 @@ def create_manager_app(
         # health gate must still inspect the Manager-owned session service.
         manager_service.archive_coordinator.control_probe = control_service.probe
     archive_coordinator = manager_service.archive_coordinator
+    runtime_support = manager_service.maintenance_runtime_support
+    if runtime_support is None:
+        runtime_support = getattr(archive_coordinator, "runtime_support", None)
+    if runtime_support is None:
+        runtime_support = MaintenanceRuntimeSupport(
+            layout=settings.layout,
+            service=manager_service,
+            control_probe=control_service.probe,
+        )
+        manager_service.maintenance_runtime_support = runtime_support
+    query_database_coordinator = QueryDatabaseCoordinator(
+        layout=settings.layout,
+        service=manager_service,
+        runtime_support=runtime_support,
+    )
     if manager_service.release_manager is None:
         manager_service.release_manager = ReleaseManager(
             layout=settings.layout,
@@ -274,6 +320,7 @@ def create_manager_app(
     app.state.critical_operation_tasks = critical_tasks
     app.state.release_tasks = release_tasks
     app.state.control_service = control_service
+    app.state.query_database_coordinator = query_database_coordinator
 
     manager_bearer = HTTPBearer(
         auto_error=False,
@@ -450,6 +497,37 @@ def create_manager_app(
                 detail={
                     "error": "unexpected_archive_restore_failure",
                     "target_filename": filename,
+                },
+            )
+            manager_service.store.save(manager_operation)
+        finally:
+            maintenance_lease.release()
+
+    async def finish_query_database_normalize(
+        manager_operation,
+        database: str,
+        source: Path,
+        maintenance_lease: MaintenanceReservation,
+    ) -> None:
+        try:
+            await await_critical_transaction(
+                query_database_coordinator.normalize(
+                    manager_operation,
+                    database=database,
+                    source=source,
+                    maintenance_lease=maintenance_lease,
+                )
+            )
+        except QueryDatabaseNormalizationError:
+            return
+        except Exception as exc:
+            manager_operation.transition(
+                "failed",
+                message=str(exc) or type(exc).__name__,
+                detail={
+                    "database": database,
+                    "stage": "unexpected",
+                    "error": str(exc) or type(exc).__name__,
                 },
             )
             manager_service.store.save(manager_operation)
@@ -663,6 +741,112 @@ def create_manager_app(
             "application": "deferred",
             "restart_required": True,
         }
+
+    @app.get("/v1/content/query-databases", dependencies=auth)
+    async def query_databases_list():
+        directory = settings.layout.content_dir / "queries"
+        try:
+            state = load_query_database_state(directory)
+        except QueryDatabaseStateError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        databases = []
+        if directory.exists():
+            for path in sorted(directory.glob("*.db"), key=lambda item: item.name.casefold()):
+                try:
+                    resolved = _query_database_path(settings, path.stem)
+                except HTTPException:
+                    continue
+                stat = resolved.stat()
+                databases.append({
+                    "name": path.stem,
+                    "enabled": state.is_enabled(path.stem),
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                })
+        return {"ok": True, "databases": databases}
+
+    @app.put("/v1/content/query-databases/{database}/enabled", dependencies=auth)
+    async def query_database_enabled(database: str, request: Request):
+        _query_database_path(settings, database)
+        body = await _json_body(request)
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            raise HTTPException(status_code=400, detail="enabled must be a boolean")
+        try:
+            with manager_service.maintenance():
+                state = set_query_database_enabled(
+                    settings.layout.content_dir / "queries",
+                    database,
+                    enabled,
+                )
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        except QueryDatabaseStateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "database": database,
+            "enabled": state.is_enabled(database),
+            "application": "immediate",
+            "restart_required": False,
+        }
+
+    @app.post(
+        "/v1/content/query-databases/{database}/normalize/dry-run",
+        dependencies=auth,
+    )
+    async def query_database_normalize_dry_run(database: str):
+        """Build and validate a disposable candidate without changing the source."""
+        source = _query_database_path(settings, database)
+        candidate = source.with_name(
+            f".{source.name}.{uuid4().hex}.dry-run.tmp"
+        )
+        try:
+            report = await asyncio.to_thread(
+                prepare_query_database_candidate,
+                source,
+                candidate,
+            )
+        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"数据库无法自动修复：{exc}",
+            ) from exc
+        finally:
+            candidate.unlink(missing_ok=True)
+        detail = query_normalization_report_detail(report)
+        return {
+            "ok": True,
+            "database": database,
+            "requires_confirmation": True,
+            "report": detail,
+        }
+
+    @app.post(
+        "/v1/content/query-databases/{database}/normalize",
+        dependencies=auth,
+        status_code=202,
+    )
+    async def query_database_normalize(database: str):
+        source = _query_database_path(settings, database)
+        try:
+            maintenance_lease = manager_service.reserve_maintenance()
+        except MaintenanceConflict as exc:
+            return _maintenance_conflict_response(exc)
+        try:
+            manager_operation = query_database_coordinator.new_operation()
+            track_critical_task(
+                finish_query_database_normalize(
+                    manager_operation,
+                    database,
+                    source,
+                    maintenance_lease,
+                )
+            )
+        except BaseException:
+            maintenance_lease.release()
+            raise
+        return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.get("/v1/archives", dependencies=auth)
     async def archives_list():

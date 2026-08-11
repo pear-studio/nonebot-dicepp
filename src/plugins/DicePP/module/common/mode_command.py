@@ -74,6 +74,14 @@ class ModeCommand(UserCommandBase):
         # 大写模式名到原始模式名映射，减少重复遍历
         self.mode_upper_map: Dict[str, str] = {}
 
+    def _mode_is_available(self, mode_name: str) -> bool:
+        values = self.mode_dict.get(mode_name, [])
+        database = values[1] if len(values) > 1 else ""
+        return not database or not self.bot.db.query.is_database_disabled(database)
+
+    def _available_mode_names(self) -> List[str]:
+        return [name for name in self.mode_dict if self._mode_is_available(name)]
+
     def delay_init(self) -> List[str]:
         bot_id: str = self.bot.account
         init_info: List[str] = []
@@ -193,7 +201,10 @@ class ModeCommand(UserCommandBase):
                 database = config.data.get("query_database", self.bot.config.query.private_database) if config else ""
 
             current_text = self.bot.loc_helper.format_loc_text(LOC_MODE_CURRENT, new_mode=stored_mode, dice=dice, database=database)
-            list_text = self.bot.loc_helper.format_loc_text(LOC_MODE_LIST, modes="、".join(self.mode_dict.keys()))
+            list_text = self.bot.loc_helper.format_loc_text(
+                LOC_MODE_LIST,
+                modes="、".join(self._available_mode_names()),
+            )
             feedback = current_text + "\n" + list_text
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -255,7 +266,7 @@ class ModeCommand(UserCommandBase):
         feedback = ""
         # 尝试精准匹配预定义模式
         exact_key = self.mode_upper_map.get(mode)
-        if exact_key is not None:
+        if exact_key is not None and self._mode_is_available(exact_key):
             await update_group_config(target_id, self.mode_field, [
                                 exact_key]+self.mode_dict[exact_key], is_private_inner=is_private)
             feedback = self.bot.loc_helper.format_loc_text(
@@ -265,6 +276,8 @@ class ModeCommand(UserCommandBase):
         if not matched:
             result: List[str] = []
             for key in self.mode_dict.keys():
+                if not self._mode_is_available(key):
+                    continue
                 ukey = key.upper()
                 if mode in ukey:
                     result.append(ukey)
@@ -303,7 +316,10 @@ class ModeCommand(UserCommandBase):
             else:
                 # 没有找到任何匹配
                 feedback = self.bot.loc_helper.format_loc_text(
-                    LOC_MODE_NOT_EXIST) + self.bot.loc_helper.format_loc_text(LOC_MODE_LIST, modes="、".join(self.mode_dict.keys()))
+                    LOC_MODE_NOT_EXIST) + self.bot.loc_helper.format_loc_text(
+                        LOC_MODE_LIST,
+                        modes="、".join(self._available_mode_names()),
+                    )
 
         return feedback
 

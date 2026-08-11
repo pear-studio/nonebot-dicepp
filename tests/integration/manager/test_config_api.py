@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,14 @@ def _auth() -> dict[str, str]:
     return {"Authorization": "Bearer manager-secret"}
 
 
+def _query_database(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("CREATE TABLE data (名称 TEXT, 内容 TEXT)")
+        connection.execute("INSERT INTO data VALUES ('规则', '正文')")
+        connection.commit()
+
+
 def test_config_get_routes_return_documents_and_missing_bot_is_404(tmp_path: Path) -> None:
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_user.parent.mkdir(parents=True)
@@ -64,6 +74,81 @@ def test_config_get_routes_return_documents_and_missing_bot_is_404(tmp_path: Pat
     assert bot.json() == {"ok": True, "config": {"master": ["owner"]}}
     assert missing.status_code == 404
     assert missing.json()["message"] == "Bot configuration not found"
+
+
+def test_query_database_normalize_route_runs_as_durable_operation(tmp_path: Path) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    source = layout.content_dir / "queries" / "rules.db"
+    _query_database(source)
+    app = _app(layout)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/content/query-databases/rules/normalize",
+            headers=_auth(),
+        )
+        operation_id = response.json()["operation"]["operation_id"]
+
+    operation = app.state.manager_service.get_operation(operation_id)
+    assert response.status_code == 202
+    assert operation is not None
+    assert operation.status == "succeeded"
+    assert operation.detail["backup_database"] == "rules_backup"
+    assert source.with_name("rules_backup.db").exists()
+
+
+def test_query_database_normalize_dry_run_reports_effects_without_writing(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    source = layout.content_dir / "queries" / "rules.db"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(source)) as connection:
+        connection.execute("CREATE TABLE data (名称 TEXT, 来源 TEXT, 内容 TEXT)")
+        connection.executemany(
+            "INSERT INTO data VALUES (?, ?, ?)",
+            [("规则", "TEST", "第一行"), ("规则", "TEST", "冲突的第二行")],
+        )
+        connection.commit()
+    before = source.read_bytes()
+
+    with TestClient(_app(layout)) as client:
+        response = client.post(
+            "/v1/content/query-databases/rules/normalize/dry-run",
+            headers=_auth(),
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["requires_confirmation"] is True
+    assert payload["report"]["counts"]["data_duplicates"] == 1
+    assert payload["report"]["issues"][0]["code"] == "duplicate_content_conflict"
+    assert payload["report"]["issues"][0]["subject"] == "规则"
+    assert source.read_bytes() == before
+    assert not source.with_name("rules_backup.db").exists()
+
+
+def test_clean_query_database_dry_run_still_requires_confirmation(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    source = layout.content_dir / "queries" / "rules.db"
+    _query_database(source)
+
+    with TestClient(_app(layout)) as client:
+        response = client.post(
+            "/v1/content/query-databases/rules/normalize/dry-run",
+            headers=_auth(),
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["requires_confirmation"] is True
+    assert payload["report"]["impact_counts"] == {
+        "deletion": 0,
+        "behavior_change": 0,
+    }
+    assert payload["report"]["issues"] == []
 
 
 def test_invalid_update_is_rejected_without_replacing_user_document(tmp_path: Path) -> None:
@@ -236,6 +321,56 @@ def test_valid_config_save_reports_deferred_application(tmp_path: Path) -> None:
     assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
         "update": {"check_interval_hours": 12.0}
     }
+
+
+def test_query_database_enablement_is_manager_owned_and_defaults_enabled(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    queries = layout.content_dir / "queries"
+    queries.mkdir(parents=True)
+    (queries / "rules.db").write_bytes(b"database-placeholder")
+
+    with TestClient(_app(layout)) as client:
+        listed = client.get("/v1/content/query-databases", headers=_auth())
+        disabled = client.put(
+            "/v1/content/query-databases/rules/enabled",
+            headers=_auth(),
+            json={"enabled": False},
+        )
+        listed_after = client.get("/v1/content/query-databases", headers=_auth())
+
+    assert listed.json()["databases"][0]["enabled"] is True
+    assert disabled.json() == {
+        "ok": True,
+        "database": "rules",
+        "enabled": False,
+        "application": "immediate",
+        "restart_required": False,
+    }
+    assert listed_after.json()["databases"][0]["enabled"] is False
+    state = json.loads((queries / ".dicepp-query-databases.json").read_text("utf-8"))
+    assert state == {"version": 1, "disabled": ["rules"]}
+
+
+def test_query_database_enablement_rejects_unknown_or_unsafe_names(tmp_path: Path) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    (layout.content_dir / "queries").mkdir(parents=True)
+
+    with TestClient(_app(layout)) as client:
+        missing = client.put(
+            "/v1/content/query-databases/missing/enabled",
+            headers=_auth(),
+            json={"enabled": False},
+        )
+        unsafe = client.put(
+            "/v1/content/query-databases/..%2Fsecret/enabled",
+            headers=_auth(),
+            json={"enabled": False},
+        )
+
+    assert missing.status_code == 404
+    assert unsafe.status_code == 404
 
 
 def test_validator_uses_the_runtime_canonical_bot_config_model() -> None:

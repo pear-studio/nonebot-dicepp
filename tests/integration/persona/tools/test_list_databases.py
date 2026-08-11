@@ -51,9 +51,7 @@ class TestListDatabases:
 
         assert data["default"] == db_name
         found = [d for d in data["databases"] if d["name"] == db_name]
-        assert len(found) == 1
-        assert found[0]["rows"] == 1
-        assert "法术" in found[0]["categories"]
+        assert found == [{"name": db_name, "rows": 1}]
 
     @pytest.mark.asyncio
     async def test_list_databases_query_unavailable(self):
@@ -119,12 +117,10 @@ class TestListDatabases:
         data = await _execute(tool)
 
         found = [d for d in data["databases"] if d["name"] == db_name]
-        assert len(found) == 1
-        assert found[0]["rows"] == 0
-        assert found[0]["categories"] == []
+        assert found == [{"name": db_name, "rows": 0}]
 
     @pytest.mark.asyncio
-    async def test_categories_empty_and_filled(self, query_store):
+    async def test_categories_are_not_exposed(self, query_store):
         store, make_db = query_store
         db_name = await make_db("CATEGORYDB")
         await store.execute(
@@ -147,9 +143,7 @@ class TestListDatabases:
         data = await _execute(tool)
 
         found = [d for d in data["databases"] if d["name"] == db_name]
-        assert len(found) == 1
-        assert found[0]["rows"] == 2
-        assert found[0]["categories"] == ["魔法"]
+        assert found == [{"name": db_name, "rows": 2}]
 
     @pytest.mark.asyncio
     async def test_return_format_stability(self, query_store):
@@ -170,10 +164,9 @@ class TestListDatabases:
 
         assert set(data.keys()) == {"databases", "default"}
         db_info = data["databases"][0]
-        assert set(db_info.keys()) == {"name", "rows", "categories"}
+        assert set(db_info.keys()) == {"name", "rows"}
         assert db_info["name"] == db_name
         assert isinstance(db_info["rows"], int)
-        assert isinstance(db_info["categories"], list)
 
 
 class TestListDatabasesToolSpec:

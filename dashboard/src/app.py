@@ -19,7 +19,11 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from dicepp_data import PERSONA_DB_ASSET
+from dicepp_data import (
+    PERSONA_DB_ASSET,
+    QueryDatabaseStateError,
+    load_query_database_state,
+)
 from dicepp_manager.archive import MAX_ARCHIVE_BYTES
 from dicepp_manager.client import (
     ManagerClient,
@@ -43,6 +47,7 @@ from .auth import (
 )
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
+from .audit import log_once as audit_log_once
 from .config import DashboardPaths
 from .query_audit import (
     QueryAuditFormatError,
@@ -1658,6 +1663,50 @@ def _audit_manager_operation(request: Request, operation: dict, status_code: int
         ip=request.client.host if request.client else "",
     )
 
+
+def _audit_query_normalization_result(request: Request, operation: dict) -> None:
+    """Persist one terminal query-normalization result in Dashboard audit history."""
+    if operation.get("action") != "query.normalize":
+        return
+    if operation.get("status") not in {"succeeded", "failed", "cancelled"}:
+        return
+    operation_detail = operation.get("detail")
+    database = (
+        operation_detail.get("database", "")
+        if isinstance(operation_detail, dict)
+        else ""
+    )
+    detail = json.dumps(
+        {
+            "operation_id": operation.get("operation_id", ""),
+            "status": operation.get("status", ""),
+            "message": operation.get("message", ""),
+            "detail": operation_detail if isinstance(operation_detail, dict) else {},
+        },
+        ensure_ascii=False,
+    )
+    operation_finished_at = operation.get("finished_at") or operation.get("updated_at")
+    operation_ts = None
+    if isinstance(operation_finished_at, str):
+        try:
+            finished_at = datetime.fromisoformat(
+                operation_finished_at.replace("Z", "+00:00")
+            )
+            if finished_at.tzinfo is None:
+                finished_at = finished_at.replace(tzinfo=timezone.utc)
+            operation_ts = finished_at.timestamp()
+        except ValueError:
+            pass
+    audit_log_once(
+        request.app.state.dashboard_db,
+        "content.query.normalize.result",
+        str(database),
+        detail,
+        ip=request.client.host if request.client else "",
+        ts=operation_ts,
+    )
+
+
 @app.get("/api/manager/status", dependencies=[Depends(require_auth)])
 async def manager_status(request: Request):
     """Return RuntimeUnits, or an explicit unsupported/unavailable state."""
@@ -1768,6 +1817,7 @@ async def manager_operation(operation_id: str, request: Request):
         operation = await _get_manager_client(request).get_operation(operation_id)
     except ManagerClientError as exc:
         _err(str(exc), exc.status_code)
+    _audit_query_normalization_result(request, operation)
     return _ok({"operation": operation})
 
 
@@ -1815,17 +1865,27 @@ async def content_list(subdir: str, request: Request):
     if not content_dir.exists():
         return _ok({"files": []})
 
+    query_state = None
+    if subdir == "queries":
+        try:
+            query_state = load_query_database_state(content_dir)
+        except QueryDatabaseStateError as exc:
+            _err(str(exc), 500)
+
     files = []
     for f in sorted(content_dir.iterdir()):
         if f.name.startswith('.'):
             continue
         if f.is_file():
             stat = f.stat()
-            files.append({
+            item = {
                 "name": f.name,
                 "size": stat.st_size,
                 "modified": stat.st_mtime,
-            })
+            }
+            if query_state is not None and f.suffix == ".db":
+                item["enabled"] = query_state.is_enabled(f.stem)
+            files.append(item)
 
     return _ok({"files": files})
 
@@ -1865,6 +1925,75 @@ def _query_rowids(value: Optional[str]) -> Optional[list[int]]:
     if any(rowid <= 0 or rowid > _SQLITE_MAX_INT for rowid in rowids):
         _err(f"rowids 必须是 1 到 {_SQLITE_MAX_INT} 之间的正整数", 400)
     return list(dict.fromkeys(rowids))
+
+
+@app.post("/api/content/queries/{db_name}/enabled", dependencies=[Depends(require_auth)])
+async def content_queries_enabled(db_name: str, request: Request):
+    """Enable or disable one query database without changing Bot config."""
+    _query_database_path(db_name)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+        _err("enabled 必须是布尔值", 400)
+    try:
+        result = await _get_manager_client(request).set_query_database_enabled(
+            db_name,
+            body["enabled"],
+        )
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
+    enabled = bool(result.get("enabled"))
+    audit_log(
+        request.app.state.dashboard_db,
+        "content.query.enable" if enabled else "content.query.disable",
+        db_name,
+        "",
+        ip=request.client.host if request.client else "",
+    )
+    return _ok({"database": db_name, "enabled": enabled})
+
+
+@app.post(
+    "/api/content/queries/{db_name}/normalize/dry-run",
+    dependencies=[Depends(require_auth)],
+)
+async def content_queries_normalize_dry_run(db_name: str, request: Request):
+    """Preview repair effects without changing the database or runtime."""
+    _query_database_path(db_name)
+    try:
+        result = await _get_manager_client(
+            request
+        ).dry_run_query_database_normalization(db_name)
+    except ManagerClientError as exc:
+        audit_log(
+            request.app.state.dashboard_db,
+            "content.query.normalize.dry_run",
+            db_name,
+            json.dumps(
+                {"status": "failed", "message": str(exc)},
+                ensure_ascii=False,
+            ),
+            ip=request.client.host if request.client else "",
+        )
+        return _manager_error_response(exc)
+    return _ok(result)
+
+
+@app.post("/api/content/queries/{db_name}/normalize", dependencies=[Depends(require_auth)])
+async def content_queries_normalize(db_name: str, request: Request):
+    """Start the Manager-owned one-click query database normalization."""
+    _query_database_path(db_name)
+    try:
+        operation = await _get_manager_client(request).normalize_query_database(db_name)
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
+    audit_log(
+        request.app.state.dashboard_db,
+        "content.query.normalize.start",
+        db_name,
+        str(operation.get("operation_id", "")),
+        ip=request.client.host if request.client else "",
+    )
+    return _ok({"operation": operation})
 
 
 @app.get("/api/content/queries/{db_name}/audit", dependencies=[Depends(require_auth)])
@@ -2002,7 +2131,16 @@ async def content_read(subdir: str, name: str, request: Request):
 
 @app.get("/api/audit", dependencies=[Depends(require_auth)])
 async def audit_list(request: Request, limit: int = Query(200, ge=1, le=1000)):
-    """Return recent audit entries, ordered by id DESC."""
+    """Return recent audit entries, ordered by their actual event time."""
+    try:
+        operations = await _get_manager_client(request).list_operations(
+            min(limit, 200)
+        )
+    except (AttributeError, ManagerClientError):
+        operations = []
+    for operation in operations:
+        if isinstance(operation, dict):
+            _audit_query_normalization_result(request, operation)
     db_path = request.app.state.dashboard_db
     entries = audit_get_recent(db_path, limit)
     return _ok({"entries": entries})

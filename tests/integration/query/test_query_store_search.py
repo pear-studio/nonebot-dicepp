@@ -1,5 +1,7 @@
 import pytest
 
+from plugins.DicePP.core.data.query_store import QueryStoreError
+
 @pytest.mark.asyncio
 async def test_search_basic_keyword(fresh_bot, query_db):
     """QueryStore.search() — 基本关键词搜索"""
@@ -77,6 +79,12 @@ async def test_search_redirect_resolution(fresh_bot, query_db):
         ("火球术", "Fireball", "PHB", "法术", "塑能", "完整内容"),
         commit=True,
     )
+    await bot.db.query.execute(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        ("强效火球术", "Greater Fireball", "TEST", "法术", "塑能", "不应被别名命中"),
+        commit=True,
+    )
     # 别名与真实名称不重叠，确保只有 redirect 能命中
     await bot.db.query.execute(
         db_name,
@@ -96,7 +104,7 @@ async def test_search_redirect_resolution(fresh_bot, query_db):
 
 @pytest.mark.asyncio
 async def test_search_dedup(fresh_bot, query_db):
-    """QueryStore.search() — 去重（hash_word 相同只保留一条）"""
+    """QueryStore.search() — 同名同来源只保留第一条。"""
     bot, _proxy = fresh_bot
     db_name = await query_db("SEARCHDEDUP")
 
@@ -106,7 +114,7 @@ async def test_search_dedup(fresh_bot, query_db):
         ("火球术", "Fireball", "PHB", "法术", "塑能", "内容A"),
         commit=True,
     )
-    # 同名+同来源+同分类 = 同 hash_word
+    # 分类和标签不参与身份判断，后续同名同来源内容会被隐藏。
     await bot.db.query.execute(
         db_name,
         "INSERT INTO data VALUES(?,?,?,?,?,?)",
@@ -119,6 +127,57 @@ async def test_search_dedup(fresh_bot, query_db):
         query_tokens=["火球术"],
     )
     assert len(result["results"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_dedup_identity_is_a_tuple_not_a_joined_string(fresh_bot, query_db):
+    bot, _proxy = fresh_bot
+    db_name = await query_db("SEARCHIDENTITY")
+    await bot.db.query.executemany(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        [
+            ("a#b", "", "c", "", "", "first"),
+            ("a", "", "b#c", "", "", "second"),
+        ],
+        commit=True,
+    )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["a"],
+        fulltext=True,
+    )
+
+    assert [(row["name"], row["source"]) for row in result["results"]] == [
+        ("a#b", "c"),
+        ("a", "b#c"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exact_name_wins_beyond_fuzzy_result_limit(fresh_bot, query_db):
+    bot, _proxy = fresh_bot
+    db_name = await query_db("SEARCHEXACTLATE")
+    await bot.db.query.executemany(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        [
+            (f"目标词条变体{i}", "", f"SRC{i}", "", "", f"content {i}")
+            for i in range(2002)
+        ]
+        + [("目标词条", "", "EXACT", "", "", "exact content")],
+        commit=True,
+    )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["目标词条"],
+        max_total=1000,
+    )
+
+    assert result["total"] == 1
+    assert result["results"][0]["source"] == "EXACT"
 
 
 @pytest.mark.asyncio
@@ -165,10 +224,7 @@ async def test_get_database_info(fresh_bot, query_db):
     )
 
     info = await bot.db.query.get_database_info(db_name)
-    assert info["name"] == db_name
-    assert info["rows"] == 2
-    assert "法术" in info["categories"]
-    assert "武器" in info["categories"]
+    assert info == {"name": db_name, "rows": 2}
 
     # 未加载库返回 None
     assert await bot.db.query.get_database_info("NONEXIST") is None
@@ -187,8 +243,8 @@ async def test_search_empty_tokens(fresh_bot):
 
 
 @pytest.mark.asyncio
-async def test_search_tag_prefix(fresh_bot, query_db):
-    """QueryStore.search() — #标签前缀过滤"""
+async def test_search_tag_prefix_is_rejected(fresh_bot, query_db):
+    """QueryStore.search() — # 不再作为标签/来源筛选语法。"""
     bot, _proxy = fresh_bot
     db_name = await query_db("TAGTEST")
 
@@ -205,18 +261,13 @@ async def test_search_tag_prefix(fresh_bot, query_db):
         commit=True,
     )
 
-    # #塑能 应只命中火球术
-    result = await bot.db.query.search(
-        databases=[db_name],
-        query_tokens=["#塑能"],
-    )
-    assert len(result["results"]) == 1
-    assert result["results"][0]["name"] == "火球术"
+    with pytest.raises(QueryStoreError, match="查询格式错误"):
+        await bot.db.query.search(databases=[db_name], query_tokens=["#塑能"])
 
 
 @pytest.mark.asyncio
-async def test_search_category_prefix(fresh_bot, query_db):
-    """QueryStore.search() — &分类前缀过滤"""
+async def test_search_category_prefix_is_rejected(fresh_bot, query_db):
+    """QueryStore.search() — & 不再作为分类筛选语法。"""
     bot, _proxy = fresh_bot
     db_name = await query_db("CATTEST")
 
@@ -233,13 +284,8 @@ async def test_search_category_prefix(fresh_bot, query_db):
         commit=True,
     )
 
-    # &法术 应只命中火球术
-    result = await bot.db.query.search(
-        databases=[db_name],
-        query_tokens=["&法术"],
-    )
-    assert len(result["results"]) == 1
-    assert result["results"][0]["name"] == "火球术"
+    with pytest.raises(QueryStoreError, match="查询格式错误"):
+        await bot.db.query.search(databases=[db_name], query_tokens=["&法术"])
 
 
 @pytest.mark.asyncio

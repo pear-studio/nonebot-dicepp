@@ -85,10 +85,22 @@ class MaintenanceRuntimeSupport:
         maintenance: MaintenanceSession,
         *,
         state_callback: Callable[[list[str]], None] | None = None,
+        require_known: bool = False,
     ) -> tuple[list[str], list[str]]:
         units = self.service.units()
         ids = [unit.runtime_unit_id for unit in units]
         statuses = await self.service.runtime_adapter.status(ids)
+        if require_known:
+            unknown = [
+                unit_id
+                for unit_id in ids
+                if statuses.get(unit_id) is None
+                or statuses[unit_id].runtime_state == "unknown"
+            ]
+            if unknown:
+                raise ArchiveError(
+                    "无法确认并安全停止 RuntimeUnit：" + "、".join(unknown)
+                )
         original_running = [
             unit_id
             for unit_id, status in statuses.items()

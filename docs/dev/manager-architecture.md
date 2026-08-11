@@ -6,13 +6,13 @@
 
 ## 职责边界
 
-Manager 是 DicePP 标准 Windows 与 Linux 部署的一部分，负责实例运行单元、维护事务、归档和兼容更新。Dashboard 是经过用户鉴权的界面与 Manager API 代理；它不直接控制 Docker 或子进程，不直接读写归档文件或执行数据恢复，但仍负责用户驱动的配置编辑、自身本地状态，以及受限的 Persona 角色卡编辑。Bot 只负责 NoneBot 与一个或多个 QQ 账号的业务运行。
+Manager 是 DicePP 标准 Windows 与 Linux 部署的一部分，负责实例运行单元、维护事务、查询数据库规范、归档和兼容更新。Dashboard 是经过用户鉴权的界面与 Manager API 代理；它不直接控制 Docker 或子进程，不直接读写归档文件或执行数据恢复，但仍负责用户驱动的配置编辑、自身本地状态，以及受限的 Persona 角色卡编辑。Bot 只负责 NoneBot 与一个或多个 QQ 账号的业务运行。
 
 没有 Manager 的旧部署不再是受支持拓扑。Dashboard 无法连接 Manager 时会报告不可用，不会退回到直接操作 Docker、子进程或 ZIP 文件。
 
 | 组件 | 负责 | 不负责 |
 |---|---|---|
-| Manager | RuntimeUnit 生命周期、维护锁、持久 operation、归档/恢复事务、兼容更新 | Dashboard 用户界面、机器人业务逻辑 |
+| Manager | RuntimeUnit 生命周期、维护锁、持久 operation、查询库启停与规范、归档/恢复事务、兼容更新 | Dashboard 用户界面、机器人业务逻辑 |
 | Dashboard | 用户鉴权、状态展示、提交和查询 Manager operation、受限的 Persona 角色卡编辑 | Docker/子进程控制、归档文件写入、通用内容写入 |
 | Bot Runtime | QQ Bot 业务与到 Manager 的本地控制心跳 | 自身部署生命周期 |
 
@@ -54,7 +54,15 @@ Bot、Dashboard 与 Manager 通过同一 `InstanceLayout` 解析实例根目录�
 
 ### 用户内容
 
-`content/` 是同一实例用户的工作区，而非 Manager 的独占写入区。Bot 读取实例内容；认证后的 Dashboard 仅可通过类型受限的 Persona 角色卡路由直接编辑 `content/characters/`，同机 Agent 也可直接编辑内容文件。Dashboard 不提供通用内容写入 API，也不经 Manager 代理这些写入。启动、升级和恢复不会从程序 `templates/` 静默复制、合并或覆盖内容。随发布提供的 `templates/characters/default/` 是只读模板，只有用户通过显式新建或导入操作后才会进入 `content/`。配置的实例外绝对内容路径可以继续使用，但不会被归档；恢复预览会给出警告。
+`content/` 是同一实例用户的工作区，而非 Manager 的独占写入区。Bot 读取实例内容；认证后的 Dashboard 仅可通过类型受限的 Persona 角色卡路由直接编辑 `content/characters/`，同机 Agent 也可直接编辑内容文件。Dashboard 不提供通用内容写入 API。查询数据库启停状态和规范操作是例外：Dashboard 只展示、审查和代理请求，Manager 在维护锁下写入 `content/queries/`。启动、升级和恢复不会从程序 `templates/` 静默复制、合并或覆盖内容。随发布提供的 `templates/characters/default/` 是只读模板，只有用户通过显式新建或导入操作后才会进入 `content/`。配置的实例外绝对内容路径可以继续使用，但不会被归档；恢复预览会给出警告。
+
+### 查询数据库维护
+
+查询数据库以 `content/queries/*.db` 为文件边界，未出现在 `.dicepp-query-databases.json` 的数据库默认启用。Bot、Dashboard 与 Manager 共享按列名识别的四个逻辑字段 `名称、英文、来源、内容`；`名称、内容` 必需，其他额外列不参与运行时查询。每个数据库可独立启停，停用不会改写 Bot 配置，运行时在下一次查询时立即生效。
+
+Dashboard 只在查询问题列表中提供“一键修复”。点击后先调用 dry run；无论是否发现问题，都固定用一次性弹窗把删除项、行为变化以及备份/替换/重启等固定操作分开展示，等待管理员继续或取消。成功预检不写审计，避免反复打开弹窗堆积记录；预检失败会长期保留。确认后提交 `query.normalize` 持久 operation：Manager 先在同目录生成并完整性校验临时数据库，再获取实例维护锁、记录并停止原本运行的全部 RuntimeUnit、完成原库 WAL 检查点、把原库复制为首个可用的 `*_backup.db` 并将备份标记为停用，然后用原子替换让规范后的数据库继承原文件名，最后只启动原本运行的单元。规范后的 `data` 表只写四个逻辑字段；备份是此后可独立启停的普通数据库。
+
+该操作刻意不实现数据库回滚：失败的 dry run、正式修复提交和最终 operation 进入 Dashboard 审计日志；备份、替换或重启失败时，operation 记录明确的失败阶段、错误和规范报告，Dashboard 用一次性弹窗提示并允许复制日志供人工或 Agent 处理。替换前失败不会覆盖原库；替换后失败也不会自动把备份换回。这样避免在 Windows 文件占用或 Runtime 启动异常时继续执行更多隐式文件改名。
 
 ## RuntimeUnit 与 Manager API
 

@@ -1,12 +1,69 @@
 """Tests for the ``/api/content/**`` content-management endpoints."""
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from dicepp_manager.client import ManagerClientError
 from tests.support.dashboard.app import setup_auth
 from tests.support.fs_utils import symlink_or_skip
+
+
+class _NormalizeManagerClient:
+    def __init__(self) -> None:
+        self.databases: list[str] = []
+        self.dry_runs: list[str] = []
+        self.operations: list[dict] = []
+
+    async def normalize_query_database(self, database: str) -> dict:
+        self.databases.append(database)
+        return {
+            "operation_id": "normalize-1",
+            "status": "queued",
+            "action": "query.normalize",
+        }
+
+    async def dry_run_query_database_normalization(self, database: str) -> dict:
+        self.dry_runs.append(database)
+        return {
+            "database": database,
+            "requires_confirmation": True,
+            "report": {
+                "counts": {"data_duplicates": 1},
+                "issues": [
+                    {
+                        "code": "duplicate_content_conflict",
+                        "table": "data",
+                        "rowid": 2,
+                        "line_number": None,
+                        "subject": "规则",
+                        "impact": "deletion",
+                        "message": "同名且同来源的第 2 行会被删除。",
+                        "related_rowids": [1],
+                    }
+                ],
+                "issues_omitted": 0,
+            },
+        }
+
+    async def get_operation(self, operation_id: str) -> dict:
+        return {
+            "operation_id": operation_id,
+            "status": "succeeded",
+            "action": "query.normalize",
+            "message": "数据库规范完成",
+            "detail": {"database": "test_queries", "stage": "completed"},
+        }
+
+    async def list_operations(self, _limit: int = 50) -> list[dict]:
+        return self.operations
+
+
+class _FailingNormalizeManagerClient(_NormalizeManagerClient):
+    async def dry_run_query_database_normalization(self, database: str) -> dict:
+        raise ManagerClientError("数据库预检失败", status_code=422)
 
 
 class TestListDecks:
@@ -95,6 +152,115 @@ class TestPathTraversal:
 
 
 class TestQueryDbEntries:
+    def test_normalize_is_delegated_to_manager(self, test_client: TestClient):
+        setup_auth(test_client)
+        manager = _NormalizeManagerClient()
+        test_client.app.state.manager_client = manager
+
+        response = test_client.post(
+            "/api/content/queries/test_queries/normalize"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["operation"]["operation_id"] == "normalize-1"
+        assert manager.databases == ["test_queries"]
+
+    def test_successful_normalize_dry_run_does_not_fill_audit_history(
+        self,
+        test_client: TestClient,
+    ) -> None:
+        setup_auth(test_client)
+        manager = _NormalizeManagerClient()
+        test_client.app.state.manager_client = manager
+
+        response = test_client.post(
+            "/api/content/queries/test_queries/normalize/dry-run"
+        )
+        audit = test_client.get("/api/audit").json()["entries"]
+
+        assert response.status_code == 200
+        assert response.json()["requires_confirmation"] is True
+        assert manager.dry_runs == ["test_queries"]
+        assert not any(
+            row["action"] == "content.query.normalize.dry_run"
+            for row in audit
+        )
+
+    def test_failed_normalize_dry_run_is_kept_in_audit_history(
+        self,
+        test_client: TestClient,
+    ) -> None:
+        setup_auth(test_client)
+        test_client.app.state.manager_client = _FailingNormalizeManagerClient()
+
+        response = test_client.post(
+            "/api/content/queries/test_queries/normalize/dry-run"
+        )
+        audit = test_client.get("/api/audit").json()["entries"]
+        failure = next(
+            row
+            for row in audit
+            if row["action"] == "content.query.normalize.dry_run"
+        )
+
+        assert response.status_code == 422
+        assert failure["target"] == "test_queries"
+        assert "数据库预检失败" in failure["detail"]
+
+    def test_terminal_normalize_result_is_audited_once(
+        self,
+        test_client: TestClient,
+    ) -> None:
+        setup_auth(test_client)
+        test_client.app.state.manager_client = _NormalizeManagerClient()
+
+        first = test_client.get("/api/manager/operations/normalize-1")
+        second = test_client.get("/api/manager/operations/normalize-1")
+        audit = test_client.get("/api/audit").json()["entries"]
+        results = [
+            row for row in audit
+            if row["action"] == "content.query.normalize.result"
+        ]
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert len(results) == 1
+        assert results[0]["target"] == "test_queries"
+
+    def test_audit_page_recovers_terminal_normalize_result_from_manager(
+        self,
+        test_client: TestClient,
+    ) -> None:
+        setup_auth(test_client)
+        manager = _NormalizeManagerClient()
+        manager.operations = [
+            {
+                "operation_id": "normalize-after-navigation",
+                "status": "failed",
+                "action": "query.normalize",
+                "finished_at": "2026-08-11T07:50:00+00:00",
+                "message": "启动机器人运行环境失败",
+                "detail": {
+                    "database": "test_queries",
+                    "stage": "restart_runtime",
+                },
+            }
+        ]
+        test_client.app.state.manager_client = manager
+
+        audit = test_client.get("/api/audit").json()["entries"]
+        recovered = [
+            row for row in audit
+            if row["action"] == "content.query.normalize.result"
+        ]
+
+        assert len(recovered) == 1
+        assert "normalize-after-navigation" in recovered[0]["detail"]
+        assert recovered[0]["ts"] == datetime.fromisoformat(
+            "2026-08-11T07:50:00+00:00"
+        ).timestamp()
+        assert audit.index(recovered[0]) > 0
+
     def test_query_db_entries(self, test_client: TestClient):
         """The data endpoint exposes only the four simple-format fields."""
         setup_auth(test_client)
@@ -247,8 +413,8 @@ class TestQueryDbAudit:
         }
         conflict = next(w for w in warnings if w["kind"] == "duplicate_content")
         assert conflict["rowids"] == [1, 2, 3]
-        assert "当前机器人仍会读取分类" in conflict["message"]
-        assert "简易格式启用后不再读取分类" in conflict["message"]
+        assert "机器人只会使用最前面的第 1 行" in conflict["message"]
+        assert "后续内容会被隐藏" in conflict["message"]
         assert "请合并内容" in conflict["message"]
 
         ambiguous = next(w for w in warnings if w["kind"] == "ambiguous_name")
@@ -258,8 +424,9 @@ class TestQueryDbAudit:
         duplicate_redirect = next(
             w for w in warnings if w["kind"] == "duplicate_redirect"
         )
-        assert "当前机器人查询这个别名时可能返回多个不同目标" in duplicate_redirect["message"]
-        assert "简易格式启用后只会使用第 1 行" in duplicate_redirect["message"]
+        assert "当前机器人只会使用最前面的第 1 行" in duplicate_redirect["message"]
+        assert "后续目标会被隐藏" in duplicate_redirect["message"]
+        assert "规范数据库后也只会保留第 1 行" in duplicate_redirect["message"]
 
     def test_warnings_are_paginated_without_clustering(self, test_client: TestClient):
         setup_auth(test_client)
@@ -276,6 +443,29 @@ class TestQueryDbAudit:
         assert {item["id"] for item in first["records"]}.isdisjoint(
             item["id"] for item in second["records"]
         )
+
+    def test_identical_duplicate_rows_are_reported_as_hidden_data(
+        self, test_client: TestClient
+    ):
+        from dashboard.src.config import DashboardPaths
+
+        db_path = DashboardPaths.CONTENT_DIR / "queries" / "duplicate.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("CREATE TABLE data (名称 TEXT, 来源 TEXT, 内容 TEXT)")
+            conn.executemany(
+                "INSERT INTO data VALUES (?, ?, ?)",
+                [("相同词条", "TEST", "相同内容"), ("相同词条", "TEST", "相同内容")],
+            )
+
+        setup_auth(test_client)
+        response = test_client.get("/api/content/queries/duplicate/warnings")
+
+        assert response.status_code == 200
+        warning = response.json()["records"][0]
+        assert warning["title"] == "“相同词条”有重复数据"
+        assert warning["rowids"] == [1, 2]
+        assert "后续内容会被隐藏" in warning["message"]
+        assert "请删除重复行" in warning["message"]
 
     def test_missing_required_column_reports_effect_and_fix(
         self, test_client: TestClient

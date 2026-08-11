@@ -66,6 +66,51 @@ class TestQueryStoreConnect:
         assert store.has_database("b") is True
 
     @pytest.mark.asyncio
+    async def test_disabled_database_is_hidden_and_blocked_immediately(
+        self, tmp_path, query_store
+    ):
+        from dicepp_data import set_query_database_enabled
+        from plugins.DicePP.core.data.query_store import QueryStoreError
+
+        db_path = str(tmp_path / "rules.db")
+        await _create_test_db(db_path, [("火球术", "", "PHB", "", "", "内容")])
+        await query_store.connect_path(db_path)
+
+        set_query_database_enabled(tmp_path, "rules", False)
+
+        assert query_store.is_database_loaded("rules") is True
+        assert query_store.is_database_disabled("rules") is True
+        assert query_store.has_database("rules") is False
+        assert "rules" not in query_store.list_databases()
+        with pytest.raises(QueryStoreError, match="未加载"):
+            await query_store.search(["rules"], ["火球术"])
+
+        set_query_database_enabled(tmp_path, "rules", True)
+        assert query_store.has_database("rules") is True
+
+    @pytest.mark.asyncio
+    async def test_four_field_database_is_searchable(self, tmp_path, query_store):
+        db_path = tmp_path / "four.db"
+        conn = await aiosqlite.connect(db_path)
+        await conn.execute("CREATE TABLE data (名称 TEXT, 英文 TEXT, 来源 TEXT, 内容 TEXT)")
+        await conn.execute("INSERT INTO data VALUES ('火球术', 'Fireball', 'PHB', '8d6')")
+        await conn.commit()
+        await conn.close()
+
+        await query_store.connect_path(str(db_path))
+        result = await query_store.search(["four"], ["火球术"])
+
+        assert result["results"] == [{
+            "name": "火球术",
+            "name_en": "Fireball",
+            "source": "PHB",
+            "catalogue": "",
+            "tag": "",
+            "content": "8d6",
+            "redirect_by": "",
+        }]
+
+    @pytest.mark.asyncio
     async def test_connect_directory_skips_journal(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         await _create_test_db(db_path, [])

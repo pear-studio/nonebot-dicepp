@@ -26,13 +26,14 @@ LOC_QUERY_MULTI_RESULT_ITEM = "query_multi_result_item"
 LOC_QUERY_MULTI_RESULT_PAGE = "query_multi_result_page"
 LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW = "query_multi_result_page_underflow"
 LOC_QUERY_MULTI_RESULT_PAGE_OVERFLOW = "query_multi_result_page_overflow"
-LOC_QUERY_MULTI_RESULT_CATALOGUE = "query_multi_result_catalogue"
 LOC_QUERY_NO_RESULT = "query_no_result"
 LOC_QUERY_TOO_MUCH_RESULT = "query_too_much_result"
 LOC_QUERY_KEY_NUM_EXCEED = "query_key_num_exceed"
 LOC_QUERY_CELL_BOOK = "query_cell_book"
 LOC_QUERY_CELL_REDIRECT = "query_cell_redirect"
 LOC_QUERY_READ_ONLY = "query_read_only"
+LOC_QUERY_INVALID_FORMAT = "query_invalid_format"
+LOC_QUERY_OUTDATED_CONTENT = "query_outdated_content"
 
 CFG_QUERY_ENABLE = "query_enable"
 CFG_QUERY_DATA_PATH = "query_data_path"
@@ -42,7 +43,6 @@ QUERY_ITEM_FIELD_DESC_DEFAULT_LEN = 20  # 默认用前多少个字符作为默�
 QUERY_SPLIT_LINE_LEN = 20  # 默认如何分割过长查询文本
 
 MAX_QUERY_KEY_NUM = 5  # 最多能同时用多少个查询关键字
-MAX_QUERY_CANDIDATE_NUM = 10  # 详细查询时一页最多能同时展示多少个条目
 MAX_QUERY_CANDIDATE_SIMPLE_NUM = 30  # 简略查询时一页最多能同时展示多少个条目
 MAX_QUERY_ITEM_NUM = 1000  # 最多能查询多少条目
 RECORD_RESPONSE_TIME = 60  # 至多响应多久以前的查询指令, 多余的将被清理, 单位为秒
@@ -52,7 +52,6 @@ class QueryData:
     def __init__(self,data_str: List[str],redirect_by: str = "",database: str = "DND5E"):
         """单条被查询的数据"""
         self.original_data = data_str
-        self.hash_word = self.original_data[0]+"#"+self.original_data[2]+"#"+self.original_data[3]
         self.redirect_by = redirect_by
         self.database = database
 
@@ -60,8 +59,6 @@ class QueryData:
         self.data_name = self.original_data[0]
         self.data_name_en = self.original_data[1]
         self.data_from = self.original_data[2]
-        self.data_catalogue = self.original_data[3]
-        self.data_tag = self.original_data[4]
         self.data_content = self.original_data[5]
         # 处理显示数据
         self.display_name = self.data_name if len(self.data_name) > 0 else self.data_name_en
@@ -81,8 +78,6 @@ class QueryRecord:
         self.time = time  # 更新时间
         self.length = length  # 长度
         self.page = 1  # 当前的页数
-        self.mode = 0  # 0代表仅显示名称, 1代表显示名称和简单描述
-        self.filter_mode = 0  # 0代表直接显示, 1代表分类显示
 
     
     def process_data(self):
@@ -125,42 +120,15 @@ class QueryRecord:
         for _dupe in dupe_dict.values():
             if len(_dupe) > 1:
                 for _index in _dupe:
-                    self.data[_index].display_name = self.data[_index].data_name + "(" + self.data[_index].data_from+self.data[_index].data_catalogue + ")"
+                    self.data[_index].display_name = (
+                        self.data[_index].data_name
+                        + "("
+                        + self.data[_index].data_from
+                        + ")"
+                    )
         # WIP 当父关键词出现的时候不显示子关键词
         #name_list: list = [_data[0] for _data in self.data]
         #unique_dict
-
-    def create_catalogue_list(self):
-        self.catalogue_list = {}  # 分类列表与对应数量
-        self.cata_length = 0  # 分类数量
-        
-        index: int = 0
-        for _data in self.data:
-            cata: str = _data.data_catalogue if len(_data.data_catalogue) != 0 else "杂项"
-            if not cata in self.catalogue_list:
-                self.catalogue_list[cata] = 1
-                self.cata_length += 1
-            else:
-                self.catalogue_list[cata] = self.catalogue_list[cata] + 1
-            index += 1
-        # 分类数量为1,就没有必要分类了
-        if len(self.catalogue_list) == 1:
-            self.filter_mode = 0
-
-    def select_catalogue(self,catalogue: str):
-        new_data: List[QueryData] = []
-        
-        for _data in self.data:
-            cata: str = _data.data_catalogue if len(_data.data_catalogue) != 0 else "杂项"
-            if cata == catalogue:
-                new_data.append(_data)
-        
-        self.filter_mode = 0
-        self.data = new_data
-        self.origin_data = new_data
-        self.length = len(new_data)
-        self.page = 1
-        self.process_data()
 
 class QueryError(Exception):
     """
@@ -234,8 +202,6 @@ class QueryCommand(UserCommandBase):
         reg_loc(LOC_QUERY_SINGLE_RESULT, "{keyword} {en_keyword}{tag}\n{content}{book}{redirect}",
                 "查询找到唯一条目, keyword: 条目名称, en_keyword: 条目英文名, content: 词条内容"
                 ", book: 来源*, redirect: 重定向自*, tag: 换行+标签*  (*如果有则显示, 没有则忽略)")
-        reg_loc(LOC_QUERY_MULTI_RESULT_CATALOGUE, "请选择一个分类",
-                "查询找到多个条目时选择分类的文本提示")
         reg_loc(LOC_QUERY_MULTI_RESULT_PAGE, "{page_cur}/{page_total}页, -上一页/下一页+",
                 "搜索结果出现多页时提示, {page_cur}表示当前页, {page_total}表示总页数")
         reg_loc(LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW, "已经是最前一页了!", "用户尝试在第一页往前翻页时的提醒")
@@ -252,6 +218,12 @@ class QueryCommand(UserCommandBase):
             LOC_QUERY_READ_ONLY,
             "Bot 端资料管理已停用，当前仅支持只读查询。",
             "用户尝试使用已停用的 Bot 端资料管理指令时的提示",
+        )
+        reg_loc(LOC_QUERY_INVALID_FORMAT, "查询格式错误。", "查询参数使用了不支持的格式")
+        reg_loc(
+            LOC_QUERY_OUTDATED_CONTENT,
+            "数据库“{database}”中的词条“{keyword}”包含过时的查询逻辑，暂时无法使用。请让管理员在 Dashboard 中规范这个数据库。",
+            "查询结果仍包含旧嵌套查询时返回；database: 数据库名，keyword: 词条名",
         )
 
         #已弃用，请使用mode_command那边的CFG。
@@ -282,16 +254,12 @@ class QueryCommand(UserCommandBase):
             if get_current_date_raw() - record.time < datetime.timedelta(seconds=RECORD_RESPONSE_TIME):
                 try:
                     target_index: int = int(msg_str)
-                    should_proc = (
-                        0 <= target_index <= record.length
-                        if record.filter_mode == 0
-                        else 0 <= target_index <= record.cata_length
-                    )
+                    should_proc = 0 <= target_index <= record.length
                     mode, arg_str = "select", msg_str
                 except ValueError:
                     pass
                 # 翻页
-                if record.filter_mode == 0 and not should_proc:
+                if not should_proc:
                     if msg_word == "+":
                         should_proc, mode, arg_str = True, "flip_page", "+"
                     elif msg_word == "-":
@@ -362,12 +330,27 @@ class QueryCommand(UserCommandBase):
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
+        if mode in ("select", "flip_page"):
+            record = self.record_dict.get(source_port)
+            if record is not None and not self.bot.db.query.has_database(record.database):
+                del self.record_dict[source_port]
+                feedback = (
+                    "当前查询数据库未启用。"
+                    if self.bot.db.query.is_database_disabled(record.database)
+                    else "当前查询数据库未加载。"
+                )
+                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+
         # 处理指令
         if not arg_str and (mode == "query" or mode == "search"):
             feedback = self.get_state()
         elif mode == "query" or mode == "search":
             if not self.bot.db.query.has_database(database):
-                feedback = "未加载的数据库。"
+                feedback = (
+                    "当前查询数据库未启用。"
+                    if self.bot.db.query.is_database_disabled(database)
+                    else "未加载的数据库。"
+                )
             else:
                 feedback = await self.query_info(
                     database,
@@ -382,34 +365,14 @@ class QueryCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_QUERY_NO_RESULT)
         elif mode == "select":
             record = self.record_dict[source_port]
-            if record.filter_mode == 0:
-                page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
-                index = int(arg_str) # + (record.page-1) * page_item_num
-                record.time = get_current_date_raw()  # 更新记录有效期
-                if index >= record.length:
-                    feedback = self.format_loc(LOC_QUERY_NO_RESULT)
-                else:
-                    item = record.data[index]
-                    result = await self.query_feedback(database, homebrew_database, item, source_port)
-                    feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
+            index = int(arg_str)
+            record.time = get_current_date_raw()  # 更新记录有效期
+            if index >= record.length:
+                feedback = self.format_loc(LOC_QUERY_NO_RESULT)
             else:
-                index = int(arg_str)
-                if index >= len(record.catalogue_list.keys()):
-                    feedback = self.format_loc(LOC_QUERY_NO_RESULT)
-                else:
-                    record.select_catalogue(list(record.catalogue_list.keys())[index])
-                    page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
-                    record.time = get_current_date_raw()  # 更新记录有效期
-                    show_result: List[QueryData] = record.data[:page_item_num]
-                    if record.length == 0:
-                        self.format_loc(LOC_QUERY_NO_RESULT)
-                    elif record.length == 1:
-                        feedback = self.format_loc(LOC_QUERY_RESULT, result = self.format_item_feedback(show_result[0]))
-                    else:
-                        feedback = self.format_loc(LOC_QUERY_RESULT, result = self.format_items_list_feedback(show_result))
-                    if record.length > page_item_num:
-                        feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=1,
-                                                           page_total=record.length // page_item_num + 1)
+                item = record.data[index]
+                result = await self.query_feedback(database, homebrew_database, item, source_port)
+                feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
         elif mode == "flip_page":
             record = self.record_dict[source_port]
             next_page = (arg_str == "+")
@@ -459,15 +422,10 @@ class QueryCommand(UserCommandBase):
                     "\n可以用搜索指令来匹配词条内容(而不是仅匹配关键字)"\
                     "\n若有多条可能的结果, 可以通过查询或搜索后直接输入序号查询, 输入+或-可以翻页" \
                     "\n可以用q作为查询(query)的缩写, 或用s作为检索(search)的缩写" \
-                    "\n你还可以使用#来进行仅标签、来源、类型的包含搜索，单个tag可以用/进行多tag的或搜索" \
-                    "\n&同理，只不过&为分类，且为相等搜索。" \
                     "\n示例:"\
                     "\n.查询 借机攻击"\
-                    "\n.查询 #法师 #6环"\
-                    "\n.查询 &法术 #PHB/XGE/TCE"\
-                    "\n.查询 #战士 &子职业 #PHB/XGE/TCE"\
                     "\n.检索 长弓"\
-                    "\n.检索 火焰 敏捷豁免 d6 #3环 #塑能"
+                    "\n.检索 火焰 敏捷豁免 d6"
             return help_str
         return ""
 
@@ -497,8 +455,8 @@ class QueryCommand(UserCommandBase):
                 query_keywords,
                 search_mode,
             )
-        except QueryError:
-            return self.format_loc(LOC_QUERY_TOO_MUCH_RESULT)
+        except QueryError as exc:
+            return exc.info
         poss_result_num: int = len(poss_result)
 
         feedback: str = ""
@@ -512,27 +470,12 @@ class QueryCommand(UserCommandBase):
             # 记录当前信息以备后续选择或翻页
             self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
             page_item_num = MAX_QUERY_CANDIDATE_SIMPLE_NUM
-            filter_mode: int = 1 if (poss_result_num >= page_item_num) else 0
-            self.record_dict[port].filter_mode = filter_mode
-            
-            #处理分类
-            if self.record_dict[port].filter_mode == 1:
-                self.record_dict[port].create_catalogue_list()
-            else:
-                self.record_dict[port].process_data()
-            #以分类模式显示结果
-            if self.record_dict[port].filter_mode == 1:
-                show_result: List[QueryData] = []
-                for key,num in self.record_dict[port].catalogue_list.items():
-                    show_result.append(key + " (" + str(num) + ")")
-                feedback = self.format_loc(LOC_QUERY_MULTI_RESULT_CATALOGUE) + "\n" + self.format_catalogues_list_feedback(show_result)
-            #直接显示结果
-            else:
-                show_result: List[QueryData] = poss_result[:page_item_num]
-                feedback = self.format_items_list_feedback(show_result)
-                if poss_result_num > page_item_num:
-                    feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=1,
-                                                       page_total=poss_result_num // page_item_num + 1)
+            self.record_dict[port].process_data()
+            show_result: List[QueryData] = poss_result[:page_item_num]
+            feedback = self.format_items_list_feedback(show_result)
+            if poss_result_num > page_item_num:
+                feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=1,
+                                                   page_total=math.ceil(poss_result_num / page_item_num))
         return feedback
     
     def command_split(self, keywords: str) -> List[str]:
@@ -552,7 +495,7 @@ class QueryCommand(UserCommandBase):
         if len(query_keywords) > 0:
             query_command_list = self.command_split(query_keywords)
             if len(query_command_list) == 0:
-                return poss_result
+                raise QueryError(self.format_loc(LOC_QUERY_INVALID_FORMAT))
         else:
             return poss_result
         poss_result = await self.search_item(
@@ -576,8 +519,10 @@ class QueryCommand(UserCommandBase):
                 fulltext=(search_mode == 1),
                 limit=MAX_QUERY_ITEM_NUM,
             )
-        except QueryStoreError:
-            raise QueryError("匹配条目过多，无法查询")
+        except QueryStoreError as exc:
+            if str(exc) == "查询格式错误。":
+                raise QueryError(self.format_loc(LOC_QUERY_INVALID_FORMAT)) from exc
+            raise QueryError(self.format_loc(LOC_QUERY_TOO_MUCH_RESULT)) from exc
 
         results: List[QueryData] = []
         for r in result["results"]:
@@ -600,56 +545,18 @@ class QueryCommand(UserCommandBase):
         """
         生成查询到目标的返回文本，包括处理嵌套查询
         """
-        item_lines = item.data_content.splitlines()
-        # 处理嵌套查询
-        sub_query_items = []
-        for index in range(len(item_lines)):
-            if item_lines[index].startswith("/"):
-                try:
-                    command = item_lines[index][1:].lower()
-                    extra_command = []
-                    # 有一些专用的附加指令
-                    if "|" in command:
-                        extra_command = command.split("|")
-                        command = extra_command.pop(0)
-                    extra_items = await self.query_item(database, homebrew_database, command)
-                    item_lines[index] = "[ " + self.format_items_list_feedback(extra_items,len(sub_query_items)) + " ]"
-                    # 处理专用的附加指令
-                    for excmd in extra_command:
-                        excmd = excmd.strip()
-                        # 清理查询条目文本中的特定文本
-                        if excmd.startswith("clear") and len(excmd) > 5:
-                            item_lines[index] = item_lines[index].replace(excmd[5:].strip(),"")
-                        # 展示实际内容
-                        elif excmd.startswith("show"):
-                            word_limit = 200
-                            if len(excmd) > 4:
-                                # 只展示部分内容
-                                word_limit = int(excmd[4:].strip())
-                            new_str:List[str] = []
-                            for _index in range(len(extra_items)):
-                                if len(extra_items[_index].data_content) > word_limit:
-                                    new_str.append(str(len(sub_query_items) + _index) + "." + extra_items[_index].display_name + " : " + extra_items[_index].data_content[:word_limit].replace("\n"," ")+"...")
-                                else:
-                                    new_str.append(str(len(sub_query_items) + _index) + "." + extra_items[_index].display_name + " : " + extra_items[_index].data_content.replace("\n"," "))
-                            item_lines[index] = "\n".join(new_str)
-                    sub_query_items += extra_items
-                except QueryError:
-                    item_lines[index] = self.format_loc(LOC_QUERY_TOO_MUCH_RESULT)
-            else:
-                item_lines[index] = item_lines[index].strip()
-        if len(sub_query_items) > 0:
-            # 记录嵌套查询内容
-            if port in self.record_dict:
-                del self.record_dict[port]
-            self.record_dict[port] = QueryRecord(sub_query_items, database, get_current_date_raw(), len(sub_query_items))
-        item.data_content = "\n".join(item_lines)
+        if any(line.startswith("/") for line in item.data_content.splitlines()):
+            return self.format_loc(
+                LOC_QUERY_OUTDATED_CONTENT,
+                database=database,
+                keyword=item.data_name,
+            )
         return self.format_item_feedback(item)
 
     def format_item_feedback(self, item: QueryData) -> str:
         # 最基本的单条目返回文本
         item_content = item.data_content if item.data_content else "[内容为空，等待热心小编补充]"
-        item_tag = "\n" + item.data_tag if (item.data_tag and not item.data_tag.startswith("/")) else ""
+        item_tag = ""
         item_book = self.format_loc(LOC_QUERY_CELL_BOOK, book=item.data_from) if item.data_from else ""
         item_redirect = self.format_loc(LOC_QUERY_CELL_REDIRECT, redirect=item.redirect_by) if item.redirect_by else ""
         return self.format_loc(LOC_QUERY_SINGLE_RESULT, keyword=item.data_name, en_keyword=item.data_name_en, content=item_content, tag=item_tag, book=item_book, redirect=item_redirect)
@@ -657,7 +564,7 @@ class QueryCommand(UserCommandBase):
     def format_item_redirects_feedback(self, item: QueryData) -> str:
         # 最基本的单条目返回文本
         item_content = item.data_content if item.data_content else "[内容为空，等待热心小编补充]"
-        item_tag = "\n" + item.data_tag if (item.data_tag and not item.data_tag.startswith("/")) else ""
+        item_tag = ""
         item_book = self.format_loc(LOC_QUERY_CELL_BOOK, book=item.data_from) if item.data_from else ""
         item_redirect = self.format_loc(LOC_QUERY_CELL_REDIRECT, redirect=item.redirect_by) if item.redirect_by else ""
         return self.format_loc(LOC_QUERY_SINGLE_RESULT, keyword=item.data_name, en_keyword=item.data_name_en, content=item_content, tag=item_tag, book=item_book, redirect=item_redirect)
@@ -666,11 +573,6 @@ class QueryCommand(UserCommandBase):
     def format_items_list_feedback(items: List[QueryData],start_index: int = 0):
         # 多个结果，要求用户从结果中选择其一的返回文本
         return ", ".join((f"{start_index+index}.{item.display_name}" for index, item in enumerate(items)))
-
-    @staticmethod
-    def format_catalogues_list_feedback(catalogues: List[str],start_index: int = 0):
-        # 过多结果，要求用户从分类中选择其一的返回文本
-        return "\n".join((f"{start_index+index}.{item}" for index, item in enumerate(catalogues)))
 
     def flip_page(self, record: QueryRecord, next_page: bool) -> Tuple[str, int]:
         def get_feedback(page) -> str:
@@ -687,7 +589,7 @@ class QueryCommand(UserCommandBase):
             return self.format_items_list_feedback(items,start_index)
 
         cur_page = record.page
-        page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
+        page_item_num = MAX_QUERY_CANDIDATE_SIMPLE_NUM
 
         total_page = record.length // page_item_num + 1
         if not next_page:

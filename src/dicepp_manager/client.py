@@ -161,6 +161,40 @@ class ManagerClient:
             json_body=config,
         )
 
+    async def list_query_databases(self) -> list[dict]:
+        await self._ensure_compatible()
+        rows = (await self._request("GET", "/v1/content/query-databases")).get(
+            "databases", []
+        )
+        return rows if isinstance(rows, list) else []
+
+    async def set_query_database_enabled(self, database: str, enabled: bool) -> dict:
+        await self._ensure_compatible()
+        segment = urllib.parse.quote(database, safe="")
+        return await self._request(
+            "PUT",
+            f"/v1/content/query-databases/{segment}/enabled",
+            json_body={"enabled": enabled},
+        )
+
+    async def normalize_query_database(self, database: str) -> dict:
+        await self._ensure_compatible()
+        segment = urllib.parse.quote(database, safe="")
+        payload = await self._request(
+            "POST",
+            f"/v1/content/query-databases/{segment}/normalize",
+        )
+        operation = payload.get("operation")
+        return operation if isinstance(operation, dict) else {}
+
+    async def dry_run_query_database_normalization(self, database: str) -> dict:
+        await self._ensure_compatible()
+        segment = urllib.parse.quote(database, safe="")
+        return await self._request(
+            "POST",
+            f"/v1/content/query-databases/{segment}/normalize/dry-run",
+        )
+
     async def get_bot_config(self, bot_id: str) -> dict:
         await self._ensure_compatible()
         segment = urllib.parse.quote(bot_id, safe="")

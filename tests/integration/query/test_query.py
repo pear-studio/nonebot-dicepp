@@ -148,6 +148,94 @@ class TestQueryCommandIntegration:
         assert "30.条目30" in next_page
         assert "2/2页" in next_page
 
+    @pytest.mark.parametrize("argument", ["#PHB", "&法术", "/"])
+    async def test_category_and_tag_syntax_returns_normal_format_error(
+        self, argument, fresh_bot, query_db, _send_group_factory
+    ):
+        bot, _proxy = fresh_bot
+        db_name = await query_db("FORMATERROR")
+        bot.config.mode.default = db_name
+
+        result = "\n".join(
+            str(command)
+            for command in await _send_group_factory(f".查询 {argument}")
+        )
+
+        assert "查询格式错误" in result
+        assert "语法已停用" not in result
+
+    async def test_outdated_embedded_query_points_to_dashboard_normalization(
+        self, fresh_bot, query_db, _send_group_factory
+    ):
+        bot, _proxy = fresh_bot
+        db_name = await query_db("OUTDATED")
+        bot.config.mode.default = db_name
+        await bot.db.query.execute(
+            db_name,
+            "INSERT INTO data VALUES(?,?,?,?,?,?)",
+            ("汇总", "", "TEST", "", "", "正文\n/火球术"),
+            commit=True,
+        )
+
+        result = "\n".join(
+            str(command) for command in await _send_group_factory(".查询 汇总")
+        )
+
+        assert f"数据库“{db_name}”" in result
+        assert "包含过时的查询逻辑" in result
+        assert "Dashboard 中规范" in result
+
+    async def test_disabling_database_invalidates_an_existing_selection(
+        self, fresh_bot, query_db, _send_group_factory, tmp_path
+    ):
+        from dicepp_data import set_query_database_enabled
+
+        bot, _proxy = fresh_bot
+        db_name = await query_db("DISABLESELECTION")
+        bot.config.mode.default = db_name
+        for index in range(2):
+            await bot.db.query.execute(
+                db_name,
+                "INSERT INTO data VALUES(?,?,?,?,?,?)",
+                (f"条目{index}", "", "TEST", "", "", f"内容{index}"),
+                commit=True,
+            )
+        candidates = "\n".join(
+            str(command) for command in await _send_group_factory(".查询 条目")
+        )
+        assert "0.条目0" in candidates
+
+        database_path = tmp_path / f"{db_name}.db"
+        set_query_database_enabled(database_path.parent, db_name, False)
+        selected = "\n".join(
+            str(command) for command in await _send_group_factory("0")
+        )
+
+        assert "当前查询数据库未启用" in selected
+
+    async def test_mode_bound_to_disabled_database_is_not_selectable(
+        self, fresh_bot, query_db, _send_group_factory, tmp_path
+    ):
+        from dicepp_data import set_query_database_enabled
+
+        bot, _proxy = fresh_bot
+        db_name = await query_db("DISABLEDMODE")
+        mode_command = bot.command_dict["ModeCommand"]
+        mode_command.mode_dict["DisabledMode"] = ["20", db_name]
+        mode_command.mode_upper_map = {
+            name.upper(): name for name in mode_command.mode_dict
+        }
+        set_query_database_enabled(tmp_path, db_name, False)
+
+        result = "\n".join(
+            str(command)
+            for command in await _send_group_factory(".mode DisabledMode")
+        )
+
+        assert "该模式不存在" in result
+        assert "已切换至DisabledMode" not in result
+        assert "DisabledMode" not in result.split("以下是可用的模式列表：", 1)[-1]
+
     @pytest.mark.parametrize(
         ("command", "entry_name"),
         [

@@ -2,9 +2,11 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from importlib.metadata import version as package_version
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -1449,6 +1451,305 @@ def test_updates_tab_confirms_verified_install_and_recovers_operation_status(
         finally:
             browser.close()
 
+
+def test_query_database_repair_previews_before_confirmation(
+    dashboard_url: str,
+    tmp_path: Path,
+) -> None:
+    """The content UI runs one-click normalization and exposes its log."""
+    source = tmp_path / "content" / "queries" / "rules.db"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(source)) as connection:
+        connection.execute(
+            "CREATE TABLE data (名称 TEXT, 英文 TEXT, 来源 TEXT, 分类 TEXT, 标签 TEXT, 内容 TEXT)"
+        )
+        connection.execute("CREATE TABLE redirect (名称 TEXT, 重定向 TEXT)")
+        connection.executemany(
+            "INSERT INTO data VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("汇总", "", "TEST", "旧分类", "旧标签", "/火球术|show 20"),
+                ("火球术", "Fireball", "TEST", "法术", "火焰", "火焰伤害"),
+            ],
+        )
+        connection.commit()
+
+    with sync_playwright() as playwright:
+        browser = launch_browser(playwright.chromium)
+        page = browser.new_page()
+        normalized = False
+
+        def _query_database_list(route) -> None:
+            files = [{"name": "rules.db", "size": 1, "modified": 0, "enabled": True}]
+            if normalized:
+                files.append(
+                    {
+                        "name": "rules_backup.db",
+                        "size": 1,
+                        "modified": 0,
+                        "enabled": False,
+                    }
+                )
+            route.fulfill(status=200, json={"ok": True, "files": files})
+
+        def _normalize_query_database(route) -> None:
+            nonlocal normalized
+            normalized = True
+            route.fulfill(
+                status=200,
+                json={
+                    "ok": True,
+                    "operation": {
+                        "operation_id": "query-normalize-browser",
+                        "status": "queued",
+                    },
+                },
+            )
+
+        def _dry_run_query_database(route) -> None:
+            route.fulfill(
+                status=200,
+                json={
+                    "ok": True,
+                    "database": "rules",
+                    "requires_confirmation": True,
+                    "report": {
+                        "counts": {
+                            "data_invalid": 1,
+                            "data_duplicates": 1,
+                            "directives_deleted": 1,
+                            "redirect_invalid": 0,
+                        },
+                        "issues": [
+                            {
+                                "code": "directive_no_match",
+                                "table": "data",
+                                "rowid": 1,
+                                "line_number": 1,
+                                "subject": "汇总",
+                                "impact": "deletion",
+                                "message": "这条过时查询已经匹配不到任何词条，修复时会删除这一行内容。",
+                                "related_rowids": [],
+                            },
+                            {
+                                "code": "legacy_query_expanded",
+                                "table": "data",
+                                "rowid": 2,
+                                "line_number": 1,
+                                "subject": "可转换汇总",
+                                "impact": "behavior_change",
+                                "message": "这条过时查询会在修复时展开为静态内容，以后不会再随被引用词条变化。",
+                                "related_rowids": [3],
+                            }
+                        ],
+                        "issues_omitted": 0,
+                    },
+                },
+            )
+
+        def _normalized_operation(route) -> None:
+            route.fulfill(
+                status=200,
+                json={
+                    "ok": True,
+                    "operation": {
+                        "operation_id": "query-normalize-browser",
+                        "status": "succeeded",
+                        "message": "数据库规范完成",
+                        "detail": {
+                            "stage": "completed",
+                            "backup_database": "rules_backup",
+                        },
+                    },
+                },
+            )
+
+        # Browser coverage owns the UI contract. Manager integration tests own
+        # the real stop/backup/replace/restart transaction and its safety gates.
+        page.route("**/api/content/queries", _query_database_list)
+        page.route(
+            "**/api/content/queries/rules/normalize/dry-run",
+            _dry_run_query_database,
+        )
+        page.route(
+            "**/api/content/queries/rules/normalize",
+            _normalize_query_database,
+        )
+        page.route(
+            "**/api/manager/operations/query-normalize-browser",
+            _normalized_operation,
+        )
+        try:
+            _login(page, dashboard_url)
+            page.get_by_role("button", name="内容管理", exact=True).click()
+            page.get_by_role("button", name="查询", exact=True).click()
+            selector = page.get_by_test_id("query-database-select")
+            expect(selector).to_be_visible()
+            selector.select_option("rules")
+            warning_card = page.get_by_test_id("query-stat-card").filter(has_text="警告")
+            warning_card.click()
+            repair_button = page.get_by_test_id("query-repair-button")
+            expect(repair_button).to_be_enabled()
+            assert "先检查修复会产生的变化" in (repair_button.get_attribute("title") or "")
+
+            repair_button.click()
+
+            expect(page.get_by_test_id("query-repair-confirm")).to_contain_text(
+                "修复会删除部分数据"
+            )
+            expect(page.get_by_test_id("query-repair-confirm")).to_contain_text(
+                "词条「汇总」 · 数据库第 1 行 · 正文第 1 行"
+            )
+            expect(page.get_by_test_id("query-repair-deletions")).to_contain_text(
+                "这条过时查询已经匹配不到任何词条"
+            )
+            expect(page.get_by_test_id("query-repair-behavior-changes")).to_contain_text(
+                "以后不会再随被引用词条变化"
+            )
+            expect(page.get_by_test_id("query-repair-deleted-entries")).to_have_text("2")
+            expect(page.get_by_test_id("query-repair-deleted-lines")).to_have_text("1")
+            expect(page.get_by_test_id("query-repair-deleted-redirects")).to_have_text("0")
+
+            cancel_button = page.get_by_test_id("query-repair-cancel-button")
+            expect(cancel_button).to_have_text("取消")
+            cancel_button.click()
+            expect(page.get_by_test_id("query-repair-dialog")).to_be_hidden()
+            expect(page.get_by_role("heading", name="内容管理")).to_be_visible()
+
+            warning_card.click()
+            page.get_by_test_id("query-repair-button").click()
+            expect(page.get_by_test_id("query-repair-confirm")).to_be_visible()
+            page.get_by_test_id("query-repair-confirm-button").click()
+
+            expect(page.get_by_test_id("query-repair-result")).to_contain_text(
+                "数据库修复完成",
+                timeout=30000,
+            )
+            expect(page.get_by_test_id("query-repair-result-stage")).to_have_text("完成")
+            expect(page.get_by_test_id("query-repair-result")).to_contain_text(
+                "rules_backup"
+            )
+            expect(page.get_by_test_id("query-repair-log")).to_contain_text(
+                '"stage": "completed"'
+            )
+            expect(selector.locator("option")).to_contain_text(
+                ["-- 选择 --", "rules", "rules_backup（已停用）"]
+            )
+
+            page.evaluate(
+                """async () => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    while (state.queryNormalizeLoading) {
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                    }
+                    const originalApi = state.api;
+                    const originalPoll = state.pollManagerOperation;
+                    state.api = async () => ({
+                        operation: {operation_id: 'slow-normalize-1', status: 'queued'}
+                    });
+                    state.pollManagerOperation = async () => {
+                        throw new Error('Manager 操作等待超时');
+                    };
+                    try {
+                        state.queryRepairDialogOpen = true;
+                        await state.executeQueryDatabaseRepair();
+                    } finally {
+                        state.api = originalApi;
+                        state.pollManagerOperation = originalPoll;
+                    }
+                }"""
+            )
+            expect(page.get_by_test_id("query-repair-result")).to_contain_text(
+                "数据库修复仍在进行"
+            )
+            expect(page.get_by_test_id("query-repair-log")).to_contain_text(
+                '"operation_id": "slow-normalize-1"'
+            )
+            expect(page.get_by_test_id("query-repair-log")).to_contain_text(
+                '"status": "running"'
+            )
+        finally:
+            browser.close()
+
+
+def test_audit_log_renders_uniform_presentations_across_action_categories(
+    dashboard_url: str,
+) -> None:
+    """Audit rows render backend labels and summaries without action-specific UI."""
+    with sync_playwright() as playwright:
+        browser = launch_browser(playwright.chromium)
+        page = browser.new_page()
+        try:
+            _login(page, dashboard_url)
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.currentTab = 'audit';
+                    state.auditLoading = false;
+                    state.auditLogs = [
+                        {
+                            id: 1,
+                            ts: 1786428000,
+                            action: 'content.query.normalize.dry_run',
+                            action_label: '查询库修复预检',
+                            summary: '删除 2 个词条 · 1 行内容 · 0 个重定向 · 1 项行为变化',
+                            tone: 'info',
+                            target: 'rules',
+                            detail: JSON.stringify({
+                                status: 'succeeded',
+                                report: {
+                                    counts: {
+                                        data_invalid: 1,
+                                        data_duplicates: 1,
+                                        directives_deleted: 1,
+                                        redirect_invalid: 0,
+                                    },
+                                    impact_counts: {behavior_change: 1},
+                                },
+                            }),
+                            ip: '127.0.0.1',
+                        },
+                        {
+                            id: 2,
+                            ts: 1786428060,
+                            action: 'content.query.normalize.result',
+                            action_label: '查询库修复失败',
+                            summary: '阶段：替换数据库 · 文件被占用或拒绝访问',
+                            tone: 'danger',
+                            target: 'rules',
+                            detail: JSON.stringify({
+                                status: 'failed',
+                                message: '拒绝访问',
+                                detail: {stage: 'replace'},
+                            }),
+                            ip: '127.0.0.1',
+                        },
+                        {
+                            id: 3,
+                            ts: 1786428120,
+                            action: 'config.set',
+                            action_label: '修改配置项',
+                            summary: '新值：DicePP',
+                            tone: 'info',
+                            target: 'app.name',
+                            detail: JSON.stringify({value: 'DicePP'}),
+                            ip: '127.0.0.1',
+                        },
+                    ];
+                }"""
+            )
+
+            preview_row = page.get_by_role("row").filter(has_text="查询库修复预检")
+            expect(preview_row).to_contain_text(
+                "删除 2 个词条 · 1 行内容 · 0 个重定向 · 1 项行为变化"
+            )
+            failed_row = page.get_by_role("row").filter(has_text="查询库修复失败")
+            expect(failed_row).to_contain_text(
+                "阶段：替换数据库 · 文件被占用或拒绝访问"
+            )
+            config_row = page.get_by_role("row").filter(has_text="修改配置项")
+            expect(config_row).to_contain_text("新值：DicePP")
+        finally:
+            browser.close()
 
 def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
     """Archives tab lists, creates, previews, and deletes via the API contract."""

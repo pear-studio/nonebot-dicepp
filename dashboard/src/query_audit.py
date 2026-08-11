@@ -1,4 +1,4 @@
-"""Read-only inspection helpers for simple query databases.
+"""Read-only inspection helpers for DicePP query databases.
 
 This module deliberately understands only the fields DicePP uses for the
 simple query format.  It is not a generic SQLite browser and never mutates the
@@ -9,17 +9,24 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterable
+
+from dicepp_data import (
+    QUERY_DATA_OPTIONAL_FIELDS,
+    QUERY_DATA_REQUIRED_FIELDS,
+    QUERY_REDIRECT_FIELDS,
+)
 
 
 class QueryAuditFormatError(ValueError):
     """The selected database cannot be inspected as a simple query database."""
 
 
-_DATA_REQUIRED = ("名称", "内容")
-_DATA_OPTIONAL = ("英文", "来源")
-_REDIRECT_REQUIRED = ("名称", "重定向")
+_DATA_REQUIRED = QUERY_DATA_REQUIRED_FIELDS
+_DATA_OPTIONAL = QUERY_DATA_OPTIONAL_FIELDS
+_REDIRECT_REQUIRED = QUERY_REDIRECT_FIELDS
 _SEARCH_SCOPES = {"all", "name", "english", "source", "content"}
 
 
@@ -55,7 +62,7 @@ def _require_columns(
     if not _table_exists(conn, table):
         raise QueryAuditFormatError(
             f"数据库缺少 {table} 表，Dashboard 无法{purpose}。"
-            f"请确认选中的是 DicePP 简易查询库。"
+            f"请确认选中的是 DicePP 查询数据库。"
         )
     columns = _table_columns(conn, table)
     missing = [name for name in required if name not in columns]
@@ -131,16 +138,14 @@ def _invalid_data_warning(record: dict[str, Any]) -> dict[str, Any] | None:
 
 def inspect_query_database(db_path: Path) -> dict[str, Any]:
     """Return summary statistics and concrete, actionable warnings."""
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         data_columns = _require_columns(
             conn, "data", _DATA_REQUIRED, purpose="识别查询资料"
         )
         data_rows = [
             _normalise_row(row)
             for row in conn.execute(
-                f"SELECT {_data_select(data_columns)}, "
-                f"{_text_expr('分类' if '分类' in data_columns else None)} AS catalogue "
-                "FROM data ORDER BY rowid"
+                f"SELECT {_data_select(data_columns)} FROM data ORDER BY rowid"
             ).fetchall()
         ]
 
@@ -167,6 +172,22 @@ def inspect_query_database(db_path: Path) -> dict[str, Any]:
         warning = _invalid_data_warning(record)
         if warning:
             warnings.append(warning)
+        for line_number, line in enumerate(record["content"].splitlines(), start=1):
+            if not line.startswith("/"):
+                continue
+            rowid = int(record["rowid"])
+            warnings.append({
+                "id": f"outdated-content-{rowid}-{line_number}",
+                "kind": "outdated_content",
+                "view": "data",
+                "rowids": [rowid],
+                "title": f"数据第 {rowid} 行包含过时查询逻辑",
+                "message": (
+                    f"内容第 {line_number} 行以“/”开头，机器人不会再执行这条内嵌查询，"
+                    "用户查询整个词条时会收到数据库需要规范的提示。"
+                    "请使用“一键修复”转换成静态结果，或手工改写这一行。"
+                ),
+            })
 
     by_name_source: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -177,31 +198,31 @@ def inspect_query_database(db_path: Path) -> dict[str, Any]:
         by_name[name].append(record)
 
     for (name, source), records in by_name_source.items():
-        contents = {record["content"].strip() for record in records}
-        if len(contents) <= 1:
+        if len(records) <= 1:
             continue
+        contents = {record["content"].strip() for record in records}
+        has_conflict = len(contents) > 1
         rowids = [int(record["rowid"]) for record in records]
         source_label = f"来源“{source}”" if source else "未填写来源"
-        catalogues = {str(record["catalogue"] or "").strip() for record in records}
-        if len(catalogues) == 1:
-            current_effect = (
-                f"当前机器人也只会使用最前面的第 {rowids[0]} 行，后续内容已经被隐藏。"
-            )
-        else:
-            current_effect = (
-                "当前机器人仍会读取分类，因此可能让用户选择多个分类；"
-                "同一分类中的后续内容仍会被隐藏。"
-            )
         warnings.append({
             "id": f"duplicate-content-{rowids[0]}",
             "kind": "duplicate_content",
             "view": "data",
             "rowids": rowids,
-            "title": f"“{name}”有多个不同内容",
+            "title": (
+                f"“{name}”有多个不同内容"
+                if has_conflict
+                else f"“{name}”有重复数据"
+            ),
             "message": (
-                f"名称“{name}”在{source_label}下出现了 {len(records)} 行不同内容。"
-                f"{current_effect}简易格式启用后不再读取分类，将统一只使用第 {rowids[0]} 行。"
-                "请合并内容，或者修改后续行的名称或来源。"
+                f"名称“{name}”在{source_label}下出现了 {len(records)} 行"
+                f"{'不同内容' if has_conflict else '完全相同的数据'}。"
+                f"机器人只会使用最前面的第 {rowids[0]} 行，后续内容会被隐藏。"
+                + (
+                    "请合并内容，或者修改后续行的名称或来源。"
+                    if has_conflict
+                    else "请删除重复行。"
+                )
             ),
         })
 
@@ -253,11 +274,6 @@ def inspect_query_database(db_path: Path) -> dict[str, Any]:
         if len(records) <= 1:
             continue
         rowids = [int(record["rowid"]) for record in records]
-        targets = {record["target"].strip() for record in records}
-        if len(targets) > 1:
-            current_effect = "当前机器人查询这个别名时可能返回多个不同目标，让用户进行选择。"
-        else:
-            current_effect = "当前机器人通常会合并相同结果，但重复行本身没有作用。"
         warnings.append({
             "id": f"duplicate-redirect-{rowids[0]}",
             "kind": "duplicate_redirect",
@@ -266,7 +282,8 @@ def inspect_query_database(db_path: Path) -> dict[str, Any]:
             "title": f"重定向名称“{name}”重复",
             "message": (
                 f"名称“{name}”重复出现了 {len(records)} 次。"
-                f"{current_effect}简易格式启用后只会使用第 {rowids[0]} 行。"
+                f"当前机器人只会使用最前面的第 {rowids[0]} 行，后续目标会被隐藏。"
+                f"规范数据库后也只会保留第 {rowids[0]} 行。"
                 "请只保留一个目标，或者修改重复名称。"
             ),
         })
@@ -298,7 +315,7 @@ def list_query_entries(
             "搜索范围无效。可用范围为：全部、名称、英文、来源、内容。"
         )
 
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         columns = _require_columns(conn, "data", _DATA_REQUIRED, purpose="识别查询资料")
         select = _data_select(columns)
         expressions = {
@@ -347,7 +364,7 @@ def list_query_redirects(
     rowids: list[int] | None,
 ) -> dict[str, Any]:
     """Return a semantic, server-filtered page from the optional redirect table."""
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         _require_columns(conn, "data", _DATA_REQUIRED, purpose="识别查询资料")
         if not _table_exists(conn, "redirect"):
             return {"records": [], "total": 0, "offset": offset, "limit": limit}
