@@ -572,8 +572,8 @@ jobs:
             --candidate "linux:runtime-manifest:${{ needs.quality-gate.outputs.runtime_candidate_digest }}" \
             --candidate "linux:dashboard-manifest:${{ needs.quality-gate.outputs.dashboard_candidate_digest }}" \
             --candidate "windows:package-tree:${{ needs.quality-gate.outputs.windows_candidate_digest }}" \
-            --platform-result dist/platform-results/dicepp-upgrade-result-windows-${{ github.run_id }}-${{ github.run_attempt }}/upgrade-result/windows.json \
-            --platform-result dist/platform-results/dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}/upgrade-result/linux.json \
+            --platform-result dist/platform-results/dicepp-upgrade-result-windows-${{ github.run_id }}-${{ github.run_attempt }}/windows.json \
+            --platform-result dist/platform-results/dicepp-upgrade-result-linux-${{ github.run_id }}-${{ github.run_attempt }}/linux.json \
             --output dist/upgrade-evidence/evidence.json
       - name: Upload commit-and-final-byte-bound upgrade evidence
         if: needs.candidate-metadata.outputs.automatic_upgrade == 'true'

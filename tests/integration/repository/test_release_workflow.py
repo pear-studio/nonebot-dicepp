@@ -599,6 +599,16 @@ def test_validation_only_upgrade_matrix_mode_covers_all_policy_combinations():
     assert "--target-commit-sha" in assemble
     assert assemble.count("--candidate") == 3
     assert assemble.count("--platform-result") == 2
+    assert "/upgrade-result/windows.json" not in assemble
+    assert "/upgrade-result/linux.json" not in assemble
+    assert (
+        "dicepp-upgrade-result-windows-${{ github.run_id }}-"
+        "${{ github.run_attempt }}/windows.json"
+    ) in assemble
+    assert (
+        "dicepp-upgrade-result-linux-${{ github.run_id }}-"
+        "${{ github.run_attempt }}/linux.json"
+    ) in assemble
     assert "continue-on-error" not in windows
     assert "continue-on-error" not in linux
 
