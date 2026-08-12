@@ -220,7 +220,7 @@ def _remove_deep(target: dict, path: str) -> bool:
     return False
 
 
-_CONTENT_SUBDIRS = {"decks", "random", "queries", "characters", "excel"}
+_CONTENT_SUBDIRS = {"decks", "random", "queries"}
 
 _XLSX_MAGIC = b"\x50\x4b\x03\x04"
 

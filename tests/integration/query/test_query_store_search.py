@@ -22,7 +22,7 @@ async def test_search_basic_keyword(fresh_bot, query_db):
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火球术"],
     )
     assert len(result["results"]) == 1
@@ -51,7 +51,7 @@ async def test_search_fulltext(fresh_bot, query_db):
 
     # fulltext=False 搜 "火焰" 不命中内容（只搜名称/英文）
     result_name = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火焰"],
         fulltext=False,
     )
@@ -59,7 +59,7 @@ async def test_search_fulltext(fresh_bot, query_db):
 
     # fulltext=True 搜 "火焰" 命中内容
     result_full = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火焰"],
         fulltext=True,
     )
@@ -94,7 +94,7 @@ async def test_search_redirect_resolution(fresh_bot, query_db):
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["大火球"],
     )
     assert len(result["results"]) == 1
@@ -123,7 +123,7 @@ async def test_search_dedup(fresh_bot, query_db):
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火球术"],
     )
     assert len(result["results"]) == 1
@@ -144,7 +144,7 @@ async def test_dedup_identity_is_a_tuple_not_a_joined_string(fresh_bot, query_db
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["a"],
         fulltext=True,
     )
@@ -171,7 +171,7 @@ async def test_exact_name_wins_beyond_fuzzy_result_limit(fresh_bot, query_db):
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["目标词条"],
         max_total=1000,
     )
@@ -198,7 +198,7 @@ async def test_search_max_total_exceeded(fresh_bot, query_db):
         )
     with pytest.raises(QueryStoreError):
         await bot.db.query.search(
-            databases=[db_name],
+            database=db_name,
             query_tokens=["条目"],
             max_total=3,
         )
@@ -236,7 +236,7 @@ async def test_search_empty_tokens(fresh_bot):
     bot, _proxy = fresh_bot
 
     result = await bot.db.query.search(
-        databases=["DND5E混合"],
+        database="DND5E混合",
         query_tokens=[],
     )
     assert result == {"results": [], "total": 0}
@@ -262,7 +262,7 @@ async def test_search_tag_prefix_is_rejected(fresh_bot, query_db):
     )
 
     with pytest.raises(QueryStoreError, match="查询格式错误"):
-        await bot.db.query.search(databases=[db_name], query_tokens=["#塑能"])
+        await bot.db.query.search(database=db_name, query_tokens=["#塑能"])
 
 
 @pytest.mark.asyncio
@@ -285,71 +285,7 @@ async def test_search_category_prefix_is_rejected(fresh_bot, query_db):
     )
 
     with pytest.raises(QueryStoreError, match="查询格式错误"):
-        await bot.db.query.search(databases=[db_name], query_tokens=["&法术"])
-
-
-@pytest.mark.asyncio
-async def test_search_homebrew_merge(fresh_bot, query_db):
-    """QueryStore.search() — HB 私设库合并（同名覆盖 + 空内容丢弃）"""
-    bot, _proxy = fresh_bot
-
-    main_db = await query_db("HBMAIN")
-    hb_db = await query_db("HBTEST")
-
-    # 主库条目
-    await bot.db.query.execute(
-        main_db,
-        "INSERT INTO data VALUES(?,?,?,?,?,?)",
-        ("火球术", "Fireball", "PHB", "法术", "塑能 3环", "主库火球术描述"),
-        commit=True,
-    )
-    await bot.db.query.execute(
-        main_db,
-        "INSERT INTO data VALUES(?,?,?,?,?,?)",
-        ("寒冰锥", "Cone of Cold", "PHB", "法术", "塑能 5环", "主库寒冰锥描述"),
-        commit=True,
-    )
-
-    # HB 库：同名覆盖火球术 + 空内容条目
-    await bot.db.query.execute(
-        hb_db,
-        "INSERT INTO data VALUES(?,?,?,?,?,?)",
-        ("火球术", "Fireball", "PHB", "法术", "私设 3环", "私设火球术描述"),
-        commit=True,
-    )
-    # 空内容条目 — 应被丢弃
-    await bot.db.query.execute(
-        hb_db,
-        "INSERT INTO data VALUES(?,?,?,?,?,?)",
-        ("空条目", "Empty", "PHB", "法术", "私设", ""),
-        commit=True,
-    )
-
-    result = await bot.db.query.search(
-        databases=[main_db, hb_db],
-        query_tokens=["火球术"],
-    )
-    assert len(result["results"]) == 1
-    assert result["results"][0]["content"] == "私设火球术描述"
-
-    # 空内容 HB 条目不应出现
-    result_all = await bot.db.query.search(
-        databases=[main_db, hb_db],
-        query_tokens=["空条目"],
-    )
-    assert len(result_all["results"]) == 0
-
-
-@pytest.mark.asyncio
-async def test_search_empty_databases(fresh_bot):
-    """QueryStore.search() — 空 databases 列表返回空"""
-    bot, _proxy = fresh_bot
-
-    result = await bot.db.query.search(
-        databases=[],
-        query_tokens=["火球术"],
-    )
-    assert result == {"results": [], "total": 0}
+        await bot.db.query.search(database=db_name, query_tokens=["&法术"])
 
 
 # ── Q56: / OR 分隔符 ───────────────────────────────────────────────────────
@@ -374,7 +310,7 @@ async def test_search_or_separator_returns_both(fresh_bot, query_db):
     )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火球术/寒冰锥"],
     )
     assert len(result["results"]) == 2
@@ -404,7 +340,7 @@ async def test_search_or_separator_single_matches_one(fresh_bot, query_db):
 
     # 火球术/不存在 → 应只命中火球术
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["火球术/不存在"],
     )
     assert len(result["results"]) == 1
@@ -428,7 +364,7 @@ async def test_search_limit_offset_first_page(fresh_bot, query_db):
         )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["条目"],
         limit=2,
         offset=0,
@@ -452,7 +388,7 @@ async def test_search_limit_offset_second_page(fresh_bot, query_db):
         )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["条目"],
         limit=2,
         offset=2,
@@ -475,7 +411,7 @@ async def test_search_limit_offset_beyond_total(fresh_bot, query_db):
         )
 
     result = await bot.db.query.search(
-        databases=[db_name],
+        database=db_name,
         query_tokens=["条目"],
         limit=5,
         offset=10,

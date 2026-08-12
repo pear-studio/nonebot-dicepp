@@ -31,12 +31,35 @@ DEFAULT_GROUP_CONFIG = {
     "query_enable": True,
     "random_gen_enable": True,
     "query_database": "DND5E",
-    "homebrew_database": False,
     # 娱乐内容
     "cool_jrrp": True,
     "chat": True,
     "april_fool": False,
 }
+
+_TRUE_VALUES = {"真", "是", "开", "开启", "true", "yes", "on"}
+_FALSE_VALUES = {"假", "否", "关", "关闭", "false", "no", "off"}
+
+
+def _parse_config_value(name: str, raw_value: str) -> Any:
+    default = DEFAULT_GROUP_CONFIG[name]
+    if isinstance(default, bool):
+        if raw_value in _TRUE_VALUES:
+            return True
+        if raw_value in _FALSE_VALUES:
+            return False
+        raise ValueError(
+            f"群配置 {name} 需要布尔值：真/假、是/否、开/关、"
+            "true/false、yes/no 或 on/off。"
+        )
+    if isinstance(default, int):
+        digits = raw_value[1:] if raw_value.startswith(("+", "-")) else raw_value
+        if not digits or not digits.isdecimal():
+            raise ValueError(f"群配置 {name} 需要合法整数。")
+        return int(raw_value)
+    if isinstance(default, str):
+        return raw_value
+    raise ValueError(f"群配置 {name} 使用了不支持的值类型。")
 
 
 @custom_user_command(readable_name="群配置指令", priority=-1,
@@ -89,43 +112,36 @@ class GroupconfigCommand(UserCommandBase):
             arg_list = []
             arg_num = 0
         else:
-            arg_list = [arg.split() for arg in hint[0].split(" ") if arg.split() != ""]
+            arg_list = hint[0].split()
             arg_num = len(arg_list)
         feedback: str = ""
 
         if arg_num == 0:
             feedback = self.get_help(".config", meta)
         elif arg_list[0] == "set":
-            if arg_num == 3 and arg_list[1] in DEFAULT_GROUP_CONFIG.keys():
-                var_type = type(DEFAULT_GROUP_CONFIG[arg_list[1]])
-                if arg_list[2] in ["真", "是", "开", "开启", "true", "yes", "on"]:
-                    await self.set_group_config(meta.group_id, arg_list[1], True)
-                    var_str = "True"
-                elif arg_list[2] in ["假", "否", "关", "关闭", "false", "no", "off"]:
-                    await self.set_group_config(meta.group_id, arg_list[1], False)
-                    var_str = "False"
-                elif arg_list[2].isdigit():
-                    await self.set_group_config(meta.group_id, arg_list[1], int(arg_list[2]))
-                    var_str = arg_list[2]
+            if arg_num == 3 and arg_list[1] in DEFAULT_GROUP_CONFIG:
+                try:
+                    value = _parse_config_value(arg_list[1], arg_list[2])
+                except ValueError as exc:
+                    feedback = str(exc)
                 else:
-                    await self.set_group_config(meta.group_id, arg_list[1], arg_list[2])
-                    var_str = arg_list[2]
-                if not isinstance(arg_list[1], var_type):
-                    feedback = "违规的数据类型。"
-                else:
+                    await self.set_group_config(meta.group_id, arg_list[1], value)
                     feedback = "已将群配置 " + arg_list[1] + " 的值改为 " + arg_list[2] + "。"
             else:
                 feedback = "参数错误"
         elif arg_list[0] == "get":
-            if arg_num == 2:
+            if arg_num == 2 and arg_list[1] in DEFAULT_GROUP_CONFIG:
                 feedback = str(await self.get_group_config(meta.group_id, arg_list[1]))
                 feedback = "群配置 " + arg_list[1] + " 的值为 " + feedback + "。"
+            else:
+                feedback = "参数错误"
         elif arg_list[0] == "show":
             _row = await self.bot.db.group_config.get(meta.group_id)
             config_dict = _row.data if _row and _row.data else {}
             feedback = "当前已配置的群配置: "
-            for key in config_dict.keys():
-                feedback += "\n · " + str(key) + " : " + str(config_dict[key])
+            for key in DEFAULT_GROUP_CONFIG:
+                if key in config_dict:
+                    feedback += "\n · " + key + " : " + str(config_dict[key])
         elif arg_list[0] == "list":
             feedback = "以下是所有可用的群配置与默认值: "
             for key in DEFAULT_GROUP_CONFIG.keys():
@@ -139,17 +155,20 @@ class GroupconfigCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     async def set_group_config(self, group_id: str, name: str, data: Any) -> None:
+        if name not in DEFAULT_GROUP_CONFIG:
+            raise ValueError(f"不支持的群配置: {name}")
         _row = await self.bot.db.group_config.get(group_id)
         config_dict = dict(_row.data) if _row and _row.data else {}
         config_dict[name] = data
         await self.bot.db.group_config.upsert(GroupConfig(group_id=group_id, data=config_dict))
 
     async def get_group_config(self, group_id: str, name: str) -> Any:
+        if name not in DEFAULT_GROUP_CONFIG:
+            raise ValueError(f"不支持的群配置: {name}")
         _row = await self.bot.db.group_config.get(group_id)
-        data = _row.data.get(name) if _row and _row.data else None
-        if not data:
-            data = DEFAULT_GROUP_CONFIG.get(name)
-        return data
+        if _row and _row.data and name in _row.data:
+            return _row.data[name]
+        return DEFAULT_GROUP_CONFIG[name]
 
     async def clear_group_config(self, group_id: str) -> None:
         await self.bot.db.group_config.delete(group_id)

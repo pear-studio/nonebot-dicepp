@@ -102,10 +102,6 @@ class InstanceLayout:
         return self.content_dir / "random"
 
     @property
-    def content_excel_dir(self) -> Path:
-        return self.content_dir / "excel"
-
-    @property
     def dashboard_data_dir(self) -> Path:
         return self.root / "dashboard" / "data"
 

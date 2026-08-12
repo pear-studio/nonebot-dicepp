@@ -14,7 +14,7 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 | `config/user.json` | API Key、密钥等敏感信息 | 不提交 |
 | `config/bots/_template.json` | 账号配置模板 | 可以 |
 | `config/bots/{QQ号}.json` | 具体机器人账号配置 | 不提交 |
-| `content/` | 用户自己的角色卡、牌组、查询库等内容 | 不提交 |
+| `content/` | 用户自己的 Persona 角色卡、牌组、随机表和查询库 | 不提交 |
 | `data/` | 运行时数据 | 不提交 |
 | `dashboard/data/` | Dashboard 账号和会话数据 | 不提交 |
 | `manager/state/` | Manager token、operation 和维护状态 | 不提交 |
@@ -202,3 +202,7 @@ docker exec dicepp cat /app/config/user.json
 Bot、Dashboard 和 Manager 通过同一份实例布局解析这些目录。除兼容旧部署的 `DICEPP_DATA_DIR` 外，建议让三个目录保持在同一个实例根目录，便于归档和跨平台迁移。普通归档只保存配置和 Catalog 管理的 `data/`；完整归档才包含可能很大的 `content/`。
 
 当前不提供旧 `Data` 目录的自动迁移。若你手上仍有旧版本 `Data` 资产，请先整体备份，再根据当前 `config/`、`content/`、`data/` 文档手工整理到新目录结构；不要假设旧 Excel 文件会被自动兼容或自动导入。
+
+旧群私设命令及其 XLSX 导入链路已经停用。既有 `content/excel/` 和
+`data/bots/{账号}/QueryHomebrew/` 数据不会被删除或迁移，但 Bot、Persona 和
+Dashboard 内容管理不再读取这些目录；启动首次发现时只记录一条遗留数据警告。

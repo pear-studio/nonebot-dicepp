@@ -2101,18 +2101,15 @@ function app() {
     characterYamlText: '',
 
     // ── Tab: Content ──
-    contentDirs: ['queries', 'decks', 'random', 'characters', 'excel'],
+    contentDirs: ['queries', 'decks', 'random'],
     contentGroups: [
       { label: '常用内容', dirs: ['queries', 'decks', 'random'] },
-      { label: '旧格式与其他', dirs: ['characters', 'excel'] },
     ],
-    dirLabels: { decks: '卡组', random: '随机生成', queries: '查询', characters: '角色', excel: 'Excel' },
+    dirLabels: { decks: '卡组', random: '随机生成', queries: '查询' },
     dirDescriptions: {
       decks: '卡组文件',
       random: '随机生成内容',
       queries: '查询数据库',
-      characters: '旧格式角色资料',
-      excel: '旧格式 Excel 文件',
     },
     contentSubdir: 'queries',
     queryDatabaseListOpen: true,

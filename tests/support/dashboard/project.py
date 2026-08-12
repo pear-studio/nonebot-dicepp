@@ -27,7 +27,6 @@ def build_dashboard_project(
         "content/random",
         "content/queries",
         "content/characters",
-        "content/excel",
         "dashboard/data",
     ]
     for directory in directories:

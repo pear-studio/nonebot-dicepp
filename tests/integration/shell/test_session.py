@@ -107,7 +107,9 @@ class TestSessionWorkspace:
         ) == {}
         assert (session_dir / "config" / "bots" / "_template.json").is_file()
         assert (session_dir / "data" / "bots").is_dir()
+        assert (session_dir / "content" / "characters").is_dir()
         assert (session_dir / "content" / "queries").is_dir()
+        assert not (session_dir / "content" / "excel").exists()
         assert (session_dir / "dashboard" / "data").is_dir()
 
     def test_live_runtime_lease_blocks_second_runtime_and_session_deletion(self):

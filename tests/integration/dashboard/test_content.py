@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dicepp_manager.client import ManagerClientError
@@ -107,12 +108,13 @@ class TestListDecks:
         assert ".DS_Store" not in names
         assert "test_deck.txt" in names
 
-    def test_empty_subdir(self, test_client: TestClient):
-        """An empty but valid subdirectory returns an empty list."""
+    @pytest.mark.parametrize("subdir", ["characters", "excel"])
+    def test_retired_generic_content_subdirs_are_rejected(
+        self, test_client: TestClient, subdir: str
+    ):
         setup_auth(test_client)
-        resp = test_client.get("/api/content/characters")
-        assert resp.status_code == 200
-        assert resp.json()["files"] == []
+        resp = test_client.get(f"/api/content/{subdir}")
+        assert resp.status_code == 404
 
 
 class TestReadTextFile:

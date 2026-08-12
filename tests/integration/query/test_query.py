@@ -307,7 +307,6 @@ class TestQueryCommandIntegration:
             "connect_path",
             "disconnect_database",
             "create_empty_database",
-            "load_data_from_xlsx_to_sqlite",
         ):
             blocked_methods[name] = AsyncMock(side_effect=AssertionError(f"{name} must not be called"))
             monkeypatch.setattr(bot.db.query, name, blocked_methods[name])
@@ -324,21 +323,9 @@ class TestQueryCommandIntegration:
 
 
 @pytest.mark.asyncio
-class TestHomebrewCommandIntegration:
-    """HomebrewCommand (.私设/.hb) 集成测试"""
+class TestRetiredHomebrewCommands:
+    """Retired homebrew commands are no longer registered."""
 
-    async def test_homebrew_status_returns_response(self, _send_group_factory):
-        """查询私设状态——应返回私设状态提示而非空列表"""
-        cmds = await _send_group_factory(".hb status", user_id="test_master")
-        assert len(cmds) == 1, ".hb status 应返回一条提示"
-        result = "\n".join([str(c) for c in cmds])
-        assert "私设" in result
-        assert "未载入" in result
-
-    async def test_homebrew_query_no_data_returns_response(self, _send_group_factory):
-        """没有私设数据时查询应返回提示而非崩溃"""
-        cmds = await _send_group_factory(".私设 测试条目", user_id="test_master")
-        assert len(cmds) == 1, ".私设 应返回一条提示"
-        result = "\n".join([str(c) for c in cmds])
-        assert "私设" in result
-        assert "未载入" in result
+    @pytest.mark.parametrize("command", [".hb status", ".私设 测试条目"])
+    async def test_homebrew_command_is_not_registered(self, command, _send_group_factory):
+        assert await _send_group_factory(command, user_id="test_master") == []

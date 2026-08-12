@@ -1,10 +1,6 @@
 from typing import List, Tuple, Dict, Optional, Set, Literal, Any
-import os
 import datetime
-#import openpyxl
 import math
-#import random
-# from openpyxl.utils import get_column_letter
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command.const import *
@@ -308,23 +304,6 @@ class QueryCommand(UserCommandBase):
         arg_str: str = hint[1]
         feedback: str = ""
 
-        # 私设查询库
-        query_homebrew = False
-        if meta.group_id:
-            group_row = await self.bot.db.group_config.get(meta.group_id)
-            if group_row and group_row.data:
-                query_homebrew = group_row.data.get("query_homebrew", False)
-        if meta.group_id and query_homebrew:
-            homebrew_database = "HB" + meta.group_id
-            if not self.bot.db.query.has_database(homebrew_database):
-                homebrew_path: str = os.path.join(self.bot.data_path, "QueryHomebrew", homebrew_database + ".db")
-                if os.path.exists(homebrew_path):
-                    await self.bot.db.query.connect_path(homebrew_path)
-                else:
-                    homebrew_database = ""
-        else:
-            homebrew_database = ""
-
         # 判断功能开关
         if not self.bot.config.query.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
@@ -354,7 +333,6 @@ class QueryCommand(UserCommandBase):
             else:
                 feedback = await self.query_info(
                     database,
-                    homebrew_database,
                     arg_str,
                     source_port,
                     search_mode=(0 if mode == "query" else 1),
@@ -371,7 +349,7 @@ class QueryCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_QUERY_NO_RESULT)
             else:
                 item = record.data[index]
-                result = await self.query_feedback(database, homebrew_database, item, source_port)
+                result = await self.query_feedback(database, item, source_port)
                 feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
         elif mode == "flip_page":
             record = self.record_dict[source_port]
@@ -435,7 +413,6 @@ class QueryCommand(UserCommandBase):
     async def query_info(
         self,
         database: str,
-        homebrew_database: str,
         query_keywords: str,
         port: MessagePort,
         search_mode: int,
@@ -451,7 +428,6 @@ class QueryCommand(UserCommandBase):
         try:
             poss_result = await self.query_item(
                 database,
-                homebrew_database,
                 query_keywords,
                 search_mode,
             )
@@ -465,7 +441,7 @@ class QueryCommand(UserCommandBase):
         if not poss_result or poss_result_num == 0:  # 找不到结果
             return ""
         elif poss_result_num == 1:  # 找到唯一结果
-            feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port)
+            feedback = await self.query_feedback(database, poss_result[0], port)
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
             # 记录当前信息以备后续选择或翻页
             self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
@@ -484,7 +460,6 @@ class QueryCommand(UserCommandBase):
     async def query_item(
         self,
         database: str,
-        homebrew_database: str,
         query_keywords: str,
         search_mode: int = 0,
     ) -> List[QueryData]:
@@ -499,22 +474,18 @@ class QueryCommand(UserCommandBase):
         else:
             return poss_result
         poss_result = await self.search_item(
-            database, query_command_list, search_mode, homebrew_database,
+            database, query_command_list, search_mode,
         )
         return poss_result
 
     async def search_item(
         self, database: str, query_command_list: List[str],
-        search_mode: int = 0, homebrew_database: str = "",
+        search_mode: int = 0,
     ) -> List[QueryData]:
         """搜索合规的对象（适配层：调用 QueryStore.search() + dict→QueryData）。"""
-        databases = [database]
-        if homebrew_database:
-            databases.append(homebrew_database)
-
         try:
             result = await self.bot.db.query.search(
-                databases=databases,
+                database=database,
                 query_tokens=query_command_list,
                 fulltext=(search_mode == 1),
                 limit=MAX_QUERY_ITEM_NUM,
@@ -538,7 +509,6 @@ class QueryCommand(UserCommandBase):
     async def query_feedback(
         self,
         database: str,
-        homebrew_database: str,
         item: QueryData,
         port: MessagePort,
     ) -> str:

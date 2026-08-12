@@ -38,7 +38,6 @@ _WORKSPACE_DIRS = (
     "content/queries",
     "content/decks",
     "content/random",
-    "content/excel",
     "dashboard/data",
 )
 

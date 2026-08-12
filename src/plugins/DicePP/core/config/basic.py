@@ -6,6 +6,57 @@ from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.frozen import get_project_root
 
 
+_legacy_warning_roots: set[Path] = set()
+
+
+def _contains_non_hidden_file(directory: Path) -> bool:
+    try:
+        for path in directory.rglob("*"):
+            relative = path.relative_to(directory)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if path.is_file():
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _legacy_content_locations(layout: InstanceLayout) -> list[Path]:
+    locations: list[Path] = []
+    excel_dir = layout.content_dir / "excel"
+    if _contains_non_hidden_file(excel_dir):
+        locations.append(excel_dir)
+
+    try:
+        homebrew_dirs = sorted(layout.data_bots_dir.glob("*/QueryHomebrew"))
+        for homebrew_dir in homebrew_dirs:
+            try:
+                if any(path.is_file() for path in homebrew_dir.glob("HB*.db")):
+                    locations.append(homebrew_dir)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return locations
+
+
+def _warn_legacy_content_once(layout: InstanceLayout) -> None:
+    """Report retired homebrew assets once without reading or changing them."""
+    root = layout.root.resolve()
+    if root in _legacy_warning_roots:
+        return
+    _legacy_warning_roots.add(root)
+
+    legacy_locations = _legacy_content_locations(layout)
+    if legacy_locations:
+        locations = "、".join(str(path) for path in legacy_locations)
+        logger.warning(
+            f"[Config] [Legacy] 检测到已停用的群私设/XLSX 数据: {locations}。"
+            "这些数据会保留在磁盘，但 DicePP 不再读取、导入或迁移它们。"
+        )
+
+
 def _derive_paths(layout: InstanceLayout) -> dict[str, Path]:
     """Compatibility attribute map backed by the shared instance layout."""
     return {
@@ -22,7 +73,6 @@ def _derive_paths(layout: InstanceLayout) -> dict[str, Path]:
         "CONTENT_QUERIES_DIR": layout.content_queries_dir,
         "CONTENT_DECKS_DIR": layout.content_decks_dir,
         "CONTENT_RANDOM_DIR": layout.content_random_dir,
-        "CONTENT_EXCEL_DIR": layout.content_excel_dir,
     }
 
 
@@ -43,7 +93,6 @@ class Paths:
     CONTENT_QUERIES_DIR: Path
     CONTENT_DECKS_DIR: Path
     CONTENT_RANDOM_DIR: Path
-    CONTENT_EXCEL_DIR: Path
     _layout: InstanceLayout
 
     @classmethod
@@ -78,11 +127,12 @@ class Paths:
 
     @classmethod
     def ensure_dirs(cls) -> None:
+        _warn_legacy_content_once(cls._layout)
         for d in [
             cls.CONFIG_DIR, cls.CONFIG_BOTS_DIR,
             cls.DATA_DIR, cls.DATA_BOTS_DIR, cls.LOCAL_IMG_DIR,
             cls.CONTENT_DIR, cls.CONTENT_CHARACTERS_DIR, cls.CONTENT_QUERIES_DIR, cls.CONTENT_DECKS_DIR,
-            cls.CONTENT_RANDOM_DIR, cls.CONTENT_EXCEL_DIR,
+            cls.CONTENT_RANDOM_DIR,
         ]:
             if not d.exists():
                 d.mkdir(parents=True, exist_ok=True)
@@ -97,7 +147,7 @@ class Paths:
         仍在 base_dir 之内，防止路径遍历攻击（../、绝对路径等）。
 
         Args:
-            base_dir: 允许访问的根目录（如 Paths.CONTENT_EXCEL_DIR）
+            base_dir: 允许访问的根目录（如 Paths.CONTENT_DECKS_DIR）
             name:     用户输入的文件/目录名（不含后缀，不允许含路径分隔符）
             suffix:   要附加的后缀（如 ".xlsx"）
 

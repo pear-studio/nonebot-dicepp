@@ -83,7 +83,7 @@ class TestQueryStoreConnect:
         assert query_store.has_database("rules") is False
         assert "rules" not in query_store.list_databases()
         with pytest.raises(QueryStoreError, match="未加载"):
-            await query_store.search(["rules"], ["火球术"])
+            await query_store.search("rules", ["火球术"])
 
         set_query_database_enabled(tmp_path, "rules", True)
         assert query_store.has_database("rules") is True
@@ -98,7 +98,7 @@ class TestQueryStoreConnect:
         await conn.close()
 
         await query_store.connect_path(str(db_path))
-        result = await query_store.search(["four"], ["火球术"])
+        result = await query_store.search("four", ["火球术"])
 
         assert result["results"] == [{
             "name": "火球术",
@@ -183,7 +183,7 @@ class TestQueryStoreSearch:
         store = query_store
         await store.connect_path(db_path)
 
-        result = await store.search(["d"], ["火球术"])
+        result = await store.search("d", ["火球术"])
         assert result["total"] == 1
         assert len(result["results"]) == 1
         assert result["results"][0]["name"] == "火球术"
@@ -195,7 +195,7 @@ class TestQueryStoreSearch:
         store = query_store
         await store.connect_path(db_path)
 
-        result = await store.search(["d"], [])
+        result = await store.search("d", [])
         assert result == {"results": [], "total": 0}
 
     @pytest.mark.asyncio
@@ -204,7 +204,7 @@ class TestQueryStoreSearch:
 
         store = query_store
         with pytest.raises(QueryStoreError, match="未加载"):
-            await store.search(["nonexistent"], ["foo"])
+            await store.search("nonexistent", ["foo"])
 
     @pytest.mark.asyncio
     async def test_search_pagination(self, tmp_path, query_store):
@@ -214,25 +214,9 @@ class TestQueryStoreSearch:
         store = query_store
         await store.connect_path(db_path)
 
-        result = await store.search(["d"], ["name"], limit=3, offset=2)
+        result = await store.search("d", ["name"], limit=3, offset=2)
         assert len(result["results"]) == 3
         assert result["results"][0]["name"] == "name2"
         assert result["results"][1]["name"] == "name3"
         assert result["results"][2]["name"] == "name4"
-
-    @pytest.mark.asyncio
-    async def test_search_private_overrides_master(self, tmp_path, query_store):
-        """私设库中的同名条目应覆盖主库条目。"""
-        master = str(tmp_path / "master.db")
-        private = str(tmp_path / "private.db")
-        await _create_test_db(master, [("火球术", "Fireball", "PHB", "", "", "3d6")])
-        await _create_test_db(private, [("火球术", "Fireball", "私设", "", "", "4d6")])
-
-        store = query_store
-        await store.connect_path(str(tmp_path))
-
-        result = await store.search(["master", "private"], ["火球术"])
-        assert result["total"] == 1
-        assert result["results"][0]["source"] == "私设"
-        assert result["results"][0]["content"] == "4d6"
 

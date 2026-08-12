@@ -6,6 +6,7 @@ import pytest
 
 from tests.support.fs_utils import rmtree_retry
 
+
 class _BotTestBase(IsolatedAsyncioTestCase):
     """提供通用 Bot 初始化和清理的基类"""
 
@@ -230,6 +231,119 @@ class TestBotActivate:
         await h.send_group(".dismiss", group_id="group_activate", checker=lambda s: not s)
         await h.send_group(".dismiss", group_id="group_activate", to_me=True,
                            checker=lambda s: "再见啦。" in s)
+
+
+class TestGroupConfigLegacyFields:
+    async def test_retired_field_is_preserved_but_not_visible_or_configurable(self, h):
+        from plugins.DicePP.core.data.models import GroupConfig
+
+        group_id = "group_legacy_config"
+        stored = {
+            "query_database": "RULES",
+            "query_homebrew": True,
+        }
+        await h.bot.db.group_config.upsert(GroupConfig(group_id=group_id, data=stored))
+
+        await h.send_group(
+            ".config show",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: (
+                "query_database : RULES" in result
+                and "query_homebrew" not in result
+            ),
+        )
+        await h.send_group(
+            ".config get query_homebrew",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "参数错误" in result and "True" not in result,
+        )
+        await h.send_group(
+            ".config set query_homebrew false",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "参数错误" in result,
+        )
+        await h.send_group(
+            ".config set query_database NEW_RULES",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "已将群配置 query_database" in result,
+        )
+        await h.send_group(
+            ".config get query_database",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "NEW_RULES" in result,
+        )
+
+        row = await h.bot.db.group_config.get(group_id)
+        assert row is not None
+        assert row.data == {
+            "query_database": "NEW_RULES",
+            "query_homebrew": True,
+        }
+
+    async def test_set_parses_supported_value_types_before_persisting(
+        self, h, monkeypatch
+    ):
+        from plugins.DicePP.module.common.groupconfig_command import (
+            DEFAULT_GROUP_CONFIG,
+        )
+
+        group_id = "group_typed_config"
+        monkeypatch.setitem(DEFAULT_GROUP_CONFIG, "test_integer_limit", 3)
+
+        await h.send_group(
+            ".config set query_enable 关",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "已将群配置 query_enable" in result,
+        )
+        await h.send_group(
+            ".config set query_enable true",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "已将群配置 query_enable" in result,
+        )
+        await h.send_group(
+            ".config set test_integer_limit -7",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "已将群配置 test_integer_limit" in result,
+        )
+        await h.send_group(
+            ".config set query_database CUSTOM_RULES",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "已将群配置 query_database" in result,
+        )
+
+        row = await h.bot.db.group_config.get(group_id)
+        assert row is not None
+        assert row.data == {
+            "query_enable": True,
+            "test_integer_limit": -7,
+            "query_database": "CUSTOM_RULES",
+        }
+
+        await h.send_group(
+            ".config set query_enable 1",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "布尔值" in result,
+        )
+        await h.send_group(
+            ".config set test_integer_limit 1.5",
+            group_id=group_id,
+            user_id="test_master",
+            checker=lambda result: "整数" in result,
+        )
+
+        row_after_invalid = await h.bot.db.group_config.get(group_id)
+        assert row_after_invalid is not None
+        assert row_after_invalid.data == row.data
 
 
 class TestHelp:

@@ -9,7 +9,7 @@ class _SearchKnowledgeArgs(BaseModel):
     """规则资料库搜索参数"""
     keyword: str | None = Field(default=None, description="搜索关键词，匹配名称/英文名。如 '火球术'")
     query: str | None = Field(default=None, description="fallback 原始查询字符串。传入时忽略 keyword")
-    database: str | None = Field(default=None, description="要搜索的资料库名称。不填使用当前对话默认库。可先调用 list_query_databases 查看可选库。注意：群聊中会自动追加当前群的房规数据库，同名条目以房规为准")
+    database: str | None = Field(default=None, description="要搜索的资料库名称。不填使用当前对话默认库。可先调用 list_query_databases 查看可选库")
     limit: int | None = Field(default=5, ge=1, le=10, description="返回结果数量上限（1-10）")
     fulltext: bool | None = Field(default=False, description="是否同时搜索来源和内容正文。默认 false 只搜索名称和英文名")
     detail_index: int | None = Field(default=None, description="获取之前搜索结果中第 N 条的完整内容。使用此参数时请保持其他参数不变")
@@ -57,13 +57,6 @@ def build_search_knowledge_tool(query, resolve_db, user_id="", group_id="") -> T
             reason = "未启用" if query.is_database_disabled(db) else "未加载"
             return ToolResult(observation=f"资料库 '{db}' {reason}。当前可用: {', '.join(available)}")
 
-        databases = [db]
-
-        if group_id:
-            hb_db = f"HB{group_id}"
-            if query.has_database(hb_db):
-                databases.append(hb_db)
-
         # Build query from structured args
         raw_query = parsed.query
         if not raw_query:
@@ -80,7 +73,7 @@ def build_search_knowledge_tool(query, resolve_db, user_id="", group_id="") -> T
 
         try:
             result = await query.search(
-                databases=databases, query_tokens=tokens,
+                database=db, query_tokens=tokens,
                 fulltext=parsed.fulltext or False,
                 limit=limit,
             )
