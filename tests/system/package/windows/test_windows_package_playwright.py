@@ -130,10 +130,10 @@ def test_windows_dashboard_exe_shows_setup_validation(dashboard_exe_url: str) ->
             browser.close()
 
 
-def test_windows_dashboard_exe_validates_update_config_from_frozen_schema(
+def test_windows_dashboard_exe_applies_packaged_config_validation(
     dashboard_exe_url: str,
 ) -> None:
-    """The packaged onefile accepts valid update config and rejects invalid input."""
+    """The packaged Manager canonicalizes recoverable input and rejects hard errors."""
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
@@ -163,7 +163,7 @@ def test_windows_dashboard_exe_validates_update_config_from_frozen_schema(
                     return {status: response.status, body: await response.json()};
                 }"""
             )
-            invalid = page.evaluate(
+            recoverable = page.evaluate(
                 """async () => {
                     const response = await fetch('/api/config/user/save', {
                         method: 'POST',
@@ -173,10 +173,30 @@ def test_windows_dashboard_exe_validates_update_config_from_frozen_schema(
                     return {status: response.status, body: await response.json()};
                 }"""
             )
+            invalid = page.evaluate(
+                """async () => {
+                    const response = await fetch('/api/config/user/save', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({master: 'not-a-list'}),
+                    });
+                    return {status: response.status, body: await response.json()};
+                }"""
+            )
+            persisted = page.evaluate(
+                """async () => {
+                    const response = await fetch('/api/config/user');
+                    return {status: response.status, body: await response.json()};
+                }"""
+            )
 
             assert valid["status"] == 200
             assert valid["body"]["ok"] is True
+            assert recoverable["status"] == 200
+            assert recoverable["body"]["ok"] is True
             assert invalid["status"] == 422
             assert invalid["body"]["ok"] is False
+            assert persisted["status"] == 200
+            assert persisted["body"]["config"] == {"update": {"cache_versions": 2}}
         finally:
             browser.close()
