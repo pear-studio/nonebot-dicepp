@@ -111,7 +111,6 @@ class DockerSocketUpgradeExecutor:
         self, image_records: list[dict[str, str]]
     ) -> dict[str, Any]:
         targets = _target_images(image_records)
-        compose_env_keys = _compose_environment_keys(self.current_compose)
         bot_id = await self.runtime._resolve_container(
             next(iter(self.runtime._allowed))
         )
@@ -132,8 +131,6 @@ class DockerSocketUpgradeExecutor:
             "bot": await self._capture_with_image_defaults(bot),
             "dashboard": await self._capture_with_image_defaults(dashboard),
         }
-        for role, captured in containers.items():
-            captured["compose_env_keys"] = compose_env_keys[role]
         return {
             "project": project,
             "targets": targets,
@@ -217,6 +214,7 @@ class DockerSocketUpgradeExecutor:
                 await self._replace(
                     previous["containers"][role],
                     targets[role],
+                    role=role,
                     expected_container_id=previous["containers"][role][
                         "container_id"
                     ],
@@ -233,6 +231,7 @@ class DockerSocketUpgradeExecutor:
                                 "image_defaults"
                             ],
                         },
+                        role=role,
                         expected_container_id=previous["containers"][role][
                             "container_id"
                         ],
@@ -263,6 +262,7 @@ class DockerSocketUpgradeExecutor:
                     "image_id": container["image_id"],
                     "defaults": container["image_defaults"],
                 },
+                role=role,
                 expected_container_id=container["container_id"],
                 expected_transaction_id=transaction_id,
             )
@@ -322,6 +322,7 @@ class DockerSocketUpgradeExecutor:
         captured: dict[str, Any],
         image: dict[str, Any],
         *,
+        role: str,
         extra_labels: dict[str, str] | None = None,
         restart_policy: str | None = None,
         start: bool = True,
@@ -343,7 +344,9 @@ class DockerSocketUpgradeExecutor:
                 captured["effective_image_config"],
                 captured["image_defaults"],
                 image["defaults"],
-                compose_env_keys=captured.get("compose_env_keys"),
+                compose_env_keys=_compose_environment_keys(
+                    self.current_compose
+                )[role],
             )
         )
         config["Image"] = image["image_id"]

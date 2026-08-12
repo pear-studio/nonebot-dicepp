@@ -531,6 +531,7 @@ async def test_socket_upgrade_allows_replacing_transaction_labeled_container():
     await executor._replace(
         previous["containers"]["bot"],
         resolved["bot"],
+        role="bot",
         extra_labels={
             "io.dicepp.upgrade-transaction": transaction_id,
             "io.dicepp.upgrade-role": "runtime",
