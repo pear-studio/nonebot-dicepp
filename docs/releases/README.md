@@ -120,18 +120,32 @@ Windows Portable/Setup、Velopack bundle、Linux amd64 bundle、`docker-compose.
 `dicepp-release.json`、receipt，以及 `自动升级: yes` 时与该候选绑定的
 `dicepp-upgrade-evidence.json`。Promotion 不执行构建、`vpk`、`docker save` 或 zip。
 
-release metadata 只有在升级协议 registry 全部就绪，并且 Final Candidate 通过与
-当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵时，才能把
-`自动升级` 填写为 `yes`。任一协议仍待验证、平台结果缺失或身份不匹配时必须填写
-`no`；validation-only 矩阵结果不得进入 Receipt 或 Release assets。
+`自动升级` 表示上一兼容 Release 的标准实例能否由现有 Manager 在 Dashboard 中
+经管理员确认后完成托管升级，不表示无人值守安装。`yes` 是日常兼容 Release 的
+默认目标；`no` 会使 Dashboard 将 Release 标记为不兼容并禁止下载、安装，只适用于
+版本按设计仍可发布、但必须在 Dashboard 之外手工部署的兼容性边界。
+
+计划发布 `自动升级: yes` 时，升级协议 registry 必须全部就绪，Final Candidate
+必须产出与当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵
+证据。候选构建失败、产物缺失、摘要或身份不一致、升级矩阵失败、恢复/回退失败、
+证据缺失都直接阻止发布或晋升；修复后重新生成候选，不得通过把同一 Release 改成
+`no` 绕过。validation-only 矩阵只用于事先明确的手工部署版本，不得进入 Receipt
+或 Release assets。
+
+`no` 的合理用途包括：源 Manager 的缺陷使其无法获得自身修复；现有事务无法处理
+Compose service/volume/network、deployment schema、RuntimeUnit、安装布局或 handoff
+协议的破坏性变化；以及经开发者明确决定的数据/配置人工迁移。数据或配置变化本身
+不等于 `no`。若以“必须人工处理数据或配置迁移”为理由使用 `no`，必须先说明 Manager
+无法处理的原因、受影响的标准部署、人工步骤和可选兼容方案，并在初次风险确认之外
+取得开发者单独、明确的二次确认；agent 不得自行作出该判定。
 
 `manager` 变更范围本身不再是一律手工的标志。变更 Manager 的 Linux 发布必须
 在 release manifest 与 bundle 内层 manifest 中声明受支持的
 `linux_manager_handoff_protocol`（当前 v1），并以真实 Linux 候选矩阵
 （rc20 手工基线 → 下一候选的 `manager_handoff_*` 场景）和 Windows 自身矩阵
 证据共同支撑 `自动升级: yes`；协议字段缺失或不受支持、破坏性交接变化，或
-任一平台缺乏真实字节证据时保持 fail closed 手工迁移，全局 `automatic_upgrade`
-保持 `no`。
+任一平台缺乏真实字节证据时保持 fail closed：计划为兼容 Release 时阻止发布；
+只有事先明确设计为手工部署版本时，全局 `automatic_upgrade` 才保持 `no`。
 
 Sealed candidate artifact 的 retention 是 30 天，因此 Promotion 必须在 candidate
 run 完成后 30 天内执行；同时还要求 candidate `head_sha` 仍是当前 default branch

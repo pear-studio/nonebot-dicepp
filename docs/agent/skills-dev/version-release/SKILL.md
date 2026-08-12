@@ -40,10 +40,14 @@ metadata:
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
-- release metadata 只有在升级协议 registry 全部就绪，并且 Final Candidate 通过与
-  当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵时，才能把
-  `自动升级` 填写为 `yes`。任一协议仍待验证、平台结果缺失或身份不匹配时必须填写
-  `no`；不得因为存在 validation-only 结果就提前填写 `yes`。
+- `自动升级` 表示上一兼容 Release 的标准实例能否由现有 Manager 在 Dashboard
+  经管理员确认后完成托管升级，不表示无人值守安装。`no` 只用于版本按设计仍可发布、
+  但必须在 Dashboard 之外手工部署的兼容性边界；不得用来绕过候选构建、升级矩阵、
+  恢复/回退或证据失败。
+- 计划填写 `yes` 时，升级协议 registry 必须全部就绪；Final Candidate 必须产出与
+  当前 commit、候选身份和最终发布字节绑定的 Windows/Linux 跨版本矩阵证据。
+  任一验证失败、结果缺失或身份不匹配都阻止发布或晋升，修复后重新生成候选，
+  不得由 agent 自动把同一 Release 降级为 `no`。
 
 ## Preconditions
 
@@ -92,10 +96,23 @@ metadata:
 
 `version-release` 只生成并验证 Release contract，不执行生产部署、不直接调用 Manager，也不替代 `version-deploy`。
 
-- 将 `自动升级` 写为 `yes` 前，确认当前标准 Manager 能对已采用标准拓扑的兼容实例完成下载、归档、安装和健康检查，且失败处理已按平台验收：Linux 自动回退，Windows 生成可用的一次性人工恢复入口。正常安装不得需要 Manager 自身升级或人工迁移。
-- 当前 Manager 不满足 `最低 Manager 版本`、目标包含 Manager 自身升级、需要 Compose、deployment schema、RuntimeUnit、宿主配置或人工配置迁移、发布产物或兼容性未知时，必须写 `no`。
-- `数据变更` 或 `配置变更` 本身不自动等于 `no`；只有当前 Manager 的受支持事务能覆盖相应迁移且已在 release 验收中验证时才可写 `yes`。
-- 不能确认时写 `no`，并在 `Risk Notes` 说明手工迁移或恢复要求。
+- `yes` 是日常兼容 Release 的默认目标：当前标准 Manager 能对上一兼容 Release 的
+  标准实例完成发现、下载、归档、安装和健康检查；Linux 失败时自动回退，Windows
+  生成可用的一次性人工恢复入口。管理员仍需在 Dashboard 中确认安装。
+- 普通 Runtime、Dashboard、Manager 或向下兼容配置变化不构成 `no`。目标包含
+  Manager 新代码时，只要源 Manager 满足 `最低 Manager 版本`，Linux 声明受支持的
+  handoff 协议，并通过双平台真实候选矩阵，就可以填写 `yes`。
+- `no` 只用于有意发布的手工部署版本，例如：源 Manager 的缺陷使其无法获得自身
+  修复；Compose service/volume/network、deployment schema、RuntimeUnit、安装布局
+  或 handoff 协议发生现有事务无法处理的破坏性变化；或开发者明确决定采用 Manager
+  无法安全完成的数据/配置人工迁移。
+- 以数据或配置必须人工迁移为由判定 `no` 时，agent 不得自行决定。必须先说明
+  Manager 为什么不能处理、影响哪些标准部署、人工步骤及可选兼容方案，然后暂停，
+  在初次风险确认之外取得开发者单独且明确的二次确认；没有二次确认时继续以 `yes`
+  为目标解决兼容问题，或将发布视为阻塞。
+- 构建失败、产物缺失、摘要或身份不一致、升级矩阵失败、恢复/回退失败、证据缺失
+  都是发布阻塞，不是填写 `no` 的理由。不得通过改成 `no` 绕过失败；若要把版本重新
+  定义为手工部署版本，必须说明独立的设计兼容性理由、重新确认 metadata 并重建候选。
 
 字段含义：
 
@@ -103,9 +120,13 @@ metadata:
 - `配置变更`: 是否影响运行环境变量、`config/`、配置 schema 或配置加载行为。
 - `变更范围`: 逗号分隔的实际变更域；必须显式声明 `data` / `config`，并与
   前两个风险字段完全一致，否则发布会 fail closed。
-- `自动升级`: 表示当前兼容的常驻 Manager 能否对已采用标准部署拓扑的实例完成一次兼容的最新版本升级；不表示任意 tag 安装或回退。Linux Compose 的 service、volume、network 或 deployment schema 有变化时必须写 `no`。
-- `变更范围` 包含 `manager` 时，`自动升级` 必须为 `no`；外层 Release contract 和 Linux 包内 contract 都会拒绝矛盾声明。
-- `最低 Manager 版本`: 能理解本次发布契约和安装事务的最低 Manager 版本；它不能让旧 Manager 自动升级自身。当前 Manager 不满足该版本时，`自动升级` 必须为 `no`。
+- `自动升级`: 表示上一兼容 Release 的标准实例能否由现有 Manager 在 Dashboard
+  经管理员确认后完成一次托管升级；`no` 会使 Dashboard 将 Release 标记为不兼容，
+  禁止下载和安装，只保留外部手工部署路径。
+- `变更范围` 包含 `manager` 时，Linux Release 必须声明当前支持的 Manager handoff
+  协议并通过双平台候选矩阵；Manager 代码变化本身不强制 `no`。
+- `最低 Manager 版本`: 能理解本次发布契约并执行安装事务的源 Manager 能力下限。
+  目标版本包含新的 Manager 不等于源 Manager 不满足该下限。
 
 - `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
 - `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
@@ -215,6 +236,12 @@ metadata:
    Release workflow 会严格解析这些字段；缺失、重复、值非法或版本不一致时
    直接拒绝发布。
 
+   如果初步分析认为数据或配置必须人工迁移、因而准备把 `自动升级` 写为 `no`，
+   必须执行独立的二次确认流程：第一轮只展示不能由 Manager 处理的具体原因、受影响
+   标准部署、人工步骤和可选兼容方案，不写入 metadata；开发者确认已理解后，再单独
+   询问“是否确认将本版本定义为手工部署版本并填写 `自动升级: no`”。只有第二次得到
+   明确肯定答复后才能写入；含糊答复、一般性发版授权或首次风险确认都不算二次确认。
+
    编写 metadata 前必须先列出本次 release 的用户可见主题，至少回答：
 
    - 用户现在能做什么以前不能做的事？
@@ -289,8 +316,10 @@ metadata:
 
    `自动升级: yes` 候选必须先确认升级协议 registry 全部就绪，并验证与该 commit、
    candidate identities 和最终发布字节绑定的 `dicepp-upgrade-evidence.json`；
-   缺失、不完整或不匹配时不得晋升。`automatic_upgrade: no` 的 validation-only
-   矩阵只能用于验收，不得进入 Receipt 或 Release assets。
+   缺失、不完整、不匹配，或 Windows/Linux 升级、恢复、回退任一失败时，候选失败且
+   不得晋升；修复后重新生成候选，不得降级 metadata 绕过。`automatic_upgrade: no`
+   的 validation-only 矩阵只用于事先明确的手工部署版本验收，不得进入 Receipt 或
+   Release assets。
 
    Candidate artifact 只保留 30 天，且 Promotion 要求它的 `head_sha` 仍等于
    当前 default branch HEAD。必须在 master 再次前进之前尽快晋升，30 天只是
