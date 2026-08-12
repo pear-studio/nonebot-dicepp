@@ -5,8 +5,10 @@ import urllib.parse
 
 import pytest
 
+from dicepp_data import InstanceLayout
 from dicepp_manager.docker_runtime import DockerRuntimeError
 from dicepp_manager.docker_upgrade import DockerSocketUpgradeExecutor
+from dicepp_manager.upgrade import LinuxBundleUpgradeAdapter
 
 
 BOT_OLD_ID = "sha256:" + ("1" * 64)
@@ -434,6 +436,11 @@ services:
         encoding="utf-8",
     )
     executor = DockerSocketUpgradeExecutor(runtime, current_compose=compose)
+    adapter = LinuxBundleUpgradeAdapter(
+        layout=InstanceLayout.from_root(tmp_path / "instance"),
+        executor=executor,
+        current_compose=compose,
+    )
     records = [
         {
             "role": "bot",
@@ -449,7 +456,11 @@ services:
 
     previous = await executor.capture_images(records)
     resolved = await executor.resolve_images(records)
-    await executor.switch_images(target_images=resolved, previous=previous)
+    await adapter.create_target_runtimes(
+        previous,
+        {"images": resolved},
+        "t" * 32,
+    )
 
     bot_create = next(
         body
@@ -531,7 +542,6 @@ async def test_socket_upgrade_allows_replacing_transaction_labeled_container():
     await executor._replace(
         previous["containers"]["bot"],
         resolved["bot"],
-        role="bot",
         extra_labels={
             "io.dicepp.upgrade-transaction": transaction_id,
             "io.dicepp.upgrade-role": "runtime",

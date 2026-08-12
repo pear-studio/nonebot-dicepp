@@ -214,7 +214,6 @@ class DockerSocketUpgradeExecutor:
                 await self._replace(
                     previous["containers"][role],
                     targets[role],
-                    role=role,
                     expected_container_id=previous["containers"][role][
                         "container_id"
                     ],
@@ -231,7 +230,6 @@ class DockerSocketUpgradeExecutor:
                                 "image_defaults"
                             ],
                         },
-                        role=role,
                         expected_container_id=previous["containers"][role][
                             "container_id"
                         ],
@@ -262,7 +260,6 @@ class DockerSocketUpgradeExecutor:
                     "image_id": container["image_id"],
                     "defaults": container["image_defaults"],
                 },
-                role=role,
                 expected_container_id=container["container_id"],
                 expected_transaction_id=transaction_id,
             )
@@ -322,7 +319,6 @@ class DockerSocketUpgradeExecutor:
         captured: dict[str, Any],
         image: dict[str, Any],
         *,
-        role: str,
         extra_labels: dict[str, str] | None = None,
         restart_policy: str | None = None,
         start: bool = True,
@@ -338,6 +334,14 @@ class DockerSocketUpgradeExecutor:
         ``io.dicepp.upgrade-transaction`` label.  Anything else fails closed
         and never reaches a DELETE.
         """
+        role = {
+            "dicepp": "bot",
+            "dicepp-dashboard": "dashboard",
+        }.get(captured.get("name"))
+        if role is None:
+            raise DockerRuntimeError(
+                "Compose runtime container role cannot be derived safely"
+            )
         config = dict(captured["config"])
         config.update(
             _explicit_image_overrides(
