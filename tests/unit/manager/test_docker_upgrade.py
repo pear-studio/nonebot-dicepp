@@ -387,6 +387,84 @@ async def test_socket_upgrade_rejects_changed_defaults_even_when_effective_equal
 
 
 @pytest.mark.asyncio
+async def test_socket_upgrade_preserves_compose_env_when_image_defaults_change(
+    tmp_path,
+):
+    runtime = Runtime()
+    original_request = runtime._request
+
+    async def request(method, path, **kwargs):
+        payload = await original_request(method, path, **kwargs)
+        if path == f"/containers/{'a' * 64}/json":
+            payload["Config"]["Env"] = [
+                "ROLE=bot",
+                "PYTHON_VERSION=3.13.14",
+                "DICEPP_ONEBOT_HOST=0.0.0.0",
+            ]
+        elif path == f"/images/{urllib.parse.quote(BOT_OLD_ID, safe='')}/json":
+            payload["Config"]["Env"] = [
+                "ROLE=bot",
+                "PYTHON_VERSION=3.13.14",
+            ]
+        elif path == (
+            "/images/"
+            + urllib.parse.quote(
+                "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+                safe="",
+            )
+            + "/json"
+        ):
+            payload["Config"]["Env"] = [
+                "ROLE=target-default",
+                "PYTHON_VERSION=3.13.15",
+            ]
+        return payload
+
+    runtime._request = request
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        """
+services:
+  bot:
+    environment:
+      - ROLE=bot
+      - DICEPP_ONEBOT_HOST=0.0.0.0
+  dashboard: {}
+""",
+        encoding="utf-8",
+    )
+    executor = DockerSocketUpgradeExecutor(runtime, current_compose=compose)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+
+    previous = await executor.capture_images(records)
+    resolved = await executor.resolve_images(records)
+    await executor.switch_images(target_images=resolved, previous=previous)
+
+    bot_create = next(
+        body
+        for method, path, body in runtime.requests
+        if method == "POST"
+        and path.startswith("/containers/create?name=dicepp")
+        and "dashboard" not in path
+    )
+    assert bot_create["Env"] == [
+        "ROLE=bot",
+        "DICEPP_ONEBOT_HOST=0.0.0.0",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_socket_upgrade_rejects_replacing_unrelated_same_name_container():
     """A same-name container with an unknown identity is never deleted."""
     runtime = Runtime()

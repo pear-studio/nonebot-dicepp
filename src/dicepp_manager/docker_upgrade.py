@@ -94,8 +94,14 @@ class DockerSocketUpgradeExecutor:
     leaves the Manager container and Compose topology untouched.
     """
 
-    def __init__(self, runtime: DockerSocketRuntimeAdapter) -> None:
+    def __init__(
+        self,
+        runtime: DockerSocketRuntimeAdapter,
+        *,
+        current_compose: Path | None = None,
+    ) -> None:
         self.runtime = runtime
+        self.current_compose = current_compose
         #: Container ids created by this executor in the current process.
         #: A replace is authorized to delete them even when their id no longer
         #: matches the captured identity (same-transaction switch -> restore).
@@ -105,6 +111,7 @@ class DockerSocketUpgradeExecutor:
         self, image_records: list[dict[str, str]]
     ) -> dict[str, Any]:
         targets = _target_images(image_records)
+        compose_env_keys = _compose_environment_keys(self.current_compose)
         bot_id = await self.runtime._resolve_container(
             next(iter(self.runtime._allowed))
         )
@@ -125,6 +132,8 @@ class DockerSocketUpgradeExecutor:
             "bot": await self._capture_with_image_defaults(bot),
             "dashboard": await self._capture_with_image_defaults(dashboard),
         }
+        for role, captured in containers.items():
+            captured["compose_env_keys"] = compose_env_keys[role]
         return {
             "project": project,
             "targets": targets,
@@ -334,6 +343,7 @@ class DockerSocketUpgradeExecutor:
                 captured["effective_image_config"],
                 captured["image_defaults"],
                 image["defaults"],
+                compose_env_keys=captured.get("compose_env_keys"),
             )
         )
         config["Image"] = image["image_id"]
@@ -588,6 +598,8 @@ def _explicit_image_overrides(
     effective: dict[str, Any],
     old_defaults: dict[str, Any],
     new_defaults: dict[str, Any],
+    *,
+    compose_env_keys: Any = None,
 ) -> dict[str, Any]:
     """Derive only explicit container overrides from the old image merge.
 
@@ -604,7 +616,10 @@ def _explicit_image_overrides(
         for key in _IMAGE_DEFAULT_KEYS
         if old_defaults.get(key) != new_defaults.get(key)
     ]
-    if changed_defaults:
+    unsupported_changes = [key for key in changed_defaults if key != "Env"]
+    if unsupported_changes or (
+        "Env" in changed_defaults and compose_env_keys is None
+    ):
         # Docker inspect exposes only the effective container Config.  It
         # cannot tell whether a value equal to the old image default was also
         # explicitly pinned by Compose.  Re-inferring overrides would silently
@@ -620,7 +635,11 @@ def _explicit_image_overrides(
         old = old_defaults.get(key)
         new = new_defaults.get(key)
         if key == "Env":
-            explicit = _derive_env_overrides(current, old, new)
+            explicit = (
+                _compose_env_overrides(current, compose_env_keys)
+                if old != new
+                else _derive_env_overrides(current, old, new)
+            )
             if explicit:
                 overrides[key] = explicit
         elif key in {"ExposedPorts", "Volumes"}:
@@ -631,6 +650,70 @@ def _explicit_image_overrides(
             _validate_default_shape(key, current, old, new)
             overrides[key] = current
     return overrides
+
+
+def _compose_environment_keys(path: Path | None) -> dict[str, list[str] | None]:
+    if path is None:
+        return {"bot": None, "dashboard": None}
+    try:
+        import yaml
+
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise DockerRuntimeError("Current Compose environment is unavailable") from exc
+    services = document.get("services") if isinstance(document, dict) else None
+    if not isinstance(services, dict):
+        raise DockerRuntimeError("Current Compose services are unavailable")
+    result: dict[str, list[str] | None] = {}
+    for role in ("bot", "dashboard"):
+        service = services.get(role)
+        if not isinstance(service, dict):
+            raise DockerRuntimeError(f"Current Compose {role} service is unavailable")
+        if service.get("env_file") is not None:
+            raise DockerRuntimeError(
+                f"Current Compose {role} env_file cannot prove environment overrides"
+            )
+        environment = service.get("environment")
+        if environment is None:
+            result[role] = []
+            continue
+        if isinstance(environment, dict):
+            keys = list(environment)
+        elif isinstance(environment, list):
+            if any(not isinstance(item, str) for item in environment):
+                raise DockerRuntimeError(
+                    f"Current Compose {role} environment is invalid"
+                )
+            keys = [item.partition("=")[0] for item in environment]
+        else:
+            raise DockerRuntimeError(f"Current Compose {role} environment is invalid")
+        if any(not isinstance(key, str) or not key for key in keys):
+            raise DockerRuntimeError(f"Current Compose {role} environment is invalid")
+        if len(set(keys)) != len(keys):
+            raise DockerRuntimeError(
+                f"Current Compose {role} environment has duplicate keys"
+            )
+        result[role] = keys
+    return result
+
+
+def _compose_env_overrides(current: Any, keys: Any) -> list[str]:
+    current_map = _env_map(current)
+    if not isinstance(keys, list) or any(
+        not isinstance(key, str) or not key for key in keys
+    ):
+        raise DockerRuntimeError("Compose environment override source is invalid")
+    missing = set(keys) - set(current_map)
+    if missing:
+        raise DockerRuntimeError(
+            "Compose environment overrides are absent from the running container"
+        )
+    wanted = set(keys)
+    return [
+        entry
+        for entry in (current or [])
+        if entry.partition("=")[0] in wanted
+    ]
 
 
 def _derive_env_overrides(current: Any, old: Any, new: Any) -> list[str]:

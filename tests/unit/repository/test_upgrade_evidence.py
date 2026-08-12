@@ -540,7 +540,7 @@ def test_release_with_empty_matrix_reports_source_gap_before_missing_evidence(
         )
 
 
-def test_tracked_registry_is_ready_with_pinned_rc20_sources_for_both_platforms() -> None:
+def test_tracked_registry_is_ready_with_previous_release_sources() -> None:
     root = find_repository_root(Path(__file__))
     registry = json.loads(
         (root / "scripts/build/upgrade_protocol_registry.json").read_text(
@@ -571,25 +571,25 @@ def test_tracked_registry_is_ready_with_pinned_rc20_sources_for_both_platforms()
     } == {
         (
             "windows",
-            "3.0.0rc20",
+            "3.0.0rc21",
             (
                 (
                     "portable",
-                    "27deaae390af392bf19bd8adf025a3079326ac00ed9559dd4caaedad53704d73",
+                    "23ac4ad653782b76b1a1239ebd52765eba9090d3e645d34ab9f65886a868e028",
                 ),
                 (
                     "velopack-bundle",
-                    "98ac5eeebbfc535cb7e9aa963304386c5906c0183502c5d5a3c4f78ebb36a911",
+                    "d035d0a9a8cc85bc22732e9980da46a0651bb4201cdb5c57249018fb14cc5be4",
                 ),
             ),
         ),
         (
             "linux",
-            "3.0.0rc20",
+            "3.0.0rc21",
             (
                 (
                     "linux-bundle",
-                    "557a1fedebd20d40176abf8717afa21f1251830b57f114fdb314bc3023a2c2c0",
+                    "9abc2fe939082be095bcf81fda03308fab3fd211a7e368ca45f679227b161413",
                 ),
             ),
         ),

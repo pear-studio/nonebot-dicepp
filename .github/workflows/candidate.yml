@@ -588,8 +588,8 @@ jobs:
           needs.candidate-metadata.outputs.automatic_upgrade != 'true' &&
           inputs.exercise_upgrade_matrix == true
         run: |
-          echo "Windows: pinned rc20 source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
-          echo "Linux: pinned rc20 source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows: previous published source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux: previous published source to final-candidate cross-version matrix" >> "$GITHUB_STEP_SUMMARY"
           echo "No upgrade evidence is promotable while automatic_upgrade is false." >> "$GITHUB_STEP_SUMMARY"
 
   receipt:

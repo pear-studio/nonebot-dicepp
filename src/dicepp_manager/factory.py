@@ -160,7 +160,10 @@ def _create_upgrade_adapter(
 
         return LinuxBundleUpgradeAdapter(
             layout=settings.layout,
-            executor=DockerSocketUpgradeExecutor(runtime_adapter),
+            executor=DockerSocketUpgradeExecutor(
+                runtime_adapter,
+                current_compose=compose,
+            ),
             handoff_executor=DockerHandoffExecutor(runtime_adapter),
             current_compose=compose,
         )

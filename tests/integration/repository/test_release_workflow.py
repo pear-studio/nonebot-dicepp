@@ -623,8 +623,8 @@ def test_validation_only_windows_matrix_is_not_misrepresented_as_release_evidenc
         for source in matrix["supported_sources"]
     }
     assert sources == {
-        ("windows", "3.0.0rc20"),
-        ("linux", "3.0.0rc20"),
+        ("windows", "3.0.0rc21"),
+        ("linux", "3.0.0rc21"),
     }
     windows_contract = next(
         item
@@ -637,8 +637,8 @@ def test_validation_only_windows_matrix_is_not_misrepresented_as_release_evidenc
         "upgrade-evidence",
         "Record validation-only transition coverage",
     )["run"]
-    assert "Windows: pinned rc20 source" in transition
-    assert "Linux: pinned rc20 source" in transition
+    assert "Windows: previous published source" in transition
+    assert "Linux: previous published source" in transition
     assert "No upgrade evidence is promotable" in transition
 
 
