@@ -221,6 +221,7 @@ def test_dind_uses_audited_official_digest_by_default(
 
     run_call = next(call for call in calls if call[0] == "run")
     assert _DEFAULT_DIND_IMAGE in run_call
+    assert "--restart=unless-stopped" in run_call
 
 
 def test_dind_wait_requires_three_consecutive_connections(

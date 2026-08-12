@@ -888,6 +888,7 @@ class _DockerDaemonSandbox:
                 "run",
                 "-d",
                 "--privileged",
+                "--restart=unless-stopped",
                 "--name",
                 self.name,
                 "--label",
