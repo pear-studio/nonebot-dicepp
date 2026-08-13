@@ -14,6 +14,23 @@
 
 ## dashboard
 
+### [B-260813-e95640] 重整版本更新界面与下载安装状态交互
+- 创建: 2026-08-13
+- 优先级: P1
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前版本、可用版本、兼容信息、产物列表、下载状态、安装确认和历史事务平铺在同一页面，主操作路径和当前所处阶段不清楚，信息较乱
+    - 下载状态虽包含 `bytes_downloaded/size`，页面只显示英文状态和文件名，不展示进度；已有下载任务时重复点击返回 409 `A release download is already running`，用户看不到后台下载情况，容易误判为失败或卡死
+    - 安装事务无条件把 operation.message 作为 failure fallback，成功事务 `status=succeeded/message=Upgrade ... committed` 也显示在“失败原因”下
+    - Linux rc21→rc22 生产验收已同时复现以上交互问题；升级实际成功，但页面信息不足且容易误导管理员
+- 开发备忘:
+    - 重新梳理版本更新页的信息层级，以“检查更新 → 下载 → 安装确认 → 安装事务结果”为清晰主流程，区分当前状态、可执行操作、风险说明和历史结果
+    - 下载期间展示字节进度与百分比、禁用重复提交；遇到并发下载 409 时刷新并接管现有任务状态，提供用户可理解的中文提示
+    - 按 operation 状态渲染事务信息：失败状态才显示“失败原因”，成功消息使用中性的状态说明；明确 active 与 last operation 的视觉区别
+    - 实现前先确认页面布局与需要保留的技术信息，不改变 stable/prerelease channel、兼容性判断或升级确认语义
+    - 影响面：dashboard/src/static/dashboard.html、版本更新 Dashboard API 适配与 Playwright 测试；需覆盖刷新页面后继续显示下载进度、并发下载、成功/失败事务和窄屏布局
+
 ### [B-260731-cf6a1d] 设计 Dashboard 查询资料与群私设管理
 - 创建: 2026-07-31
 - 优先级: P2
@@ -67,6 +84,38 @@
     - 集中命令执行、错误转换和用户回复，避免命令 Adapter 了解远端调用细节
     - 明确旧 DiceHub 配置和数据的保留、迁移或废弃策略
     - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
+
+## manager
+
+### [B-260813-0c90bf] 限定启动恢复期间 Manager 退出的 Runtime 停机策略
+- 创建: 2026-08-13
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - Linux 生产验收中 startup maintenance gate 生效时重启 Manager，ASGI shutdown 无条件调用 Runtime `quiesce`，Bot 被正常 stop 后 Exit 0
+    - Compose `unless-stopped` 不会自动拉起被显式 stop 的容器，新 Manager 启动后也没有恢复被 quiesce RuntimeUnit 的逻辑，导致 Bot 离线约 9 分钟，最终需人工 `docker compose start bot`
+    - 当前 shutdown quiesce 最初用于 Windows 人工恢复时释放 `current/` 占用，直接删除会破坏 Windows 恢复边界；问题不能通过单纯取消 quiesce 解决
+- 开发备忘:
+    - 建立 startup gate 下 Manager shutdown 的确定性测试，分别覆盖 Linux Manager 单独重启、Windows 人工恢复和真正升级接管场景
+    - 让关闭行为依据恢复协议、平台和恢复动作决定是否需要停止 Runtime，而不是仅依据内存 gate；Linux 普通 Manager 重启不得遗留 Bot 停机
+    - 如仍有场景必须 quiesce，评估持久记录 original_running 并由新 Manager 恢复，或把 quiesce 收敛到拥有完整恢复事务的协调器路径
+    - 影响面：src/dicepp_manager/api.py、service.py、maintenance_runtime.py 与两平台启动恢复测试；风险点是 Windows 文件占用释放和 Linux handoff 所有权不能退化
+
+### [B-260813-edd51a] 自动退役被后续成功升级取代的中断事务
+- 创建: 2026-08-13
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - Linux 生产验收中，rc21 升级遗留事务 `12eac21a` 保持 `interrupted`、`commit_point=program_switch_started`，之后虽已有另一事务成功 committed，旧事务仍持续进入 `list_recoverable_journals`
+    - 旧事务的恢复目录与 staging 已清理，Manager 每次启动恢复都在身份校验处失败并设置 startup maintenance gate，后续升级确认、Runtime start/restart 均被 409 `Startup maintenance recovery is active` 拒绝
+    - 当前 `retire_terminal_rollback_journals` 只覆盖 terminal `rollback_failed`，无法清理已被可信成功事务取代的 `interrupted` journal；生产现场只能备份 manager.db 后人工将旧 journal 标记为 retired
+- 开发备忘:
+    - 先用“旧 interrupted 事务 + 更新的成功 committed 事务 + 旧恢复材料缺失”复现生产状态，并覆盖 Manager 重启后的 gate 行为
+    - 定义严格的事务取代判据；仅在同类升级存在可验证的后续成功提交并已证明当前运行状态时退役旧 interrupted journal，不能仅凭恢复材料缺失自动忽略
+    - 评估将现有退役方法泛化或新增 superseded journal 收口策略，并保留 retired journal 作为审计证据
+    - 影响面：src/dicepp_manager/store.py、upgrade.py、启动恢复及升级事务测试；风险点是误退役仍需人工恢复的破坏性事务，因此必须继续 fail-closed
 
 ## persona
 
