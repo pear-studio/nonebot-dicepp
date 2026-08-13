@@ -309,6 +309,60 @@ def test_store_retention_and_limit_contract(tmp_path: Path) -> None:
         ManagerOperationStore(tmp_path / "invalid.db", max_operations=0)
 
 
+def test_store_retention_preserves_superseded_retirement_evidence(
+    tmp_path: Path,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db", max_operations=1)
+    interrupted_detail = {
+        "transaction_id": "interrupted-upgrade",
+        "target_version": "3.0.0rc21",
+        "platform": "linux",
+        "commit_point": "program_switch_started",
+    }
+    interrupted = ManagerOperation.create_system("upgrade.install")
+    interrupted.created_at = "2026-08-10T10:00:00+00:00"
+    interrupted.transition("interrupted", detail=interrupted_detail)
+    store.save(interrupted)
+    store.write_journal(
+        "interrupted-upgrade",
+        kind="upgrade",
+        phase="program_switch",
+        status="interrupted",
+        operation_id=interrupted.operation_id,
+        detail=interrupted_detail,
+    )
+
+    committed_detail = {
+        "transaction_id": "committed-upgrade",
+        "target_version": "3.0.0rc22",
+        "platform": "linux",
+        "commit_point": "health_passed",
+    }
+    committed = ManagerOperation.create_system("upgrade.install")
+    committed.created_at = "2026-08-10T11:00:00+00:00"
+    committed.transition("succeeded", detail=committed_detail)
+    store.save(committed)
+    store.write_journal(
+        "committed-upgrade",
+        kind="upgrade",
+        phase="committed",
+        status="committed",
+        operation_id=committed.operation_id,
+        detail=committed_detail,
+    )
+
+    unrelated = ManagerOperation.create_system("runtime.start")
+    unrelated.transition("succeeded")
+    store.save(unrelated)
+
+    assert store.get(interrupted.operation_id) is not None
+    assert store.get(committed.operation_id) is not None
+    assert store.retire_superseded_interrupted_upgrades(
+        current_version="3.0.0rc22",
+        current_platform="linux",
+    ) == ["interrupted-upgrade"]
+
+
 def test_journal_upsert_and_recovery_marks_running_transaction_interrupted(
     tmp_path: Path,
 ) -> None:

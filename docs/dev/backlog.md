@@ -102,21 +102,6 @@
     - 如仍有场景必须 quiesce，评估持久记录 original_running 并由新 Manager 恢复，或把 quiesce 收敛到拥有完整恢复事务的协调器路径
     - 影响面：src/dicepp_manager/api.py、service.py、maintenance_runtime.py 与两平台启动恢复测试；风险点是 Windows 文件占用释放和 Linux handoff 所有权不能退化
 
-### [B-260813-edd51a] 自动退役被后续成功升级取代的中断事务
-- 创建: 2026-08-13
-- 优先级: P1
-- 类型: bug
-- 改动量: M
-- 问题表现:
-    - Linux 生产验收中，rc21 升级遗留事务 `12eac21a` 保持 `interrupted`、`commit_point=program_switch_started`，之后虽已有另一事务成功 committed，旧事务仍持续进入 `list_recoverable_journals`
-    - 旧事务的恢复目录与 staging 已清理，Manager 每次启动恢复都在身份校验处失败并设置 startup maintenance gate，后续升级确认、Runtime start/restart 均被 409 `Startup maintenance recovery is active` 拒绝
-    - 当前 `retire_terminal_rollback_journals` 只覆盖 terminal `rollback_failed`，无法清理已被可信成功事务取代的 `interrupted` journal；生产现场只能备份 manager.db 后人工将旧 journal 标记为 retired
-- 开发备忘:
-    - 先用“旧 interrupted 事务 + 更新的成功 committed 事务 + 旧恢复材料缺失”复现生产状态，并覆盖 Manager 重启后的 gate 行为
-    - 定义严格的事务取代判据；仅在同类升级存在可验证的后续成功提交并已证明当前运行状态时退役旧 interrupted journal，不能仅凭恢复材料缺失自动忽略
-    - 评估将现有退役方法泛化或新增 superseded journal 收口策略，并保留 retired journal 作为审计证据
-    - 影响面：src/dicepp_manager/store.py、upgrade.py、启动恢复及升级事务测试；风险点是误退役仍需人工恢复的破坏性事务，因此必须继续 fail-closed
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

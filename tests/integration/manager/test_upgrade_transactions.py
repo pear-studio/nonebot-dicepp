@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 import json
+import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -13,7 +14,12 @@ import dicepp_manager.upgrade as upgrade_module
 from dicepp_data import InstanceLayout
 from dicepp_manager.archive_coordinator import ArchiveCoordinator
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION, MANAGER_VERSION
-from dicepp_manager.models import RuntimeLogs, RuntimeUnit, RuntimeUnitStatus
+from dicepp_manager.models import (
+    ManagerOperation,
+    RuntimeLogs,
+    RuntimeUnit,
+    RuntimeUnitStatus,
+)
 from dicepp_manager.service import ManagerService, OperationFailed
 from dicepp_manager.store import ManagerOperationStore
 from dicepp_manager.upgrade import (
@@ -291,6 +297,38 @@ async def test_upgrade_commits_only_after_archive_migration_and_hard_health(
     assert runtime.actions == ["stop", "start"]
     assert service.store.get_journal(result.detail["transaction_id"])["status"] == "committed"
     assert (layout.manager_backups_dir / result.detail["pre_upgrade_filename"]).is_file()
+
+
+@pytest.mark.asyncio
+async def test_committed_upgrade_survives_superseded_retirement_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _layout, _data, _runtime, service, coordinator, platform = _setup(tmp_path)
+
+    def fail_retirement(**_kwargs) -> list[str]:
+        raise sqlite3.OperationalError("injected retirement failure")
+
+    monkeypatch.setattr(
+        service.store,
+        "retire_superseded_interrupted_upgrades",
+        fail_retirement,
+    )
+    preview = await coordinator.preview()
+    operation, package = coordinator.confirm(
+        version="3.1.0",
+        confirmation_token=preview["confirmation_token"],
+    )
+
+    result = await coordinator.run(operation, package)
+
+    assert result.status == "succeeded"
+    assert result.detail["phase"] == "committed"
+    assert service.store.get_journal(result.detail["transaction_id"])["status"] == (
+        "committed"
+    )
+    assert platform.calls[-1] == "commit"
+    assert "rollback" not in platform.calls
 
 
 def _no_heartbeat_control_probe() -> dict:
@@ -919,6 +957,207 @@ async def test_terminal_rollback_journal_retires_after_successful_upgrade_commit
     assert all(
         entry.get("transaction_id") != transaction_id for entry in recovered
     )
+
+
+def _persist_upgrade_evidence(
+    store: ManagerOperationStore,
+    *,
+    transaction_id: str,
+    operation_id: str,
+    operation_status: str,
+    journal_status: str,
+    created_at: str,
+    target_version: str,
+    platform: str = "linux",
+    operation_platform: str | None = None,
+) -> None:
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": target_version,
+        "platform": platform,
+        "platform_protocol": "linux-manager-handoff-v1",
+        "commit_point": "program_switch_started",
+    }
+    operation_detail = {
+        **detail,
+        "platform": operation_platform or platform,
+    }
+    operation = ManagerOperation(
+        operation_id=operation_id,
+        runtime_unit_id="instance",
+        action="upgrade.install",
+        status=operation_status,
+        created_at=created_at,
+        updated_at=created_at,
+        finished_at=created_at,
+        message="",
+        detail=operation_detail,
+    )
+    store.save(operation)
+    store.write_journal(
+        transaction_id,
+        kind="upgrade",
+        phase=("committed" if journal_status == "committed" else "program_switch"),
+        status=journal_status,
+        operation_id=operation_id,
+        detail=detail,
+    )
+
+
+def test_later_committed_upgrade_retires_superseded_interrupted_journal(
+    tmp_path: Path,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db")
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="old-transaction",
+        operation_id="old-operation",
+        operation_status="interrupted",
+        journal_status="interrupted",
+        created_at="2026-08-10T10:00:00+00:00",
+        target_version="3.0.0rc21",
+    )
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="new-transaction",
+        operation_id="new-operation",
+        operation_status="succeeded",
+        journal_status="committed",
+        created_at="2026-08-10T11:00:00+00:00",
+        target_version="3.0.0rc22",
+    )
+
+    retired = store.retire_superseded_interrupted_upgrades(
+        current_version="3.0.0rc22",
+        current_platform="linux",
+    )
+
+    assert retired == ["old-transaction"]
+    journal = store.get_journal("old-transaction")
+    assert journal["status"] == "retired"
+    assert journal["phase"] == "program_switch"
+    assert journal["detail"]["retirement"] == {
+        "reason": "superseded_by_committed_upgrade",
+        "transaction_id": "new-transaction",
+        "operation_id": "new-operation",
+        "target_version": "3.0.0rc22",
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "successful_status",
+        "successful_created_at",
+        "successful_version",
+        "current_version",
+    ),
+    [
+        ("failed", "2026-08-10T11:00:00+00:00", "3.0.0rc22", "3.0.0rc22"),
+        ("succeeded", "2026-08-10T09:00:00+00:00", "3.0.0rc22", "3.0.0rc22"),
+        ("succeeded", "2026-08-10T11:00:00+00:00", "3.0.0rc22", "3.0.0rc21"),
+    ],
+)
+def test_interrupted_upgrade_remains_recoverable_without_complete_superseding_evidence(
+    tmp_path: Path,
+    successful_status: str,
+    successful_created_at: str,
+    successful_version: str,
+    current_version: str,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db")
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="old-transaction",
+        operation_id="old-operation",
+        operation_status="interrupted",
+        journal_status="interrupted",
+        created_at="2026-08-10T10:00:00+00:00",
+        target_version="3.0.0rc21",
+    )
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="candidate-transaction",
+        operation_id="candidate-operation",
+        operation_status=successful_status,
+        journal_status="committed",
+        created_at=successful_created_at,
+        target_version=successful_version,
+    )
+
+    assert store.retire_superseded_interrupted_upgrades(
+        current_version=current_version,
+        current_platform="linux",
+    ) == []
+    assert store.get_journal("old-transaction")["status"] == "interrupted"
+
+
+def test_later_committed_downgrade_supersedes_interrupted_upgrade(
+    tmp_path: Path,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db")
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="old-transaction",
+        operation_id="old-operation",
+        operation_status="interrupted",
+        journal_status="interrupted",
+        created_at="2026-08-10T10:00:00+00:00",
+        target_version="3.0.0rc22",
+    )
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="new-transaction",
+        operation_id="new-operation",
+        operation_status="succeeded",
+        journal_status="committed",
+        created_at="2026-08-10T11:00:00+00:00",
+        target_version="3.0.0rc21",
+    )
+
+    assert store.retire_superseded_interrupted_upgrades(
+        current_version="3.0.0rc21",
+        current_platform="linux",
+    ) == ["old-transaction"]
+
+
+@pytest.mark.parametrize(
+    ("operation_platform", "current_platform"),
+    [
+        ("windows", "linux"),
+        ("linux", "windows"),
+    ],
+)
+def test_conflicting_platform_evidence_never_retires_interrupted_upgrade(
+    tmp_path: Path,
+    operation_platform: str,
+    current_platform: str,
+) -> None:
+    store = ManagerOperationStore(tmp_path / "manager.db")
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="old-transaction",
+        operation_id="old-operation",
+        operation_status="interrupted",
+        journal_status="interrupted",
+        created_at="2026-08-10T10:00:00+00:00",
+        target_version="3.0.0rc21",
+    )
+    _persist_upgrade_evidence(
+        store,
+        transaction_id="new-transaction",
+        operation_id="new-operation",
+        operation_status="succeeded",
+        journal_status="committed",
+        created_at="2026-08-10T11:00:00+00:00",
+        target_version="3.0.0rc22",
+        operation_platform=operation_platform,
+    )
+
+    assert store.retire_superseded_interrupted_upgrades(
+        current_version="3.0.0rc22",
+        current_platform=current_platform,
+    ) == []
+    assert store.get_journal("old-transaction")["status"] == "interrupted"
 
 
 @pytest.mark.asyncio

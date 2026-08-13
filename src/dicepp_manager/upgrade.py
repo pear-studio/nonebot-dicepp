@@ -1517,6 +1517,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             )
             self.store.save(operation)
             self.store.retire_terminal_rollback_journals()
+            self._retire_superseded_interrupted_upgrades()
             return operation
         except Exception as exc:
             rollback = await self._rollback(
@@ -1549,6 +1550,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
         # ``prepare_windows_handoff_only`` predates Linux Manager handoff.
         # Keep the keyword compatible, but treat it as the startup prepare
         # phase for every handoff whose recovery depends on the Manager API.
+        self._retire_superseded_interrupted_upgrades()
         recovered: list[dict[str, Any]] = []
         runtime_state_owned: set[str] = set()
         # The startup maintenance gate blocks user-submitted operations while
@@ -2548,6 +2550,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             phase="committed",
             status="committed",
         )
+        self._retire_superseded_interrupted_upgrades()
         self.service.set_startup_maintenance_gate(False)
         return True
 

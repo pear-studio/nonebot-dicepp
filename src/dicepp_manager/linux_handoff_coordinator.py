@@ -66,6 +66,32 @@ class LinuxHandoffCoordinator:
         self._upgrade_compatibility_error = upgrade_compatibility_error
         self._convergence_tasks: set[asyncio.Task] = set()
 
+    def _retire_superseded_interrupted_upgrades(self) -> list[str]:
+        """Best-effort housekeeping after or before upgrade recovery.
+
+        Once an upgrade is durably committed, failure to retire older journal
+        evidence must never overturn that commit or keep maintenance active.
+        During startup the same failure remains fail-closed: the old journal
+        stays recoverable and follows the normal recovery state machine.
+        """
+        try:
+            retired = self.store.retire_superseded_interrupted_upgrades(
+                current_version=get_version(),
+                current_platform=str(self.platform_adapter.platform),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Superseded interrupted-upgrade retirement failed: %s",
+                str(exc) or type(exc).__name__,
+            )
+            return []
+        for transaction_id in retired:
+            logger.info(
+                "Retired interrupted upgrade %s after a later committed upgrade",
+                transaction_id,
+            )
+        return retired
+
     async def _recover_linux_manager_handoff(
         self,
         journal: dict[str, Any],
@@ -680,6 +706,7 @@ class LinuxHandoffCoordinator:
             detail=committed,
         )
         self.store.save(operation)
+        self._retire_superseded_interrupted_upgrades()
         self.service.set_startup_maintenance_gate(False)
         # Terminal success: the transaction files are no longer recovery
         # material.  Failure to remove them only warns; the terminal state

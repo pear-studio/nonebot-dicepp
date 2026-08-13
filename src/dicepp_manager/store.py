@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+
+from packaging.version import InvalidVersion, Version
 
 from .maintenance_policy import is_terminal_rollback_failure
 from .models import ManagerOperation, utc_now
@@ -90,6 +93,14 @@ class ManagerOperationStore:
             connection.execute(
                 """DELETE FROM manager_operations
                    WHERE status IN ('succeeded', 'failed', 'rejected', 'interrupted')
+                     AND operation_id NOT IN (
+                       SELECT operation_id FROM manager_journal
+                       WHERE operation_id IS NOT NULL
+                         AND (
+                           status IN ('running', 'interrupted', 'rollback_failed')
+                           OR (kind = 'upgrade' AND status = 'committed')
+                         )
+                     )
                      AND operation_id NOT IN (
                        SELECT operation_id FROM manager_operations
                        WHERE status IN ('succeeded', 'failed', 'rejected', 'interrupted')
@@ -213,6 +224,140 @@ class ManagerOperationStore:
             retired.append(transaction_id)
         return retired
 
+    def retire_superseded_interrupted_upgrades(
+        self,
+        *,
+        current_version: str,
+        current_platform: str,
+    ) -> list[str]:
+        """Retire stale interrupted upgrades only with durable replacement proof.
+
+        A missing recovery directory is never proof that an interrupted
+        transaction is safe to ignore.  Retirement requires a later committed
+        upgrade whose operation succeeded and whose target is the version the
+        current Manager is actually running.  The old journal remains in the
+        database as audit evidence, but leaves the recoverable set.
+        """
+        try:
+            running_version = Version(current_version)
+        except (InvalidVersion, TypeError):
+            return []
+        if not isinstance(current_platform, str) or not current_platform:
+            return []
+
+        with self._transaction() as connection:
+            committed_rows = connection.execute(
+                """SELECT j.*, o.action AS operation_action,
+                          o.status AS operation_status,
+                          o.created_at AS operation_created_at,
+                          o.detail AS operation_detail
+                   FROM manager_journal AS j
+                   JOIN manager_operations AS o
+                     ON o.operation_id = j.operation_id
+                   WHERE j.kind = 'upgrade'
+                     AND j.status = 'committed'
+                     AND j.phase = 'committed'
+                     AND o.action = 'upgrade.install'
+                     AND o.status = 'succeeded'"""
+            ).fetchall()
+            replacements: list[dict[str, Any]] = []
+            for row in committed_rows:
+                journal_detail = self._json_object(row["detail"])
+                operation_detail = self._json_object(row["operation_detail"])
+                transaction_id = str(row["transaction_id"])
+                target_version = journal_detail.get("target_version")
+                journal_platform = journal_detail.get("platform")
+                created_at = self._timestamp(row["operation_created_at"])
+                try:
+                    parsed_target = Version(target_version)
+                except (InvalidVersion, TypeError):
+                    continue
+                if (
+                    parsed_target != running_version
+                    or created_at is None
+                    or operation_detail.get("transaction_id") != transaction_id
+                    or operation_detail.get("target_version") != target_version
+                    or journal_platform != current_platform
+                    or operation_detail.get("platform") != journal_platform
+                ):
+                    continue
+                replacements.append(
+                    {
+                        "transaction_id": transaction_id,
+                        "operation_id": str(row["operation_id"]),
+                        "target_version": str(target_version),
+                        "parsed_target": parsed_target,
+                        "created_at": created_at,
+                        "platform": journal_platform,
+                    }
+                )
+            if not replacements:
+                return []
+            replacements.sort(key=lambda item: item["created_at"])
+
+            interrupted_rows = connection.execute(
+                """SELECT j.*, o.action AS operation_action,
+                          o.status AS operation_status,
+                          o.created_at AS operation_created_at
+                   FROM manager_journal AS j
+                   JOIN manager_operations AS o
+                     ON o.operation_id = j.operation_id
+                   WHERE j.kind = 'upgrade'
+                     AND j.status = 'interrupted'
+                     AND o.action = 'upgrade.install'
+                     AND o.status IN ('interrupted', 'failed')"""
+            ).fetchall()
+            retired: list[str] = []
+            for row in interrupted_rows:
+                detail = self._json_object(row["detail"])
+                commit_point = detail.get("commit_point")
+                old_created_at = self._timestamp(row["operation_created_at"])
+                old_target = detail.get("target_version")
+                old_platform = detail.get("platform")
+                try:
+                    Version(old_target)
+                except (InvalidVersion, TypeError):
+                    continue
+                if (
+                    commit_point in (None, "not_started")
+                    or old_created_at is None
+                    or old_platform != current_platform
+                ):
+                    continue
+                replacement = next(
+                    (
+                        item
+                        for item in replacements
+                        if item["created_at"] > old_created_at
+                        and item["platform"] == old_platform
+                    ),
+                    None,
+                )
+                if replacement is None:
+                    continue
+                transaction_id = str(row["transaction_id"])
+                retired_detail = {
+                    **detail,
+                    "retirement": {
+                        "reason": "superseded_by_committed_upgrade",
+                        "transaction_id": replacement["transaction_id"],
+                        "operation_id": replacement["operation_id"],
+                        "target_version": replacement["target_version"],
+                    },
+                }
+                connection.execute(
+                    """UPDATE manager_journal
+                       SET status='retired', updated_at=?, detail=?
+                       WHERE transaction_id=? AND status='interrupted'""",
+                    (
+                        utc_now(),
+                        json.dumps(retired_detail, ensure_ascii=False),
+                        transaction_id,
+                    ),
+                )
+                retired.append(transaction_id)
+            return retired
+
     def protected_archive_names(self) -> set[str]:
         names: set[str] = set()
         for journal in self.list_recoverable_journals():
@@ -241,10 +386,7 @@ class ManagerOperationStore:
 
     @staticmethod
     def _journal_row(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            detail = json.loads(row["detail"] or "{}")
-        except json.JSONDecodeError:
-            detail = {}
+        detail = ManagerOperationStore._json_object(row["detail"])
         return {
             "transaction_id": row["transaction_id"],
             "operation_id": row["operation_id"],
@@ -254,6 +396,24 @@ class ManagerOperationStore:
             "updated_at": row["updated_at"],
             "detail": detail if isinstance(detail, dict) else {},
         }
+
+    @staticmethod
+    def _json_object(value: Any) -> dict[str, Any]:
+        try:
+            payload = json.loads(value or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _timestamp(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
     @staticmethod
     def _row(row: sqlite3.Row) -> ManagerOperation:

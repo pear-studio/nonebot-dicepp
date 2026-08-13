@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import socket
 import sqlite3
 import time
@@ -22,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import dicepp_manager.linux_handoff_coordinator as handoff_coordinator_module
+import dicepp_manager.upgrade as upgrade_module
 from dicepp_data import InstanceLayout
 from dicepp_manager.api import create_manager_app
 from dicepp_manager.archive import create_archive
@@ -1069,6 +1071,64 @@ async def test_source_restore_fails_closed_on_container_identity_mismatch(
 
 
 @pytest.mark.asyncio
+async def test_later_committed_upgrade_supersedes_stale_handoff_before_identity_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(handoff_coordinator_module, "get_version", lambda: TARGET_VERSION)
+    monkeypatch.setattr(upgrade_module, "get_version", lambda: TARGET_VERSION)
+    layout, _data_file, service = _setup(tmp_path)
+    request = request_payload(
+        transaction_id=TRANSACTION_ID,
+        operation_id=OPERATION_ID,
+        source_version=SOURCE_VERSION,
+        target_version=TARGET_VERSION,
+    )
+    staged, tx_dir = _staged(layout, request)
+    platform = PlatformAdapter(fail_identity=True)
+    coordinator, runtime_support = _coordinator(layout, service, platform)
+    _journal(coordinator, _detail(staged, _current(request)))
+    old_journal = service.store.get_journal(TRANSACTION_ID)
+    assert old_journal is not None
+    old_operation = service.store.get(str(old_journal["operation_id"]))
+    assert old_operation is not None
+    old_operation.created_at = "2026-08-10T10:00:00+00:00"
+    old_operation.transition("interrupted", detail=old_operation.detail)
+    service.store.save(old_operation)
+    shutil.rmtree(tx_dir)
+
+    committed_detail = {
+        "transaction_id": "c" * 32,
+        "target_version": TARGET_VERSION,
+        "platform": "linux",
+        "platform_protocol": "linux-manager-handoff-v1",
+        "commit_point": "health_passed",
+    }
+    committed = coordinator.new_operation()
+    committed.created_at = "2026-08-10T11:00:00+00:00"
+    committed.updated_at = committed.created_at
+    committed.transition("succeeded", detail=committed_detail)
+    service.store.save(committed)
+    service.store.write_journal(
+        committed_detail["transaction_id"],
+        kind="upgrade",
+        phase="committed",
+        status="committed",
+        operation_id=committed.operation_id,
+        detail=committed_detail,
+    )
+
+    recovered = await coordinator.recover()
+
+    assert recovered == []
+    stale = service.store.get_journal(TRANSACTION_ID)
+    assert stale["status"] == "retired"
+    assert platform.calls == []
+    assert runtime_support.restarts == []
+    assert service._startup_maintenance_active is False
+
+
+@pytest.mark.asyncio
 async def test_source_restore_fails_closed_without_self_inspection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1307,9 +1367,11 @@ async def test_run_fails_closed_when_capture_current_missing_source_version(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("retirement_failure", [False, True])
 async def test_background_convergence_loop_finishes_committed_after_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retirement_failure: bool,
 ) -> None:
     """After the bounded wait times out, the in-process convergence loop must
     keep polling and converge the committed cleanup once the Updater result
@@ -1330,6 +1392,15 @@ async def test_background_convergence_loop_finishes_committed_after_result(
     platform = PlatformAdapter()
     coordinator, _runtime_support = _coordinator(layout, service, platform)
     _journal(coordinator, _detail(staged, current))
+    if retirement_failure:
+        def fail_retirement(**_kwargs) -> list[str]:
+            raise sqlite3.OperationalError("injected retirement failure")
+
+        monkeypatch.setattr(
+            service.store,
+            "retire_superseded_interrupted_upgrades",
+            fail_retirement,
+        )
 
     recovered = await coordinator.recover()
 
