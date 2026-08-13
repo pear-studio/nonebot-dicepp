@@ -27,7 +27,11 @@ from dicepp_manager.service import (
     UnknownRuntimeUnit,
 )
 from dicepp_manager.store import ManagerOperationStore
-from dicepp_manager.upgrade import SimpleWindowsVelopackUpgradeAdapter
+from dicepp_manager.upgrade import (
+    SHUTDOWN_RUNTIME_POLICY_FIELD,
+    SHUTDOWN_RUNTIME_QUIESCE,
+    SimpleWindowsVelopackUpgradeAdapter,
+)
 
 
 class FakeRuntimeAdapter:
@@ -1029,6 +1033,7 @@ def test_legacy_windows_journal_does_not_claim_runtime_startup(
     layout = InstanceLayout.from_root(tmp_path)
     service = _service(tmp_path)
     service.upgrade_coordinator = LegacyCoordinator(layout)
+    service.set_startup_maintenance_gate(True)
     app = create_manager_app(
         ManagerSettings(
             layout=layout,
@@ -1047,6 +1052,7 @@ def test_legacy_windows_journal_does_not_claim_runtime_startup(
 
     assert response.status_code == 200
     assert response.json()["upgrade_handoff"] is None
+    assert service.runtime_adapter.actions == []
 
 
 @pytest.mark.asyncio
@@ -1094,6 +1100,8 @@ async def test_shutdown_retries_runtime_stop_behind_startup_recovery_gate(
         service=service,
         api_token="manager-secret",
     )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
     service.set_startup_maintenance_gate(True)
     with service.maintenance(
         timeout=1,
@@ -1101,9 +1109,19 @@ async def test_shutdown_retries_runtime_stop_behind_startup_recovery_gate(
     ) as maintenance:
         with pytest.raises(RuntimeError, match="target-health quiesce failure"):
             await service.archive_coordinator.runtime_support.quiesce(maintenance)
-
-    lifespan = app.router.lifespan_context(app)
-    await lifespan.__aenter__()
+    service.store.write_journal(
+        "windows-manual-recovery",
+        kind="upgrade",
+        phase="target_health_failed",
+        status="rollback_failed",
+        operation_id=None,
+        detail={
+            "transaction_id": "windows-manual-recovery",
+            "platform_protocol": "windows-simple-v1",
+            "phase": "target_health_failed",
+            SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
+        },
+    )
     await lifespan.__aexit__(None, None, None)
 
     assert runtime.stop_attempts == 2
@@ -1112,6 +1130,77 @@ async def test_shutdown_retries_runtime_stop_behind_startup_recovery_gate(
         ("dicepp-runtime", "stop"),
         ("dicepp-runtime", "stop"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_manager_shutdown_keeps_runtime_running_for_linux_startup_gate(
+    tmp_path: Path,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    runtime = FakeRuntimeAdapter()
+    service = _service(tmp_path, runtime)
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+    service.set_startup_maintenance_gate(True)
+    service.store.write_journal(
+        "linux-interrupted-upgrade",
+        kind="upgrade",
+        phase="program_switch",
+        status="interrupted",
+        operation_id=None,
+        detail={
+            "transaction_id": "linux-interrupted-upgrade",
+            "platform_protocol": "linux-manager-handoff-v1",
+            "phase": "program_switch",
+        },
+    )
+
+    await lifespan.__aexit__(None, None, None)
+
+    assert runtime.actions == []
+
+
+@pytest.mark.asyncio
+async def test_manager_shutdown_policy_read_failure_keeps_runtime_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = InstanceLayout.from_root(tmp_path)
+    runtime = FakeRuntimeAdapter()
+    service = _service(tmp_path, runtime)
+    app = create_manager_app(
+        ManagerSettings(
+            layout=layout,
+            runtime="unavailable",
+            release_scheduler_enabled=False,
+        ),
+        service=service,
+        api_token="manager-secret",
+    )
+    lifespan = app.router.lifespan_context(app)
+    await lifespan.__aenter__()
+
+    def fail_policy_read() -> bool:
+        raise sqlite3.OperationalError("injected policy read failure")
+
+    monkeypatch.setattr(
+        service.upgrade_coordinator,
+        "should_quiesce_runtime_on_shutdown",
+        fail_policy_read,
+    )
+
+    await lifespan.__aexit__(None, None, None)
+
+    assert runtime.actions == []
 
 
 def test_release_scheduler_checks_immediately_and_survives_config_error(

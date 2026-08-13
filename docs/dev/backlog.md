@@ -85,23 +85,6 @@
     - 明确旧 DiceHub 配置和数据的保留、迁移或废弃策略
     - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
 
-## manager
-
-### [B-260813-0c90bf] 限定启动恢复期间 Manager 退出的 Runtime 停机策略
-- 创建: 2026-08-13
-- 优先级: P1
-- 类型: bug
-- 改动量: M
-- 问题表现:
-    - Linux 生产验收中 startup maintenance gate 生效时重启 Manager，ASGI shutdown 无条件调用 Runtime `quiesce`，Bot 被正常 stop 后 Exit 0
-    - Compose `unless-stopped` 不会自动拉起被显式 stop 的容器，新 Manager 启动后也没有恢复被 quiesce RuntimeUnit 的逻辑，导致 Bot 离线约 9 分钟，最终需人工 `docker compose start bot`
-    - 当前 shutdown quiesce 最初用于 Windows 人工恢复时释放 `current/` 占用，直接删除会破坏 Windows 恢复边界；问题不能通过单纯取消 quiesce 解决
-- 开发备忘:
-    - 建立 startup gate 下 Manager shutdown 的确定性测试，分别覆盖 Linux Manager 单独重启、Windows 人工恢复和真正升级接管场景
-    - 让关闭行为依据恢复协议、平台和恢复动作决定是否需要停止 Runtime，而不是仅依据内存 gate；Linux 普通 Manager 重启不得遗留 Bot 停机
-    - 如仍有场景必须 quiesce，评估持久记录 original_running 并由新 Manager 恢复，或把 quiesce 收敛到拥有完整恢复事务的协调器路径
-    - 影响面：src/dicepp_manager/api.py、service.py、maintenance_runtime.py 与两平台启动恢复测试；风险点是 Windows 文件占用释放和 Linux handoff 所有权不能退化
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

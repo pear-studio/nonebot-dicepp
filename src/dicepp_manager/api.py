@@ -294,10 +294,24 @@ def create_manager_app(
                 await asyncio.gather(*critical_tasks, return_exceptions=True)
             if handoff_task is not None:
                 await asyncio.gather(handoff_task, return_exceptions=True)
-            if getattr(manager_service, "_startup_maintenance_active", False):
-                # Public lifecycle requests remain gated during a failed
-                # startup recovery.  Shutdown is the one internal boundary
-                # that must still make a final attempt to release current/.
+            shutdown_policy = getattr(
+                upgrade_coordinator,
+                "should_quiesce_runtime_on_shutdown",
+                None,
+            )
+            try:
+                quiesce_runtime = (
+                    callable(shutdown_policy) and shutdown_policy()
+                )
+            except Exception:
+                quiesce_runtime = False
+                logger.exception(
+                    "Manager shutdown could not read the durable Runtime policy"
+                )
+            if quiesce_runtime:
+                # Runtime shutdown is a durable recovery requirement, not an
+                # implication of the startup maintenance gate.  In particular,
+                # Linux Manager restarts must not explicitly stop Bot containers.
                 try:
                     with manager_service.maintenance(
                         timeout=1,

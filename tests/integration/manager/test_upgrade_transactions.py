@@ -23,6 +23,9 @@ from dicepp_manager.models import (
 from dicepp_manager.service import ManagerService, OperationFailed
 from dicepp_manager.store import ManagerOperationStore
 from dicepp_manager.upgrade import (
+    SHUTDOWN_RUNTIME_KEEP,
+    SHUTDOWN_RUNTIME_POLICY_FIELD,
+    SHUTDOWN_RUNTIME_QUIESCE,
     UpgradeCompatibilityError,
     UpgradeConfirmationError,
     UpgradeCoordinator,
@@ -299,6 +302,146 @@ async def test_upgrade_commits_only_after_archive_migration_and_hard_health(
     assert (layout.manager_backups_dir / result.detail["pre_upgrade_filename"]).is_file()
 
 
+@pytest.mark.parametrize(
+    ("protocol", "phase", "policy", "manual_requested", "expected"),
+    [
+        ("linux-manager-handoff-v1", "target_health_failed", None, False, False),
+        ("windows-simple-v1", "awaiting_windows_restart", None, False, False),
+        ("windows-simple-v1", "target_health_failed", None, False, True),
+        ("windows-simple-v1", "switch_identity_unknown", None, False, True),
+        ("windows-simple-v1", "manual_data_restore", None, False, True),
+        ("windows-simple-v1", "manual_restore_failed", None, False, True),
+        ("windows-simple-v1", "rolling_back", None, True, True),
+        ("windows-simple-v1", "rollback_failed", None, False, False),
+        ("windows-simple-v1", "manual_data_restored", None, False, False),
+        ("windows-simple-v1", "manual_cleanup_failed", None, False, False),
+        ("windows-simple-v1", "target_health_failed", "unexpected", False, False),
+        (
+            "windows-simple-v1",
+            "target_health_failed",
+            SHUTDOWN_RUNTIME_KEEP,
+            False,
+            False,
+        ),
+        (
+            "linux-manager-handoff-v1",
+            "target_health_failed",
+            SHUTDOWN_RUNTIME_QUIESCE,
+            False,
+            True,
+        ),
+    ],
+)
+def test_shutdown_runtime_policy_uses_explicit_value_or_narrow_windows_compatibility(
+    tmp_path: Path,
+    protocol: str,
+    phase: str,
+    policy: str | None,
+    manual_requested: bool,
+    expected: bool,
+) -> None:
+    _layout, _data, _runtime, service, coordinator, _platform = _setup(tmp_path)
+    detail = {
+        "transaction_id": "shutdown-policy-transaction",
+        "target_version": "3.1.0",
+        "platform": "windows" if protocol == "windows-simple-v1" else "linux",
+        "platform_protocol": protocol,
+        "commit_point": "program_switch_started",
+        "phase": phase,
+        "manual_restore": {"requested": manual_requested},
+    }
+    if policy is not None:
+        detail[SHUTDOWN_RUNTIME_POLICY_FIELD] = policy
+    service.store.write_journal(
+        detail["transaction_id"],
+        kind="upgrade",
+        phase=phase,
+        status="rollback_failed" if "failed" in phase else "interrupted",
+        operation_id=None,
+        detail=detail,
+    )
+
+    assert coordinator.should_quiesce_runtime_on_shutdown() is expected
+
+
+def test_shutdown_runtime_policy_uses_any_quiesce_recoverable_transaction(
+    tmp_path: Path,
+) -> None:
+    _layout, _data, _runtime, service, coordinator, _platform = _setup(tmp_path)
+    for transaction_id, policy in (
+        ("keep-transaction", SHUTDOWN_RUNTIME_KEEP),
+        ("quiesce-transaction", SHUTDOWN_RUNTIME_QUIESCE),
+    ):
+        service.store.write_journal(
+            transaction_id,
+            kind="upgrade",
+            phase="target_health_failed",
+            status="rollback_failed",
+            operation_id=None,
+            detail={
+                "transaction_id": transaction_id,
+                "platform_protocol": "windows-simple-v1",
+                "phase": "target_health_failed",
+                SHUTDOWN_RUNTIME_POLICY_FIELD: policy,
+            },
+        )
+
+    assert coordinator.should_quiesce_runtime_on_shutdown() is True
+
+
+def test_legacy_shutdown_policy_uses_durable_journal_phase(
+    tmp_path: Path,
+) -> None:
+    _layout, _data, _runtime, service, coordinator, _platform = _setup(tmp_path)
+    service.store.write_journal(
+        "legacy-manual-rollback",
+        kind="upgrade",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=None,
+        detail={
+            "transaction_id": "legacy-manual-rollback",
+            "platform_protocol": "windows-simple-v1",
+            "phase": "manual_data_restore",
+            "manual_restore": {"requested": True},
+        },
+    )
+
+    assert coordinator.should_quiesce_runtime_on_shutdown() is True
+
+
+@pytest.mark.parametrize("status", ["committed", "rolled_back", "retired"])
+def test_terminal_shutdown_policy_is_ignored(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    _layout, _data, _runtime, service, coordinator, _platform = _setup(tmp_path)
+    service.store.write_journal(
+        f"terminal-{status}",
+        kind="upgrade",
+        phase=status,
+        status=status,
+        operation_id=None,
+        detail={
+            "transaction_id": f"terminal-{status}",
+            SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
+        },
+    )
+    service.store.write_journal(
+        "recoverable-archive",
+        kind="archive_restore",
+        phase="rollback_failed",
+        status="rollback_failed",
+        operation_id=None,
+        detail={
+            "transaction_id": "recoverable-archive",
+            SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
+        },
+    )
+
+    assert coordinator.should_quiesce_runtime_on_shutdown() is False
+
+
 @pytest.mark.asyncio
 async def test_committed_upgrade_survives_superseded_retirement_failure(
     tmp_path: Path,
@@ -324,6 +467,7 @@ async def test_committed_upgrade_survives_superseded_retirement_failure(
 
     assert result.status == "succeeded"
     assert result.detail["phase"] == "committed"
+    assert result.detail[SHUTDOWN_RUNTIME_POLICY_FIELD] == SHUTDOWN_RUNTIME_KEEP
     assert service.store.get_journal(result.detail["transaction_id"])["status"] == (
         "committed"
     )

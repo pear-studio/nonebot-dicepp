@@ -24,6 +24,9 @@ from dicepp_manager.models import (
 from dicepp_manager.service import ManagerService, OperationFailed
 from dicepp_manager.store import ManagerOperationStore
 from dicepp_manager.upgrade import (
+    SHUTDOWN_RUNTIME_KEEP,
+    SHUTDOWN_RUNTIME_POLICY_FIELD,
+    SHUTDOWN_RUNTIME_QUIESCE,
     UpgradeCoordinator,
     VerifiedUpgradePackage,
     SimpleWindowsVelopackUpgradeAdapter,
@@ -649,6 +652,9 @@ async def test_failed_manual_data_restore_keeps_all_program_recovery_material(
     failed = store.get_journal(transaction_id)
     assert failed["phase"] == "manual_restore_failed"
     assert failed["status"] == "rollback_failed"
+    assert failed["detail"][SHUTDOWN_RUNTIME_POLICY_FIELD] == (
+        SHUTDOWN_RUNTIME_QUIESCE
+    )
     assert shutil_target.is_dir()
     assert (recovery / "failed-current").is_dir()
     assert marker.is_file()
@@ -779,6 +785,9 @@ async def test_target_health_failure_quiesces_restarted_runtime_before_recovery(
     assert journal["phase"] == "target_health_failed"
     assert journal["status"] == "rollback_failed"
     assert journal["detail"]["target_runtime_stopped"] is not initial_stop_fails
+    assert journal["detail"][SHUTDOWN_RUNTIME_POLICY_FIELD] == (
+        SHUTDOWN_RUNTIME_QUIESCE
+    )
     assert service._startup_maintenance_active is True
     recovery = layout.manager_recovery_dir / transaction_id
     assert (recovery / "current").is_dir()
@@ -794,6 +803,101 @@ async def test_target_health_failure_quiesces_restarted_runtime_before_recovery(
         assert runtime.actions == ["start", "stop", "stop"]
         assert runtime.state == "stopped"
         assert service._startup_maintenance_active is True
+
+
+@pytest.mark.asyncio
+async def test_target_health_failure_persists_shutdown_policy_before_stop_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(upgrade_module, "get_version", lambda: "3.1.0")
+
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    layout, adapter = _adapter(tmp_path)
+    package = _package(layout)
+    transaction_id = "e" * 32
+    staged = await adapter.stage(package, transaction_id)
+    staged = await adapter.prepare_recovery(
+        staged,
+        transaction_id=transaction_id,
+        source_version="3.0.0",
+        target_version="3.1.0",
+        pre_upgrade_filename="pre-upgrade.zip",
+        original_running=["dicepp-runtime"],
+    )
+
+    class CrashingStopRuntime:
+        async def status(self, ids):
+            return {
+                unit_id: RuntimeUnitStatus(unit_id, "running", "unhealthy")
+                for unit_id in ids
+            }
+
+        async def operate(self, _runtime_unit_id, action):
+            if action == "stop":
+                raise SimulatedProcessExit
+            return RuntimeUnitStatus("dicepp-runtime", "running", "unhealthy")
+
+    runtime = CrashingStopRuntime()
+    store = ManagerOperationStore(layout.manager_db)
+    service = ManagerService(
+        unit_provider=lambda: [RuntimeUnit("dicepp-runtime", (), True, "fake")],
+        runtime_adapter=runtime,
+        store=store,
+        state_dir=layout.manager_state_dir,
+    )
+    archive = ArchiveCoordinator(
+        layout=layout,
+        service=service,
+        control_probe=lambda: {"ok": True, "status": "ok"},
+        health_timeout=0.01,
+        control_health_timeout=0.01,
+        health_interval=0.001,
+    )
+    coordinator = UpgradeCoordinator(
+        layout=layout,
+        service=service,
+        archive_coordinator=archive,
+        release_manager=SimpleNamespace(target=("windows", "amd64")),
+        platform_adapter=adapter,
+    )
+    coordinator.runtime_support.hard_health = AsyncMock(
+        side_effect=OSError("injected target health failure")
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "_package_from_release",
+        lambda _version, _release: package,
+    )
+    operation = coordinator.new_operation()
+    detail = {
+        "transaction_id": transaction_id,
+        "target_version": "3.1.0",
+        "release_snapshot": {"version": "3.1.0"},
+        "pre_upgrade_filename": "pre-upgrade.zip",
+        "original_running": ["dicepp-runtime"],
+        "platform_current": {"source_version": "3.0.0"},
+        "platform_staged": staged,
+        "platform_protocol": "windows-simple-v1",
+        "commit_point": "program_switch_started",
+        "phase": "awaiting_windows_restart",
+    }
+
+    with pytest.raises(SimulatedProcessExit):
+        await coordinator._recover_simple_windows_handoff(
+            {"transaction_id": transaction_id},
+            operation,
+            detail,
+            prepare_only=False,
+        )
+
+    journal = store.get_journal(transaction_id)
+    assert journal["phase"] == "target_health_failed"
+    assert journal["detail"][SHUTDOWN_RUNTIME_POLICY_FIELD] == (
+        SHUTDOWN_RUNTIME_QUIESCE
+    )
 
 
 @pytest.mark.asyncio
@@ -1110,6 +1214,9 @@ async def test_manual_restore_crash_after_data_restore_resumes_cleanup_only(
     assert store.journal is not None
     assert store.journal["phase"] == "manual_restored"
     assert store.journal["status"] == "rolled_back"
+    assert store.journal["detail"][SHUTDOWN_RUNTIME_POLICY_FIELD] == (
+        SHUTDOWN_RUNTIME_KEEP
+    )
     assert not recovery.exists()
     assert not (layout.root / "DicePP-Recover.cmd").exists()
     assert gates == [True, False]
@@ -1195,6 +1302,9 @@ async def test_manual_restore_cleanup_failure_stays_recoverable_and_retries(
     assert store.journal is not None
     assert store.journal["phase"] == "manual_cleanup_failed"
     assert store.journal["status"] == "interrupted"
+    assert store.journal["detail"][SHUTDOWN_RUNTIME_POLICY_FIELD] == (
+        SHUTDOWN_RUNTIME_KEEP
+    )
     assert recovery.is_dir()
     coordinator._rollback.assert_not_awaited()
     # Simulate a partial shutil.rmtree that removed the marker before another
@@ -1599,6 +1709,9 @@ async def test_switch_started_crash_routes_by_actual_manager_identity(
         assert recovery.is_dir()
         assert (layout.root / "DicePP-Recover.cmd").is_file()
         assert store.get_journal(transaction_id)["status"] == "rollback_failed"
+        assert store.get_journal(transaction_id)["detail"][
+            SHUTDOWN_RUNTIME_POLICY_FIELD
+        ] == SHUTDOWN_RUNTIME_QUIESCE
         assert service._startup_maintenance_active is True
     else:
         assert not recovery.exists()

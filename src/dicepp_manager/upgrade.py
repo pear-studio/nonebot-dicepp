@@ -80,6 +80,16 @@ LINUX_STAGE_RESERVE_BYTES = 256 * 1024**2
 CONFIRMATION_TTL = timedelta(minutes=15)
 _TERMINAL = {"succeeded", "failed", "rejected", "interrupted"}
 _VELOPACK_GENERATION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+SHUTDOWN_RUNTIME_POLICY_FIELD = "shutdown_runtime_policy"
+SHUTDOWN_RUNTIME_KEEP = "keep"
+SHUTDOWN_RUNTIME_QUIESCE = "quiesce"
+_LEGACY_WINDOWS_SHUTDOWN_QUIESCE_PHASES = {
+    "target_health_failed",
+    "switch_identity_unknown",
+    "manual_restore_blocked",
+    "manual_data_restore",
+    "manual_restore_failed",
+}
 
 
 class UpgradeError(RuntimeError):
@@ -1249,6 +1259,39 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             "journal": journal,
         }
 
+    def should_quiesce_runtime_on_shutdown(self) -> bool:
+        """Return whether durable recovery state requires Runtime shutdown.
+
+        The startup maintenance gate protects recovery from user operations;
+        it does not itself imply that Runtime must stop when Manager exits.
+        Explicit policy wins.  The narrow phase fallback preserves the
+        Windows simple-upgrade contract for rc20-rc22 journals written before
+        the policy field existed.
+        """
+        for journal in self.store.list_recoverable_journals():
+            if journal.get("kind") != UPGRADE_JOURNAL_KIND:
+                continue
+            detail = journal.get("detail")
+            if not isinstance(detail, dict):
+                continue
+            if SHUTDOWN_RUNTIME_POLICY_FIELD in detail:
+                if (
+                    detail.get(SHUTDOWN_RUNTIME_POLICY_FIELD)
+                    == SHUTDOWN_RUNTIME_QUIESCE
+                ):
+                    return True
+                continue
+            if detail.get("platform_protocol") != "windows-simple-v1":
+                continue
+            phase = str(journal.get("phase") or detail.get("phase") or "")
+            if phase in _LEGACY_WINDOWS_SHUTDOWN_QUIESCE_PHASES:
+                return True
+            if phase in {"rolling_back", "rollback_failed"}:
+                manual = detail.get("manual_restore")
+                if isinstance(manual, dict) and manual.get("requested") is True:
+                    return True
+        return False
+
     async def preview(self, version: str | None = None) -> dict[str, Any]:
         package = self._verified_package(version)
         platform = await self.platform_adapter.preflight(package)
@@ -1358,6 +1401,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             "commit_point": "not_started",
             "rolled_back": False,
             "rollback_status": "not_started",
+            SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_KEEP,
         }
         protocol = getattr(self.platform_adapter, "protocol", None)
         if isinstance(protocol, str) and protocol:
@@ -1863,6 +1907,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                 blocked_detail = {
                     **detail,
                     "phase": "manual_restore_blocked",
+                    SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
                     "manual_restore": {
                         "requested": True,
                         "program_directory_restored": False,
@@ -1912,11 +1957,13 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                 # Data and Runtime restoration already completed before the
                 # prior process died.  Do not replay destructive restoration;
                 # resume only recovery-material cleanup and terminal recording.
+                detail[SHUTDOWN_RUNTIME_POLICY_FIELD] = SHUTDOWN_RUNTIME_KEEP
                 rollback = dict(persisted_rollback)
             else:
                 detail.update(
                     {
                         "phase": "manual_data_restore",
+                        SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
                         "manual_restore": {
                             "requested": True,
                             "program_directory_restored": True,
@@ -1994,6 +2041,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                 cleanup_detail = {
                     **detail,
                     "phase": "manual_cleanup_failed",
+                    SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_KEEP,
                     "manual_restore": {
                         "requested": True,
                         "program_directory_restored": True,
@@ -2027,6 +2075,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             restored_detail = {
                 **detail,
                 "phase": "manual_restored",
+                SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_KEEP,
                 "manual_restore": {
                     "requested": True,
                     "program_directory_restored": True,
@@ -2133,6 +2182,7 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                 blocked_detail = {
                     **detail,
                     "phase": "switch_identity_unknown",
+                    SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
                     "actual_version": actual_version,
                     "source_version": source_version,
                     "manual_recovery_required": True,
@@ -2226,6 +2276,27 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
             )
             self._journal(operation, detail, phase="healthy")
         except Exception as exc:
+            failed_detail = {
+                **detail,
+                "phase": "target_health_failed",
+                SHUTDOWN_RUNTIME_POLICY_FIELD: SHUTDOWN_RUNTIME_QUIESCE,
+                "new_version_health_error": str(exc) or type(exc).__name__,
+                "target_runtime_stopped": False,
+                "manual_recovery_required": True,
+                "manual_restore": {
+                    "requested": False,
+                    "program_directory_restored": False,
+                    "data_runtime_restored": False,
+                },
+            }
+            # Persist the shutdown requirement before the first stop attempt.
+            # If Manager exits during that attempt, lifespan shutdown can retry.
+            self._journal(
+                operation,
+                failed_detail,
+                phase="target_health_failed",
+                status="rollback_failed",
+            )
             target_runtime_stop_error = None
             try:
                 with self._maintenance_context(
@@ -2238,23 +2309,13 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
                 target_runtime_stop_error = (
                     str(stop_exc) or type(stop_exc).__name__
                 )
-            failed_detail = {
-                **detail,
-                "phase": "target_health_failed",
-                "new_version_health_error": str(exc) or type(exc).__name__,
-                "target_runtime_stopped": target_runtime_stop_error is None,
-                **(
-                    {"target_runtime_stop_error": target_runtime_stop_error}
-                    if target_runtime_stop_error is not None
-                    else {}
-                ),
-                "manual_recovery_required": True,
-                "manual_restore": {
-                    "requested": False,
-                    "program_directory_restored": False,
-                    "data_runtime_restored": False,
-                },
-            }
+            failed_detail["target_runtime_stopped"] = (
+                target_runtime_stop_error is None
+            )
+            if target_runtime_stop_error is not None:
+                failed_detail["target_runtime_stop_error"] = (
+                    target_runtime_stop_error
+                )
             self._journal(
                 operation,
                 failed_detail,
@@ -2436,6 +2497,8 @@ class UpgradeCoordinator(LinuxHandoffCoordinator):
         journal_phase = (
             "manual_data_restored" if program_already_restored else "rolled_back"
         )
+        if program_already_restored:
+            detail[SHUTDOWN_RUNTIME_POLICY_FIELD] = SHUTDOWN_RUNTIME_KEEP
         self._journal(
             operation,
             {**detail, "phase": journal_phase, "rollback_result": result},
