@@ -1,11 +1,39 @@
 """Tests for ``/api/persona/characters/**`` persona character card endpoints."""
 
 import json
+import os
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from dashboard.src.app import _find_persona_db
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
+
+
+def test_persona_database_discovery_uses_asset_scope_and_newest_file(
+    tmp_dashboard_paths: Path,
+) -> None:
+    bot_dir = tmp_dashboard_paths / "data" / "bots" / "test_bot"
+    older = bot_dir / "personas_data_old.db"
+    newer = bot_dir / "personas_data_new.db"
+    older.write_bytes(b"old")
+    newer.write_bytes(b"new")
+    older.touch()
+    newer.touch()
+    older_mtime = newer.stat().st_mtime - 10
+    os.utime(older, (older_mtime, older_mtime))
+    (bot_dir / "personas_data_directory.db").mkdir()
+    other_bot = (
+        tmp_dashboard_paths
+        / "data"
+        / "bots"
+        / "another_bot"
+        / "personas_data_other.db"
+    )
+    other_bot.write_bytes(b"other bot")
+
+    assert _find_persona_db("test_bot") == newer
 
 
 class TestListCharacters:

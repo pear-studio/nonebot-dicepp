@@ -291,98 +291,6 @@
         </div>
       </div>
 
-      <!-- Tab: 数据浏览 -->
-      <div x-show="currentTab === 'data'" x-cloak class="h-full flex flex-col min-h-0" data-testid="data-browser">
-        <div class="mb-4 flex-shrink-0">
-          <h2 class="text-xl font-bold">数据浏览</h2>
-          <p class="mt-1 text-sm text-gray-500">只读查看 Bot 运行过程中保存的数据。</p>
-        </div>
-        <template x-if="!selectedBotId">
-          <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg">请先在左侧选择一个 Bot</div>
-        </template>
-        <template x-if="selectedBotId">
-          <div class="flex-1 min-h-0 flex gap-4">
-            <aside class="w-64 flex-shrink-0 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col min-h-0" data-testid="data-resource-sidebar">
-              <div class="p-3 border-b">
-                <div class="text-sm font-semibold text-gray-900">数据表</div>
-                <input type="search" x-model="dataTableSearch" placeholder="筛选数据表…" class="mt-2 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-              </div>
-              <div class="flex-1 overflow-y-auto p-2">
-                <div x-show="dataLoading && tables.length === 0" class="p-3 text-sm text-gray-500">正在读取数据表…</div>
-                <div x-show="!dataLoading && tables.length === 0" class="p-3 text-sm text-gray-500">暂无数据表</div>
-                <template x-for="tbl in filteredDataTables()" :key="tbl.name">
-                  <button type="button" @click="selectDataTable(tbl.name)" class="w-full rounded-lg px-3 py-2.5 text-left transition mb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300" :class="selectedTable === tbl.name ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'" :data-testid="`data-table-${tbl.name}`">
-                    <div class="flex items-start justify-between gap-2">
-                      <span class="text-sm font-medium break-words" x-text="tbl.label || tbl.name"></span>
-                      <span class="text-xs text-gray-400 tabular-nums" x-text="tbl.count ?? 0"></span>
-                    </div>
-                    <div x-show="tbl.label && tbl.label !== tbl.name" class="mt-0.5 text-xs text-gray-400 break-all" x-text="tbl.name"></div>
-                  </button>
-                </template>
-                <div x-show="tables.length > 0 && filteredDataTables().length === 0" class="p-3 text-sm text-gray-500">没有匹配的数据表</div>
-              </div>
-            </aside>
-
-            <section class="flex-1 min-w-0 min-h-0 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col overflow-hidden" data-testid="data-workspace">
-              <div x-show="!selectedTable" class="flex-1 flex items-center justify-center p-8 text-center text-gray-500">
-                <div>
-                  <div class="font-medium text-gray-700">选择一个数据表</div>
-                  <p class="mt-1 text-sm">从左侧列表选择后在这里查看数据。</p>
-                </div>
-              </div>
-              <template x-if="selectedTable">
-                <div class="flex-1 min-h-0 flex flex-col">
-                  <header class="flex-shrink-0 border-b px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                    <div class="min-w-0">
-                      <h3 class="font-semibold text-gray-900" x-text="selectedDataTable()?.label || selectedTable"></h3>
-                      <div class="mt-0.5 text-xs text-gray-500">
-                        <span x-show="selectedDataTable()?.label !== selectedTable" x-text="selectedTable"></span>
-                        <span x-show="selectedDataTable()?.label !== selectedTable"> · </span>
-                        <span x-text="`${dataTotal} 条记录 · 只读`"></span>
-                      </div>
-                    </div>
-                    <input type="search" x-model="searchQuery" placeholder="搜索当前数据表…" @input.debounce.500ms="loadTableData(1)" class="w-full sm:w-80 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  </header>
-                  <div class="relative flex-1 min-h-0">
-                    <div x-show="!dataLoading && records.length === 0" class="absolute inset-0 flex items-center justify-center text-gray-500">暂无数据</div>
-                    <div x-show="records.length > 0" class="h-full overflow-auto">
-                      <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
-                          <tr>
-                            <template x-for="col in columns" :key="col">
-                              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 whitespace-nowrap" x-text="col"></th>
-                            </template>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                          <template x-for="(row, idx) in records" :key="idx">
-                            <tr class="hover:bg-gray-50 align-top">
-                              <template x-for="col in columns" :key="col">
-                                <td class="px-4 py-2 text-sm text-gray-700 max-w-md">
-                                  <pre x-text="formatCell(row[col])" class="max-h-24 overflow-auto whitespace-pre-wrap break-words font-sans text-xs"></pre>
-                                </td>
-                              </template>
-                            </tr>
-                          </template>
-                        </tbody>
-                      </table>
-                    </div>
-                    <div x-show="dataLoading" class="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 text-gray-600">
-                      <div class="rounded-lg bg-white px-4 py-3 shadow text-sm">正在加载数据…</div>
-                    </div>
-                  </div>
-                  <footer class="flex-shrink-0 flex items-center justify-between border-t px-4 py-3">
-                    <button @click="loadTableData(currentPage - 1)" :disabled="dataLoading || currentPage <= 1" class="px-3 py-1.5 border rounded hover:bg-gray-100 disabled:opacity-50 text-sm">上一页</button>
-                    <span class="text-sm text-gray-600" x-text="`第 ${currentPage} / ${totalPages} 页，共 ${dataTotal} 条，每页 ${dataPageSize} 条`"></span>
-                    <button @click="loadTableData(currentPage + 1)" :disabled="dataLoading || currentPage >= totalPages" class="px-3 py-1.5 border rounded hover:bg-gray-100 disabled:opacity-50 text-sm">下一页</button>
-                  </footer>
-                </div>
-              </template>
-            </section>
-          </div>
-        </template>
-      </div>
-
       <!-- Tab: 配置编辑 -->
       <div x-show="currentTab === 'config'" x-cloak>
         <h2 class="text-xl font-bold mb-4">配置编辑</h2>
@@ -2129,7 +2037,6 @@ function app() {
     currentTab: 'overview',
     tabs: [
       { id: 'overview', label: '概览' },
-      { id: 'data', label: '数据浏览' },
       { id: 'config', label: '配置编辑' },
       { id: 'persona', label: 'Persona' },
       { id: 'content', label: '内容管理' },
@@ -2142,18 +2049,6 @@ function app() {
     // ── Bot selection ──
     bots: [],
     selectedBotId: '',
-
-    // ── Tab: Data Browse ──
-    tables: [],
-    selectedTable: '',
-    dataTableSearch: '',
-    dataTotal: 0,
-    dataPageSize: 25,
-    records: [],
-    columns: [],
-    currentPage: 1,
-    totalPages: 1,
-    searchQuery: '',
 
     // ── Tab: Config Edit ──
     configView: 'fields',
@@ -2305,7 +2200,6 @@ function app() {
     auditLogs: [],
 
     // ── Per-tab loading states ──
-    dataLoading: false,
     configLoading: false,
     personaConfigLoading: false,
     charactersLoading: false,
@@ -2561,7 +2455,6 @@ function app() {
     loadTabData(tabId) {
       switch (tabId) {
         case 'overview': this.loadOverview(); break;
-        case 'data': this.loadTables(); break;
         case 'config':
           this.loadConfig();
           this.loadManagerStatus();
@@ -2579,78 +2472,6 @@ function app() {
         case 'monitor': this.loadMonitor(); break;
         case 'audit': this.loadAudit(); break;
       }
-    },
-
-    // ── Data Browse ──
-    async loadTables() {
-      if (!this.selectedBotId) return;
-      this.dataLoading = true;
-      try {
-        const data = await this.api(`/api/data/${this.selectedBotId}/tables`);
-        this.tables = data.tables || [];
-        this.selectedTable = '';
-        this.dataTableSearch = '';
-        this.dataTotal = 0;
-        this.records = [];
-        this.columns = [];
-      } catch (err) {
-        console?.warn('[DicePP] Failed to load tables:', err);
-        this.tables = [];
-      } finally {
-        this.dataLoading = false;
-      }
-    },
-
-    filteredDataTables() {
-      const keyword = this.dataTableSearch.trim().toLocaleLowerCase();
-      if (!keyword) return this.tables;
-      return this.tables.filter(table =>
-        `${table.label || ''} ${table.name || ''}`.toLocaleLowerCase().includes(keyword)
-      );
-    },
-
-    selectedDataTable() {
-      return this.tables.find(table => table.name === this.selectedTable) || null;
-    },
-
-    selectDataTable(table) {
-      if (!table || table === this.selectedTable) return;
-      this.selectedTable = table;
-      this.searchQuery = '';
-      this.records = [];
-      this.columns = [];
-      this.dataTotal = 0;
-      this.loadTableData(1);
-    },
-
-    async loadTableData(page) {
-      if (!this.selectedBotId || !this.selectedTable) return;
-      this.currentPage = page || 1;
-      this.dataLoading = true;
-      try {
-        const limit = this.dataPageSize;
-        const offset = (this.currentPage - 1) * limit;
-        const params = new URLSearchParams({ offset: offset, limit: limit });
-        if (this.searchQuery) params.set('q', this.searchQuery);
-        const data = await this.api(`/api/data/${this.selectedBotId}/table/${this.selectedTable}?${params}`);
-        this.records = data.records || [];
-        this.columns = data.columns || (this.records.length > 0 ? Object.keys(this.records[0]) : []);
-        this.dataTotal = data.total || 0;
-        this.totalPages = Math.ceil(this.dataTotal / limit) || 1;
-      } catch (err) {
-        console?.warn('[DicePP] Failed to load table data:', err);
-        this.records = [];
-        this.columns = [];
-        this.dataTotal = 0;
-      } finally {
-        this.dataLoading = false;
-      }
-    },
-
-    formatCell(val) {
-      if (val === null || val === undefined) return 'null';
-      if (typeof val === 'object') return JSON.stringify(val, null, 1);
-      return String(val);
     },
 
     // ── Shared config loading ──

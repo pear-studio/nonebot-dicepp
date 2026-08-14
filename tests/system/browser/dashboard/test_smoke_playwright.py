@@ -181,6 +181,7 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             page.locator("#login-password").fill("test_pass")
             page.get_by_role("button", name="登录").click()
             page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
+            expect(page.get_by_role("button", name="数据浏览", exact=True)).to_have_count(0)
 
             # The sidebar version opens the shared project/about information.
             expected_version = f"v{package_version('dicepp')}"
@@ -1912,77 +1913,6 @@ def test_updates_tab_is_usable_on_mobile_and_does_not_claim_unchecked_is_latest(
             expect(page.get_by_test_id("audit-tab")).to_be_visible()
             expect(page.get_by_role("columnheader", name="时间")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        finally:
-            browser.close()
-
-
-def test_data_browser_uses_resource_sidebar_and_fixed_workspace(
-    dashboard_url: str,
-) -> None:
-    """Data tables are selected from a resource list and keep raw cells bounded."""
-    requested_urls: list[str] = []
-
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright.chromium)
-        page = browser.new_page()
-
-        page.route(
-            "**/api/data/demo/tables",
-            lambda route: route.fulfill(
-                status=200,
-                json={
-                    "ok": True,
-                    "tables": [
-                        {"name": "group_stat", "label": "群组统计", "count": 1},
-                        {"name": "nickname", "label": "用户昵称", "count": 8},
-                    ],
-                },
-            ),
-        )
-
-        def _table_data(route) -> None:
-            requested_urls.append(route.request.url)
-            route.fulfill(
-                status=200,
-                json={
-                    "ok": True,
-                    "columns": ["group_id", "data", "updated_at"],
-                    "records": [
-                        {
-                            "group_id": "10001",
-                            "data": json.dumps({"nested": "x" * 500}),
-                            "updated_at": 1786428000,
-                        }
-                    ],
-                    "total": 1,
-                },
-            )
-
-        page.route("**/api/data/demo/table/group_stat?*", _table_data)
-        try:
-            _login(page, dashboard_url)
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.selectedBotId = 'demo';
-                }"""
-            )
-            page.get_by_role("button", name="数据浏览", exact=True).click()
-
-            expect(page.get_by_test_id("data-resource-sidebar")).to_be_visible()
-            expect(page.get_by_test_id("data-workspace")).to_contain_text("选择一个数据表")
-            table_button = page.get_by_test_id("data-table-group_stat")
-            expect(table_button).to_contain_text("群组统计")
-            expect(table_button).to_contain_text("group_stat")
-            expect(table_button).to_contain_text("1")
-
-            table_button.click()
-            expect(page.get_by_test_id("data-workspace")).to_contain_text("群组统计")
-            expect(page.get_by_test_id("data-workspace")).to_contain_text("每页 25 条")
-            expect(page.get_by_test_id("data-workspace").locator("pre").first).to_have_class(
-                re.compile(r"max-h-24")
-            )
-            assert any("limit=25" in url for url in requested_urls)
         finally:
             browser.close()
 

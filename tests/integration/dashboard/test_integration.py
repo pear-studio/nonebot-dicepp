@@ -14,7 +14,7 @@ def _install_config_manager(test_client: TestClient) -> None:
 
 
 class TestFullFlow:
-    """Simulate a real user session: setup -> login -> browse -> edit -> audit -> logout."""
+    """Simulate a real user session: setup -> login -> edit -> audit -> logout."""
 
     def test_full_flow(self, test_client: TestClient, tmp_dashboard_paths):
         """Walk through the complete dashboard lifecycle."""
@@ -42,37 +42,18 @@ class TestFullFlow:
         assert "another_bot" in bots
         assert "_template" not in bots
 
-        # ── 5. Browse bot data ────────────────────────────────────────────
-        resp = test_client.get("/api/data/test_bot/tables")
-        assert resp.status_code == 200
-        tables = resp.json()["tables"]
-        assert any(t["name"] == "characters" and t["count"] == 3 for t in tables)
+        # Raw runtime database browsing is intentionally not a Dashboard API.
+        assert test_client.get("/api/data/test_bot/tables").status_code == 404
+        assert test_client.get("/api/data/test_bot/table/characters").status_code == 404
 
-        resp = test_client.get(
-            "/api/data/test_bot/table/characters",
-            params={"offset": 0, "limit": 2},
-        )
-        assert resp.status_code == 200
-        assert len(resp.json()["records"]) == 2
-        assert resp.json()["total"] == 3
-
-        # ── 6. Search data ───────────────────────────────────────────────
-        resp = test_client.get(
-            "/api/data/test_bot/table/characters",
-            params={"q": "Gandalf"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["total"] == 1
-        assert resp.json()["records"][0]["level"] == 20
-
-        # ── 7. Read merged config ────────────────────────────────────────
+        # ── 5. Read merged config ────────────────────────────────────────
         resp = test_client.get("/api/config/merged")
         assert resp.status_code == 200
         config = resp.json()["config"]
         assert "chat_interval" in config
         assert config["chat_interval"]["source"] == "default"
 
-        # ── 8. Edit config ───────────────────────────────────────────────
+        # ── 6. Edit config ───────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/set",
             json={"path": "chat_interval", "value": 33},
@@ -84,7 +65,7 @@ class TestFullFlow:
         assert '"chat_interval"' in user_cfg
         assert "33" in user_cfg
 
-        # ── 9. Reset config ──────────────────────────────────────────────
+        # ── 7. Reset config ──────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/reset",
             json={"path": "chat_interval"},
@@ -92,7 +73,7 @@ class TestFullFlow:
         assert resp.status_code == 200
         assert resp.json()["removed"] is True
 
-        # ── 10. Save bot config ──────────────────────────────────────────
+        # ── 8. Save bot config ───────────────────────────────────────────
         new_bot_cfg = {"master": ["admin"], "enabled": False}
         resp = test_client.post(
             "/api/config/bots/test_bot/save",
@@ -104,7 +85,7 @@ class TestFullFlow:
         assert '"admin"' in saved
         assert '"enabled"' in saved
 
-        # ── 11. Read content ─────────────────────────────────────────────
+        # ── 9. Read content ──────────────────────────────────────────────
         resp = test_client.get("/api/content/decks")
         assert resp.status_code == 200
         files = resp.json()["files"]
@@ -114,7 +95,7 @@ class TestFullFlow:
         assert resp.status_code == 200
         assert resp.json()["content"] == "deck content"
 
-        # ── 12. Check audit log ──────────────────────────────────────────
+        # ── 10. Check audit log ──────────────────────────────────────────
         resp = test_client.get("/api/audit")
         assert resp.status_code == 200
         entries = resp.json()["entries"]
@@ -126,7 +107,7 @@ class TestFullFlow:
         ids = [e["id"] for e in entries]
         assert ids == sorted(ids, reverse=True)
 
-        # ── 13. Logout ───────────────────────────────────────────────────
+        # ── 11. Logout ───────────────────────────────────────────────────
         resp = test_client.post("/api/auth/logout")
         assert resp.status_code == 200
 
@@ -134,6 +115,6 @@ class TestFullFlow:
         resp = test_client.get("/api/auth/status")
         assert resp.json()["authenticated"] is False
 
-        # ── 14. Protected endpoints refuse after logout ──────────────────
+        # ── 12. Protected endpoints refuse after logout ──────────────────
         resp = test_client.get("/api/bots")
         assert resp.status_code == 401
