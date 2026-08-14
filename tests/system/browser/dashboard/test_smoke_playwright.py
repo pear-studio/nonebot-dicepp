@@ -735,6 +735,14 @@ def test_monitor_tab_loads_initial_status_via_rest(dashboard_url: str) -> None:
 
         try:
             _login(page, dashboard_url)
+            page.evaluate(
+                """() => {
+                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
+                    state.eventSource?.close();
+                    state.eventSource = null;
+                    state.eventSourceConnected = false;
+                }"""
+            )
 
             success = page.evaluate(
                 """async () => {
