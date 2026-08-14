@@ -633,8 +633,8 @@ def test_validation_only_windows_matrix_is_not_misrepresented_as_release_evidenc
         for source in matrix["supported_sources"]
     }
     assert sources == {
-        ("windows", "3.0.0rc21"),
-        ("linux", "3.0.0rc21"),
+        ("windows", "3.0.0rc22"),
+        ("linux", "3.0.0rc22"),
     }
     windows_contract = next(
         item

@@ -571,25 +571,25 @@ def test_tracked_registry_is_ready_with_previous_release_sources() -> None:
     } == {
         (
             "windows",
-            "3.0.0rc21",
+            "3.0.0rc22",
             (
                 (
                     "portable",
-                    "23ac4ad653782b76b1a1239ebd52765eba9090d3e645d34ab9f65886a868e028",
+                    "d5ddcde13fc2f20b36f54a9bb9ad47d4f0316b111ddeec8e98fe409df7be317f",
                 ),
                 (
                     "velopack-bundle",
-                    "d035d0a9a8cc85bc22732e9980da46a0651bb4201cdb5c57249018fb14cc5be4",
+                    "d0e07f773caf5b6d88368b01de9d819e83ed07cc4ff117fc7b078739b62976a0",
                 ),
             ),
         ),
         (
             "linux",
-            "3.0.0rc21",
+            "3.0.0rc22",
             (
                 (
                     "linux-bundle",
-                    "9abc2fe939082be095bcf81fda03308fab3fd211a7e368ca45f679227b161413",
+                    "e3830c28f4cfbbac7eda1d832ba25eaafcecaa52147dc7c19860325a66ad09fc",
                 ),
             ),
         ),

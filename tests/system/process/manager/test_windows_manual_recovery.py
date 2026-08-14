@@ -50,21 +50,44 @@ def test_root_recovery_script_swaps_whole_current_without_current_helpers(
     shutil.rmtree(layout.root / "current")
     (layout.root / "current").mkdir()
     (layout.root / "current" / "broken-target.txt").write_text("broken")
+    blocker_path = layout.root / "current" / "blocking.exe"
+    shutil.copyfile(
+        Path(os.environ["WINDIR"]) / "System32" / "ping.exe",
+        blocker_path,
+    )
     shutil.copyfile(
         Path(os.environ["WINDIR"]) / "System32" / "where.exe",
         layout.root / "DicePP.exe",
     )
 
-    result = subprocess.run(
-        [os.environ["COMSPEC"], "/d", "/c", str(layout.root / "DicePP-Recover.cmd")],
-        cwd=layout.root,
+    blocker = subprocess.Popen(
+        [str(blocker_path), "-n", "4", "127.0.0.1"],
+        cwd=layout.root / "current",
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        timeout=10,
-        check=False,
     )
+    try:
+        result = subprocess.run(
+            [
+                os.environ["COMSPEC"],
+                "/d",
+                "/c",
+                str(layout.root / "DicePP-Recover.cmd"),
+            ],
+            cwd=layout.root,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=20,
+            check=False,
+        )
+    finally:
+        if blocker.poll() is None:
+            blocker.kill()
+        blocker.wait(timeout=5)
 
     assert result.returncode == 0, result.stdout.decode(errors="replace")
     assert (layout.root / "current" / "old-program.txt").read_text() == "old"

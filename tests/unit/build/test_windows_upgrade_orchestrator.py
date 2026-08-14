@@ -7,10 +7,35 @@ from scripts.build.windows_upgrade_orchestrator import (
     _manager_environment,
     _manual_restore_journal_passed,
     _runtime_is_healthy,
+    _wait_current_directory_releasable,
     _wait_launcher_started,
     _wait_manager,
     _wait_runtime_healthy,
 )
+
+
+def test_current_directory_release_probe_retries_transient_windows_lock(
+    tmp_path, monkeypatch
+) -> None:
+    current = tmp_path / "current"
+    current.mkdir()
+    real_rename = type(current).rename
+    attempts = 0
+
+    def transiently_locked(path, target):
+        nonlocal attempts
+        if path == current and attempts < 2:
+            attempts += 1
+            raise PermissionError("directory still in use")
+        return real_rename(path, target)
+
+    monkeypatch.setattr(type(current), "rename", transiently_locked)
+
+    _wait_current_directory_releasable(tmp_path, timeout=1)
+
+    assert attempts == 2
+    assert current.is_dir()
+    assert not (tmp_path / "current.matrix-probe").exists()
 
 
 def _healthy_runtime_units() -> list[dict]:

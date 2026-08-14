@@ -387,8 +387,14 @@ if exist "%FAILED%\\" goto failed_exists
 if exist "%RECOVERY%\\manual-restore.requested" goto marker_exists
 if not exist "%DICEPP_ROOT%current\\" goto install_backup
 
-move "%DICEPP_ROOT%current" "%FAILED%" >NUL
-if errorlevel 1 goto current_in_use
+set /A MOVE_ATTEMPTS=0
+:move_current
+move "%DICEPP_ROOT%current" "%FAILED%" >NUL 2>&1
+if not errorlevel 1 goto install_backup
+set /A MOVE_ATTEMPTS+=1
+if %MOVE_ATTEMPTS% GEQ 15 goto current_in_use
+"%SystemRoot%\\System32\\ping.exe" -n 2 127.0.0.1 >NUL
+goto move_current
 
 :install_backup
 move "%BACKUP%" "%DICEPP_ROOT%current" >NUL

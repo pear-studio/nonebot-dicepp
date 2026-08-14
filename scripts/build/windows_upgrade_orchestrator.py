@@ -519,6 +519,33 @@ if ($processes.Count -gt 0) {
         )
 
 
+def _wait_current_directory_releasable(root: Path, *, timeout: float = 15) -> None:
+    current = root / "current"
+    probe = root / "current.matrix-probe"
+    if probe.exists():
+        raise WindowsMatrixError("Windows matrix directory probe already exists")
+    deadline = time.monotonic() + timeout
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            current.rename(probe)
+            probe.rename(current)
+            return
+        except OSError as exc:
+            last_error = exc
+            if probe.exists() and not current.exists():
+                try:
+                    probe.rename(current)
+                except OSError as restore_exc:
+                    raise WindowsMatrixError(
+                        "Windows matrix could not restore its directory-release probe"
+                    ) from restore_exc
+            time.sleep(0.1)
+    raise WindowsMatrixError(
+        f"Windows current directory remained in use after process shutdown: {last_error}"
+    )
+
+
 class _PortBlocker:
     def __init__(self, port: int) -> None:
         self.port = port
@@ -793,6 +820,7 @@ def _manual_restore(
         if not recovery_material_preserved:
             raise WindowsMatrixError("Source recovery material was not preserved")
         _stop_root_processes(root)
+        _wait_current_directory_releasable(root)
         # The injected port conflict has already proved the target-start
         # failure.  Remove that artificial fault before exercising the user
         # recovery entrypoint so the restored source can start normally.

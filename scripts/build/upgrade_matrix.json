@@ -27,32 +27,32 @@
     {
       "platform": "windows",
       "arch": "amd64",
-      "source_version": "3.0.0rc21",
+      "source_version": "3.0.0rc22",
       "assets": [
         {
           "purpose": "portable",
-          "name": "DicePP-v3.0.0rc21-win64-Portable.zip",
-          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc21/DicePP-v3.0.0rc21-win64-Portable.zip",
-          "sha256": "23ac4ad653782b76b1a1239ebd52765eba9090d3e645d34ab9f65886a868e028"
+          "name": "DicePP-v3.0.0rc22-win64-Portable.zip",
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc22/DicePP-v3.0.0rc22-win64-Portable.zip",
+          "sha256": "d5ddcde13fc2f20b36f54a9bb9ad47d4f0316b111ddeec8e98fe409df7be317f"
         },
         {
           "purpose": "velopack-bundle",
           "name": "velopack.win-x64.zip",
-          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc21/velopack.win-x64.zip",
-          "sha256": "d035d0a9a8cc85bc22732e9980da46a0651bb4201cdb5c57249018fb14cc5be4"
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc22/velopack.win-x64.zip",
+          "sha256": "d0e07f773caf5b6d88368b01de9d819e83ed07cc4ff117fc7b078739b62976a0"
         }
       ]
     },
     {
       "platform": "linux",
       "arch": "amd64",
-      "source_version": "3.0.0rc21",
+      "source_version": "3.0.0rc22",
       "assets": [
         {
           "purpose": "linux-bundle",
-          "name": "DicePP-v3.0.0rc21-linux-amd64.zip",
-          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc21/DicePP-v3.0.0rc21-linux-amd64.zip",
-          "sha256": "9abc2fe939082be095bcf81fda03308fab3fd211a7e368ca45f679227b161413"
+          "name": "DicePP-v3.0.0rc22-linux-amd64.zip",
+          "url": "https://github.com/pear-studio/nonebot-dicepp/releases/download/v3.0.0rc22/DicePP-v3.0.0rc22-linux-amd64.zip",
+          "sha256": "e3830c28f4cfbbac7eda1d832ba25eaafcecaa52147dc7c19860325a66ad09fc"
         }
       ]
     }
