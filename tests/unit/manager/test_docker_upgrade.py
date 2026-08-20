@@ -225,7 +225,12 @@ async def test_socket_upgrade_rejects_loaded_tag_with_wrong_immutable_id():
 
 
 @pytest.mark.asyncio
-async def test_socket_upgrade_rejects_unhandled_nondefault_host_config():
+async def test_socket_upgrade_drops_unhandled_host_config_fields():
+    """HostConfig 未处理字段不复制(白名单提取),而不是拒绝升级。
+
+    daemon 自动维护的字段(如 Config.MacAddress)会周期性出现在运行容器上,
+    全量拒绝会让升级通道卡死;白名单提取保证未处理字段一律不进入新容器。
+    """
     runtime = Runtime()
     original_request = runtime._request
 
@@ -250,8 +255,72 @@ async def test_socket_upgrade_rejects_unhandled_nondefault_host_config():
         },
     ]
 
-    with pytest.raises(DockerRuntimeError, match="DeviceRequests"):
-        await executor.capture_images(records)
+    previous = await executor.capture_images(records)
+    resolved = await executor.resolve_images(records)
+    await executor.switch_images(target_images=resolved, previous=previous)
+
+    creates = [
+        body
+        for method, path, body in runtime.requests
+        if method == "POST" and path.startswith("/containers/create?")
+    ]
+    assert all("DeviceRequests" not in body["HostConfig"] for body in creates)
+
+
+@pytest.mark.asyncio
+async def test_socket_upgrade_ignores_legacy_container_mac_address():
+    """daemon 维护的 Config/endpoint MacAddress 不阻塞升级也不被复制。
+
+    回归:Manager 自切换会把 endpoint MacAddress 同步写进新容器的
+    Config.MacAddress(docker 25+ legacy 行为),升级通道因此周期性卡死。
+    白名单提取后该字段既不再触发拒绝,也不进入创建请求。
+    """
+    runtime = Runtime()
+    original_request = runtime._request
+
+    async def request(method, path, **kwargs):
+        payload = await original_request(method, path, **kwargs)
+        if path == f"/containers/{'a' * 64}/json":
+            payload["Config"]["MacAddress"] = "7a:0c:3b:f5:1b:94"
+            payload["NetworkSettings"]["Networks"]["dicepp_manager-net"][
+                "MacAddress"
+            ] = "7a:0c:3b:f5:1b:94"
+        return payload
+
+    runtime._request = request
+    executor = DockerSocketUpgradeExecutor(runtime)
+    records = [
+        {
+            "role": "bot",
+            "reference": "ghcr.io/pear-studio/nonebot-dicepp:v3.1.0",
+            "image_id": BOT_NEW_ID,
+        },
+        {
+            "role": "dashboard",
+            "reference": "ghcr.io/pear-studio/dicepp-dashboard:v3.1.0",
+            "image_id": DASHBOARD_NEW_ID,
+        },
+    ]
+
+    previous = await executor.capture_images(records)
+    resolved = await executor.resolve_images(records)
+    await executor.switch_images(target_images=resolved, previous=previous)
+
+    creates = [
+        body
+        for method, path, body in runtime.requests
+        if method == "POST" and path.startswith("/containers/create?")
+    ]
+    assert all("MacAddress" not in body for body in creates)
+    assert all(
+        "MacAddress" not in endpoint
+        for body in creates
+        for endpoint in body["NetworkingConfig"]["EndpointsConfig"].values()
+    )
+    assert all(
+        set(body["NetworkingConfig"]["EndpointsConfig"]) == {"dicepp_manager-net"}
+        for body in creates
+    )
 
 
 @pytest.mark.asyncio

@@ -395,6 +395,31 @@ def identity_from_payload(payload: dict[str, Any]) -> ContainerIdentity:
     )
 
 
+def extract_endpoints(networks: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Extract per-network endpoint settings for a container create request.
+
+    The four kept keys (IPAMConfig/Links/Aliases/DriverOpts) are the legal
+    input contract of the Docker create API's EndpointSettings: they carry
+    user intent.  Everything else in an inspected endpoint (MacAddress,
+    Gateway, IPAddress, NetworkID, ...) is runtime state assigned by the
+    daemon and is deliberately not carried over (fail-closed), so the new
+    container gets fresh daemon-allocated addresses.  This is a semantic
+    contract, not a version-specific compatibility hardcode.  Shared by the
+    docker_upgrade capture path and the Manager self-switch helper so the
+    two upgrade paths cannot drift apart.
+    """
+    endpoints: dict[str, dict[str, Any]] = {}
+    for network, endpoint in networks.items():
+        if not isinstance(network, str) or not isinstance(endpoint, dict):
+            raise DockerRuntimeError("Docker network identity is invalid")
+        endpoints[network] = {
+            key: endpoint[key]
+            for key in ("IPAMConfig", "Links", "Aliases", "DriverOpts")
+            if key in endpoint and endpoint[key] is not None
+        }
+    return endpoints
+
+
 def _clean_absolute_linux_path(
     value: object, *, label: str
 ) -> PurePosixPath:

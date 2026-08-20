@@ -9,6 +9,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from .docker_handoff import extract_endpoints
 from .docker_runtime import (
     DockerRuntimeError,
     DockerSocketRuntimeAdapter,
@@ -545,21 +546,12 @@ def _capture_container(
         or not _IMAGE_ID.fullmatch(payload["Image"])
     ):
         raise DockerRuntimeError("Docker inspect payload is incomplete")
-    _reject_unhandled_nondefault(
-        config,
-        _CONFIG_KEYS | _IMAGE_DEFAULT_KEYS | {"Image"},
-        "container Config",
-    )
-    _reject_unhandled_nondefault(host, _HOST_KEYS, "HostConfig")
-    endpoints = {}
-    for network, endpoint in networks.items():
-        if not isinstance(network, str) or not isinstance(endpoint, dict):
-            raise DockerRuntimeError("Docker network identity is invalid")
-        endpoints[network] = {
-            key: endpoint[key]
-            for key in ("IPAMConfig", "Links", "Aliases", "DriverOpts")
-            if key in endpoint and endpoint[key] is not None
-        }
+    # Config/HostConfig 只保留下面白名单提取的字段:运行容器上 daemon 自动
+    # 维护的 legacy 字段(如 Config.MacAddress)会被丢弃而不是拒绝升级,
+    # 否则 docker 28+ 升级会因这类字段周期性卡死。
+    # endpoint 提取走共享的 extract_endpoints(见 docker_handoff),与
+    # Manager 自切换路径保持同一白名单契约。
+    endpoints = extract_endpoints(networks)
     return {
         "container_id": container_id,
         "name": name,

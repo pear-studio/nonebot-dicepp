@@ -40,6 +40,7 @@ from typing import Any, Mapping
 from .docker_handoff import (
     ContainerIdentity,
     DockerHandoffExecutor,
+    extract_endpoints,
 )
 from .docker_runtime import (
     DockerRuntimeError,
@@ -125,9 +126,18 @@ def _manager_create_config(
     # not be copied into the replacement: omitting it lets Docker generate a
     # hostname bound to the new target container id for the self-identity gate.
     config.pop("Hostname", None)
+    # 容器级 MacAddress 是 daemon 自动维护的 legacy 字段(docker 25+ 弃用):
+    # 复制它会让新容器带上旧 MAC,daemon 再把它写回 Config.MacAddress,
+    # 导致后续升级在配置捕获阶段周期性失败。omit 后由 daemon 自动分配。
+    config.pop("MacAddress", None)
     config["Image"] = target_manager_image_id
     config["HostConfig"] = dict(identity.host_config)
-    config["NetworkingConfig"] = {"EndpointsConfig": dict(identity.networks)}
+    # endpoint 提取与 docker_upgrade 路径对齐:共享 extract_endpoints
+    # 白名单(见 docker_handoff),不复制 MacAddress 等 daemon 维护字段,
+    # 让新容器由 daemon 自动分配地址。
+    config["NetworkingConfig"] = {
+        "EndpointsConfig": extract_endpoints(identity.networks)
+    }
     return config
 
 
