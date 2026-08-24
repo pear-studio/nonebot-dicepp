@@ -21,12 +21,12 @@ def test_launcher_environment_only_configures_dashboard(
     assert "DICEPP_BOT_AUTO_START" not in env
 
 
-def test_frozen_autostart_uses_stable_root_launcher(tmp_path: Path, monkeypatch) -> None:
-    current = tmp_path / "current"
+def test_frozen_autostart_uses_portable_launcher(tmp_path: Path, monkeypatch) -> None:
+    portable = tmp_path / "DicePP"
     monkeypatch.setattr(os, "name", "nt", raising=False)
     monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(launcher.sys, "executable", str(current / "DicePP-App.exe"))
-    assert launcher.autostart_launcher_path() == tmp_path / "DicePP.exe"
+    monkeypatch.setattr(launcher.sys, "executable", str(portable / "DicePP.exe"))
+    assert launcher.autostart_launcher_path() == portable / "DicePP.exe"
 
 
 def test_launcher_tray_stops_bot_before_dashboard(tmp_path: Path) -> None:

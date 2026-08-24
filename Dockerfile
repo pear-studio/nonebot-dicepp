@@ -41,6 +41,14 @@ RUN VERSION="$(python -c "import tomllib; print(tomllib.load(open('pyproject.tom
     printf "Metadata-Version: 2.1\nName: dicepp\nVersion: %s\n" "$VERSION" \
         > "/app/project-meta/dicepp-${VERSION}.dist-info/METADATA"
 
+# 在构建阶段安装项目，使 Dashboard 与 Bot 共用同一环境。
+COPY bot.py ./
+COPY src/ src/
+COPY dashboard/ dashboard/
+COPY config/ config/
+COPY templates/ templates/
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
+
 # ── 运行阶段 ──────────────────────────────────────────────────────
 FROM python:3.13-slim
 
@@ -61,18 +69,20 @@ COPY --from=builder /app/project-meta /app/project-meta
 COPY bot.py ./
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
-COPY config/bots/_template.json config/bots/_template.json
+COPY dashboard/ dashboard/
+COPY config/ config/
 COPY templates/ templates/
 
 # 设置环境变量
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/project-meta"
+ENV PYTHONPATH="/app/src:/app/project-meta"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DICEPP_PROJECT_ROOT=/app
 
-# 暴露端口
+# Dashboard 与 OneBot 端口
+EXPOSE 4090
 EXPOSE 8080
 
-# 启动命令
-CMD ["python", "bot.py"]
+# 由 Dashboard 持有单一 Bot controller，并显式 auto-start Bot。
+CMD ["python", "-m", "dashboard"]

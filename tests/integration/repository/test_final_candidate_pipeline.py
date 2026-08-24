@@ -15,9 +15,6 @@ RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 WINDOWS_VALIDATOR = (
     ROOT / "scripts" / "build" / "validate_windows_final_candidate.ps1"
 )
-LINUX_VALIDATOR = (
-    ROOT / "scripts" / "build" / "validate_linux_final_candidate.sh"
-)
 TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
 PINNED_ACTIONS = {
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
@@ -48,51 +45,32 @@ def test_project_and_packaged_runtimes_share_python_313_baseline() -> None:
         "revision = 3",
         'requires-python = "==3.13.*"',
     ]
-    for dockerfile in ("Dockerfile", "Dockerfile.dashboard"):
-        dockerfile_text = (ROOT / dockerfile).read_text(encoding="utf-8")
-        from_lines = [
-            line
-            for line in dockerfile_text.splitlines()
-            if line.startswith("FROM python:")
-        ]
-        assert from_lines == [
-            "FROM python:3.13-slim AS builder",
-            "FROM python:3.13-slim",
-        ]
-        assert "RUN pip install uv==0.11.16 " in dockerfile_text
+    dockerfile_text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    from_lines = [
+        line for line in dockerfile_text.splitlines() if line.startswith("FROM python:")
+    ]
+    assert from_lines == [
+        "FROM python:3.13-slim AS builder",
+        "FROM python:3.13-slim",
+    ]
+    assert "COPY dashboard/ dashboard/" in dockerfile_text
+    assert 'CMD ["python", "-m", "dashboard"]' in dockerfile_text
+    assert "RUN pip install uv==0.11.16 " in dockerfile_text
+    assert not (ROOT / "Dockerfile.dashboard").exists()
 
 
 def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     windows = WINDOWS_VALIDATOR.read_text(encoding="utf-8")
-    linux = LINUX_VALIDATOR.read_text(encoding="utf-8")
-
-    windows_declaration = windows.index("# The declaration is intentionally the last write")
-    assert windows_declaration > windows.rindex("Invoke-DetachedLaunchSmoke $stableDashboard")
-    assert windows_declaration > windows.index('-Scenario "final-setup-install"')
+    windows_declaration = windows.index("if ($ValidatedSummaryPath)")
+    assert windows_declaration > windows.index('-Scenario "portable-dashboard-smoke"')
     assert "contract_version = 1" in windows
-    assert "Get-FileHash -LiteralPath $path -Algorithm SHA256" in windows
-    assert "size = $item.Length" in windows
-    assert "Portable must not contain DicePP-UpdateGuard.exe" in windows
-    assert "Setup must not install DicePP-UpdateGuard.exe" in windows
-    assert windows.count("Assert-ManualMigrationSentinels") == 2
-    assert windows.count("Write-ManualMigrationSentinels") == 2
-    assert windows.count('"manager\\control\\user-preserved.txt"') == 2
+    assert "Get-FileHash -LiteralPath $portablePath -Algorithm SHA256" in windows
+    assert "Portable must contain only its Dashboard and Bot executables" in windows
     assert "Portable payload must not contain config/global.json" in windows
-    assert "Setup payload must not install config/global.json" in windows
-    assert windows.index("Write-ManualMigrationSentinels $extractRoot") < windows.index(
-        "[System.IO.Compression.ZipFile]::ExtractToDirectory"
-    )
+    assert "Setup" not in windows
+    assert "Velopack" not in windows
+    assert "UpdateGuard" not in windows
 
-    linux_declaration = linux.index('if [ -n "$VALIDATED_SUMMARY" ]')
-    assert linux_declaration > linux.index("up -d --pull never --wait")
-    assert linux_declaration > linux.index(".State.Health.Status")
-    assert 'stat -Lc \'%s\' -- "$PACKAGE_ZIP"' in linux
-    assert 'sha256sum -- "$PACKAGE_ZIP"' in linux
-    assert '"contract_version": 1' in linux
-    assert 'assert not Path("/app/config/global.json").exists()' in linux
-    assert 'assert config.chat_interval == 31' in linux
-    assert 'assert config.nickname == "image-bot-layer"' in linux
-    assert "Runtime image modified legacy config/global.json" in linux
 
 
 def test_release_workflows_pin_actions_and_toolchain_versions() -> None:

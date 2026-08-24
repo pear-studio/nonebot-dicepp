@@ -18,16 +18,10 @@ COMMIT_SHA = "1" * 40
 
 
 @pytest.mark.parametrize(
-    ("version", "channel", "is_prerelease", "velopack_version", "velopack_channel"),
+    ("version", "channel", "is_prerelease"),
     [
-        ("3.1.0", "stable", False, "3.1.0", "win-x64-stable"),
-        (
-            "3.1.0rc7",
-            "prerelease",
-            True,
-            "3.1.0-rc.7",
-            "win-x64-prerelease",
-        ),
+        ("3.1.0", "stable", False),
+        ("3.1.0rc7", "prerelease", True),
     ],
 )
 def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
@@ -35,8 +29,6 @@ def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
     version: str,
     channel: str,
     is_prerelease: bool,
-    velopack_version: str,
-    velopack_channel: str,
 ) -> None:
     project = tmp_path / "pyproject.toml"
     project.write_text(f'[project]\nversion = "{version}"\n', encoding="utf-8")
@@ -68,8 +60,6 @@ def test_release_build_metadata_derives_all_protocol_versions_from_one_tag(
     assert metadata.commit_sha == COMMIT_SHA
     assert metadata.channel == channel
     assert metadata.is_prerelease is is_prerelease
-    assert metadata.velopack_version == velopack_version
-    assert metadata.velopack_channel == velopack_channel
     assert metadata.automatic_upgrade is False
 
 

@@ -411,23 +411,16 @@ def _validate_seed_directory(
 def resolve_launcher_roots(
     app_dir: str | os.PathLike[str],
 ) -> tuple[Path, Path]:
-    """Return ``(program_dir, instance_root)`` for Portable or Velopack.
-
-    Velopack launches the active program from ``<install-root>/current``.
-    Mutable DicePP data belongs to the stable parent while executables remain in
-    the version switch directory. Portable keeps both roles in its own root.
-    """
+    """Return the Portable directory as both executable and data root."""
     program = Path(app_dir).resolve()
-    instance = program.parent if program.name.casefold() == "current" else program
-    return program, instance
+    return program, program
 
 
 def autostart_launcher_path() -> Path:
-    """Return the stable root entry, not the version-owned frozen process."""
+    """Return the single Portable launcher executable."""
     if not getattr(sys, "frozen", False):
         return Path(sys.executable)
-    _program, instance = resolve_launcher_roots(Path(sys.executable).parent)
-    return instance / "DicePP.exe"
+    return Path(sys.executable).resolve()
 
 
 def should_open_browser() -> bool:

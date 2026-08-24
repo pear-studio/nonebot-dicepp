@@ -85,6 +85,10 @@ def test_windows_build_has_no_update_guard_entrypoint() -> None:
     assert not Path("scripts/build/update_guard_entry.py").exists()
     assert "update_guard.spec" not in build
     assert "UpdateGuardSource" not in assembly
+    assert "Portable ZIP" in build
+    assert "build_windows_launcher_shim" not in assembly
+    assert not Path("scripts/build/build_windows_launcher_shim.ps1").exists()
+    assert not Path("scripts/build/windows_launcher_shim.cpp").exists()
 
 
 def test_distribution_sources_do_not_ship_global_config() -> None:

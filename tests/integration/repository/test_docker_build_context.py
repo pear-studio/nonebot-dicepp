@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.support.paths import find_repository_root
 
@@ -38,3 +39,17 @@ def test_docker_build_context_excludes_manager_runtime_credentials():
     both leaks credentials into the context and breaks later host-side builds.
     """
     assert {"manager/control/", "manager/state/"} <= _rules()
+
+
+def test_compose_describes_one_dashboard_and_bot_service():
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+
+    assert set(compose["services"]) == {"dicepp"}
+    service = compose["services"]["dicepp"]
+    assert service["build"]["dockerfile"] == "Dockerfile"
+    assert service["ports"] == ["4090:4090"]
+    assert service["expose"] == ["8080"]
+    assert service["environment"]["DICEPP_ONEBOT_HOST"] == "0.0.0.0"
+    assert "manager" not in compose["services"]
+    assert "4091" not in str(service)
+    assert "/var/run/docker.sock" not in str(service)

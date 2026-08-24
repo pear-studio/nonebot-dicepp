@@ -1,91 +1,37 @@
-# 镜像版本策略：
-# - 默认使用 Manager 受管的本地 tag `dicepp-current`；首次部署必须显式设置
-#   DICEPP_IMAGE_TAG=vX.Y.Z（例如 `DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d`）。
-# - `dicepp-current` 由首次健康启动的 Manager 从已验证容器 Image ID 播种；
-#   已进入受管 alias 模式后，不要对 dicepp-current 执行远程 docker compose pull。
 services:
-  bot:
-    image: "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-dicepp-current}}"
+  dicepp:
+    image: "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}}"
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # 国内镜像源配置（可通过环境变量覆盖）
         APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
         UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: dicepp
     restart: unless-stopped
 
-    # Manager 只会控制同时带有这三个标签且值完全匹配的容器。
-    labels:
-      io.dicepp.managed: "true"
-      io.dicepp.runtime-unit: "dicepp-runtime"
-      io.dicepp.deployment-schema: "2"
-
-    # 网络：使用外部 dice-net 网络与协议适配器（NapCat/LLOneBot）通信
     networks:
       - dice-net
-      - manager-net
-
-    depends_on:
-      manager:
-        condition: service_healthy
-
-    # 端口：内部通信，无需暴露到宿主机
-    # 协议适配器通过 ws://dicepp:8080/onebot/v11/ws 连接
-    expose:
-      - "8080"
-
-    # 环境变量
-    environment:
-      - TZ=Asia/Shanghai
-      # Manager 是唯一 Bot 控制端；Dashboard 不承载控制 WebSocket。
-      - DICEPP_MANAGER_URL=http://manager:4091
-      # OneBot 监听地址：跨容器连接（NapCat/LLOneBot 经 ws://dicepp:8080 连入）要求监听全部网卡，
-      # 覆盖 bot.py 的默认值 127.0.0.1
-      - DICEPP_ONEBOT_HOST=0.0.0.0
-
-    # 数据持久化：
-    # - config：配置目录（可写，运行时生成 bots/*.json）
-    # - data：运行时数据（可写）
-    # - content：内容资源（可写，queries/ 运行时写入 .db）
-    volumes:
-      - ./config:/app/config
-      - ./data:/app/data
-      - ./content:/app/content
-      # Bot 与 Manager 仅共享控制凭据目录；Dashboard 不挂载它。
-      - ./manager/control:/app/manager/control:ro
-
-    # 日志配置：自动轮转
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
-        compress: "true"
-
-  dashboard:
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-dicepp-current}}"
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-      args:
-        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    container_name: dicepp-dashboard
-    restart: unless-stopped
-
-    networks:
-      - manager-net
-
-    depends_on:
-      manager:
-        condition: service_healthy
 
     ports:
       - "4090:4090"
+    # NapCat/LLOneBot connects to ws://dicepp:8080/onebot/v11/ws.
+    expose:
+      - "8080"
+
+    environment:
+      TZ: Asia/Shanghai
+      DICEPP_PROJECT_ROOT: /app
+      DICEPP_ONEBOT_HOST: 0.0.0.0
+
+    volumes:
+      - ./config:/app/config:rw
+      - ./data:/app/data:rw
+      - ./content:/app/content:rw
+      - ./dashboard/data:/app/dashboard/data:rw
+      # 保留已有实例的存档物理位置，不迁移旧数据。
+      - ./manager/backups:/app/manager/backups:rw
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4090/api/health', timeout=3).read()"]
@@ -94,96 +40,13 @@ services:
       retries: 12
       start_period: 10s
 
-    environment:
-      - TZ=Asia/Shanghai
-      - DICEPP_PROJECT_ROOT=/app
-      - DICEPP_MANAGER_URL=http://manager:4091
-      - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
-
-    volumes:
-      # Dashboard 只读取共享配置；所有配置写入经 Manager API 进行事务仲裁。
-      - ./config:/app/config:ro
-      # 运行时数据：只读
-      - ./data:/app/data:ro
-      # 同一用户内容工作区：仅认证后的 Persona 角色卡路由可直接写入。
-      # 不提供通用内容写入接口，也不经 Manager 代理。
-      - ./content:/app/content:rw
-      # Dashboard 运行时数据（可写，例如 session key）
-      - ./dashboard/data:/app/dashboard/data
-      # Manager 生成的内部 API token；Dashboard 只能读取
-      - ./manager/state:/app/manager/state:ro
-
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
-        max-size: "50m"
-        max-file: "5"
-        compress: "true"
-
-  manager:
-    # Manager 与 Dashboard 复用同一发布镜像，但使用独立入口。
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-dicepp-current}}"
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-      args:
-        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    container_name: dicepp-manager
-    restart: unless-stopped
-    command: ["python", "-m", "dicepp_manager"]
-
-    networks:
-      - manager-net
-
-    # 仅向同机 Agent 暴露回环地址；Compose 内仍通过 manager-net 访问。
-    ports:
-      - "127.0.0.1:4091:4091"
-    expose:
-      - "4091"
-
-    healthcheck:
-      test: ["CMD", "python", "-c", "import pathlib, urllib.request; token=pathlib.Path('/app/manager/state/api-token').read_text().strip(); request=urllib.request.Request('http://127.0.0.1:4091/v1/health', headers={'Authorization': 'Bearer '+token}); assert urllib.request.urlopen(request, timeout=3).status == 200"]
-      interval: 5s
-      timeout: 4s
-      retries: 12
-      start_period: 10s
-
-    environment:
-      - TZ=Asia/Shanghai
-      - DICEPP_PROJECT_ROOT=/app
-      - DICEPP_MANAGER_HOST=0.0.0.0
-      - DICEPP_MANAGER_PORT=4091
-      - DICEPP_MANAGER_RUNTIME=docker
-      - DICEPP_MANAGER_RUNTIME_UNIT_ID=dicepp-runtime
-      - DICEPP_MANAGER_DOCKER_COMMAND=unix:///var/run/docker.sock
-      - DICEPP_MANAGER_TOKEN_FILE=/app/manager/state/api-token
-
-    volumes:
-      # Manager 是维护操作、归档与后续升级的唯一写入者。
-      - ./config:/app/config:rw
-      - ./data:/app/data:rw
-      - ./content:/app/content:rw
-      - ./manager:/app/manager:rw
-      # 升级事务的 Dashboard DB 快照/恢复挂载：Dashboard 停止后由 Manager
-      # 经此挂载访问主库；恢复目录（manager/recovery）不挂载给 Dashboard，
-      # 也不经普通 archive API 列出。
-      - ./dashboard/data:/app/dashboard/data:rw
-      # 自动升级只读比较当前 Compose 拓扑；Manager 不会修改此文件。
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
-      # 仅 Manager 接触 Docker Socket；Dashboard 不挂载。
-      - /var/run/docker.sock:/var/run/docker.sock
-
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
+        max-size: 50m
         max-file: "5"
         compress: "true"
 
 networks:
   dice-net:
     external: true
-  manager-net:
-    driver: bridge

@@ -105,12 +105,22 @@ if errorlevel 1 (
 )
 echo [INFO] Smoke test passed
 
+set "PORTABLE_ZIP=dist\DicePP-Portable.zip"
+if exist "%PORTABLE_ZIP%" del /q "%PORTABLE_ZIP%"
+powershell -NoProfile -Command "Compress-Archive -Path '%DIST_DIR%' -DestinationPath '%PORTABLE_ZIP%'"
+if errorlevel 1 (
+    echo [ERROR] Failed to create Portable ZIP
+    exit /b 1
+)
+echo [INFO] Portable ZIP: %PORTABLE_ZIP%
+
 echo.
 echo ============================================================
 echo [SUCCESS] Build complete!
 echo ============================================================
 echo.
 echo Output location: dist\DicePP\
+echo Portable ZIP: dist\DicePP-Portable.zip
 echo.
 echo Contents:
 dir /b "dist\DicePP\"

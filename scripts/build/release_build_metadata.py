@@ -34,8 +34,6 @@ class ReleaseBuildMetadata:
     commit_sha: str
     is_prerelease: bool
     channel: str
-    velopack_version: str
-    velopack_channel: str
     automatic_upgrade: bool
 
 
@@ -83,31 +81,10 @@ def package_tree_sha256(package_root: Path) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def velopack_version(version: str) -> str:
-    """Translate DicePP's supported PEP 440 versions to Velopack SemVer 2."""
-    match = _match_release_tag(f"v{version.removeprefix('v')}")
-    prerelease_label = match["pre"]
-    if prerelease_label is None:
-        return match["base"]
-    labels = {"a": "alpha", "b": "beta", "rc": "rc"}
-    return (
-        f"{match['base']}-{labels[prerelease_label]}.{match['pre_number']}"
-    )
-
-
 def validate_release_version(version: str) -> str:
     """Validate an unprefixed version against the canonical release tag grammar."""
     _match_release_tag(f"v{version}")
     return version
-
-
-def velopack_channel(channel: str, arch: str) -> str:
-    if channel not in {"stable", "prerelease"}:
-        raise ValueError("channel must be stable or prerelease")
-    arch_label = {"amd64": "x64", "arm64": "arm64"}.get(arch)
-    if arch_label is None:
-        raise ValueError("unsupported Velopack architecture")
-    return f"win-{arch_label}-{channel}"
 
 
 def derive_release_build_metadata(
@@ -154,8 +131,6 @@ def derive_release_build_metadata(
         commit_sha=commit_sha,
         is_prerelease=is_prerelease,
         channel=channel,
-        velopack_version=velopack_version(tag),
-        velopack_channel=velopack_channel(channel, "amd64"),
         automatic_upgrade=automatic_upgrade,
     )
 
