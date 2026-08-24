@@ -114,5 +114,5 @@ async def test_incompatible_manager_blocks_mutating_request(monkeypatch) -> None
 
     monkeypatch.setattr(client, "_request", request)
     with pytest.raises(ManagerIncompatible, match="compatibility mismatch"):
-        await client.save_user_config({})
+        await client.delete_archive("example.zip")
     assert calls == [("GET", "/v1/status")]

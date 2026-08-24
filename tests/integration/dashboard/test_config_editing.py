@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
-from tests.support.dashboard.manager import PersistingConfigManager
 
 # Check if Pydantic is importable (for integration tests using real models)
 try:
@@ -15,12 +14,6 @@ try:
     _HAVE_PYDANTIC = True
 except ImportError:
     _HAVE_PYDANTIC = False
-
-
-@pytest.fixture(autouse=True)
-def _install_config_manager(test_client: TestClient) -> None:
-    """Keep this suite at the Dashboard/Manager HTTP boundary, not direct I/O."""
-    test_client.app.state.manager_client = PersistingConfigManager()
 
 
 class TestMergedView:

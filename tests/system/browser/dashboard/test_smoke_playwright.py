@@ -788,32 +788,18 @@ def test_query_database_repair_previews_before_confirmation(
     with sync_playwright() as playwright:
         browser = launch_browser(playwright.chromium)
         page = browser.new_page()
-        normalized = False
-
         def _query_database_list(route) -> None:
             files = [{"name": "rules.db", "size": 1, "modified": 0, "enabled": True}]
-            if normalized:
-                files.append(
-                    {
-                        "name": "rules_backup.db",
-                        "size": 1,
-                        "modified": 0,
-                        "enabled": False,
-                    }
-                )
             route.fulfill(status=200, json={"ok": True, "files": files})
 
         def _normalize_query_database(route) -> None:
-            nonlocal normalized
-            normalized = True
             route.fulfill(
                 status=200,
                 json={
                     "ok": True,
-                    "operation": {
-                        "operation_id": "query-normalize-browser",
-                        "status": "queued",
-                    },
+                    "database": "rules",
+                    "normalized": True,
+                    "report": {"counts": {}, "issues": [], "issues_omitted": 0},
                 },
             )
 
@@ -858,25 +844,7 @@ def test_query_database_repair_previews_before_confirmation(
                 },
             )
 
-        def _normalized_operation(route) -> None:
-            route.fulfill(
-                status=200,
-                json={
-                    "ok": True,
-                    "operation": {
-                        "operation_id": "query-normalize-browser",
-                        "status": "succeeded",
-                        "message": "数据库规范完成",
-                        "detail": {
-                            "stage": "completed",
-                            "backup_database": "rules_backup",
-                        },
-                    },
-                },
-            )
-
-        # Browser coverage owns the UI contract. Manager integration tests own
-        # the real stop/backup/replace/restart transaction and its safety gates.
+        # Browser coverage owns the synchronous, in-place Dashboard contract.
         page.route("**/api/content/queries", _query_database_list)
         page.route(
             "**/api/content/queries/rules/normalize/dry-run",
@@ -885,10 +853,6 @@ def test_query_database_repair_previews_before_confirmation(
         page.route(
             "**/api/content/queries/rules/normalize",
             _normalize_query_database,
-        )
-        page.route(
-            "**/api/manager/operations/query-normalize-browser",
-            _normalized_operation,
         )
         try:
             _login(page, dashboard_url)
@@ -942,47 +906,8 @@ def test_query_database_repair_previews_before_confirmation(
                 timeout=30000,
             )
             expect(page.get_by_test_id("query-repair-result-stage")).to_have_text("完成")
-            expect(page.get_by_test_id("query-repair-result")).to_contain_text(
-                "rules_backup"
-            )
             expect(page.get_by_test_id("query-repair-log")).to_contain_text(
                 '"stage": "completed"'
-            )
-            expect(page.get_by_test_id("query-database-rules_backup")).to_contain_text(
-                "已停用"
-            )
-
-            page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    while (state.queryNormalizeLoading) {
-                        await new Promise(resolve => setTimeout(resolve, 20));
-                    }
-                    const originalApi = state.api;
-                    const originalPoll = state.pollManagerOperation;
-                    state.api = async () => ({
-                        operation: {operation_id: 'slow-normalize-1', status: 'queued'}
-                    });
-                    state.pollManagerOperation = async () => {
-                        throw new Error('Manager 操作等待超时');
-                    };
-                    try {
-                        state.queryRepairDialogOpen = true;
-                        await state.executeQueryDatabaseRepair();
-                    } finally {
-                        state.api = originalApi;
-                        state.pollManagerOperation = originalPoll;
-                    }
-                }"""
-            )
-            expect(page.get_by_test_id("query-repair-result")).to_contain_text(
-                "数据库修复仍在进行"
-            )
-            expect(page.get_by_test_id("query-repair-log")).to_contain_text(
-                '"operation_id": "slow-normalize-1"'
-            )
-            expect(page.get_by_test_id("query-repair-log")).to_contain_text(
-                '"status": "running"'
             )
         finally:
             browser.close()

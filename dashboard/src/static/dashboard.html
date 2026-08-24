@@ -1392,7 +1392,7 @@
           <div x-show="queryRepairStage === 'checking'" class="py-8 text-center text-gray-600">
             <div class="inline-block w-7 h-7 border-2 border-amber-600 border-t-transparent rounded-full animate-spin mb-3"></div>
             <div class="font-medium">正在预检修复结果…</div>
-            <p class="mt-1 text-sm text-gray-500">此步骤不会修改文件，也不会停止 Bot。</p>
+            <p class="mt-1 text-sm text-gray-500">此步骤不会修改文件。</p>
           </div>
 
           <div x-show="queryRepairStage === 'confirm'" data-testid="query-repair-confirm">
@@ -1404,9 +1404,9 @@
             <section class="mt-4 rounded-lg border border-gray-200 p-4">
               <h3 class="font-medium text-gray-900">固定操作</h3>
               <ul class="mt-2 list-disc pl-5 space-y-1 text-sm text-gray-600">
-                <li>生成只包含名称、英文、来源、内容四个字段的新数据库。</li>
-                <li>把原数据库保存为默认停用的备份，再用新数据库替换原文件。</li>
-                <li>如有相关 Bot 正在运行，会先停止，替换完成后再重新启动。</li>
+                <li>按规则整理原数据库，并原地替换为规范结构。</li>
+                <li>此操作直接修改原数据库，不生成备份，也不提供自动回滚。</li>
+                <li>执行前必须停止 Bot；操作不会自动停止或重新启动 Bot。</li>
               </ul>
             </section>
 
@@ -1442,28 +1442,27 @@
             </section>
 
             <div class="mt-4 rounded-lg bg-gray-50 border p-3 text-sm text-gray-600">
-              点击“继续修复”才会执行上述操作；点击“取消”不会修改数据库。
+              点击“继续修复”会直接整理原数据库；点击“取消”不会修改数据库。
             </div>
             <p x-show="queryRepairIssuesTruncated()" class="mt-2 text-xs text-gray-500">弹窗每类只显示前 20 项，完整记录可在审计日志中查看。</p>
           </div>
 
           <div x-show="queryRepairStage === 'running'" class="py-8 text-center text-gray-600">
             <div class="inline-block w-7 h-7 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
-            <div class="font-medium">正在备份并修复数据库…</div>
-            <p class="mt-1 text-sm text-gray-500">期间可能会短暂停止并重新启动相关 Bot。</p>
+            <div class="font-medium">正在整理原数据库…</div>
+            <p class="mt-1 text-sm text-gray-500">Bot 必须保持停止；此操作不会自动停止或重新启动。</p>
           </div>
 
           <div x-show="queryRepairStage === 'result'" data-testid="query-repair-result">
-            <div class="rounded-lg border p-4" :class="queryNormalizeResult?.status === 'succeeded' ? 'border-green-200 bg-green-50' : (['queued', 'running'].includes(queryNormalizeResult?.status) ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50')">
-              <div class="font-medium" :class="queryNormalizeResult?.status === 'succeeded' ? 'text-green-900' : (['queued', 'running'].includes(queryNormalizeResult?.status) ? 'text-amber-900' : 'text-red-900')" x-text="queryRepairResultTitle()"></div>
+            <div class="rounded-lg border p-4" :class="queryNormalizeResult?.status === 'succeeded' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'">
+              <div class="font-medium" :class="queryNormalizeResult?.status === 'succeeded' ? 'text-green-900' : 'text-red-900'" x-text="queryRepairResultTitle()"></div>
               <div class="mt-1 text-sm text-gray-700" x-text="queryNormalizeResult?.message || '没有返回详细说明。'"></div>
               <div class="mt-2 text-xs text-gray-600">
-                <span>阶段：</span><span data-testid="query-repair-result-stage" x-text="queryRepairStageLabel(queryNormalizeResult?.detail?.stage)"></span>
-                <span x-show="queryNormalizeResult?.detail?.backup_database" class="ml-3">备份：</span><span x-show="queryNormalizeResult?.detail?.backup_database" x-text="queryNormalizeResult?.detail?.backup_database"></span>
+                <span>结果：</span><span data-testid="query-repair-result-stage" x-text="queryRepairStageLabel(queryNormalizeResult?.detail?.stage)"></span>
               </div>
             </div>
             <pre data-testid="query-repair-log" class="mt-4 max-h-52 overflow-auto rounded bg-gray-50 border p-3 text-xs whitespace-pre-wrap break-words" x-text="queryNormalizationLog()"></pre>
-            <p class="mt-2 text-xs text-gray-500">预检和处理结果已写入审计日志，关闭后仍可回来查看。</p>
+            <p class="mt-2 text-xs text-gray-500">处理结果仅在当前窗口展示；关闭后可重新运行预检。</p>
           </div>
         </div>
 
@@ -1476,7 +1475,6 @@
           </template>
           <template x-if="queryRepairStage === 'result'">
             <div class="flex flex-wrap gap-2">
-              <button x-show="['queued', 'running'].includes(queryNormalizeResult?.status)" @click="resumeQueryNormalization()" :disabled="queryNormalizeLoading" class="px-3 py-2 border border-amber-300 text-amber-800 rounded text-sm hover:bg-amber-50 disabled:opacity-50" x-text="queryNormalizeLoading ? '查询中…' : '继续查询结果'"></button>
               <button @click="openAuditFromQueryRepair()" class="px-3 py-2 border rounded text-sm hover:bg-white">查看审计日志</button>
               <button @click="copyQueryNormalizationLog()" class="px-3 py-2 border rounded text-sm hover:bg-white">复制处理日志</button>
               <button @click="closeQueryRepairDialog()" class="px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">关闭</button>
@@ -2450,19 +2448,14 @@ function app() {
       if (!database || this.queryNormalizeLoading || this.queryStateLoading) return;
       this.queryNormalizeLoading = true;
       this.queryRepairStage = 'running';
-      let operation = null;
       try {
         const data = await this.api(`/api/content/queries/${encodeURIComponent(database)}/normalize`, {
           method: 'POST',
         });
-        operation = data.operation || null;
-        if (operation?.operation_id) {
-          operation = await this.pollManagerOperation(operation.operation_id, 120000);
-        }
-        this.queryNormalizeResult = operation || {
-          status: 'failed',
-          message: 'Manager 未返回处理结果',
-          detail: { stage: 'unknown' },
+        this.queryNormalizeResult = {
+          status: data.normalized ? 'succeeded' : 'failed',
+          message: data.normalized ? '数据库修复完成' : '数据库修复失败',
+          detail: { stage: 'completed', report: data.report || null },
         };
         this.queryRepairStage = 'result';
         await this.loadQueryDbs();
@@ -2471,49 +2464,13 @@ function app() {
           this.errorMessage = this.queryNormalizeResult.message || '数据库修复失败';
         }
       } catch (err) {
-        this.queryNormalizeResult = operation?.operation_id
-          ? {
-              ...operation,
-              status: 'running',
-              message: `Manager 操作仍可能在进行：${err.message}`,
-              detail: { ...(operation.detail || {}), stage: operation.detail?.stage || 'running' },
-            }
-          : {
-              status: 'failed',
-              message: err.message || '数据库修复失败',
-              detail: { stage: 'request' },
-            };
-        this.queryRepairStage = 'result';
-        this.errorMessage = operation?.operation_id
-          ? `数据库修复仍在进行，可稍后继续查询：${err.message}`
-          : `数据库修复失败：${err.message}`;
-      } finally {
-        this.queryNormalizeLoading = false;
-      }
-    },
-
-    async resumeQueryNormalization() {
-      const operationId = this.queryNormalizeResult?.operation_id;
-      if (!operationId || this.queryNormalizeLoading) return;
-      this.queryNormalizeLoading = true;
-      this.queryRepairStage = 'running';
-      try {
-        const operation = await this.pollManagerOperation(operationId, 120000);
-        this.queryNormalizeResult = operation;
-        this.queryRepairStage = 'result';
-        await this.loadQueryDbs();
-        if (this.selectedQueryDb) await this.selectQueryDatabase();
-        if (operation.status !== 'succeeded') {
-          this.errorMessage = operation.message || '数据库修复失败';
-        }
-      } catch (err) {
         this.queryNormalizeResult = {
-          ...this.queryNormalizeResult,
-          status: 'running',
-          message: `Manager 操作仍可能在进行：${err.message}`,
+          status: 'failed',
+          message: err.message || '数据库修复失败',
+          detail: { stage: 'request' },
         };
         this.queryRepairStage = 'result';
-        this.errorMessage = `数据库修复仍在进行，可稍后继续查询：${err.message}`;
+        this.errorMessage = `数据库修复失败：${err.message}`;
       } finally {
         this.queryNormalizeLoading = false;
       }
@@ -2542,7 +2499,6 @@ function app() {
 
     queryRepairResultTitle() {
       if (this.queryNormalizeResult?.status === 'succeeded') return '数据库修复完成';
-      if (['queued', 'running'].includes(this.queryNormalizeResult?.status)) return '数据库修复仍在进行';
       return this.queryNormalizeResult?.detail?.stage === 'dry_run'
         ? '数据库无法自动修复'
         : '数据库修复失败';
@@ -2551,13 +2507,7 @@ function app() {
     queryRepairStageLabel(stage) {
       return {
         dry_run: '检查修复内容',
-        prepare: '生成并检查新数据库',
-        stop_runtime: '停止 Bot',
-        wal_checkpoint: '保存原数据库',
-        backup: '备份原数据库',
-        replace: '替换数据库',
-        restart_runtime: '重新启动 Bot',
-        verify_runtime: '检查 Bot 运行状态',
+        normalize: '整理原数据库',
         completed: '完成',
       }[stage] || stage || '-';
     },
@@ -2620,7 +2570,7 @@ function app() {
       return JSON.stringify(
         {
           dry_run: this.queryNormalizePreview,
-          operation: this.queryNormalizeResult,
+          result: this.queryNormalizeResult,
         },
         null,
         2,

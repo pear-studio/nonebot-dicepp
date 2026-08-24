@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import sqlite3
 import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from dicepp_data import (
-    QueryDatabaseStateError,
-    is_query_database_name,
-    load_query_database_state,
-    set_query_database_enabled,
-)
 from dicepp_meta import get_version
 
 from .archive import (
@@ -34,12 +25,6 @@ from .archive_coordinator import ArchiveCoordinator
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
 from .control import ControlChannelService
-from .config_validation import (
-    ConfigurationValidationError,
-    read_config_object,
-    validate_bot_candidate,
-    validate_user_candidate,
-)
 from .factory import create_manager_service
 from .maintenance import MaintenanceConflict
 from .service import ManagerService
@@ -54,68 +39,6 @@ def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
             "code": "maintenance_conflict",
         },
     )
-
-
-def _invalid_configuration_response(exc: ConfigurationValidationError) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,
-        content={
-            "ok": False,
-            "code": "invalid_configuration",
-            "message": "Configuration validation failed",
-            "errors": exc.errors,
-        },
-    )
-
-
-def _stored_configuration_response() -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={
-            "ok": False,
-            "code": "stored_configuration_invalid",
-            "message": "Stored configuration is unreadable",
-        },
-    )
-
-
-def _write_managed_config(path: Path, payload: dict) -> None:
-    """Atomically persist a Manager-authorized config document."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        with temporary.open("x", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        if os.name != "nt":
-            descriptor = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-    except Exception:
-        temporary.unlink(missing_ok=True)
-        raise
-
-
-def _query_database_path(settings: ManagerSettings, database: str) -> Path:
-    if not is_query_database_name(database):
-        raise HTTPException(status_code=400, detail="Invalid query database name")
-    directory = (settings.layout.content_dir / "queries").resolve()
-    candidate = directory / f"{database}.db"
-    try:
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(directory)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="Query database not found") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Query database escapes content directory") from exc
-    if not resolved.is_file():
-        raise HTTPException(status_code=400, detail="Query database is not a file")
-    return resolved
 
 
 def create_manager_app(
@@ -243,117 +166,6 @@ def create_manager_app(
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return task
-
-    @app.get("/v1/config/user", dependencies=auth)
-    async def config_user_get():
-        try:
-            config = read_config_object(settings.layout.config_user)
-        except ConfigurationValidationError:
-            return _stored_configuration_response()
-        return {"ok": True, "config": config}
-
-    @app.put("/v1/config/user", dependencies=auth)
-    async def config_user_save(request: Request):
-        body = await _json_body(request)
-        try:
-            with manager_service.maintenance():
-                canonical = validate_user_candidate(settings.layout, body)
-                _write_managed_config(settings.layout.config_user, canonical)
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        except ConfigurationValidationError as exc:
-            return _invalid_configuration_response(exc)
-        return {
-            "ok": True,
-            "saved": True,
-            "application": "deferred",
-            "restart_required": True,
-        }
-
-    @app.get("/v1/config/bots/{bot_id}", dependencies=auth)
-    async def config_bot_get(bot_id: str):
-        try:
-            path = settings.layout.bot_config_path(bot_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if not path.exists():
-            raise HTTPException(status_code=404, detail="Bot configuration not found")
-        try:
-            config = read_config_object(path, missing_is_empty=False)
-        except ConfigurationValidationError:
-            return _stored_configuration_response()
-        return {"ok": True, "config": config}
-
-    @app.put("/v1/config/bots/{bot_id}", dependencies=auth)
-    async def config_bot_save(bot_id: str, request: Request):
-        body = await _json_body(request)
-        try:
-            path = settings.layout.bot_config_path(bot_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        try:
-            with manager_service.maintenance():
-                canonical = validate_bot_candidate(settings.layout, bot_id, body)
-                _write_managed_config(path, canonical)
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        except ConfigurationValidationError as exc:
-            return _invalid_configuration_response(exc)
-        return {
-            "ok": True,
-            "saved": True,
-            "application": "deferred",
-            "restart_required": True,
-        }
-
-    @app.get("/v1/content/query-databases", dependencies=auth)
-    async def query_databases_list():
-        directory = settings.layout.content_dir / "queries"
-        try:
-            state = load_query_database_state(directory)
-        except QueryDatabaseStateError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        databases = []
-        if directory.exists():
-            for path in sorted(directory.glob("*.db"), key=lambda item: item.name.casefold()):
-                try:
-                    resolved = _query_database_path(settings, path.stem)
-                except HTTPException:
-                    continue
-                stat = resolved.stat()
-                databases.append({
-                    "name": path.stem,
-                    "enabled": state.is_enabled(path.stem),
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime,
-                })
-        return {"ok": True, "databases": databases}
-
-    @app.put("/v1/content/query-databases/{database}/enabled", dependencies=auth)
-    async def query_database_enabled(database: str, request: Request):
-        _query_database_path(settings, database)
-        body = await _json_body(request)
-        enabled = body.get("enabled")
-        if not isinstance(enabled, bool):
-            raise HTTPException(status_code=400, detail="enabled must be a boolean")
-        try:
-            with manager_service.maintenance():
-                state = set_query_database_enabled(
-                    settings.layout.content_dir / "queries",
-                    database,
-                    enabled,
-                )
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        except QueryDatabaseStateError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {
-            "ok": True,
-            "database": database,
-            "enabled": state.is_enabled(database),
-            "application": "immediate",
-            "restart_required": False,
-        }
 
     @app.get("/v1/archives", dependencies=auth)
     async def archives_list():

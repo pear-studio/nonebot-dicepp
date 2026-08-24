@@ -7,14 +7,6 @@ from fastapi.testclient import TestClient
 
 from dashboard.src.audit import log as audit_log
 from tests.support.dashboard.app import setup_auth
-from tests.support.dashboard.manager import PersistingConfigManager
-
-
-@pytest.fixture(autouse=True)
-def _install_config_manager(test_client: TestClient) -> None:
-    test_client.app.state.manager_client = PersistingConfigManager()
-
-
 class TestAuditLogCreated:
     def test_audit_log_created_on_set(self, test_client, tmp_dashboard_paths):
         """Config set creates an audit log entry."""
@@ -136,32 +128,6 @@ class TestAuditList:
             ("content.query.enable", "rules", ""),
             ("content.query.disable", "rules", ""),
             (
-                "content.query.normalize.dry_run",
-                "rules",
-                json.dumps({
-                    "status": "succeeded",
-                    "report": {
-                        "counts": {
-                            "data_invalid": 1,
-                            "data_duplicates": 1,
-                            "directives_deleted": 1,
-                            "redirect_invalid": 0,
-                        },
-                        "impact_counts": {"behavior_change": 1},
-                    },
-                }),
-            ),
-            ("content.query.normalize.start", "rules", "normalize-1"),
-            (
-                "content.query.normalize.result",
-                "rules",
-                json.dumps({
-                    "status": "failed",
-                    "message": "拒绝访问",
-                    "detail": {"stage": "verify_runtime"},
-                }),
-            ),
-            (
                 "custom.event",
                 "demo",
                 json.dumps({"status": "succeeded", "message": "完成"}),
@@ -190,9 +156,6 @@ class TestAuditList:
             "manager.restart": "重启 Bot 失败",
             "content.query.enable": "启用查询库",
             "content.query.disable": "停用查询库",
-            "content.query.normalize.dry_run": "查询库修复预检",
-            "content.query.normalize.start": "查询库修复已提交",
-            "content.query.normalize.result": "查询库修复失败",
             "custom.event": "custom.event",
         }
         assert presented["config.set"]["summary"] == "新值：DicePP"
@@ -200,12 +163,6 @@ class TestAuditList:
         assert presented["config.bot.save"]["target_label"] == "demo"
         assert presented["config.user.save"]["target_label"] == "全局配置"
         assert presented["manager.restart"]["summary"] == "无法启动 · 操作 ID：restart-1"
-        assert presented["content.query.normalize.dry_run"]["summary"] == (
-            "删除 2 个词条 · 1 行内容 · 0 个重定向 · 1 项行为变化"
-        )
-        assert presented["content.query.normalize.result"]["summary"] == (
-            "阶段：检查 Bot 运行状态 · 文件被占用或拒绝访问"
-        )
         assert presented["custom.event"]["action_label"] == "custom.event"
         assert presented["custom.event"]["summary"] == "成功 · 完成"
         assert presented["custom.event"]["tone"] == "success"

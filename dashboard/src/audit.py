@@ -18,10 +18,6 @@ _ACTION_PRESENTATION: dict[str, tuple[str, str]] = {
     "manager.restart": ("重启 Bot", "warning"),
     "content.query.enable": ("启用查询库", "success"),
     "content.query.disable": ("停用查询库", "neutral"),
-    "content.query.normalize.dry_run": ("查询库修复预检", "info"),
-    "content.query.normalize": ("查询库修复已提交", "warning"),
-    "content.query.normalize.start": ("查询库修复已提交", "warning"),
-    "content.query.normalize.result": ("查询库修复结果", "neutral"),
 }
 
 _STATUS_PRESENTATION: dict[str, tuple[str, str]] = {
@@ -31,19 +27,6 @@ _STATUS_PRESENTATION: dict[str, tuple[str, str]] = {
     "failed": ("失败", "danger"),
     "cancelled": ("已取消", "neutral"),
 }
-
-_REPAIR_STAGE_LABELS = {
-    "prepare": "准备修复",
-    "stop_runtime": "停止 Bot",
-    "wal_checkpoint": "保存数据库",
-    "backup": "备份原数据库",
-    "replace": "替换数据库",
-    "restart_runtime": "重新启动 Bot",
-    "health_check": "检查运行状态",
-    "verify_runtime": "检查 Bot 运行状态",
-    "completed": "完成",
-}
-
 
 def _detail_object(detail: str) -> dict[str, Any] | None:
     if not detail:
@@ -65,38 +48,6 @@ def _compact(value: Any, limit: int = 120) -> str:
             rendered = str(value)
     rendered = " ".join(rendered.split())
     return rendered if len(rendered) <= limit else f"{rendered[:limit - 1]}…"
-
-
-def _repair_message(detail: dict[str, Any]) -> str:
-    nested = detail.get("detail")
-    nested_detail = nested if isinstance(nested, dict) else {}
-    message = _compact(detail.get("message") or nested_detail.get("error") or "")
-    if "拒绝访问" in message:
-        return "文件被占用或拒绝访问"
-    return message
-
-
-def _query_preview_summary(detail: dict[str, Any]) -> tuple[str, str, str]:
-    status = str(detail.get("status", ""))
-    if status == "failed":
-        message = _compact(detail.get("message") or "没有返回详细原因")
-        return "查询库修复预检失败", "danger", message
-    report = detail.get("report")
-    report_detail = report if isinstance(report, dict) else {}
-    counts = report_detail.get("counts")
-    count_detail = counts if isinstance(counts, dict) else {}
-    impact_counts = report_detail.get("impact_counts")
-    impact_detail = impact_counts if isinstance(impact_counts, dict) else {}
-    deleted_entries = int(count_detail.get("data_invalid") or 0) + int(
-        count_detail.get("data_duplicates") or 0
-    )
-    summary = (
-        f"删除 {deleted_entries} 个词条"
-        f" · {int(count_detail.get('directives_deleted') or 0)} 行内容"
-        f" · {int(count_detail.get('redirect_invalid') or 0)} 个重定向"
-        f" · {int(impact_detail.get('behavior_change') or 0)} 项行为变化"
-    )
-    return "查询库修复预检", "info", summary
 
 
 def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
@@ -147,31 +98,6 @@ def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
         operation_id = _compact(detail.get("operation_id") or "")
         if operation_id:
             parts.append(f"操作 ID：{operation_id}")
-        summary = " · ".join(parts)
-    elif action == "content.query.normalize.dry_run" and detail is not None:
-        action_label, tone, summary = _query_preview_summary(detail)
-    elif action in {"content.query.normalize", "content.query.normalize.start"}:
-        operation_id = detail_raw
-        if detail is not None:
-            operation_id = str(detail.get("operation_id") or detail_raw)
-        if operation_id:
-            summary = f"操作 ID：{_compact(operation_id)}"
-    elif action == "content.query.normalize.result" and detail is not None:
-        status = str(detail.get("status") or "")
-        status_label, tone = _STATUS_PRESENTATION.get(status, ("结果", "neutral"))
-        action_label = f"查询库修复{status_label}"
-        nested = detail.get("detail")
-        nested_detail = nested if isinstance(nested, dict) else {}
-        stage = _REPAIR_STAGE_LABELS.get(
-            str(nested_detail.get("stage") or ""),
-            str(nested_detail.get("stage") or ""),
-        )
-        parts = []
-        if stage:
-            parts.append(f"阶段：{stage}")
-        message = _repair_message(detail)
-        if message:
-            parts.append(message)
         summary = " · ".join(parts)
     elif detail is not None:
         status = str(detail.get("status") or "")

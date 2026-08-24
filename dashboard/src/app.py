@@ -23,6 +23,7 @@ from dicepp_data import (
     PERSONA_DB_ASSET,
     QueryDatabaseStateError,
     load_query_database_state,
+    set_query_database_enabled,
 )
 from dicepp_manager.archive import MAX_ARCHIVE_BYTES
 from dicepp_manager.client import (
@@ -44,9 +45,16 @@ from .auth import (
 )
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
-from .audit import log_once as audit_log_once
 from .bot_process import BotProcessController, create_bot_process_controller
 from .config import DashboardPaths
+from .config_store import (
+    ConfigurationValidationError,
+    read_config_object,
+    validate_bot_candidate,
+    validate_user_candidate,
+    write_config_object,
+)
+from .query_database import normalization_report, report_detail, write_normalized_database
 from .query_audit import (
     QueryAuditFormatError,
     inspect_query_database,
@@ -72,6 +80,8 @@ async def lifespan(app: FastAPI):
     # 多 worker 部署 (uvicorn --workers > 1) 时，
     # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
     app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
+    # Serialize Bot lifecycle changes with in-place data maintenance.
+    app.state.data_maintenance_lock = asyncio.Lock()
     controller = getattr(app.state, "bot_process_controller", None)
     if controller is None:
         controller = create_bot_process_controller(
@@ -834,9 +844,9 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     models = _load_pydantic_models_module()
     default_cfg = models.BotConfig().model_dump(mode="json", by_alias=True)
     try:
-        user_cfg = await _get_manager_client(request).get_user_config()
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+    except ConfigurationValidationError:
+        _err("Stored configuration is unreadable", 500)
 
     # Annotate merged config: global=default, user overlays=user, bot overlays=bot
     result_annotated = {}
@@ -874,9 +884,9 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     if bot_id:
         _validate_identifier(bot_id, "bot_id")
         try:
-            bot_cfg = await _get_manager_client(request).get_bot_config(bot_id)
-        except ManagerClientError as exc:
-            return _manager_error_response(exc)
+            bot_cfg = read_config_object(DashboardPaths.bot_config_path(bot_id))
+        except ConfigurationValidationError:
+            _err("Stored configuration is unreadable", 500)
         # Re-annotate: start from the previous result, update with bot overrides
         # For each key in bot_cfg, overwrite source to "bot"
         def _flatten_and_annotate(d: dict, prefix: str = ""):
@@ -918,7 +928,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.post("/api/config/set", dependencies=[Depends(require_auth)])
 async def config_set(request: Request):
-    """Deep merge a value into user.json, then persist it through Manager."""
+    """Deep merge a value into user.json and persist it locally."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
@@ -929,22 +939,23 @@ async def config_set(request: Request):
         _err("path is required")
 
     try:
-        user_cfg = await _get_manager_client(request).get_user_config()
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+    except ConfigurationValidationError:
+        _err("Stored configuration is unreadable", 500)
 
     _apply_deep(user_cfg, path, value)
     try:
-        save_result = await _get_manager_client(request).save_user_config(user_cfg)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
+        write_config_object(DashboardPaths.CONFIG_USER, user_cfg)
+    except ConfigurationValidationError as exc:
+        return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
     audit_detail = json.dumps({"value": "***"}, ensure_ascii=False) if re.search(r'\.api_key$', path) else json.dumps({"value": value}, ensure_ascii=False)
     audit_log(db_path, "config.set", path, audit_detail,
               ip=request.client.host if request.client else "")
 
-    return _config_save_result(save_result)
+    return _config_save_result({})
 
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
@@ -959,63 +970,65 @@ async def config_reset(request: Request):
         _err("path is required")
 
     try:
-        user_cfg = await _get_manager_client(request).get_user_config()
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+    except ConfigurationValidationError:
+        _err("Stored configuration is unreadable", 500)
 
     removed = _remove_deep(user_cfg, path)
     try:
-        save_result = await _get_manager_client(request).save_user_config(user_cfg)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
+        write_config_object(DashboardPaths.CONFIG_USER, user_cfg)
+    except ConfigurationValidationError as exc:
+        return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.reset", path, "reset to default",
               ip=request.client.host if request.client else "")
 
-    return _config_save_result(save_result, removed=removed)
+    return _config_save_result({}, removed=removed)
 
 
-# NOTE: Not consumed by Dashboard frontend; retained for external API consumers
-# (e.g., bot runtime config sync via dashboard_client.py).
 @app.get("/api/config/bots/{bot_id}", dependencies=[Depends(require_auth)])
 async def config_bot_get(bot_id: str, request: Request):
     """Read bot config file content."""
     _validate_identifier(bot_id, "bot_id")
     try:
-        cfg = await _get_manager_client(request).get_bot_config(bot_id)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        cfg = read_config_object(DashboardPaths.bot_config_path(bot_id), missing_is_empty=False)
+    except FileNotFoundError:
+        _err("Bot configuration not found", 404)
+    except ConfigurationValidationError:
+        _err("Stored configuration is unreadable", 500)
     return _ok({"config": cfg})
 
 
 @app.post("/api/config/bots/{bot_id}/save", dependencies=[Depends(require_auth)])
 async def config_bot_save(bot_id: str, request: Request):
-    """Validate JSON, persist bot config through Manager, and audit the save."""
+    """Validate JSON, persist bot config locally, and audit the save."""
     _validate_identifier(bot_id, "bot_id")
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
 
     try:
-        save_result = await _get_manager_client(request).save_bot_config(bot_id, body)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        validate_bot_candidate(DashboardPaths.instance_layout(), bot_id, body)
+        write_config_object(DashboardPaths.bot_config_path(bot_id), body)
+    except ConfigurationValidationError as exc:
+        return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.bot.save", f"bots/{bot_id}", "",
               ip=request.client.host if request.client else "")
 
-    return _config_save_result(save_result)
+    return _config_save_result({})
 
 
 @app.get("/api/config/user", dependencies=[Depends(require_auth)])
 async def config_user_get(request: Request):
     """Return raw user.json content for JSON view editing."""
     try:
-        user_cfg = await _get_manager_client(request).get_user_config()
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+    except ConfigurationValidationError:
+        _err("Stored configuration is unreadable", 500)
     return _ok({"config": user_cfg})
 
 
@@ -1027,15 +1040,16 @@ async def config_user_save(request: Request):
         _err("Body must be a JSON object")
 
     try:
-        save_result = await _get_manager_client(request).save_user_config(body)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        validate_user_candidate(DashboardPaths.instance_layout(), body)
+        write_config_object(DashboardPaths.CONFIG_USER, body)
+    except ConfigurationValidationError as exc:
+        return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.user.save", "user.json", "",
               ip=request.client.host if request.client else "")
 
-    return _config_save_result(save_result)
+    return _config_save_result({})
 
 
 # ── Persona character cards ──────────────────────────────────────────────────
@@ -1337,24 +1351,29 @@ async def bot_process_action(action: str, request: Request):
     if action not in {"start", "stop", "restart"}:
         _err("Bot action must be start, stop, or restart", 400)
     controller = _get_bot_process_controller(request)
-    try:
-        status = await asyncio.to_thread(getattr(controller, action))
-    except (OSError, RuntimeError) as exc:
+    lock = getattr(request.app.state, "data_maintenance_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        request.app.state.data_maintenance_lock = lock
+    async with lock:
+        try:
+            status = await asyncio.to_thread(getattr(controller, action))
+        except (OSError, RuntimeError) as exc:
+            audit_log(
+                request.app.state.dashboard_db,
+                f"bot.{action}",
+                "bot",
+                json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
+                ip=request.client.host if request.client else "",
+            )
+            _err(str(exc) or type(exc).__name__, 500)
         audit_log(
             request.app.state.dashboard_db,
             f"bot.{action}",
             "bot",
-            json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
+            json.dumps(status.to_dict(), ensure_ascii=False),
             ip=request.client.host if request.client else "",
         )
-        _err(str(exc) or type(exc).__name__, 500)
-    audit_log(
-        request.app.state.dashboard_db,
-        f"bot.{action}",
-        "bot",
-        json.dumps(status.to_dict(), ensure_ascii=False),
-        ip=request.client.host if request.client else "",
-    )
     return _ok({"status": status.to_dict()})
 
 
@@ -1391,8 +1410,6 @@ async def manager_operations(
 async def manager_operation(operation_id: str, request: Request):
     try:
         operation = await _get_manager_client(request).get_operation(operation_id)
-        if isinstance(operation, dict):
-            _audit_query_normalization_result(request, operation)
         return _ok({"operation": operation})
     except ManagerClientError as exc:
         return _manager_error_response(exc)
@@ -1448,49 +1465,6 @@ async def _poll_manager_control_status(app: FastAPI) -> None:
             # of falling back to Dashboard's former direct channel.
             pass
         await asyncio.sleep(2)
-
-
-def _audit_query_normalization_result(request: Request, operation: dict) -> None:
-    """Persist one terminal query-normalization result in Dashboard audit history."""
-    if operation.get("action") != "query.normalize":
-        return
-    if operation.get("status") not in {"succeeded", "failed", "cancelled"}:
-        return
-    operation_detail = operation.get("detail")
-    database = (
-        operation_detail.get("database", "")
-        if isinstance(operation_detail, dict)
-        else ""
-    )
-    detail = json.dumps(
-        {
-            "operation_id": operation.get("operation_id", ""),
-            "status": operation.get("status", ""),
-            "message": operation.get("message", ""),
-            "detail": operation_detail if isinstance(operation_detail, dict) else {},
-        },
-        ensure_ascii=False,
-    )
-    operation_finished_at = operation.get("finished_at") or operation.get("updated_at")
-    operation_ts = None
-    if isinstance(operation_finished_at, str):
-        try:
-            finished_at = datetime.fromisoformat(
-                operation_finished_at.replace("Z", "+00:00")
-            )
-            if finished_at.tzinfo is None:
-                finished_at = finished_at.replace(tzinfo=timezone.utc)
-            operation_ts = finished_at.timestamp()
-        except ValueError:
-            pass
-    audit_log_once(
-        request.app.state.dashboard_db,
-        "content.query.normalize.result",
-        str(database),
-        detail,
-        ip=request.client.host if request.client else "",
-        ts=operation_ts,
-    )
 
 
 # ── SSE endpoint ────────────────────────────────────────────────────────────────
@@ -1601,19 +1575,18 @@ def _query_rowids(value: Optional[str]) -> Optional[list[int]]:
 
 @app.post("/api/content/queries/{db_name}/enabled", dependencies=[Depends(require_auth)])
 async def content_queries_enabled(db_name: str, request: Request):
-    """Enable or disable one query database without changing Bot config."""
+    """Enable or disable one query database in Dashboard-owned state."""
     _query_database_path(db_name)
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
         _err("enabled 必须是布尔值", 400)
     try:
-        result = await _get_manager_client(request).set_query_database_enabled(
-            db_name,
-            body["enabled"],
+        state = set_query_database_enabled(
+            DashboardPaths.CONTENT_DIR / "queries", db_name, body["enabled"]
         )
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    enabled = bool(result.get("enabled"))
+    except QueryDatabaseStateError as exc:
+        _err(str(exc), 400)
+    enabled = state.is_enabled(db_name)
     audit_log(
         request.app.state.dashboard_db,
         "content.query.enable" if enabled else "content.query.disable",
@@ -1622,6 +1595,44 @@ async def content_queries_enabled(db_name: str, request: Request):
         ip=request.client.host if request.client else "",
     )
     return _ok({"database": db_name, "enabled": enabled})
+
+
+@app.post(
+    "/api/content/queries/{db_name}/normalize/dry-run",
+    dependencies=[Depends(require_auth)],
+)
+async def content_queries_normalize_dry_run(db_name: str, request: Request):
+    """Preview normalization without writing the source database."""
+    db_path = _query_database_path(db_name)
+    try:
+        report = await asyncio.to_thread(normalization_report, db_path)
+    except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+        _err(f"数据库无法自动修复：{exc}", 400)
+    return _ok({"database": db_name, "requires_confirmation": True, "report": report_detail(report)})
+
+
+@app.post("/api/content/queries/{db_name}/normalize", dependencies=[Depends(require_auth)])
+async def content_queries_normalize(db_name: str, request: Request):
+    """Normalize a query database locally while the controlled Bot is stopped."""
+    db_path = _query_database_path(db_name)
+    controller = _get_bot_process_controller(request)
+    lock = getattr(request.app.state, "data_maintenance_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        request.app.state.data_maintenance_lock = lock
+    async with lock:
+        status = await asyncio.to_thread(controller.status)
+        if status.state != "stopped":
+            return JSONResponse(
+                status_code=409,
+                content={"ok": False, "message": "Bot must be stopped before query database normalization"},
+            )
+        try:
+            report = await asyncio.to_thread(normalization_report, db_path)
+            await asyncio.to_thread(write_normalized_database, db_path, report)
+        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+            _err(f"数据库无法自动修复：{exc}", 400)
+    return _ok({"database": db_name, "normalized": True, "report": report_detail(report)})
 
 
 @app.get("/api/content/queries/{db_name}/audit", dependencies=[Depends(require_auth)])
@@ -1760,15 +1771,6 @@ async def content_read(subdir: str, name: str, request: Request):
 @app.get("/api/audit", dependencies=[Depends(require_auth)])
 async def audit_list(request: Request, limit: int = Query(200, ge=1, le=1000)):
     """Return recent audit entries, ordered by their actual event time."""
-    try:
-        operations = await _get_manager_client(request).list_operations(
-            min(limit, 200)
-        )
-    except (AttributeError, ManagerClientError):
-        operations = []
-    for operation in operations:
-        if isinstance(operation, dict):
-            _audit_query_normalization_result(request, operation)
     db_path = request.app.state.dashboard_db
     entries = audit_get_recent(db_path, limit)
     return _ok({"entries": entries})

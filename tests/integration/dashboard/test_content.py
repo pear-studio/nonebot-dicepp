@@ -1,70 +1,17 @@
 """Tests for the ``/api/content/**`` content-management endpoints."""
 
+import asyncio
 import sqlite3
-from datetime import datetime
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dicepp_manager.client import ManagerClientError
+from dashboard.src.bot_process import BotProcessStatus
 from tests.support.dashboard.app import setup_auth
 from tests.support.fs_utils import symlink_or_skip
-
-
-class _NormalizeManagerClient:
-    def __init__(self) -> None:
-        self.databases: list[str] = []
-        self.dry_runs: list[str] = []
-        self.operations: list[dict] = []
-
-    async def normalize_query_database(self, database: str) -> dict:
-        self.databases.append(database)
-        return {
-            "operation_id": "normalize-1",
-            "status": "queued",
-            "action": "query.normalize",
-        }
-
-    async def dry_run_query_database_normalization(self, database: str) -> dict:
-        self.dry_runs.append(database)
-        return {
-            "database": database,
-            "requires_confirmation": True,
-            "report": {
-                "counts": {"data_duplicates": 1},
-                "issues": [
-                    {
-                        "code": "duplicate_content_conflict",
-                        "table": "data",
-                        "rowid": 2,
-                        "line_number": None,
-                        "subject": "规则",
-                        "impact": "deletion",
-                        "message": "同名且同来源的第 2 行会被删除。",
-                        "related_rowids": [1],
-                    }
-                ],
-                "issues_omitted": 0,
-            },
-        }
-
-    async def get_operation(self, operation_id: str) -> dict:
-        return {
-            "operation_id": operation_id,
-            "status": "succeeded",
-            "action": "query.normalize",
-            "message": "数据库规范完成",
-            "detail": {"database": "test_queries", "stage": "completed"},
-        }
-
-    async def list_operations(self, _limit: int = 50) -> list[dict]:
-        return self.operations
-
-
-class _FailingNormalizeManagerClient(_NormalizeManagerClient):
-    async def dry_run_query_database_normalization(self, database: str) -> dict:
-        raise ManagerClientError("数据库预检失败", status_code=422)
 
 
 class TestListDecks:
@@ -154,114 +101,95 @@ class TestPathTraversal:
 
 
 class TestQueryDbEntries:
-    def test_normalize_is_delegated_to_manager(self, test_client: TestClient):
-        setup_auth(test_client)
-        manager = _NormalizeManagerClient()
-        test_client.app.state.manager_client = manager
+    @pytest.mark.asyncio
+    async def test_normalize_serializes_bot_actions_with_one_maintenance_lock(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Bot lifecycle request cannot overlap an in-place normalization."""
+        from dashboard.src import app as dashboard_app
 
-        response = test_client.post(
-            "/api/content/queries/test_queries/normalize"
+        class Controller:
+            def status(self) -> BotProcessStatus:
+                return BotProcessStatus("stopped", returncode=0)
+
+            def start(self) -> BotProcessStatus:
+                started.set()
+                return BotProcessStatus("running", pid=123)
+
+            def shutdown(self) -> BotProcessStatus:
+                return BotProcessStatus("stopped", returncode=0)
+
+        entered = threading.Event()
+        release = threading.Event()
+        started = threading.Event()
+
+        def blocking_write(*_args) -> None:
+            entered.set()
+            assert release.wait(2)
+
+        monkeypatch.setattr(dashboard_app, "normalization_report", lambda _path: object())
+        monkeypatch.setattr(dashboard_app, "report_detail", lambda _report: {})
+        monkeypatch.setattr(dashboard_app, "write_normalized_database", blocking_write)
+        test_client.app.state.bot_process_controller = Controller()
+        test_client.app.state.data_maintenance_lock = asyncio.Lock()
+        request = SimpleNamespace(app=test_client.app, client=None)
+
+        normalize_task = asyncio.create_task(
+            dashboard_app.content_queries_normalize("test_queries", request)
         )
+        await asyncio.to_thread(entered.wait, 2)
+        start_task = asyncio.create_task(dashboard_app.bot_process_action("start", request))
+        await asyncio.sleep(0)
+        assert not started.is_set()
+        release.set()
+        await normalize_task
+        await start_task
+        assert started.is_set()
+
+    def test_normalize_rejects_a_running_bot_without_writing(
+        self, test_client: TestClient
+    ) -> None:
+        setup_auth(test_client)
+        source = Path(test_client.app.state.dashboard_paths.CONTENT_DIR) / "queries" / "test_queries.db"
+        before = source.read_bytes()
+
+        class RunningController:
+            def status(self) -> BotProcessStatus:
+                return BotProcessStatus("running", pid=123)
+
+            def shutdown(self) -> BotProcessStatus:
+                return BotProcessStatus("stopped", returncode=0)
+
+        test_client.app.state.bot_process_controller = RunningController()
+        response = test_client.post("/api/content/queries/test_queries/normalize")
+
+        assert response.status_code == 409
+        assert "Bot must be stopped" in response.json()["message"]
+        assert source.read_bytes() == before
+
+    def test_normalize_writes_the_final_database_after_bot_is_stopped(
+        self, test_client: TestClient
+    ) -> None:
+        setup_auth(test_client)
+
+        class StoppedController:
+            def status(self) -> BotProcessStatus:
+                return BotProcessStatus("stopped", returncode=0)
+
+            def shutdown(self) -> BotProcessStatus:
+                return BotProcessStatus("stopped", returncode=0)
+
+        test_client.app.state.bot_process_controller = StoppedController()
+        response = test_client.post("/api/content/queries/test_queries/normalize")
 
         assert response.status_code == 200
-        assert response.json()["operation"]["operation_id"] == "normalize-1"
-        assert manager.databases == ["test_queries"]
-
-    def test_successful_normalize_dry_run_does_not_fill_audit_history(
-        self,
-        test_client: TestClient,
-    ) -> None:
-        setup_auth(test_client)
-        manager = _NormalizeManagerClient()
-        test_client.app.state.manager_client = manager
-
-        response = test_client.post(
-            "/api/content/queries/test_queries/normalize/dry-run"
-        )
-        audit = test_client.get("/api/audit").json()["entries"]
-
-        assert response.status_code == 200
-        assert response.json()["requires_confirmation"] is True
-        assert manager.dry_runs == ["test_queries"]
-        assert not any(
-            row["action"] == "content.query.normalize.dry_run"
-            for row in audit
-        )
-
-    def test_failed_normalize_dry_run_is_kept_in_audit_history(
-        self,
-        test_client: TestClient,
-    ) -> None:
-        setup_auth(test_client)
-        test_client.app.state.manager_client = _FailingNormalizeManagerClient()
-
-        response = test_client.post(
-            "/api/content/queries/test_queries/normalize/dry-run"
-        )
-        audit = test_client.get("/api/audit").json()["entries"]
-        failure = next(
-            row
-            for row in audit
-            if row["action"] == "content.query.normalize.dry_run"
-        )
-
-        assert response.status_code == 422
-        assert failure["target"] == "test_queries"
-        assert "数据库预检失败" in failure["detail"]
-
-    def test_terminal_normalize_result_is_audited_once(
-        self,
-        test_client: TestClient,
-    ) -> None:
-        setup_auth(test_client)
-        test_client.app.state.manager_client = _NormalizeManagerClient()
-
-        first = test_client.get("/api/manager/operations/normalize-1")
-        second = test_client.get("/api/manager/operations/normalize-1")
-        audit = test_client.get("/api/audit").json()["entries"]
-        results = [
-            row for row in audit
-            if row["action"] == "content.query.normalize.result"
-        ]
-
-        assert first.status_code == 200
-        assert second.status_code == 200
-        assert len(results) == 1
-        assert results[0]["target"] == "test_queries"
-
-    def test_audit_page_recovers_terminal_normalize_result_from_manager(
-        self,
-        test_client: TestClient,
-    ) -> None:
-        setup_auth(test_client)
-        manager = _NormalizeManagerClient()
-        manager.operations = [
-            {
-                "operation_id": "normalize-after-navigation",
-                "status": "failed",
-                "action": "query.normalize",
-                "finished_at": "2026-08-11T07:50:00+00:00",
-                "message": "启动机器人运行环境失败",
-                "detail": {
-                    "database": "test_queries",
-                    "stage": "restart_runtime",
-                },
-            }
-        ]
-        test_client.app.state.manager_client = manager
-
-        audit = test_client.get("/api/audit").json()["entries"]
-        recovered = [
-            row for row in audit
-            if row["action"] == "content.query.normalize.result"
-        ]
-
-        assert len(recovered) == 1
-        assert "normalize-after-navigation" in recovered[0]["detail"]
-        assert recovered[0]["ts"] == datetime.fromisoformat(
-            "2026-08-11T07:50:00+00:00"
-        ).timestamp()
-        assert audit.index(recovered[0]) > 0
+        assert response.json()["normalized"] is True
+        with sqlite3.connect(
+            Path(test_client.app.state.dashboard_paths.CONTENT_DIR)
+            / "queries"
+            / "test_queries.db"
+        ) as connection:
+            assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
     def test_query_db_entries(self, test_client: TestClient):
         """The data endpoint exposes only the four simple-format fields."""
