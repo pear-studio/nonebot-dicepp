@@ -8,7 +8,6 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from .maintenance_policy import is_terminal_rollback_failure
 from .models import ManagerOperation, utc_now
 
 OPERATIONS_SQL = """CREATE TABLE IF NOT EXISTS manager_operations (
@@ -195,49 +194,6 @@ class ManagerOperationStore:
                    ORDER BY updated_at ASC"""
             ).fetchall()
         return [self._journal_row(row) for row in rows]
-
-    def retire_terminal_rollback_journals(self) -> list[str]:
-        """Retire terminal rollback_failed journals after a successful recovery.
-
-        A rollback adjudicated failed past its commit point is terminal
-        (the terminal rollback adjudication rule shared by
-        archive_coordinator.ArchiveCoordinator.recover); its journal stays
-        in the recoverable set while manual recovery is pending. Once an
-        archive recovery succeeds, that protection duty is fulfilled: the
-        journal is marked retired (kept as evidence, but outside the
-        recoverable set), which lifts archive protection and stops the
-        repeated manual_recovery_required report on Manager restart.
-        """
-        retired: list[str] = []
-        for journal in self.list_recoverable_journals():
-            detail = journal.get("detail") or {}
-            if not is_terminal_rollback_failure(journal):
-                continue
-            transaction_id = str(journal["transaction_id"])
-            self.write_journal(
-                transaction_id,
-                kind=str(journal.get("kind") or ""),
-                phase=str(journal.get("phase") or ""),
-                status="retired",
-                operation_id=journal.get("operation_id"),
-                detail=detail,
-            )
-            retired.append(transaction_id)
-        return retired
-
-    def protected_archive_names(self) -> set[str]:
-        names: set[str] = set()
-        for journal in self.list_recoverable_journals():
-            detail = journal.get("detail", {})
-            for key in (
-                "pre_restore_filename",
-                "target_filename",
-                "archive",
-            ):
-                value = detail.get(key)
-                if isinstance(value, str):
-                    names.add(value)
-        return names
 
     @staticmethod
     def _journal_row(row: sqlite3.Row) -> dict[str, Any]:

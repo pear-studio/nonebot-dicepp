@@ -73,22 +73,6 @@ def test_windows_launcher_starts_dashboard_before_manager_recovery() -> None:
     )
 
 
-def test_factory_binds_archive_control_health_to_manager_service(tmp_path: Path) -> None:
-    service = manager_factory.create_manager_service(
-        ManagerSettings(
-            layout=InstanceLayout.from_root(tmp_path),
-            runtime="unavailable",
-        )
-    )
-    try:
-        assert service.control_service is not None
-        assert service.archive_coordinator.control_probe.__self__ is service.control_service
-        assert service.archive_coordinator.control_probe()["message"] == "No Bot control heartbeat"
-        assert service.archive_coordinator.control_health_timeout == 120.0
-    finally:
-        service.close()
-
-
 def test_factory_has_no_dashboard_health_recovery_dependency() -> None:
     source = inspect.getsource(manager_factory)
     assert "DICEPP_DASHBOARD_HEALTH_URL" not in source

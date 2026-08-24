@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import http.client
-import io
 import json
 import urllib.error
-import urllib.parse
 import urllib.request
-from typing import Any, Iterator
+from typing import Any
 
 from .auth import TokenSecurityError, read_api_token
 from .config import ManagerClientSettings
@@ -42,26 +39,6 @@ def _read_manager_token(token_path) -> str:
         ) from exc
 
 
-class ArchiveDownload:
-    def __init__(self, response) -> None:
-        self._response = response
-
-    def __iter__(self) -> Iterator[bytes]:
-        try:
-            while True:
-                chunk = self._response.read(1024 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            self.close()
-
-    def close(self) -> None:
-        response, self._response = self._response, None
-        if response is not None:
-            response.close()
-
-
 class ManagerClient:
     def __init__(self, settings: ManagerClientSettings) -> None:
         self.settings = settings
@@ -88,15 +65,6 @@ class ManagerClient:
                 status_code=409,
             )
         return payload
-
-    async def list_operations(self, limit: int = 50) -> list[dict]:
-        await self._ensure_compatible()
-        return (await self._request("GET", f"/v1/operations?limit={limit}")).get("operations", [])
-
-    async def get_operation(self, operation_id: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(operation_id, safe="")
-        return (await self._request("GET", f"/v1/operations/{segment}")).get("operation", {})
 
     async def control_bots(self) -> list[dict]:
         await self._ensure_control_capable()
@@ -127,45 +95,6 @@ class ManagerClient:
                 status_code=409,
             )
         return payload
-
-    async def list_archives(self) -> list[dict]:
-        await self._ensure_compatible()
-        return (await self._request("GET", "/v1/archives")).get("archives", [])
-
-    async def archive_detail(self, filename: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        return await self._request("GET", f"/v1/archives/{segment}")
-
-    async def verify_archive(self, filename: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        return await self._request("POST", f"/v1/archives/{segment}/verify")
-
-    async def delete_archive(self, filename: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        return await self._request("DELETE", f"/v1/archives/{segment}")
-
-    async def export_archive(self, filename: str) -> bytes:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        return await self._request_bytes("GET", f"/v1/archives/{segment}/export")
-
-    async def open_archive_download(self, filename: str) -> ArchiveDownload:
-        await self._ensure_compatible()
-        token = _read_manager_token(self.settings.token_path)
-        segment = urllib.parse.quote(filename, safe="")
-        return await asyncio.to_thread(
-            self._open_archive_download_sync,
-            f"/v1/archives/{segment}/export",
-            token,
-        )
-
-    async def import_archive(self, filename: str, source) -> dict:
-        await self._ensure_compatible()
-        token = _read_manager_token(self.settings.token_path)
-        return await asyncio.to_thread(self._upload_sync, filename, source, token)
 
     async def _request(
         self,
@@ -225,97 +154,6 @@ class ManagerClient:
             raise ManagerClientError(str(payload.get("message") or "Manager request failed"), status_code=status, payload=payload)
         payload.pop("ok", None)
         return payload
-
-    async def _request_bytes(self, method: str, path: str) -> bytes:
-        token = _read_manager_token(self.settings.token_path)
-        return await asyncio.to_thread(self._request_bytes_sync, method, path, token)
-
-    def _request_bytes_sync(self, method: str, path: str, token: str) -> bytes:
-        request = urllib.request.Request(
-            f"{self.settings.base_url}{path}",
-            method=method,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/zip"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.settings.timeout) as response:
-                return response.read()
-        except urllib.error.HTTPError as exc:
-            payload = _decode_payload(exc.read())
-            raise ManagerClientError(
-                str(payload.get("message") or f"Manager API returned HTTP {exc.code}"),
-                status_code=exc.code,
-                payload=payload,
-            ) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ManagerUnavailable(f"Manager is unavailable: {exc}", status_code=503) from exc
-
-    def _open_archive_download_sync(self, path: str, token: str) -> ArchiveDownload:
-        request = urllib.request.Request(
-            f"{self.settings.base_url}{path}",
-            method="GET",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/zip"},
-        )
-        try:
-            response = urllib.request.urlopen(request, timeout=self.settings.timeout)
-        except urllib.error.HTTPError as exc:
-            payload = _decode_payload(exc.read())
-            raise ManagerClientError(
-                str(payload.get("message") or f"Manager API returned HTTP {exc.code}"),
-                status_code=exc.code,
-                payload=payload,
-            ) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ManagerUnavailable(f"Manager is unavailable: {exc}", status_code=503) from exc
-        return ArchiveDownload(response)
-
-    def _upload_sync(self, filename: str, source, token: str) -> dict[str, Any]:
-        parsed = urllib.parse.urlsplit(self.settings.base_url)
-        connection_class = (
-            http.client.HTTPSConnection
-            if parsed.scheme == "https"
-            else http.client.HTTPConnection
-        )
-        connection = connection_class(
-            parsed.hostname,
-            parsed.port,
-            timeout=self.settings.timeout,
-        )
-        try:
-            source.seek(0, io.SEEK_END)
-            length = source.tell()
-            source.seek(0)
-            path = f"{parsed.path.rstrip('/')}/v1/archives/import"
-            connection.putrequest("POST", path)
-            connection.putheader("Authorization", f"Bearer {token}")
-            connection.putheader("Accept", "application/json")
-            connection.putheader(
-                "X-Archive-Filename",
-                urllib.parse.quote(filename, safe=""),
-            )
-            connection.putheader("Content-Type", "application/zip")
-            connection.putheader("Content-Length", str(length))
-            connection.endheaders()
-            while True:
-                chunk = source.read(1024 * 1024)
-                if not chunk:
-                    break
-                connection.send(chunk)
-            response = connection.getresponse()
-            raw = response.read()
-        except (OSError, TimeoutError, UnicodeError, http.client.HTTPException) as exc:
-            raise ManagerUnavailable(f"Manager is unavailable: {exc}", status_code=503) from exc
-        finally:
-            connection.close()
-        payload = _decode_payload(raw)
-        if response.status >= 400 or payload.get("ok") is False:
-            raise ManagerClientError(
-                str(payload.get("message") or "Manager import failed"),
-                status_code=response.status,
-                payload=payload,
-            )
-        payload.pop("ok", None)
-        return payload
-
 
 def _decode_payload(raw: bytes) -> dict[str, Any]:
     try:

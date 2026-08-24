@@ -25,7 +25,21 @@ from dicepp_data import (
     load_query_database_state,
     set_query_database_enabled,
 )
-from dicepp_manager.archive import MAX_ARCHIVE_BYTES
+from dicepp_data.archive import (
+    MAX_ARCHIVE_BYTES,
+    ArchiveError,
+    ArchiveInvalidError,
+    ArchiveNameError,
+    ArchiveNotFoundError,
+    create_archive,
+    delete_archive,
+    estimate_archive,
+    export_archive_path,
+    import_archive,
+    list_archives,
+    read_archive_detail,
+    verify_archive,
+)
 from dicepp_manager.client import (
     ManagerClient,
     ManagerClientError,
@@ -473,57 +487,97 @@ async def auth_status(request: Request):
     })
 
 
-# ── Manager proxy errors ────────────────────────────────────────────────────
+def _archive_layout():
+    return DashboardPaths.instance_layout()
+
+
+def _archive_error_response(exc: ArchiveError) -> JSONResponse:
+    status = 400 if isinstance(exc, ArchiveNameError) else 404 if isinstance(exc, ArchiveNotFoundError) else 422 if isinstance(exc, ArchiveInvalidError) else 409
+    return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
 
 
 def _manager_error_response(exc: ManagerClientError) -> JSONResponse:
-    """Preserve Manager status and payload for every Dashboard proxy route."""
     content = dict(exc.payload)
     content.setdefault("ok", False)
     content.setdefault("message", str(exc) or type(exc).__name__)
     return JSONResponse(status_code=exc.status_code, content=content)
 
 
+def _data_maintenance_lock(request: Request) -> asyncio.Lock:
+    lock = getattr(request.app.state, "data_maintenance_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        request.app.state.data_maintenance_lock = lock
+    return lock
+
+
 @app.get("/api/archives", dependencies=[Depends(require_auth)])
 async def archives_list(request: Request):
+    del request
     try:
-        archives = await _get_manager_client(request).list_archives()
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+        archives = await asyncio.to_thread(list_archives, layout=_archive_layout())
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
     return _ok({"archives": archives})
+
+
+@app.post("/api/archives/estimate", dependencies=[Depends(require_auth)])
+async def archives_estimate(request: Request):
+    body = await request.json()
+    profile = body.get("profile", "regular") if isinstance(body, dict) else "regular"
+    try:
+        result = await asyncio.to_thread(estimate_archive, layout=_archive_layout(), profile=profile)
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
+    return _ok(result)
+
+
+@app.post("/api/archives", dependencies=[Depends(require_auth)])
+async def archives_create(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        _err("Request body must be a JSON object", 400)
+    profile = body.get("profile", "regular")
+    description = body.get("description")
+    if profile not in {"regular", "full"}:
+        _err("profile must be regular or full", 400)
+    if description is not None and not isinstance(description, str):
+        _err("description must be a string or null", 400)
+    controller = _get_bot_process_controller(request)
+    async with _data_maintenance_lock(request):
+        status = await asyncio.to_thread(controller.status)
+        if status.state != "stopped":
+            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before archive creation"})
+        try:
+            summary, manifest = await asyncio.to_thread(
+                create_archive,
+                layout=_archive_layout(),
+                profile=profile,
+                description=description,
+            )
+        except ArchiveError as exc:
+            return _archive_error_response(exc)
+    return _ok({"archive": summary, "manifest": manifest})
 
 
 @app.post("/api/archives/{filename:path}/verify", dependencies=[Depends(require_auth)])
 async def archives_verify(filename: str, request: Request):
+    del request
     try:
-        payload = await _get_manager_client(request).verify_archive(filename)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return _ok(payload)
+        payload = await asyncio.to_thread(verify_archive, filename, layout=_archive_layout())
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
+    return _ok({"verification": payload})
 
 
 @app.get("/api/archives/{filename:path}/export", dependencies=[Depends(require_auth)])
 async def archives_export(filename: str, request: Request):
+    del request
     try:
-        client = _get_manager_client(request)
-        if hasattr(client, "open_archive_download"):
-            download = await client.open_archive_download(filename)
-            return StreamingResponse(
-                download,
-                media_type="application/zip",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{Path(filename).name}"'
-                },
-                background=BackgroundTask(download.close),
-            )
-        payload = await client.export_archive(filename)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return Response(
-        content=payload,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{Path(filename).name}"'},
-    )
+        path = await asyncio.to_thread(export_archive_path, filename, layout=_archive_layout())
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
 
 
 @app.get("/api/health")
@@ -579,28 +633,30 @@ async def archives_import(request: Request):
             upload.write(chunk)
         upload.seek(0)
         try:
-            payload = await _get_manager_client(request).import_archive(filename, upload)
-        except ManagerClientError as exc:
-            return _manager_error_response(exc)
-    return _ok(payload)
+            payload = await asyncio.to_thread(import_archive, filename, upload, layout=_archive_layout())
+        except ArchiveError as exc:
+            return _archive_error_response(exc)
+    return _ok({"import": payload})
 
 
 @app.get("/api/archives/{filename:path}", dependencies=[Depends(require_auth)])
 async def archives_detail(filename: str, request: Request):
+    del request
     try:
-        payload = await _get_manager_client(request).archive_detail(filename)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return _ok(payload)
+        archive, manifest = await asyncio.to_thread(read_archive_detail, filename, layout=_archive_layout())
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
+    return _ok({"archive": archive, "manifest": manifest})
 
 
 @app.delete("/api/archives/{filename:path}", dependencies=[Depends(require_auth)])
 async def archives_delete(filename: str, request: Request):
+    del request
     try:
-        payload = await _get_manager_client(request).delete_archive(filename)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return _ok(payload)
+        archive = await asyncio.to_thread(delete_archive, filename, layout=_archive_layout())
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
+    return _ok({"deleted": filename, "archive": archive})
 
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────
@@ -1392,27 +1448,6 @@ async def bot_process_logs(
             "truncated": False,
         }
     })
-
-
-@app.get("/api/manager/operations", dependencies=[Depends(require_auth)])
-async def manager_operations(
-    request: Request,
-    limit: int = Query(50, ge=1, le=200),
-):
-    """Proxy generic archive/query operations; Bot lifecycle is not an operation."""
-    try:
-        return _ok({"operations": await _get_manager_client(request).list_operations(limit)})
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-
-
-@app.get("/api/manager/operations/{operation_id}", dependencies=[Depends(require_auth)])
-async def manager_operation(operation_id: str, request: Request):
-    try:
-        operation = await _get_manager_client(request).get_operation(operation_id)
-        return _ok({"operation": operation})
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
 
 
 # ── Manager API ───────────────────────────────────────────────────────────────

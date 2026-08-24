@@ -4,41 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-import tempfile
-import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from dicepp_meta import get_version
 
-from .archive import (
-    MAX_ARCHIVE_BYTES,
-    ArchiveError,
-    ArchiveInvalidError,
-    ArchiveNameError,
-    ArchiveNotFoundError,
-)
-from .archive_coordinator import ArchiveCoordinator
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
 from .control import ControlChannelService
 from .factory import create_manager_service
-from .maintenance import MaintenanceConflict
 from .service import ManagerService
-
-
-def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
-    return JSONResponse(
-        status_code=409,
-        content={
-            "ok": False,
-            "message": str(exc),
-            "code": "maintenance_conflict",
-        },
-    )
 
 
 def create_manager_app(
@@ -60,32 +38,18 @@ def create_manager_app(
             reload_timeout=settings.control_reload_timeout,
         )
     control_service = manager_service.control_service
-    if manager_service.archive_coordinator is None:
-        manager_service.archive_coordinator = ArchiveCoordinator(
-            layout=settings.layout,
-            service=manager_service,
-        )
-    archive_coordinator = manager_service.archive_coordinator
     expected_token = api_token or ensure_api_token(settings.token_path or settings.layout.manager_token)
-    tasks: set[asyncio.Task] = set()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
             yield
         finally:
-            if tasks:
-                _done, pending = await asyncio.wait(tasks, timeout=5)
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
             await control_service.close()
             manager_service.close()
 
     app = FastAPI(title="DicePP Manager", version="2", lifespan=lifespan)
     app.state.manager_service = manager_service
-    app.state.operation_tasks = tasks
     app.state.control_service = control_service
 
     manager_bearer = HTTPBearer(
@@ -149,103 +113,6 @@ def create_manager_app(
             "ok": True,
             "dicepp_version": get_version(),
         }
-
-    @app.get("/v1/operations", dependencies=auth)
-    async def operations(limit: int = Query(50, ge=1, le=200)):
-        return {"ok": True, "operations": manager_service.list_operations(limit)}
-
-    @app.get("/v1/operations/{operation_id}", dependencies=auth)
-    async def operation(operation_id: str):
-        result = manager_service.get_operation(operation_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="Manager operation not found")
-        return {"ok": True, "operation": result.to_dict()}
-
-    def track_task(coroutine) -> asyncio.Task:
-        task = asyncio.create_task(coroutine)
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-        return task
-
-    @app.get("/v1/archives", dependencies=auth)
-    async def archives_list():
-        return {"ok": True, "archives": archive_coordinator.list()}
-
-    @app.get("/v1/archives/{filename}", dependencies=auth)
-    async def archives_detail(filename: str):
-        try:
-            archive, manifest = archive_coordinator.detail(filename)
-        except ArchiveNameError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ArchiveNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ArchiveInvalidError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"ok": True, "archive": archive, "manifest": manifest}
-
-    @app.post("/v1/archives/{filename}/verify", dependencies=auth)
-    async def archives_verify(filename: str):
-        try:
-            verification = archive_coordinator.verify(filename)
-        except ArchiveNameError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ArchiveNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ArchiveInvalidError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"ok": True, "verification": verification}
-
-    @app.delete("/v1/archives/{filename}", dependencies=auth)
-    async def archives_delete(filename: str):
-        try:
-            archive = archive_coordinator.delete(filename)
-        except ArchiveNameError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ArchiveNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ArchiveError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"ok": True, "deleted": filename, "archive": archive}
-
-    @app.get("/v1/archives/{filename}/export", dependencies=auth)
-    async def archives_export(filename: str):
-        try:
-            path = archive_coordinator.export_path(filename)
-        except ArchiveNameError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except ArchiveNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ArchiveInvalidError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return FileResponse(
-            path,
-            media_type="application/zip",
-            filename=path.name,
-        )
-
-    @app.post("/v1/archives/import", dependencies=auth)
-    async def archives_import(request: Request, x_archive_filename: str | None = Header(None)):
-        if not x_archive_filename:
-            raise HTTPException(status_code=400, detail="X-Archive-Filename is required")
-        total = 0
-        with tempfile.SpooledTemporaryFile(max_size=8 * 1024**2) as upload:
-            async for chunk in request.stream():
-                total += len(chunk)
-                if total > MAX_ARCHIVE_BYTES:
-                    raise HTTPException(status_code=413, detail="Archive upload is too large")
-                upload.write(chunk)
-            upload.seek(0)
-            try:
-                result = await asyncio.to_thread(
-                    archive_coordinator.import_stream,
-                    urllib.parse.unquote(x_archive_filename),
-                    upload,
-                )
-            except ArchiveNameError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except ArchiveInvalidError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"ok": True, "import": result}
 
     return app
 

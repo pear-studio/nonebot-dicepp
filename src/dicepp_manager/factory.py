@@ -6,7 +6,6 @@ from pathlib import Path
 
 from dicepp_control.control_token import ensure_token
 
-from .archive_coordinator import ArchiveCoordinator
 from .config import ManagerSettings
 from .control import ControlChannelService
 from .owner import ManagerOwnerLock
@@ -37,10 +36,6 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
             known_bot_ids=lambda: _configured_bot_ids(settings.layout),
             heartbeat_timeout=settings.control_heartbeat_timeout,
             reload_timeout=settings.control_reload_timeout,
-        )
-        service.archive_coordinator = ArchiveCoordinator(
-            layout=settings.layout,
-            service=service,
         )
         return service
     except BaseException:

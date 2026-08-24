@@ -1044,197 +1044,6 @@
           </div>
         </div>
 
-        <div x-show="archivePlanArchive || archivePlanLoading || archivePlanError || archivePlanVerification" x-cloak data-testid="archive-plan-panel" class="bg-white rounded-lg shadow mb-4">
-          <div class="p-4 border-b flex items-center justify-between gap-4">
-            <div>
-              <h3 class="font-semibold">恢复预览</h3>
-              <div class="text-xs text-gray-500 mt-1" x-text="archivePlanArchive?.filename || ''"></div>
-            </div>
-            <button @click="clearArchivePlan()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
-          </div>
-          <div class="p-4 space-y-4">
-            <div x-show="archivePlanLoading" data-testid="archive-plan-loading" class="text-sm text-gray-500">正在生成恢复预览...</div>
-            <div x-show="archivePlanError" x-cloak data-testid="archive-plan-error" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archivePlanError"></div>
-            <template x-if="archivePlanVerification && !archivePlanLoading && !archivePlanError">
-              <div class="space-y-3 text-sm">
-                <div data-testid="archive-plan-verification-failed" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded">检查未通过</div>
-                <div>
-                  <div class="text-xs text-gray-500 mb-1">问题</div>
-                  <ul
-                    x-show="archivePlanList(archivePlanVerification.problems).length > 0"
-                    data-testid="archive-plan-verification-problems"
-                    class="list-disc list-inside bg-red-50 border border-red-100 rounded p-2 text-red-700 space-y-1"
-                  >
-                    <template x-for="(problem, index) in archivePlanList(archivePlanVerification.problems)" :key="`plan-verification-problem-${index}`">
-                      <li x-text="problem"></li>
-                    </template>
-                  </ul>
-                  <div x-show="archivePlanList(archivePlanVerification.problems).length === 0" data-testid="archive-plan-verification-problems-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
-                </div>
-              </div>
-            </template>
-            <template x-if="archivePlan && !archivePlanLoading && !archivePlanError">
-              <div class="space-y-4 text-sm">
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div>
-                    <div class="text-xs text-gray-500">将恢复</div>
-                    <div data-testid="archive-plan-entry-count" class="font-medium" x-text="archivePlanRestorableCount(archivePlan)"></div>
-                  </div>
-                  <div>
-                    <div class="text-xs text-gray-500">新增</div>
-                    <div data-testid="archive-plan-create-count" class="font-medium text-green-700" x-text="archivePlanActionCount(archivePlan, 'create')"></div>
-                  </div>
-                  <div>
-                    <div class="text-xs text-gray-500">覆盖</div>
-                    <div data-testid="archive-plan-overwrite-count" class="font-medium text-yellow-700" x-text="archivePlanActionCount(archivePlan, 'overwrite')"></div>
-                  </div>
-                  <div>
-                    <div class="text-xs text-gray-500">无法恢复</div>
-                    <div data-testid="archive-plan-blocked-count" class="font-medium text-red-700" x-text="archivePlanActionCount(archivePlan, 'blocked')"></div>
-                  </div>
-                </div>
-                <div>
-                  <div class="text-xs text-gray-500 mb-1">问题</div>
-                  <ul
-                    x-show="archivePlanList(archivePlan.problems).length > 0"
-                    data-testid="archive-plan-problems"
-                    class="list-disc list-inside bg-red-50 border border-red-100 rounded p-2 text-red-700 space-y-1"
-                  >
-                    <template x-for="(problem, index) in archivePlanList(archivePlan.problems)" :key="`plan-problem-${index}`">
-                      <li x-text="problem"></li>
-                    </template>
-                  </ul>
-                  <div x-show="archivePlanList(archivePlan.problems).length === 0" data-testid="archive-plan-problems-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
-                </div>
-                <div>
-                  <div class="text-xs text-gray-500 mb-1">提醒</div>
-                  <ul
-                    x-show="archivePlanList(archivePlan.warnings).length > 0"
-                    data-testid="archive-plan-warnings"
-                    class="list-disc list-inside bg-yellow-50 border border-yellow-100 rounded p-2 text-yellow-800 space-y-1"
-                  >
-                    <template x-for="(warning, index) in archivePlanList(archivePlan.warnings)" :key="`plan-warning-${index}`">
-                      <li x-text="warning"></li>
-                    </template>
-                  </ul>
-                  <div x-show="archivePlanList(archivePlan.warnings).length === 0" data-testid="archive-plan-warnings-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
-                </div>
-                <div class="border-t pt-3 space-y-3" data-testid="archive-restore-controls">
-                  <div
-                    x-show="!archiveCanRestore(archivePlan)"
-                    data-testid="archive-restore-disabled-reason"
-                    class="bg-red-50 border border-red-100 text-red-700 p-2 rounded"
-                    x-text="archiveRestoreDisabledReason(archivePlan)"
-                  ></div>
-                  <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-                    <div>
-                      <label class="block text-xs text-gray-500 mb-1" for="archive-restore-description">恢复前备份说明</label>
-                      <input
-                        id="archive-restore-description"
-                        x-model="archiveRestoreDescription"
-                        :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
-                        data-testid="archive-restore-description"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                        placeholder="可选"
-                      >
-                    </div>
-                    <div class="space-y-2">
-                      <div
-                        data-testid="archive-restore-quiesce-runtime"
-                        class="text-sm text-gray-600"
-                      >恢复事务由 Dashboard 记录结果；Bot 进程请在“运行监控”中单独控制</div>
-                      <label class="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          x-model="archiveRestoreConfirmed"
-                          :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
-                          data-testid="archive-restore-confirm"
-                          class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                        <span>确认按此计划恢复</span>
-                      </label>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-3">
-                    <button
-                      @click="restoreArchive()"
-                      :disabled="!archiveCanRestore(archivePlan) || !archiveRestoreConfirmed || archiveRestoring"
-                      data-testid="archive-restore-button"
-                      class="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      x-text="archiveRestoring ? '恢复中...' : '恢复'"
-                    ></button>
-                    <span x-show="archiveRestoreConfirmed && archiveCanRestore(archivePlan)" class="text-xs text-gray-500">恢复前会自动创建备份存档</span>
-                  </div>
-                  <div x-show="archiveRestoreError" x-cloak data-testid="archive-restore-error" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archiveRestoreError"></div>
-                  <template x-if="archiveRestoreResult">
-                    <div class="space-y-3">
-                      <div
-                        data-testid="archive-restore-status"
-                        class="p-3 rounded border text-sm"
-                        :class="archiveRestoreHasFailures(archiveRestoreResult) ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'"
-                        x-text="archiveRestoreHasFailures(archiveRestoreResult) ? '恢复失败' : '恢复完成'"
-                      ></div>
-                      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                        <div>
-                          <div class="text-xs text-gray-500">恢复前备份</div>
-                          <div data-testid="archive-restore-pre-restore" class="font-mono text-xs break-all" x-text="archiveRestorePreRestoreFilename(archiveRestoreResult)"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">已恢复</div>
-                          <div data-testid="archive-restore-restored-count" class="font-medium text-green-700" x-text="archiveRestoreEntries(archiveRestoreResult, 'restored_entries').length"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">失败</div>
-                          <div data-testid="archive-restore-failed-count" class="font-medium text-red-700" x-text="archiveRestoreEntries(archiveRestoreResult, 'failed_entries').length"></div>
-                        </div>
-                      </div>
-                      <div
-                        x-show="archiveRestoreHasFailures(archiveRestoreResult) && archiveRestorePreRestoreFilename(archiveRestoreResult) !== '-'"
-                        x-cloak
-                        class="flex flex-wrap items-center gap-3 rounded border border-red-100 bg-red-50 p-3 text-sm"
-                        data-testid="archive-restore-pre-restore-action"
-                      >
-                        <div class="text-red-700">可基于恢复前自动创建的存档继续查看恢复预览。</div>
-                        <button
-                          @click="requestArchiveRestorePlan(archiveRestorePreRestoreArchive(archiveRestoreResult))"
-                          :disabled="archivePlanLoading || !archiveRestorePreRestoreArchive(archiveRestoreResult)?.filename"
-                          data-testid="archive-restore-pre-restore-plan-button"
-                          class="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >查看恢复前存档预览</button>
-                      </div>
-                      <div x-show="archiveRestoreEntries(archiveRestoreResult, 'failed_entries').length > 0">
-                        <div class="text-xs text-gray-500 mb-1">失败原因</div>
-                        <div class="overflow-x-auto border rounded">
-                          <table data-testid="archive-restore-failed-entries" class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                              <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">原因</th>
-                              </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200">
-                              <template x-for="entry in archiveRestoreEntries(archiveRestoreResult, 'failed_entries')" :key="`failed-${entry.arcname}`">
-                                <tr>
-                                  <td class="px-3 py-2 text-xs text-red-700" x-text="entry.error || '-'"></td>
-                                </tr>
-                              </template>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                  <div x-show="archiveRestoreRuntimeQuiesce" x-cloak data-testid="archive-restore-runtime-quiesce" class="border rounded">
-                    <div class="px-3 py-2 bg-gray-50 border-b text-sm font-medium">恢复处理</div>
-                    <div class="p-3 text-sm text-gray-600">
-                      存档恢复不会由 Manager 启停 Bot。需要暂停或重新启动 Bot 时，请在“运行监控”中操作。
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-
         <div x-show="archiveDetail || archiveDetailLoading || archiveDetailError" x-cloak data-testid="archive-detail-panel" class="bg-white rounded-lg shadow">
           <div class="p-4 border-b flex items-center justify-between gap-4">
             <div>
@@ -1658,7 +1467,6 @@ function app() {
     archiveDescription: '',
     archiveProfile: 'regular',
     archiveEstimate: null,
-    archiveReconnectInProgress: false,
     archiveCreating: false,
     archiveCreateMessage: '',
     archiveCreateError: '',
@@ -1671,18 +1479,6 @@ function app() {
     archiveVerify: null,
     archiveVerifyError: '',
     archiveVerifying: false,
-    archivePlanArchive: null,
-    archivePlan: null,
-    archivePlanVerification: null,
-    archivePlanError: '',
-    archivePlanLoading: false,
-    archiveRestoreConfirmed: false,
-    archiveRestoreQuiesceRuntime: true,
-    archiveRestoreDescription: '',
-    archiveRestoring: false,
-    archiveRestoreError: '',
-    archiveRestoreResult: null,
-    archiveRestoreRuntimeQuiesce: null,
 
     // ── Tab: Audit ──
     auditLogs: [],
@@ -2835,19 +2631,6 @@ function app() {
       }
     },
 
-    // Generic Manager operation polling is retained for archive/query workflows.
-    async pollManagerOperation(operationId, timeoutMs = 30000) {
-      if (!operationId) throw new Error('Manager 未返回 operation_id');
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const data = await this.api(`/api/manager/operations/${encodeURIComponent(operationId)}`);
-        const operation = data.operation || {};
-        if (!['queued', 'running'].includes(operation.status)) return operation;
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      throw new Error('Manager 操作等待超时；可刷新页面按 operation_id 继续查看');
-    },
-
 
     // ── Archives ──
     resetArchivesState() {
@@ -2857,7 +2640,6 @@ function app() {
       this.archiveDescription = '';
       this.archiveProfile = 'regular';
       this.archiveEstimate = null;
-      this.archiveReconnectInProgress = false;
       this.archiveCreating = false;
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
@@ -2870,18 +2652,6 @@ function app() {
       this.archiveVerify = null;
       this.archiveVerifyError = '';
       this.archiveVerifying = false;
-      this.archivePlanArchive = null;
-      this.archivePlan = null;
-      this.archivePlanVerification = null;
-      this.archivePlanError = '';
-      this.archivePlanLoading = false;
-      this.archiveRestoreConfirmed = false;
-      this.archiveRestoreQuiesceRuntime = true;
-      this.archiveRestoreDescription = '';
-      this.archiveRestoring = false;
-      this.archiveRestoreError = '';
-      this.archiveRestoreResult = null;
-      this.archiveRestoreRuntimeQuiesce = null;
     },
 
     async loadArchives() {
@@ -2890,7 +2660,6 @@ function app() {
       try {
         const data = await this.api('/api/archives');
         this.archives = data.archives || [];
-        void this.reconnectArchiveOperation();
       } catch (err) {
         console?.warn('[DicePP] Failed to load archives:', err);
         this.archives = [];
@@ -2922,137 +2691,19 @@ function app() {
             profile: this.archiveProfile,
           }),
         });
-        this.rememberArchiveOperation(data.operation, 'archive.create');
-        const operation = await this.pollManagerOperation(
-          data.operation?.operation_id,
-          30 * 60 * 1000,
-        );
-        this.applyCompletedArchiveOperation(operation);
-        this.clearPersistedArchiveOperation(operation.operation_id);
-        if (operation.status !== 'succeeded') throw new Error(operation.message || '创建存档失败');
+        const archive = data.archive || null;
+        this.archiveCreateMessage = archive?.filename
+          ? `已创建 ${archive.filename}`
+          : '存档创建完成';
+        this.archiveDescription = '';
+        this.archiveDetailArchive = archive;
+        this.archiveDetail = data.manifest || null;
         await this.loadArchives();
       } catch (err) {
         console?.warn('[DicePP] Failed to create archive:', err);
         this.archiveCreateError = err.message || '创建存档失败';
       } finally {
         this.archiveCreating = false;
-      }
-    },
-
-    async reconnectArchiveOperation() {
-      if (this.archiveReconnectInProgress) return;
-      this.archiveReconnectInProgress = true;
-      try {
-        const persisted = this.persistedArchiveOperation();
-        let operation = persisted;
-        if (!operation?.operation_id) {
-          const data = await this.api('/api/manager/operations?limit=50');
-          operation = (data.operations || []).find((item) =>
-            typeof item?.action === 'string'
-            && item.action.startsWith('archive.')
-            && ['queued', 'running'].includes(item.status)
-          );
-        }
-        if (!operation?.operation_id) return;
-        this.rememberArchiveOperation(operation, operation.action);
-        if (operation.action === 'archive.create') {
-          this.archiveCreating = true;
-          this.archiveCreateMessage = `已重新连接创建任务 ${operation.operation_id.slice(0, 8)}…`;
-        } else if (operation.action === 'archive.restore') {
-          this.archiveRestoring = true;
-        }
-        const completed = await this.pollManagerOperation(
-          operation.operation_id,
-          30 * 60 * 1000,
-        );
-        this.applyCompletedArchiveOperation(completed);
-        this.clearPersistedArchiveOperation(completed.operation_id);
-        const refreshed = await this.api('/api/archives');
-        this.archives = refreshed.archives || [];
-      } catch (err) {
-        console?.warn('[DicePP] Failed to reconnect archive operation:', err);
-      } finally {
-        this.archiveReconnectInProgress = false;
-      }
-    },
-
-    rememberArchiveOperation(operation, actionFallback = '') {
-      if (!operation?.operation_id) return;
-      try {
-        localStorage.setItem('dicepp_archive_operation', JSON.stringify({
-          operation_id: operation.operation_id,
-          action: operation.action || actionFallback,
-        }));
-      } catch (_) {}
-    },
-
-    persistedArchiveOperation() {
-      try {
-        const value = JSON.parse(localStorage.getItem('dicepp_archive_operation') || 'null');
-        return value && typeof value.operation_id === 'string' ? value : null;
-      } catch (_) {
-        return null;
-      }
-    },
-
-    clearPersistedArchiveOperation(operationId) {
-      const persisted = this.persistedArchiveOperation();
-      if (!persisted || !operationId || persisted.operation_id === operationId) {
-        try { localStorage.removeItem('dicepp_archive_operation'); } catch (_) {}
-      }
-    },
-
-    archiveRestoreResultFromOperation(operation) {
-      const restore = operation.detail?.restore || {
-        failed_entries: operation.status === 'succeeded' ? [] : [{
-          error: operation.message || '恢复失败',
-        }],
-        pre_restore_archive: operation.detail?.pre_restore_filename
-          ? { filename: operation.detail.pre_restore_filename }
-          : null,
-      };
-      restore.restore_failed = operation.status !== 'succeeded';
-      restore.rolled_back = Boolean(operation.detail?.rolled_back);
-      return restore;
-    },
-
-    applyCompletedArchiveOperation(operation) {
-      if (operation.action === 'archive.create') {
-        this.archiveCreating = false;
-        const succeeded = operation.status === 'succeeded';
-        const archive = operation.detail?.archive || null;
-        const opaqueSqliteCount = Number(
-          archive?.opaque_sqlite_count
-          || operation.detail?.manifest?.compatibility?.opaque_sqlite?.count
-          || 0
-        );
-        const opaqueSqliteNotice = opaqueSqliteCount > 0
-          ? `；已原样保留 ${opaqueSqliteCount} 个未识别旧数据库`
-          : '';
-        this.archiveCreateMessage = succeeded
-          ? `已创建 ${archive?.filename || '存档'}${opaqueSqliteNotice}`
-          : '';
-        this.archiveCreateError = succeeded ? '' : (operation.message || '创建存档失败');
-        if (succeeded) {
-          this.archiveDescription = '';
-          this.archiveDetail = operation.detail?.manifest || null;
-          this.archiveDetailArchive = archive;
-          this.archiveDetailError = '';
-          this.clearArchiveVerify();
-          this.clearArchivePlan();
-        }
-        return;
-      }
-      if (operation.action === 'archive.restore') {
-        this.archiveRestoring = false;
-        this.archiveRestoreResult = this.archiveRestoreResultFromOperation(operation);
-        this.archiveRestoreConfirmed = false;
-        this.archiveRestoreRuntimeQuiesce = null;
-        this.archiveRestoreError = operation.status === 'succeeded'
-          ? ''
-          : (operation.detail?.rolled_back
-            ? `${operation.message || '恢复失败'}；已自动完整回退`
-            : (operation.message || '恢复失败'));
       }
     },
 
@@ -3117,9 +2768,6 @@ function app() {
         } else if (this.archiveVerifyArchive?.filename === archive.filename) {
           this.clearArchiveVerify();
         }
-        if (this.archivePlanArchive?.filename === archive.filename) {
-          this.clearArchivePlan();
-        }
         await this.loadArchives();
       } catch (err) {
         console?.warn('[DicePP] Failed to delete archive:', err);
@@ -3175,178 +2823,6 @@ function app() {
       this.archiveVerify = null;
       this.archiveVerifyError = '';
       this.archiveVerifying = false;
-    },
-
-    async requestArchiveRestorePlan(archive) {
-      if (!archive?.filename) return;
-      this.clearArchiveDetail();
-      this.clearArchiveVerify();
-      this.archivePlanArchive = archive;
-      this.archivePlan = null;
-      this.archivePlanVerification = null;
-      this.archivePlanError = '';
-      this.clearArchiveRestoreState();
-      if (archive.valid === false) {
-        this.archivePlanError = '该存档无有效 manifest';
-        return;
-      }
-
-      const filename = archive.filename;
-      this.archivePlanLoading = true;
-      try {
-        const resp = await fetch(`/api/archives/${encodeURIComponent(filename)}/restore-plan`, {
-          method: 'POST',
-        });
-        if (resp.status === 401) {
-          this.sessionState = 'login';
-          this.resetArchivesState();
-          if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-          }
-          throw new Error('未授权');
-        }
-        let data = {};
-        try {
-          data = await resp.json();
-        } catch (_) {
-          data = {};
-        }
-        if (this.archivePlanArchive?.filename !== filename) return;
-        if (resp.status === 409 && data.verification) {
-          this.archivePlanArchive = data.verification.archive || archive;
-          this.archivePlanVerification = data.verification;
-          return;
-        }
-        if (!resp.ok || !data.ok) {
-          throw new Error(data.error || data.message || data.detail?.message || '读取恢复预览失败');
-        }
-        this.archivePlanArchive = data.plan?.archive || archive;
-        this.archivePlan = data.plan || null;
-        this.archiveRestoreConfirmed = false;
-        this.archiveRestoreQuiesceRuntime = true;
-      } catch (err) {
-        if (this.archivePlanArchive?.filename !== filename) return;
-        console?.warn('[DicePP] Failed to load archive restore plan:', err);
-        this.archivePlanError = err.message || '读取恢复预览失败';
-      } finally {
-        if (this.archivePlanArchive?.filename === filename) {
-          this.archivePlanLoading = false;
-        }
-      }
-    },
-
-    clearArchivePlan() {
-      this.archivePlanArchive = null;
-      this.archivePlan = null;
-      this.archivePlanVerification = null;
-      this.archivePlanError = '';
-      this.archivePlanLoading = false;
-      this.clearArchiveRestoreState();
-    },
-
-    clearArchiveRestoreState() {
-      this.archiveRestoreConfirmed = false;
-      this.archiveRestoreQuiesceRuntime = true;
-      this.archiveRestoreDescription = '';
-      this.archiveRestoring = false;
-      this.archiveRestoreError = '';
-      this.archiveRestoreResult = null;
-      this.archiveRestoreRuntimeQuiesce = null;
-    },
-
-    async restoreArchive() {
-      const filename = this.archivePlanArchive?.filename;
-      if (!filename || !this.archiveCanRestore(this.archivePlan)) return;
-      if (!this.archiveRestoreConfirmed) {
-        this.archiveRestoreError = '请先确认恢复预览';
-        return;
-      }
-
-      this.archiveRestoring = true;
-      this.archiveRestoreError = '';
-      this.archiveRestoreResult = null;
-      this.archiveRestoreRuntimeQuiesce = null;
-      try {
-        const body = { confirm_restore: true };
-        if (this.archiveRestoreDescription) {
-          body.description = this.archiveRestoreDescription;
-        }
-        const resp = await fetch(`/api/archives/${encodeURIComponent(filename)}/restore`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (resp.status === 401) {
-          this.sessionState = 'login';
-          this.resetArchivesState();
-          if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-          }
-          throw new Error('未授权');
-        }
-        let data = {};
-        try {
-          data = await resp.json();
-        } catch (_) {
-          data = {};
-        }
-        if (this.archivePlanArchive?.filename !== filename) return;
-        if (resp.status === 409 && data.verification) {
-          this.archivePlanVerification = data.verification;
-          this.archivePlan = null;
-          this.archiveRestoreConfirmed = false;
-          this.archiveRestoreQuiesceRuntime = true;
-          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || null;
-          this.archiveRestoreError = data.message || '检查未通过，未执行恢复';
-          return;
-        }
-        if (resp.status === 409 && data.plan) {
-          this.archivePlan = data.plan;
-          this.archivePlanVerification = null;
-          this.archiveRestoreConfirmed = false;
-          this.archiveRestoreQuiesceRuntime = true;
-          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || null;
-          this.archiveRestoreError = data.message || '恢复预览存在阻塞项，未执行恢复';
-          return;
-        }
-        if (resp.ok && data.ok && data.operation?.operation_id) {
-          this.rememberArchiveOperation(data.operation, 'archive.restore');
-          const operation = await this.pollManagerOperation(
-            data.operation.operation_id,
-            30 * 60 * 1000,
-          );
-          this.applyCompletedArchiveOperation(operation);
-          this.clearPersistedArchiveOperation(operation.operation_id);
-          await this.loadArchives();
-          return;
-        }
-        if (data.restore) {
-          data.restore.restore_failed = !resp.ok || !data.ok;
-          this.archiveRestoreResult = data.restore;
-          this.archiveRestoreConfirmed = false;
-          this.archiveRestoreQuiesceRuntime = true;
-          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || data.restore.runtime_quiesce || null;
-          await this.loadArchives();
-          if (!resp.ok || !data.ok || this.archiveRestoreHasFailures(data.restore)) {
-            this.archiveRestoreError = data.message || '恢复失败';
-            return;
-          }
-          return;
-        }
-        if (!resp.ok || !data.ok) {
-          throw new Error(data.error || data.message || data.detail?.message || '恢复失败');
-        }
-      } catch (err) {
-        if (this.archivePlanArchive?.filename !== filename) return;
-        console?.warn('[DicePP] Failed to restore archive:', err);
-        this.archiveRestoreError = err.message || '恢复失败';
-      } finally {
-        if (this.archivePlanArchive?.filename === filename) {
-          this.archiveRestoring = false;
-        }
-      }
     },
 
     // ── Monitor ──
@@ -3503,57 +2979,6 @@ function app() {
       const preview = files.slice(0, 12);
       const rest = files.length - preview.length;
       return rest > 0 ? `${preview.join('\n')}\n... +${rest}` : preview.join('\n');
-    },
-
-    archivePlanEntries(plan) {
-      return Array.isArray(plan?.entries) ? plan.entries : [];
-    },
-
-    archivePlanActionCount(plan, action) {
-      return this.archivePlanEntries(plan).filter((entry) => entry?.action === action).length;
-    },
-
-    archivePlanRestorableCount(plan) {
-      return this.archivePlanActionCount(plan, 'create') + this.archivePlanActionCount(plan, 'overwrite');
-    },
-
-    archivePlanList(value) {
-      return this.archiveVerifyList(value);
-    },
-
-    archiveCanRestore(plan) {
-      return this.archivePlanEntries(plan).length > 0
-        && this.archivePlanList(plan?.problems).length === 0
-        && this.archivePlanActionCount(plan, 'blocked') === 0;
-    },
-
-    archiveRestoreDisabledReason(plan) {
-      if (!plan) return '';
-      if (this.archivePlanEntries(plan).length === 0) return '没有可恢复条目';
-      if (this.archivePlanList(plan.problems).length > 0) return '恢复预览存在问题，已禁用恢复';
-      if (this.archivePlanActionCount(plan, 'blocked') > 0) return '存在无法恢复条目，已禁用恢复';
-      return '';
-    },
-
-    archiveRestoreEntries(restore, key) {
-      const value = restore?.[key];
-      return Array.isArray(value) ? value : [];
-    },
-
-    archiveRestoreHasFailures(restore) {
-      return restore?.restore_failed === true
-        || this.archiveRestoreEntries(restore, 'failed_entries').length > 0;
-    },
-
-    archiveRestorePreRestoreFilename(restore) {
-      return restore?.pre_restore_archive?.filename || '-';
-    },
-
-    archiveRestorePreRestoreArchive(restore) {
-      const archive = restore?.pre_restore_archive;
-      const filename = archive?.filename;
-      if (!filename) return null;
-      return this.archives.find((item) => item?.filename === filename) || archive;
     },
 
     shortOperationId(operationId) {

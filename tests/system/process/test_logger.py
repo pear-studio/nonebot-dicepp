@@ -134,51 +134,6 @@ def test_windowed_launcher_logging_without_console_streams(tmp_path: Path) -> No
     assert "windowed launcher boot" in log_file.read_text(encoding="utf-8")
 
 
-def test_windowed_launcher_schema_migration_tolerates_nonebot_logging(
-    tmp_path: Path,
-) -> None:
-    """Startup recovery may import NoneBot schema modules without a console."""
-    marker = tmp_path / "schema-ok.txt"
-    script = tmp_path / "schema_windowed.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import sys
-            from pathlib import Path
-
-            sys.stdout = None
-            sys.stderr = None
-            sys.path.insert(0, {str(Path.cwd())!r})
-            sys.path.insert(0, {str(Path.cwd() / "src")!r})
-
-            import scripts.build.dashboard_entry
-            from dicepp_data import InstanceLayout
-            from dicepp_manager.maintenance_runtime import MaintenanceRuntimeSupport
-
-            support = object.__new__(MaintenanceRuntimeSupport)
-            support.layout = InstanceLayout.from_root({str(tmp_path)!r})
-            support.migrate_and_validate_schema()
-            Path({str(marker)!r}).write_text("ok", encoding="utf-8")
-            """
-        ).strip(),
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["DICEPP_PROJECT_ROOT"] = str(tmp_path)
-
-    proc = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=os.getcwd(),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=30,
-    )
-
-    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
-    assert marker.read_text(encoding="utf-8") == "ok"
-
-
 def test_restore_runtime_logging_replaces_colored_redirected_handler(
     tmp_path: Path,
 ) -> None:

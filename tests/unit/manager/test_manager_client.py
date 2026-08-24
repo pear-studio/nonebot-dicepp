@@ -55,16 +55,10 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         calls.append((method, path))
         if path == "/v1/status":
             return _compatible_status()
-        if path.startswith("/v1/operations/"):
-            return {"operation": {}}
-        if path.startswith("/v1/operations"):
-            return {"operations": []}
-        return {"operation": {}}
+        return {"results": []}
 
     monkeypatch.setattr(client, "_request", request)
     entries = [
-        lambda: client.list_operations(10),
-        lambda: client.get_operation("op/id"),
         lambda: client.control_bots(),
         lambda: client.reload_bots("bot/id"),
     ]
@@ -73,11 +67,6 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         await entry()
         assert calls[0] == ("GET", "/v1/status")
         assert len(calls) == 2
-
-    calls.clear()
-    await client.get_operation("op/id with space")
-    assert calls[1] == ("GET", "/v1/operations/op%2Fid%20with%20space")
-
 
 @pytest.mark.asyncio
 async def test_control_client_refuses_legacy_manager_without_control_capability(monkeypatch) -> None:
@@ -114,5 +103,5 @@ async def test_incompatible_manager_blocks_mutating_request(monkeypatch) -> None
 
     monkeypatch.setattr(client, "_request", request)
     with pytest.raises(ManagerIncompatible, match="compatibility mismatch"):
-        await client.delete_archive("example.zip")
+        await client.reload_bots()
     assert calls == [("GET", "/v1/status")]
