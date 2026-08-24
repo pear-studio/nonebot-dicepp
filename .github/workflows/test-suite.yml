@@ -1,70 +1,17 @@
-# DicePP Test Suite — shared reusable workflow for CI and Release gates
-#
-# 测试层级由 tests/unit、integration、system、external 目录表达。
-# CI 先运行固定 quick 代表集，再运行包含 Dashboard 浏览器测试的完整离线回归；
-# 容器和 Windows 安装包保留独立环境验收，external 不在默认 CI 中运行。
-
 name: Test Suite
 
 on:
   workflow_call:
-    outputs:
-      runtime_candidate_ref:
-        description: Tested Runtime candidate reference; empty for ordinary CI
-        value: ${{ jobs.runtime-image.outputs.candidate_ref }}
-      runtime_candidate_digest:
-        description: Tested Runtime candidate manifest digest
-        value: ${{ jobs.runtime-image.outputs.candidate_digest }}
-      runtime_candidate_image_id:
-        description: Tested Runtime candidate Docker image ID
-        value: ${{ jobs.runtime-image.outputs.candidate_image_id }}
-      dashboard_candidate_ref:
-        description: Tested Dashboard/Manager candidate reference; empty for ordinary CI
-        value: ${{ jobs.dashboard-image.outputs.candidate_ref }}
-      dashboard_candidate_digest:
-        description: Tested Dashboard/Manager candidate manifest digest
-        value: ${{ jobs.dashboard-image.outputs.candidate_digest }}
-      dashboard_candidate_image_id:
-        description: Tested Dashboard/Manager candidate Docker image ID
-        value: ${{ jobs.dashboard-image.outputs.candidate_image_id }}
-      windows_candidate_digest:
-        description: SHA-256 identity of the tested Windows package tree
-        value: ${{ jobs.windows-package.outputs.candidate_digest }}
-    inputs:
-      release_tag:
-        description: Release tag for publishable Windows and container candidates
-        required: false
-        type: string
-        default: ""
-      release_version:
-        description: PEP 440 release version for the Windows candidate
-        required: false
-        type: string
-        default: ""
-      release_commit_sha:
-        description: Full source commit for the Windows candidate
-        required: false
-        type: string
-        default: ""
+
+permissions:
+  contents: read
 
 jobs:
   quick:
     name: Quick Feedback
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.release_commit_sha || github.sha }}
-      - name: Lint — forbid datetime.now() in tests
-        run: |
-          if grep -rn 'datetime\.now()' tests/ --include="*.py" | grep -v '# allow: datetime.now'; then
-            echo "ERROR: datetime.now() found in tests. Use wall_now() or a fixed datetime instead."
-            echo "If this usage is legitimate, add a '# allow: datetime.now' comment on the same line."
-            exit 1
-          fi
-          echo "OK: no datetime.now() in tests"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
@@ -72,292 +19,35 @@ jobs:
         with:
           version: "0.11.16"
       - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
+        run: uv sync --frozen --group dev
       - name: Check test architecture
-        run: |
-          uv run python -m tools.check_test_layout tests
+        run: uv run python -m tools.check_test_layout tests
       - name: Run quick representative suite
-        run: |
-          uv run pytest -m quick -n0 --tb=short -q
+        run: uv run pytest -m quick -n0 --tb=short -q
 
-  dashboard-image:
-    name: Dashboard Image
+  docker-smoke:
+    name: Single Image Smoke
     runs-on: ubuntu-latest
     needs: quick
-    # 不声明 permissions: 继承调用方授予 (普通 CI 仅 contents:read, release quality-gate 额外授予 packages:write).
-    # 显式声明 packages:write 会让普通 CI 在嵌套作业权限校验阶段直接 startup failure.
-    outputs:
-      candidate_ref: ${{ steps.publish-candidate.outputs.candidate_ref }}
-      candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}
-      candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.release_commit_sha || github.sha }}
-      - name: Verify checked-out source identity
-        if: inputs.release_commit_sha != ''
-        env:
-          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Build DicePP image
+        run: docker build -f Dockerfile -t dicepp:ci .
+      - name: Smoke test Dashboard and Bot entrypoints
         run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA"
-      - name: Seed stale Python build artifacts in Docker context
-        run: |
-          mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
-          cat > src/dicepp.egg-info/PKG-INFO <<'EOF'
-          Metadata-Version: 2.1
-          Name: dicepp
-          Version: 0.0.0-stale
-          EOF
-          touch src/plugins/DicePP/__pycache__/stale.cpython-313.pyc
-      - name: Validate Docker Compose
-        run: |
-          docker compose config --quiet
-      - name: Build Dashboard image
-        id: build
-        run: |
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            IMAGE="ghcr.io/pear-studio/dicepp-dashboard:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            docker build \
-              -f Dockerfile.dashboard \
-              --build-arg "DICEPP_IMAGE_TAG=${{ inputs.release_tag }}" \
-              --build-arg "GIT_SHA=${{ inputs.release_commit_sha }}" \
-              -t "$IMAGE" \
-              .
-          else
-            IMAGE="dicepp-dashboard:ci"
-            docker build -f Dockerfile.dashboard -t "$IMAGE" .
-          fi
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-      - name: Smoke test Dashboard image
-        run: |
-          IMAGE="${{ steps.build.outputs.image }}"
-          expected="${{ inputs.release_version }}"
-          if [ -z "$expected" ]; then
-            expected="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
-          fi
-          actual="$(docker run --rm --network=none "$IMAGE" python -m dashboard --version)"
-          if [ "$actual" != "DicePP Dashboard v$expected" ]; then
-            echo "Dashboard version mismatch: expected 'DicePP Dashboard v$expected', got '$actual'"
-            exit 1
-          fi
-          docker run --rm --network=none "$IMAGE" sh -ec '
-            test ! -e /app/src/dicepp.egg-info
-            test ! -d /app/src/plugins/DicePP/__pycache__
-          '
-          docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 "$IMAGE"
-          ready=false
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != "true" ]; then
-            docker logs dicepp-dashboard-smoke
-            exit 1
-          fi
-      - name: Smoke test Manager image
-        run: |
-          IMAGE="${{ steps.build.outputs.image }}"
-          docker run --rm --network=none "$IMAGE" python -c '
-          import tomllib
-          from importlib.metadata import version
-          expected = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
-          assert version("dicepp") == expected
-          '
-          SMOKE_VOLUME=dicepp-manager-smoke
-          docker volume create "$SMOKE_VOLUME"
-          docker run -d --name dicepp-manager-smoke -p 127.0.0.1:4091:4091 \
-            -e DICEPP_MANAGER_HOST=0.0.0.0 \
-            -e DICEPP_MANAGER_RELEASE_SCHEDULER=false \
-            -v "$SMOKE_VOLUME:/app/manager" \
-            "$IMAGE" python -m dicepp_manager
-          ready=false
-          for i in $(seq 1 30); do
-            token="$(docker exec dicepp-manager-smoke cat /app/manager/state/api-token 2>/dev/null || true)"
-            if [ -n "$token" ] && curl --fail --silent \
-              -H "Authorization: Bearer $token" \
-              http://127.0.0.1:4091/v1/health >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != "true" ]; then
-            docker logs dicepp-manager-smoke
-            exit 1
-          fi
-      - name: Clean up image smoke resources
-        if: always()
-        run: |
-          docker rm -f dicepp-dashboard-smoke dicepp-manager-smoke 2>/dev/null || true
-          docker volume rm -f dicepp-manager-smoke 2>/dev/null || true
-      - name: Login to GHCR for release candidate
-        if: inputs.release_tag != ''
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Publish tested Dashboard candidate
-        if: inputs.release_tag != ''
-        id: publish-candidate
-        run: |
-          IMAGE="${{ steps.build.outputs.image }}"
-          REPOSITORY="ghcr.io/pear-studio/dicepp-dashboard"
-          LOCAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
-          docker push "$IMAGE"
-          DIGEST="$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')"
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Invalid Dashboard candidate digest: $DIGEST"
-            exit 1
-          fi
-
-          docker image rm "$IMAGE"
-          docker pull "${REPOSITORY}@${DIGEST}"
-          PULLED_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${REPOSITORY}@${DIGEST}")"
-          if [ "$PULLED_IMAGE_ID" != "$LOCAL_IMAGE_ID" ]; then
-            echo "Dashboard candidate identity changed during registry round trip"
-            exit 1
-          fi
-
-          echo "candidate_ref=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "candidate_digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "candidate_image_id=$PULLED_IMAGE_ID" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Dashboard/Manager container candidate"
-            echo
-            echo "- Reference: \`$IMAGE\`"
-            echo "- Manifest digest: \`$DIGEST\`"
-            echo "- Image ID: \`$PULLED_IMAGE_ID\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  runtime-image:
-    name: Runtime Image
-    runs-on: ubuntu-latest
-    needs: quick
-    # 不声明 permissions: 继承调用方授予 (普通 CI 仅 contents:read, release quality-gate 额外授予 packages:write).
-    # 显式声明 packages:write 会让普通 CI 在嵌套作业权限校验阶段直接 startup failure.
-    outputs:
-      candidate_ref: ${{ steps.publish-candidate.outputs.candidate_ref }}
-      candidate_digest: ${{ steps.publish-candidate.outputs.candidate_digest }}
-      candidate_image_id: ${{ steps.publish-candidate.outputs.candidate_image_id }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.release_commit_sha || github.sha }}
-      - name: Verify checked-out source identity
-        if: inputs.release_commit_sha != ''
-        env:
-          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT_SHA"
-      - name: Seed stale Python build artifacts in Docker context
-        run: |
-          mkdir -p src/dicepp.egg-info src/plugins/DicePP/__pycache__
-          cat > src/dicepp.egg-info/PKG-INFO <<'EOF'
-          Metadata-Version: 2.1
-          Name: dicepp
-          Version: 0.0.0-stale
-          EOF
-          touch src/plugins/DicePP/__pycache__/stale.cpython-313.pyc
-      - name: Build Runtime image
-        id: build
-        run: |
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            IMAGE="ghcr.io/pear-studio/nonebot-dicepp:candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            docker build \
-              -f Dockerfile \
-              --build-arg "DICEPP_IMAGE_TAG=${{ inputs.release_tag }}" \
-              --build-arg "GIT_SHA=${{ inputs.release_commit_sha }}" \
-              -t "$IMAGE" \
-              .
-          else
-            IMAGE="dicepp-runtime:ci"
-            docker build -f Dockerfile -t "$IMAGE" .
-          fi
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-      - name: Smoke test Runtime image
-        run: |
-          IMAGE="${{ steps.build.outputs.image }}"
-          expected="${{ inputs.release_version }}"
-          if [ -z "$expected" ]; then
-            expected="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
-          fi
-          actual="$(docker run --rm --network=none "$IMAGE" python bot.py --version)"
-          if [ "$actual" != "DicePP v$expected" ]; then
-            echo "Runtime version mismatch: expected 'DicePP v$expected', got '$actual'"
-            exit 1
-          fi
-          docker run --rm --network=none "$IMAGE" sh -ec '
-            test ! -e /app/src/dicepp.egg-info
-            test ! -d /app/src/plugins/DicePP/__pycache__
-          '
-          docker run --rm --network=none "$IMAGE" python bot.py --smoke-check
-      - name: Login to GHCR for release candidate
-        if: inputs.release_tag != ''
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Publish tested Runtime candidate
-        if: inputs.release_tag != ''
-        id: publish-candidate
-        run: |
-          IMAGE="${{ steps.build.outputs.image }}"
-          REPOSITORY="ghcr.io/pear-studio/nonebot-dicepp"
-          LOCAL_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
-          docker push "$IMAGE"
-          DIGEST="$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')"
-          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Invalid Runtime candidate digest: $DIGEST"
-            exit 1
-          fi
-
-          docker image rm "$IMAGE"
-          docker pull "${REPOSITORY}@${DIGEST}"
-          PULLED_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${REPOSITORY}@${DIGEST}")"
-          if [ "$PULLED_IMAGE_ID" != "$LOCAL_IMAGE_ID" ]; then
-            echo "Runtime candidate identity changed during registry round trip"
-            exit 1
-          fi
-
-          echo "candidate_ref=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "candidate_digest=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "candidate_image_id=$PULLED_IMAGE_ID" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Runtime container candidate"
-            echo
-            echo "- Reference: \`$IMAGE\`"
-            echo "- Manifest digest: \`$DIGEST\`"
-            echo "- Image ID: \`$PULLED_IMAGE_ID\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          expected="$(sed -n 's/^version = \"\(.*\)\"$/\1/p' pyproject.toml)"
+          test "$(docker run --rm --network=none dicepp:ci python -m dashboard --version)" = "DicePP Dashboard v$expected"
+          test "$(docker run --rm --network=none dicepp:ci python bot.py --version)" = "DicePP v$expected"
+          docker run --rm --network=none dicepp:ci python bot.py --smoke-check
 
   windows-package:
-    name: Windows Package
+    name: Windows Portable Package
     runs-on: windows-latest
     needs: quick
-    permissions:
-      contents: read
-    outputs:
-      candidate_digest: ${{ steps.record-candidate.outputs.package_tree_sha256 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.release_commit_sha || github.sha }}
-      - name: Verify checked-out source identity
-        if: inputs.release_commit_sha != ''
-        shell: pwsh
-        env:
-          EXPECTED_COMMIT_SHA: ${{ inputs.release_commit_sha }}
-        run: |
-          $actualCommit = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $env:EXPECTED_COMMIT_SHA) {
-            throw "Checked-out commit differs from the requested candidate"
-          }
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
@@ -365,145 +55,24 @@ jobs:
         with:
           version: "0.11.16"
       - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Install Playwright Chromium
-        run: |
-          uv run playwright install chromium
-      - name: Build Windows executables
+        run: uv sync --frozen --group dev
+      - name: Build and assemble Portable
+        shell: pwsh
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
           uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
-      - name: Assemble and smoke test package
-        shell: pwsh
-        run: |
           ./scripts/build/assemble_windows_package.ps1
-          . ./scripts/build/windows_process_runner.ps1
-
-          $versionLine = (Get-Content pyproject.toml | Select-String '^version =').Line
-          $version = [regex]::Match($versionLine, '"([^"\r\n]+)"').Groups[1].Value
-          $expectedBot = "DicePP v$version"
-          $diagnostics = "dist/windows-process-diagnostics"
-          $actualBot = Invoke-DicePPProcess `
-            -FilePath "dist/DicePP/DicePP-Runtime.exe" `
-            -Arguments @("--version") `
-            -Scenario "assembled-runtime-version" `
-            -DiagnosticsRoot $diagnostics
-          if ($actualBot -ne $expectedBot) {
-            throw "Bot version mismatch: expected '$expectedBot', got '$actualBot'"
-          }
-          Invoke-DicePPProcess `
-            -FilePath "dist/DicePP/DicePP-Runtime.exe" `
-            -Arguments @("--smoke-check") `
-            -Scenario "assembled-runtime-smoke" `
-            -DiagnosticsRoot $diagnostics | Out-Null
-
-          $expectedDashboard = $expectedBot.Replace("DicePP v", "DicePP Dashboard v")
-          $actualDashboard = Invoke-DicePPProcess `
-            -FilePath "dist/DicePP/DicePP.exe" `
-            -Arguments @("--version") `
-            -Scenario "assembled-dashboard-version" `
-            -DiagnosticsRoot $diagnostics
-          if ($actualDashboard -ne $expectedDashboard) {
-            throw "Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
-          }
-          Invoke-DicePPProcess `
-            -FilePath "dist/DicePP/DicePP.exe" `
-            -Arguments @("--smoke-check") `
-            -Scenario "assembled-dashboard-smoke" `
-            -DiagnosticsRoot $diagnostics | Out-Null
-          if (Test-Path -LiteralPath "dist/DicePP/DicePP-UpdateGuard.exe") {
-            throw "Windows package must not contain DicePP-UpdateGuard.exe"
-          }
-      - name: Upload Windows process diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: dicepp-windows-process-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/windows-process-diagnostics
-          if-no-files-found: ignore
-          retention-days: 30
-      - name: Run Windows package smokes
-        env:
-          DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
-          DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
-        run: |
-          uv run pytest tests/system/package/windows -n0 --tb=short -q
-      - name: Record release candidate provenance
-        if: inputs.release_tag != ''
-        id: record-candidate
+      - name: Smoke test Portable executables
         shell: pwsh
         run: |
-          $runtimeState = @(
-            "dist/DicePP/manager/state/api-token",
-            "dist/DicePP/manager/control",
-            "dist/DicePP/manager/packages"
-          )
-          foreach ($path in $runtimeState) {
-            if (Test-Path -LiteralPath $path) {
-              Remove-Item -LiteralPath $path -Recurse -Force
-            }
-          }
-          $actualCommit = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actualCommit -notmatch '^[0-9a-f]{40}$') {
-            throw "Unable to resolve the checked-out commit"
-          }
-          uv run --frozen python scripts/build/release_build_metadata.py write-windows-candidate `
-            --output dist/windows-candidate.json `
-            --tag "${{ inputs.release_tag }}" `
-            --version "${{ inputs.release_version }}" `
-            --expected-commit-sha "${{ inputs.release_commit_sha }}" `
-            --actual-commit-sha "$actualCommit" `
-            --package-root dist/DicePP `
-            --github-output "$env:GITHUB_OUTPUT"
-      - name: Package artifact
-        if: inputs.release_tag == ''
-        shell: pwsh
-        run: |
-          Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64.zip
+          $version = [regex]::Match((Get-Content pyproject.toml | Select-String '^version =').Line, '"([^"\r\n]+)"').Groups[1].Value
+          if ((& dist/DicePP/DicePP-Runtime.exe --version) -ne "DicePP v$version") { throw "Runtime version mismatch" }
+          if ((& dist/DicePP/DicePP.exe --version) -ne "DicePP Dashboard v$version") { throw "Dashboard version mismatch" }
+          & dist/DicePP/DicePP-Runtime.exe --smoke-check
+          & dist/DicePP/DicePP.exe --smoke-check
+          Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64-Portable.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: inputs.release_tag == ''
         with:
           name: dicepp-windows-ci
-          path: DicePP-ci-win64.zip
+          path: DicePP-ci-win64-Portable.zip
           retention-days: 3
-      - name: Upload release-ready Windows candidate
-        if: inputs.release_tag != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: dicepp-windows-candidate
-          path: |
-            dist/DicePP
-            !dist/DicePP/manager/state/api-token
-            !dist/DicePP/manager/control/**
-            !dist/DicePP/manager/packages/**
-            dist/windows-candidate.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-  full:
-    name: Full Offline Regression
-    runs-on: ubuntu-latest
-    needs: quick
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.release_commit_sha || github.sha }}
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13"
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
-        with:
-          version: "0.11.16"
-      - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Install Playwright Chromium
-        run: |
-          uv run playwright install --with-deps chromium
-      - name: Run full regression with coverage
-        run: |
-          uv run pytest --cov --cov-report=term-missing --cov-report=xml

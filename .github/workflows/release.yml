@@ -1,702 +1,135 @@
-# Promote one explicitly selected Final Candidate run and artifact without rebuilding.
-# Every public byte and container manifest must have been sealed by candidate.yml.
-
-name: Promote Release
+name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Exact candidate version to promote (without v prefix)
-        required: true
-        type: string
-      candidate_run_id:
-        description: Successful Final Candidate workflow run ID
-        required: true
-        type: string
-      candidate_artifact_id:
-        description: Sealed final candidate artifact ID from that run
-        required: true
-        type: string
+  push:
+    tags:
+      - "v*"
 
 permissions:
-  actions: read
-  contents: read
-  packages: read
+  contents: write
+  packages: write
 
 concurrency:
-  group: promote-release-global
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  verify-candidate:
-    name: Verify Explicit Candidate Selection
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      packages: read
-    outputs:
-      tag: ${{ steps.candidate.outputs.tag }}
-      version: ${{ steps.candidate.outputs.version }}
-      commit_sha: ${{ steps.candidate.outputs.commit_sha }}
-      run_attempt: ${{ steps.selection.outputs.run_attempt }}
-      artifact_name: ${{ steps.selection.outputs.artifact_name }}
-      artifact_digest: ${{ steps.selection.outputs.artifact_digest }}
-      workflow_ref: ${{ steps.selection.outputs.workflow_ref }}
-      automatic_upgrade: ${{ steps.candidate.outputs.automatic_upgrade }}
-      is_prerelease: ${{ steps.candidate.outputs.is_prerelease }}
-      receipt_sha256: ${{ steps.candidate.outputs.receipt_sha256 }}
-      runtime_candidate_ref: ${{ steps.candidate.outputs.runtime_candidate_ref }}
-      runtime_manifest_digest: ${{ steps.candidate.outputs.runtime_manifest_digest }}
-      runtime_image_id: ${{ steps.candidate.outputs.runtime_image_id }}
-      dashboard_candidate_ref: ${{ steps.candidate.outputs.dashboard_candidate_ref }}
-      dashboard_manifest_digest: ${{ steps.candidate.outputs.dashboard_manifest_digest }}
-      dashboard_image_id: ${{ steps.candidate.outputs.dashboard_image_id }}
+  tests:
+    uses: ./.github/workflows/test-suite.yml
+
+  windows-portable:
+    name: Build Windows Portable
+    runs-on: windows-latest
+    needs: tests
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
-      - name: Validate run, workflow, attempt, head, and artifact ownership
-        id: selection
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          WORKFLOW_REF: ${{ github.ref }}
-          WORKFLOW_SHA: ${{ github.sha }}
-          RUN_ID: ${{ inputs.candidate_run_id }}
-          ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || [[ ! "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Candidate run ID and artifact ID must be positive integers"
-            exit 1
-          fi
-
-          gh api "repos/${REPOSITORY}" > repository.json
-          DEFAULT_BRANCH="$(jq -r .default_branch repository.json)"
-          REPOSITORY_ID="$(jq -r .id repository.json)"
-          if [ "$WORKFLOW_REF" != "refs/heads/${DEFAULT_BRANCH}" ]; then
-            echo "Promotion must be dispatched from the default branch"
-            exit 1
-          fi
-          DEFAULT_SHA="$(gh api "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}" --jq .commit.sha)"
-          if [ "$WORKFLOW_SHA" != "$DEFAULT_SHA" ]; then
-            echo "Promotion workflow must run from the current default-branch HEAD"
-            exit 1
-          fi
-
-          gh api "repos/${REPOSITORY}/actions/workflows/candidate.yml" > workflow.json
-          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > run.json
-          RUN_ATTEMPT="$(jq -r .run_attempt run.json)"
-          HEAD_SHA="$(jq -r .head_sha run.json)"
-          RUN_PATH="$(jq -r .path run.json)"
-          if [ "$(jq -r .id run.json)" != "$RUN_ID" ] || \
-             [ "$(jq -r .workflow_id run.json)" != "$(jq -r .id workflow.json)" ] || \
-             [ "$RUN_PATH" != ".github/workflows/candidate.yml" ] || \
-             [ "$(jq -r .event run.json)" != "workflow_dispatch" ] || \
-             [ "$(jq -r .status run.json)" != "completed" ] || \
-             [ "$(jq -r .conclusion run.json)" != "success" ] || \
-             [ "$(jq -r .head_branch run.json)" != "$DEFAULT_BRANCH" ] || \
-             [ "$HEAD_SHA" != "$DEFAULT_SHA" ] || \
-             [ "$(jq -r .repository.full_name run.json)" != "$REPOSITORY" ] || \
-             [[ ! "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || \
-             [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Selected run is not a successful Final Candidate run for the current default-branch HEAD"
-            exit 1
-          fi
-
-          gh api "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}" > artifact.json
-          ARTIFACT_NAME="$(jq -r .name artifact.json)"
-          ARTIFACT_DIGEST="$(jq -r .digest artifact.json)"
-          EXPECTED_NAME="dicepp-final-candidate-${RUN_ID}-${RUN_ATTEMPT}"
-          if [ "$(jq -r .id artifact.json)" != "$ARTIFACT_ID" ] || \
-             [ "$(jq -r .expired artifact.json)" != "false" ] || \
-             [ "$(jq -r .workflow_run.id artifact.json)" != "$RUN_ID" ] || \
-             [ "$(jq -r .workflow_run.repository_id artifact.json)" != "$REPOSITORY_ID" ] || \
-             [ "$(jq -r .workflow_run.head_repository_id artifact.json)" != "$REPOSITORY_ID" ] || \
-             [ "$(jq -r .workflow_run.head_sha artifact.json)" != "$HEAD_SHA" ] || \
-             [ "$ARTIFACT_NAME" != "$EXPECTED_NAME" ] || \
-             [[ ! "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || \
-             ! jq -e '(.size_in_bytes | type) == "number" and (.size_in_bytes > 0) and (.size_in_bytes == (.size_in_bytes | floor))' artifact.json >/dev/null; then
-            echo "Selected artifact does not belong to the selected candidate run and attempt"
-            exit 1
-          fi
-
-          EXPECTED_WORKFLOW_REF="${REPOSITORY}/${RUN_PATH}@refs/heads/${DEFAULT_BRANCH}"
-          {
-            echo "run_attempt=$RUN_ATTEMPT"
-            echo "head_sha=$HEAD_SHA"
-            echo "artifact_name=$ARTIFACT_NAME"
-            echo "artifact_digest=$ARTIFACT_DIGEST"
-            echo "workflow_ref=$EXPECTED_WORKFLOW_REF"
-          } >> "$GITHUB_OUTPUT"
-
-      # Checkout before extracting the selected artifact: checkout's default
-      # clean step would otherwise remove dist/candidate as an untracked path.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
         with:
-          ref: ${{ github.sha }}
-
-      - name: Download and authenticate the selected artifact archive
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
-          EXPECTED_DIGEST: ${{ steps.selection.outputs.artifact_digest }}
+          version: "0.11.16"
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+      - name: Build and smoke test Portable
+        shell: pwsh
         run: |
-          set -euo pipefail
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
-            > candidate-artifact.zip
-          ACTUAL_DIGEST="sha256:$(sha256sum candidate-artifact.zip | cut -d' ' -f1)"
-          if [ "$ACTUAL_DIGEST" != "$EXPECTED_DIGEST" ]; then
-            echo "Downloaded Actions artifact digest differs from its API identity"
-            exit 1
-          fi
-          python - <<'PY'
-          import shutil
-          import stat
-          import zipfile
-          from pathlib import Path, PurePosixPath
+          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
+          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
+          ./scripts/build/assemble_windows_package.ps1
+          $version = [regex]::Match((Get-Content pyproject.toml | Select-String '^version =').Line, '"([^"\r\n]+)"').Groups[1].Value
+          if ((& dist/DicePP/DicePP-Runtime.exe --version) -ne "DicePP v$version") { throw "Runtime version mismatch" }
+          if ((& dist/DicePP/DicePP.exe --version) -ne "DicePP Dashboard v$version") { throw "Dashboard version mismatch" }
+          & dist/DicePP/DicePP-Runtime.exe --smoke-check
+          & dist/DicePP/DicePP.exe --smoke-check
+          Compress-Archive -Path dist/DicePP -DestinationPath "DicePP-${{ github.ref_name }}-win64-Portable.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-portable
+          path: DicePP-${{ github.ref_name }}-win64-Portable.zip
+          if-no-files-found: error
+          retention-days: 7
 
-          root = Path("dist/candidate")
-          root.mkdir(parents=True, exist_ok=False)
-          with zipfile.ZipFile("candidate-artifact.zip") as archive:
-              seen = set()
-              for member in archive.infolist():
-                  path = PurePosixPath(member.filename)
-                  mode = member.external_attr >> 16
-                  if (
-                      member.is_dir()
-                      or path.name != member.filename
-                      or path.name in {"", ".", ".."}
-                      or path.name in seen
-                      or stat.S_ISLNK(mode)
-                  ):
-                      raise SystemExit("candidate artifact must contain unique regular files at its root")
-                  seen.add(path.name)
-                  with archive.open(member) as source, (root / path.name).open("xb") as target:
-                      shutil.copyfileobj(source, target)
-          PY
-
-      - name: Install receipt verifier dependency
-        run: |
-          python -m pip install \
-            --disable-pip-version-check \
-            --no-deps \
-            --only-binary=:all: \
-            --require-hashes \
-            -r scripts/build/release-metadata-requirements.txt
-
-      - name: Verify receipt and every sealed file digest
-        id: candidate
-        env:
-          VERSION: ${{ inputs.version }}
-          RUN_ID: ${{ inputs.candidate_run_id }}
-          RUN_ATTEMPT: ${{ steps.selection.outputs.run_attempt }}
-          ARTIFACT_NAME: ${{ steps.selection.outputs.artifact_name }}
-          COMMIT_SHA: ${{ steps.selection.outputs.head_sha }}
-          EXPECTED_WORKFLOW_REF: ${{ steps.selection.outputs.workflow_ref }}
-        run: |
-          set -euo pipefail
-          python scripts/build/promotion_candidate.py \
-            --candidate-root dist/candidate \
-            --receipt dist/candidate/dicepp-candidate.json \
-            --repository "$GITHUB_REPOSITORY" \
-            --workflow-ref "$EXPECTED_WORKFLOW_REF" \
-            --run-id "$RUN_ID" \
-            --run-attempt "$RUN_ATTEMPT" \
-            --artifact-name "$ARTIFACT_NAME" \
-            --commit-sha "$COMMIT_SHA" \
-            --version "$VERSION" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Verify candidate container manifests before any write
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-          RUNTIME_REF: ${{ steps.candidate.outputs.runtime_candidate_ref }}
-          RUNTIME_DIGEST: ${{ steps.candidate.outputs.runtime_manifest_digest }}
-          RUNTIME_IMAGE_ID: ${{ steps.candidate.outputs.runtime_image_id }}
-          DASHBOARD_REF: ${{ steps.candidate.outputs.dashboard_candidate_ref }}
-          DASHBOARD_DIGEST: ${{ steps.candidate.outputs.dashboard_manifest_digest }}
-          DASHBOARD_IMAGE_ID: ${{ steps.candidate.outputs.dashboard_image_id }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          verify_candidate_image() {
-            local ref="$1" expected_digest="$2" expected_image_id="$3"
-            local immutable_ref="${ref%@*}@${expected_digest}"
-            local actual_digest actual_image_id
-            actual_digest="$(docker buildx imagetools inspect "$immutable_ref" --format '{{.Manifest.Digest}}')"
-            actual_image_id="$(docker buildx imagetools inspect "$immutable_ref" --raw | jq -r .config.digest)"
-            if [ "$actual_digest" != "$expected_digest" ] || [ "$actual_image_id" != "$expected_image_id" ]; then
-              echo "Registry candidate identity differs from the sealed receipt"
-              exit 1
-            fi
-          }
-          verify_candidate_image "$RUNTIME_REF" "$RUNTIME_DIGEST" "$RUNTIME_IMAGE_ID"
-          verify_candidate_image "$DASHBOARD_REF" "$DASHBOARD_DIGEST" "$DASHBOARD_IMAGE_ID"
-
-  promote:
-    name: Promote the Verified Bytes
-    needs: verify-candidate
+  publish:
+    name: Publish Release
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-      packages: write
+    needs: windows-portable
     steps:
-      # actions/checkout v4; update by resolving refs/tags/v4 and reviewing the pinned commit.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          ref: ${{ github.sha }}
+          name: windows-portable
+          path: dist
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
-
-      - name: Re-download the immutable selected artifact
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        with:
+          version: "0.11.16"
+      - name: Install dependencies for empty-instance import smoke
+        run: uv sync --frozen --group dev
+      - name: Test empty-instance import fixture
+        run: uv run pytest tests/integration/dashboard/test_instance_data.py -n0 --tb=short -q
+      - name: Build and fresh-start the single DicePP image
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
-          EXPECTED_DIGEST: ${{ needs.verify-candidate.outputs.artifact_digest }}
+          IMAGE: ghcr.io/pear-studio/nonebot-dicepp:${{ github.ref_name }}
+          LATEST_IMAGE: ghcr.io/pear-studio/nonebot-dicepp:latest
         run: |
-          set -euo pipefail
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
-            > candidate-artifact.zip
-          ACTUAL_DIGEST="sha256:$(sha256sum candidate-artifact.zip | cut -d' ' -f1)"
-          test "$ACTUAL_DIGEST" = "$EXPECTED_DIGEST"
-          python - <<'PY'
-          import shutil
-          import stat
-          import zipfile
-          from pathlib import Path, PurePosixPath
-
-          root = Path("dist/candidate")
-          root.mkdir(parents=True, exist_ok=False)
-          with zipfile.ZipFile("candidate-artifact.zip") as archive:
-              seen = set()
-              for member in archive.infolist():
-                  path = PurePosixPath(member.filename)
-                  mode = member.external_attr >> 16
-                  if member.is_dir() or path.name != member.filename or path.name in {"", ".", ".."} or path.name in seen or stat.S_ISLNK(mode):
-                      raise SystemExit("candidate artifact must contain unique regular files at its root")
-                  seen.add(path.name)
-                  with archive.open(member) as source, (root / path.name).open("xb") as target:
-                      shutil.copyfileobj(source, target)
-          PY
-
-      - name: Re-verify sealed bytes before publishing
-        env:
-          VERSION: ${{ inputs.version }}
-          RUN_ID: ${{ inputs.candidate_run_id }}
-          RUN_ATTEMPT: ${{ needs.verify-candidate.outputs.run_attempt }}
-          ARTIFACT_NAME: ${{ needs.verify-candidate.outputs.artifact_name }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          EXPECTED_WORKFLOW_REF: ${{ needs.verify-candidate.outputs.workflow_ref }}
-          EXPECTED_RECEIPT_SHA256: ${{ needs.verify-candidate.outputs.receipt_sha256 }}
+          expected="$(sed -n 's/^version = \"\(.*\)\"$/\1/p' pyproject.toml)"
+          test -n "$expected"
+          test "$GITHUB_REF_NAME" = "v$expected"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker_args=(--build-arg "DICEPP_IMAGE_TAG=${{ github.ref_name }}" --build-arg "GIT_SHA=${{ github.sha }}" -t "$IMAGE")
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            docker_args+=( -t "$LATEST_IMAGE" )
+          fi
+          docker build "${docker_args[@]}" .
+          test "$(docker run --rm --network=none "$IMAGE" python -m dashboard --version)" = "DicePP Dashboard v$expected"
+          mkdir -p smoke/{config,data,content,dashboard/data,manager/backups}
+          docker run -d --name dicepp-release-smoke -p 127.0.0.1:4090:4090 \
+            -e DICEPP_ONEBOT_HOST=0.0.0.0 \
+            -v "$PWD/smoke/config:/app/config" \
+            -v "$PWD/smoke/data:/app/data" \
+            -v "$PWD/smoke/content:/app/content" \
+            -v "$PWD/smoke/dashboard/data:/app/dashboard/data" \
+            -v "$PWD/smoke/manager/backups:/app/manager/backups" \
+            "$IMAGE"
+          trap 'docker rm -f dicepp-release-smoke >/dev/null 2>&1 || true' EXIT
+          ready=false
+          for i in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:4090/api/health >/dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then docker logs dicepp-release-smoke; exit 1; fi
+          docker rm -f dicepp-release-smoke >/dev/null
+      - name: Prepare release assets
         run: |
-          set -euo pipefail
-          python -m pip install \
-            --disable-pip-version-check \
-            --no-deps \
-            --only-binary=:all: \
-            --require-hashes \
-            -r scripts/build/release-metadata-requirements.txt
-          python scripts/build/promotion_candidate.py \
-            --candidate-root dist/candidate \
-            --receipt dist/candidate/dicepp-candidate.json \
-            --repository "$GITHUB_REPOSITORY" \
-            --workflow-ref "$EXPECTED_WORKFLOW_REF" \
-            --run-id "$RUN_ID" \
-            --run-attempt "$RUN_ATTEMPT" \
-            --artifact-name "$ARTIFACT_NAME" \
-            --commit-sha "$COMMIT_SHA" \
-            --version "$VERSION"
-          ACTUAL_RECEIPT_SHA256="$(sha256sum dist/candidate/dicepp-candidate.json | cut -d' ' -f1)"
-          test "$ACTUAL_RECEIPT_SHA256" = "$EXPECTED_RECEIPT_SHA256"
-
-      - name: Fetch immutable release notes from the candidate commit
+          cp docker-compose.yml dist/docker-compose.yml
+          (cd dist && sha256sum "DicePP-${{ github.ref_name }}-win64-Portable.zip" docker-compose.yml > checksums.sha256)
+      - name: Push the single GHCR image
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
+          IMAGE: ghcr.io/pear-studio/nonebot-dicepp:${{ github.ref_name }}
+          LATEST_IMAGE: ghcr.io/pear-studio/nonebot-dicepp:latest
         run: |
-          set -euo pipefail
-          gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "repos/${REPOSITORY}/contents/docs/releases/${TAG}.md?ref=${COMMIT_SHA}" \
-            > release-notes.md
-          test -s release-notes.md
-
-      - name: Preflight every immutable public resource
-        id: preflight
+          docker push "$IMAGE"
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            docker push "$LATEST_IMAGE"
+          fi
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          GHCR_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          IS_PRERELEASE: ${{ needs.verify-candidate.outputs.is_prerelease }}
-          RECEIPT_SHA256: ${{ needs.verify-candidate.outputs.receipt_sha256 }}
-          RUNTIME_DIGEST: ${{ needs.verify-candidate.outputs.runtime_manifest_digest }}
-          DASHBOARD_DIGEST: ${{ needs.verify-candidate.outputs.dashboard_manifest_digest }}
         run: |
-          set -euo pipefail
-          DEFAULT_BRANCH="$(gh api "repos/${REPOSITORY}" --jq .default_branch)"
-          CURRENT_DEFAULT_SHA="$(gh api "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}" --jq .commit.sha)"
-          if [ "$COMMIT_SHA" != "$CURRENT_DEFAULT_SHA" ]; then
-            echo "Candidate is no longer the current default-branch HEAD"
-            exit 1
-          fi
-
-          if gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}" > tag.json 2>tag-error.txt; then
-            if [ "$(jq -r .object.type tag.json)" != "commit" ] || [ "$(jq -r .object.sha tag.json)" != "$COMMIT_SHA" ]; then
-              echo "Existing version tag does not identify the candidate commit"
-              exit 1
-            fi
-          elif ! grep -q "HTTP 404" tag-error.txt; then
-            cat tag-error.txt
-            exit 1
-          fi
-
-          gh api --paginate --slurp "repos/${REPOSITORY}/releases?per_page=100" > release-pages.json
-          jq --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]' release-pages.json > matching-releases.json
-          RELEASE_COUNT="$(jq length matching-releases.json)"
-          if [ "$RELEASE_COUNT" -gt 1 ]; then
-            echo "Repository contains ambiguous releases for the target version"
-            exit 1
-          fi
-
-          jq --arg receipt "$RECEIPT_SHA256" \
-            '[.artifacts[] | {name: .filename, digest: ("sha256:" + .sha256)}] + [{name: "dicepp-candidate.json", digest: ("sha256:" + $receipt)}]' \
-            dist/candidate/dicepp-candidate.json > expected-assets.json
-          : > missing-assets.txt
-          RELEASE_EXISTS=false
-          RELEASE_PUBLIC=false
-          if [ "$RELEASE_COUNT" = 1 ]; then
-            RELEASE_EXISTS=true
-            jq '.[0]' matching-releases.json > release.json
-            python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          release = json.loads(Path("release.json").read_text(encoding="utf-8"))
-          expected = json.loads(Path("expected-assets.json").read_text(encoding="utf-8"))
-          expected_by_name = {item["name"]: item["digest"] for item in expected}
-          actual_assets = release["assets"]
-          actual_names = [item["name"] for item in actual_assets]
-          unexpected = sorted(set(actual_names) - set(expected_by_name))
-          duplicates = sorted(name for name in set(actual_names) if actual_names.count(name) != 1)
-          if unexpected or duplicates:
-              raise SystemExit(f"Release contains unexpected or duplicate assets: {unexpected + duplicates}")
-          if release.get("target_commitish") != os.environ["COMMIT_SHA"]:
-              raise SystemExit("Existing Release targets a different commit")
-          if bool(release.get("prerelease")) != (os.environ["IS_PRERELEASE"] == "true"):
-              raise SystemExit("Existing Release has different prerelease metadata")
-          if release.get("body", "") != Path("release-notes.md").read_text(encoding="utf-8"):
-              raise SystemExit("Existing Release notes differ; public metadata is never overwritten")
-          present = set()
-          for asset in actual_assets:
-              expected_digest = expected_by_name[asset["name"]]
-              if asset.get("digest") != expected_digest:
-                  raise SystemExit(f"Release asset digest differs: {asset['name']}")
-              present.add(asset["name"])
-          missing = sorted(set(expected_by_name) - present)
-          if not release.get("draft") and missing:
-              raise SystemExit("A public Release is incomplete and will not be overwritten")
-          if not release.get("draft") and release.get("immutable") is not True:
-              raise SystemExit("An existing public Release must be immutable")
-          Path("missing-assets.txt").write_text("".join(f"{name}\n" for name in missing), encoding="utf-8")
-          PY
-            if [ "$(jq -r .draft release.json)" = "false" ]; then
-              RELEASE_PUBLIC=true
-            fi
+          notes="docs/releases/${{ github.ref_name }}.md"
+          if [ -f "$notes" ]; then
+            gh release create "${{ github.ref_name }}" \
+              "dist/DicePP-${{ github.ref_name }}-win64-Portable.zip" \
+              dist/docker-compose.yml dist/checksums.sha256 \
+              --title "${{ github.ref_name }}" --notes-file "$notes" --target "${{ github.sha }}"
           else
-            jq -r '.[].name' expected-assets.json > missing-assets.txt
+            gh release create "${{ github.ref_name }}" \
+              "dist/DicePP-${{ github.ref_name }}-win64-Portable.zip" \
+              dist/docker-compose.yml dist/checksums.sha256 \
+              --title "${{ github.ref_name }}" --generate-notes --target "${{ github.sha }}"
           fi
-
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          inspect_version_target() {
-            local target="$1" expected="$2" output="$3"
-            if docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}' > "$output" 2>"${output}.err"; then
-              if [ "$(cat "$output")" != "$expected" ]; then
-                echo "Existing immutable image tag has a different manifest digest: $target"
-                exit 1
-              fi
-              return
-            fi
-            if ! grep -Eqi 'not found|manifest unknown|no such manifest' "${output}.err"; then
-              cat "${output}.err"
-              exit 1
-            fi
-            : > "$output"
-          }
-          inspect_version_target "ghcr.io/pear-studio/nonebot-dicepp:${TAG}" "$RUNTIME_DIGEST" runtime-version-state
-          inspect_version_target "ghcr.io/pear-studio/dicepp-dashboard:${TAG}" "$DASHBOARD_DIGEST" dashboard-version-state
-
-          {
-            echo "release_exists=$RELEASE_EXISTS"
-            echo "release_public=$RELEASE_PUBLIC"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Create draft Release before tag publication
-        if: steps.preflight.outputs.release_exists != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          IS_PRERELEASE: ${{ needs.verify-candidate.outputs.is_prerelease }}
-        run: |
-          jq -n \
-            --arg tag "$TAG" \
-            --arg target "$COMMIT_SHA" \
-            --argjson prerelease "$IS_PRERELEASE" \
-            --rawfile body release-notes.md \
-            '{tag_name: $tag, name: $tag, target_commitish: $target, body: $body, draft: true, prerelease: $prerelease}' \
-            > create-release.json
-          gh api --method POST "repos/${REPOSITORY}/releases" --input create-release.json > release.json
-
-      - name: Upload only missing original candidate bytes
-        if: steps.preflight.outputs.release_public != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          RELEASE_ID="$(jq -r .id release.json)"
-          while IFS= read -r asset; do
-            [ -n "$asset" ] || continue
-            if [ "$(gh api "repos/${REPOSITORY}/releases/${RELEASE_ID}" --jq .draft)" != "true" ]; then
-              echo "Release became public before all sealed assets were staged"
-              exit 1
-            fi
-            gh release upload "$TAG" "dist/candidate/${asset}"
-          done < missing-assets.txt
-
-      - name: Verify every staged Release asset digest
-        if: steps.preflight.outputs.release_public != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          RELEASE_ID="$(jq -r .id release.json)"
-          gh api "repos/${REPOSITORY}/releases/${RELEASE_ID}" > staged-release.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          release = json.loads(Path("staged-release.json").read_text(encoding="utf-8"))
-          expected = json.loads(Path("expected-assets.json").read_text(encoding="utf-8"))
-          expected_by_name = {item["name"]: item["digest"] for item in expected}
-          actual = release["assets"]
-          actual_by_name = {item["name"]: item.get("digest") for item in actual}
-          if not release.get("draft"):
-              raise SystemExit("Release became public before staged asset verification")
-          if len(actual_by_name) != len(actual) or actual_by_name != expected_by_name:
-              raise SystemExit("Staged Release asset names or digests differ from the sealed candidate")
-          PY
-
-      - name: Promote immutable version image manifests
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          RUNTIME_REF: ${{ needs.verify-candidate.outputs.runtime_candidate_ref }}
-          RUNTIME_DIGEST: ${{ needs.verify-candidate.outputs.runtime_manifest_digest }}
-          DASHBOARD_REF: ${{ needs.verify-candidate.outputs.dashboard_candidate_ref }}
-          DASHBOARD_DIGEST: ${{ needs.verify-candidate.outputs.dashboard_manifest_digest }}
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          promote_version() {
-            local source="$1" expected="$2" target="$3"
-            local actual
-            if actual="$(docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
-              test "$actual" = "$expected"
-              echo "$target already identifies the sealed manifest"
-              return
-            fi
-            docker buildx imagetools create --prefer-index=false --tag "$target" "${source%@*}@${expected}"
-            actual="$(docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}')"
-            test "$actual" = "$expected"
-          }
-          promote_version "$RUNTIME_REF" "$RUNTIME_DIGEST" "ghcr.io/pear-studio/nonebot-dicepp:${TAG}"
-          promote_version "$DASHBOARD_REF" "$DASHBOARD_DIGEST" "ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
-
-      - name: Revalidate publication boundary immediately before publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GHCR_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          EXPECTED_PUBLIC: ${{ steps.preflight.outputs.release_public }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          IS_PRERELEASE: ${{ needs.verify-candidate.outputs.is_prerelease }}
-          RUNTIME_DIGEST: ${{ needs.verify-candidate.outputs.runtime_manifest_digest }}
-          DASHBOARD_DIGEST: ${{ needs.verify-candidate.outputs.dashboard_manifest_digest }}
-        run: |
-          set -euo pipefail
-          DEFAULT_BRANCH="$(gh api "repos/${REPOSITORY}" --jq .default_branch)"
-          CURRENT_DEFAULT_SHA="$(gh api "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}" --jq .commit.sha)"
-          test "$CURRENT_DEFAULT_SHA" = "$COMMIT_SHA"
-          RELEASE_ID="$(jq -r .id release.json)"
-          gh api "repos/${REPOSITORY}/releases/${RELEASE_ID}" > publication-release.json
-
-          TAG_STATE=absent
-          if gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}" > publication-tag.json 2>publication-tag-error.txt; then
-            if [ "$(jq -r .object.type publication-tag.json)" != "commit" ] || \
-               [ "$(jq -r .object.sha publication-tag.json)" != "$COMMIT_SHA" ]; then
-              echo "Version tag changed before publication"
-              exit 1
-            fi
-            TAG_STATE=exact
-          elif ! grep -q "HTTP 404" publication-tag-error.txt; then
-            cat publication-tag-error.txt
-            exit 1
-          fi
-          if [ "$EXPECTED_PUBLIC" = "true" ] && [ "$TAG_STATE" != "exact" ]; then
-            echo "Existing public Release lost its immutable tag"
-            exit 1
-          fi
-
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          test "$(docker buildx imagetools inspect "ghcr.io/pear-studio/nonebot-dicepp:${TAG}" --format '{{.Manifest.Digest}}')" = "$RUNTIME_DIGEST"
-          test "$(docker buildx imagetools inspect "ghcr.io/pear-studio/dicepp-dashboard:${TAG}" --format '{{.Manifest.Digest}}')" = "$DASHBOARD_DIGEST"
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          def load(name):
-              return json.loads(Path(name).read_text(encoding="utf-8"))
-
-          release = load("publication-release.json")
-          original_release = load("release.json")
-          expected_assets = load("expected-assets.json")
-          expected_public = os.environ["EXPECTED_PUBLIC"] == "true"
-          expected_prerelease = os.environ["IS_PRERELEASE"] == "true"
-
-          actual_assets = release.get("assets", [])
-          actual_by_name = {item["name"]: item.get("digest") for item in actual_assets}
-          expected_by_name = {item["name"]: item["digest"] for item in expected_assets}
-          if len(actual_by_name) != len(actual_assets) or actual_by_name != expected_by_name:
-              raise SystemExit("Release assets changed before publication")
-          if (
-              release.get("id") != original_release.get("id")
-              or release.get("tag_name") != os.environ["TAG"]
-              or release.get("name") != os.environ["TAG"]
-              or release.get("target_commitish") != os.environ["COMMIT_SHA"]
-              or release.get("body", "") != Path("release-notes.md").read_text(encoding="utf-8")
-              or bool(release.get("prerelease")) != expected_prerelease
-              or bool(release.get("draft")) == expected_public
-              or (expected_public and release.get("immutable") is not True)
-          ):
-              raise SystemExit("Release metadata or lifecycle state changed before publication")
-          PY
-
-      - name: Publish the fully staged Release
-        if: steps.preflight.outputs.release_public != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          RELEASE_ID="$(jq -r .id release.json)"
-          printf '%s\n' '{"draft":false}' > publish-release.json
-          gh api --method PATCH "repos/${REPOSITORY}/releases/${RELEASE_ID}" --input publish-release.json
-
-      - name: Verify published Release, tag, assets, and image manifests
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GHCR_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          IS_PRERELEASE: ${{ needs.verify-candidate.outputs.is_prerelease }}
-          RUNTIME_DIGEST: ${{ needs.verify-candidate.outputs.runtime_manifest_digest }}
-          DASHBOARD_DIGEST: ${{ needs.verify-candidate.outputs.dashboard_manifest_digest }}
-        run: |
-          set -euo pipefail
-          RELEASE_ID="$(jq -r .id release.json)"
-          gh api "repos/${REPOSITORY}/releases/${RELEASE_ID}" > published-release.json
-          gh api "repos/${REPOSITORY}/git/ref/tags/${TAG}" > published-tag.json
-          if [ "$(jq -r .object.type published-tag.json)" != "commit" ] || \
-             [ "$(jq -r .object.sha published-tag.json)" != "$COMMIT_SHA" ]; then
-            echo "Published tag differs from the candidate commit"
-            exit 1
-          fi
-
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          release = json.loads(Path("published-release.json").read_text(encoding="utf-8"))
-          expected_assets = json.loads(Path("expected-assets.json").read_text(encoding="utf-8"))
-          assets = release.get("assets", [])
-          actual_by_name = {item["name"]: item.get("digest") for item in assets}
-          expected_by_name = {item["name"]: item["digest"] for item in expected_assets}
-          if len(actual_by_name) != len(assets) or actual_by_name != expected_by_name:
-              raise SystemExit("Published Release assets differ from the sealed candidate")
-          if (
-              release.get("tag_name") != os.environ["TAG"]
-              or release.get("name") != os.environ["TAG"]
-              or release.get("target_commitish") != os.environ["COMMIT_SHA"]
-              or release.get("body", "") != Path("release-notes.md").read_text(encoding="utf-8")
-              or bool(release.get("prerelease")) != (os.environ["IS_PRERELEASE"] == "true")
-              or release.get("draft") is not False
-              or release.get("immutable") is not True
-          ):
-              raise SystemExit("Published Release metadata or immutable state differs from the candidate")
-          PY
-
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          test "$(docker buildx imagetools inspect "ghcr.io/pear-studio/nonebot-dicepp:${TAG}" --format '{{.Manifest.Digest}}')" = "$RUNTIME_DIGEST"
-          test "$(docker buildx imagetools inspect "ghcr.io/pear-studio/dicepp-dashboard:${TAG}" --format '{{.Manifest.Digest}}')" = "$DASHBOARD_DIGEST"
-
-      - name: Update stable latest manifests last
-        if: needs.verify-candidate.outputs.is_prerelease != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GHCR_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          TAG: ${{ needs.verify-candidate.outputs.tag }}
-          COMMIT_SHA: ${{ needs.verify-candidate.outputs.commit_sha }}
-          RUNTIME_REF: ${{ needs.verify-candidate.outputs.runtime_candidate_ref }}
-          RUNTIME_DIGEST: ${{ needs.verify-candidate.outputs.runtime_manifest_digest }}
-          DASHBOARD_REF: ${{ needs.verify-candidate.outputs.dashboard_candidate_ref }}
-          DASHBOARD_DIGEST: ${{ needs.verify-candidate.outputs.dashboard_manifest_digest }}
-        run: |
-          set -euo pipefail
-          DEFAULT_BRANCH="$(gh api "repos/${REPOSITORY}" --jq .default_branch)"
-          CURRENT_DEFAULT_SHA="$(gh api "repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}" --jq .commit.sha)"
-          CURRENT_LATEST_TAG="$(gh api "repos/${REPOSITORY}/releases/latest" --jq .tag_name)"
-          if [ "$CURRENT_DEFAULT_SHA" != "$COMMIT_SHA" ] || [ "$CURRENT_LATEST_TAG" != "$TAG" ]; then
-            echo "Refusing to update latest from a stale HEAD or non-latest published Release"
-            exit 1
-          fi
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          update_latest() {
-            local source="$1" expected="$2" target="$3"
-            local actual=""
-            actual="$(docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
-            if [ "$actual" = "$expected" ]; then
-              echo "$target already identifies the sealed manifest"
-              return
-            fi
-            docker buildx imagetools create --prefer-index=false --tag "$target" "${source%@*}@${expected}"
-            actual="$(docker buildx imagetools inspect "$target" --format '{{.Manifest.Digest}}')"
-            test "$actual" = "$expected"
-          }
-          update_latest "$RUNTIME_REF" "$RUNTIME_DIGEST" "ghcr.io/pear-studio/nonebot-dicepp:latest"
-          update_latest "$DASHBOARD_REF" "$DASHBOARD_DIGEST" "ghcr.io/pear-studio/dicepp-dashboard:latest"

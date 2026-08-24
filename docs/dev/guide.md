@@ -84,20 +84,15 @@ uv run pytest tests/unit/persona/ -v
 uv run python bot.py
 ```
 
-无 QQ 的测试和 Dashboard/Manager 联调使用隔离 Shell Runtime。不要手动把
-`serve --manager` 指向尚未启动的 `4091`：推荐使用下列脚本，它会在同一个
-`dashboard-dev` workspace 中依次启动 Manager、通过带 token 的 `/v1/health`
-确认就绪、启动 Dashboard 和 Bot Runtime：
+无 QQ 的 Dashboard 和 Bot 联调直接使用当前本地入口：
 
 ```bash
-python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py start
-# 结束联调：
-python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
+uv run python -m dashboard
 ```
 
-该入口只监听本机，用于指令 E2E、Manager 控制通道和真实 Bot 生命周期
-验收，不作为生产部署方式。历史 standalone 实现仅归档为
-[archive/standalone_bot_legacy.py](archive/standalone_bot_legacy.py)。
+该入口在正常运行时启动一个 Bot 子进程；测试和导入 `dashboard.src.app` 不会
+隐式启动 Bot。Bot 生命周期、日志尾部和停止行为由
+`dashboard/src/bot_process.py` 的单一 controller 负责。
 
 ## 新增命令
 
@@ -119,8 +114,8 @@ python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 
 命令中通过 `self.bot.db` 使用仓储 API。
 
-涉及 `InstanceLayout`、DataAsset、Manager、归档恢复或兼容升级的跨进程约束，先读
-[Manager、归档恢复与升级架构](manager-architecture.md)。
+涉及 `InstanceLayout`、DataAsset、归档、空实例导入或运行时约束，先读
+[Runtime 架构](runtime-architecture.md)。
 
 涉及 schema 或持久化格式变化时：
 

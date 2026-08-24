@@ -10,11 +10,8 @@ ROOT = next(
     for parent in Path(__file__).resolve().parents
     if (parent / "pyproject.toml").is_file()
 )
-CANDIDATE_WORKFLOW = ROOT / ".github" / "workflows" / "candidate.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
-WINDOWS_VALIDATOR = (
-    ROOT / "scripts" / "build" / "validate_windows_final_candidate.ps1"
-)
+WINDOWS_VALIDATOR = ROOT / "scripts" / "build" / "validate_windows_final_candidate.ps1"
 TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
 PINNED_ACTIONS = {
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
@@ -27,7 +24,7 @@ PINNED_ACTIONS = {
 
 
 def _workflow() -> dict:
-    return yaml.safe_load(CANDIDATE_WORKFLOW.read_text(encoding="utf-8"))
+    return yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _step(job: dict, name: str) -> dict:
@@ -76,9 +73,9 @@ def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
 def test_release_workflows_pin_actions_and_toolchain_versions() -> None:
     sha_pattern = re.compile(r"^[0-9a-f]{40}$")
     for workflow_path in (
-        CANDIDATE_WORKFLOW,
         RELEASE_WORKFLOW,
         ROOT / ".github" / "workflows" / "test-suite.yml",
+        ROOT / ".github" / "workflows" / "ci.yml",
     ):
         workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
         for job in workflow["jobs"].values():
@@ -98,19 +95,26 @@ def test_release_workflows_pin_actions_and_toolchain_versions() -> None:
                     assert step["with"]["version"] == "0.11.16"
 
 
-def test_windows_package_and_final_validator_share_the_real_process_runner() -> None:
+def test_windows_workflow_builds_and_smokes_the_portable_contract() -> None:
     suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
-    assembled = _step(
-        suite["jobs"]["windows-package"],
-        "Assemble and smoke test package",
-    )["run"]
-    validator = WINDOWS_VALIDATOR.read_text(encoding="utf-8")
+    steps = suite["jobs"]["windows-package"]["steps"]
+    build = _step(suite["jobs"]["windows-package"], "Build and assemble Portable")["run"]
+    smoke = _step(suite["jobs"]["windows-package"], "Smoke test Portable executables")["run"]
 
-    assert "windows_process_runner.ps1" in assembled
-    assert "windows_process_runner.ps1" in validator
-    assert "function Invoke-PackagedExe" not in assembled
-    assert "function Invoke-PackagedExe" not in validator
-    for script in (assembled, validator):
-        assert "Invoke-DicePPProcess" in script
-        assert "-Scenario" in script
-        assert "DiagnosticsRoot" in script
+    assert "scripts/build/dicepp.spec" in build
+    assert "scripts/build/dashboard.spec" in build
+    assert "assemble_windows_package.ps1" in build
+    assert "DicePP-Runtime.exe --version" in smoke
+    assert "DicePP.exe --version" in smoke
+    assert "Compress-Archive" in smoke
+    assert len(steps) == 7
+
+
+def test_release_updates_latest_only_for_stable_tags() -> None:
+    publish = _step(yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["publish"], "Build and fresh-start the single DicePP image")["run"]
+    push = _step(yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["publish"], "Push the single GHCR image")["run"]
+
+    assert "test \"$GITHUB_REF_NAME\" = \"v$expected\"" in publish
+    assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in publish
+    assert "docker_args+=( -t \"$LATEST_IMAGE\" )" in publish
+    assert "docker push \"$LATEST_IMAGE\"" in push
