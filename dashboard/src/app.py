@@ -40,6 +40,14 @@ from dicepp_data.archive import (
     read_archive_detail,
     verify_archive,
 )
+from dicepp_data.instance_data import (
+    InstanceDataError,
+    InstanceDataInProgressError,
+    InstanceDataNotEmptyError,
+    clear_instance_data,
+    import_instance_data,
+    instance_data_marker_path,
+)
 from dicepp_manager.client import (
     ManagerClient,
     ManagerClientError,
@@ -78,6 +86,12 @@ from .query_audit import (
 
 logger = logging.getLogger("dashboard")
 
+
+def _bot_start_blocker(layout) -> str | None:
+    if instance_data_marker_path(layout).exists():
+        return "Business data import is incomplete; clear the instance before starting Bot"
+    return None
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 
@@ -109,7 +123,11 @@ async def lifespan(app: FastAPI):
     control_poll_task = asyncio.create_task(_poll_manager_control_status(app))
     try:
         if auto_start:
-            await asyncio.to_thread(controller.start)
+            blocker = _bot_start_blocker(layout)
+            if blocker:
+                logger.error(blocker)
+            else:
+                await asyncio.to_thread(controller.start)
         yield
     finally:
         control_poll_task.cancel()
@@ -496,6 +514,11 @@ def _archive_error_response(exc: ArchiveError) -> JSONResponse:
     return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
 
 
+def _instance_data_error_response(exc: InstanceDataError) -> JSONResponse:
+    status = 409 if isinstance(exc, (InstanceDataNotEmptyError, InstanceDataInProgressError)) else 422
+    return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
+
+
 def _manager_error_response(exc: ManagerClientError) -> JSONResponse:
     content = dict(exc.payload)
     content.setdefault("ok", False)
@@ -657,6 +680,53 @@ async def archives_delete(filename: str, request: Request):
     except ArchiveError as exc:
         return _archive_error_response(exc)
     return _ok({"deleted": filename, "archive": archive})
+
+
+@app.post("/api/instance/clear", dependencies=[Depends(require_auth)])
+async def instance_clear(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or body.get("confirm") is not True:
+        _err("confirm must be true for clearing business data", 400)
+    controller = _get_bot_process_controller(request)
+    async with _data_maintenance_lock(request):
+        status = await asyncio.to_thread(controller.status)
+        if status.state != "stopped":
+            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before clearing business data"})
+        try:
+            result = await asyncio.to_thread(clear_instance_data, _archive_layout())
+        except InstanceDataError as exc:
+            return _instance_data_error_response(exc)
+    return _ok(result)
+
+
+@app.post("/api/instance/import", dependencies=[Depends(require_auth)])
+async def instance_import(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or body.get("confirm") is not True:
+        _err("confirm must be true for importing business data", 400)
+    archive = body.get("archive")
+    source_path = body.get("source_path")
+    if archive is not None and not isinstance(archive, str):
+        _err("archive must be a filename", 400)
+    if source_path is not None and not isinstance(source_path, str):
+        _err("source_path must be a directory path", 400)
+    if isinstance(source_path, str) and not source_path.strip():
+        _err("source_path must be a non-empty directory path", 400)
+    controller = _get_bot_process_controller(request)
+    async with _data_maintenance_lock(request):
+        status = await asyncio.to_thread(controller.status)
+        if status.state != "stopped":
+            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before importing business data"})
+        try:
+            result = await asyncio.to_thread(
+                import_instance_data,
+                _archive_layout(),
+                archive=archive,
+                source_root=source_path,
+            )
+        except InstanceDataError as exc:
+            return _instance_data_error_response(exc)
+    return _ok(result)
 
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────
@@ -1412,6 +1482,15 @@ async def bot_process_action(action: str, request: Request):
         lock = asyncio.Lock()
         request.app.state.data_maintenance_lock = lock
     async with lock:
+        blocker = _bot_start_blocker(DashboardPaths.instance_layout()) if action in {"start", "restart"} else None
+        if blocker:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "message": blocker,
+                },
+            )
         try:
             status = await asyncio.to_thread(getattr(controller, action))
         except (OSError, RuntimeError) as exc:

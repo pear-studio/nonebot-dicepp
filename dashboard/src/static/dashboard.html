@@ -905,7 +905,18 @@
                   @change="importArchiveFile($event)"
                 />
               </label>
+              <button @click="clearInstanceData()" :disabled="instanceDataLoading" data-testid="instance-clear-button" class="px-4 py-2 border border-red-200 text-red-700 text-sm rounded hover:bg-red-50 disabled:opacity-50">清空业务数据</button>
+              <select x-model="instanceImportArchive" data-testid="instance-import-archive-select" class="px-3 py-2 border rounded text-sm">
+                <option value="">选择存档导入空实例</option>
+                <template x-for="archive in archives.filter(item => item.valid)" :key="`instance-${archive.filename}`">
+                  <option :value="archive.filename" x-text="archive.filename"></option>
+                </template>
+              </select>
+              <button @click="importArchiveToEmptyInstance()" :disabled="instanceDataLoading || !instanceImportArchive" data-testid="instance-import-button" class="px-4 py-2 border border-amber-200 text-amber-800 text-sm rounded hover:bg-amber-50 disabled:opacity-50">导入到空实例</button>
             </div>
+            <p class="mt-3 text-xs text-gray-500">清空和导入只处理业务数据；Dashboard 登录、存档库存和运行日志不受影响。导入前必须停止 Bot，目标必须为空。</p>
+            <div x-show="instanceDataError" x-cloak data-testid="instance-data-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="instanceDataError"></div>
+            <div x-show="instanceDataMessage" x-cloak data-testid="instance-data-message" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-3 rounded text-sm" x-text="instanceDataMessage"></div>
           </div>
         </div>
 
@@ -1005,12 +1016,12 @@
                       data-testid="archive-verify-status"
                       class="font-medium"
                       :class="archiveVerify.verified ? 'text-green-700' : 'text-red-700'"
-                      x-text="archiveVerify.verified ? '可恢复' : '需要处理'"
+                      x-text="archiveVerify.verified ? '通过校验' : '需要处理'"
                     ></div>
                   </div>
                   <div>
                     <div class="text-xs text-gray-500">可恢复文件</div>
-                    <div data-testid="archive-verify-restorable-count" class="font-medium" x-text="archiveVerifyRestorableFiles(archiveVerify).length"></div>
+                    <div data-testid="archive-verify-files-count" class="font-medium" x-text="archiveVerifyFiles(archiveVerify).length"></div>
                   </div>
                 </div>
                 <div>
@@ -1479,6 +1490,10 @@ function app() {
     archiveVerify: null,
     archiveVerifyError: '',
     archiveVerifying: false,
+    instanceImportArchive: '',
+    instanceDataLoading: false,
+    instanceDataError: '',
+    instanceDataMessage: '',
 
     // ── Tab: Audit ──
     auditLogs: [],
@@ -2652,6 +2667,10 @@ function app() {
       this.archiveVerify = null;
       this.archiveVerifyError = '';
       this.archiveVerifying = false;
+      this.instanceImportArchive = '';
+      this.instanceDataLoading = false;
+      this.instanceDataError = '';
+      this.instanceDataMessage = '';
     },
 
     async loadArchives() {
@@ -2725,10 +2744,46 @@ function app() {
       }
     },
 
+    async clearInstanceData() {
+      if (!confirm('清空全部业务数据？此操作不会自动备份或回滚。')) return;
+      this.instanceDataLoading = true;
+      this.instanceDataError = '';
+      this.instanceDataMessage = '';
+      try {
+        const data = await this.api('/api/instance/clear', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true }),
+        });
+        this.instanceDataMessage = `已清空 ${data.count || 0} 个业务文件`;
+      } catch (err) {
+        this.instanceDataError = err.message || '清空业务数据失败';
+      } finally {
+        this.instanceDataLoading = false;
+      }
+    },
+
+    async importArchiveToEmptyInstance() {
+      if (!this.instanceImportArchive) return;
+      if (!confirm(`将存档 ${this.instanceImportArchive} 导入空实例？`)) return;
+      this.instanceDataLoading = true;
+      this.instanceDataError = '';
+      this.instanceDataMessage = '';
+      try {
+        const data = await this.api('/api/instance/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true, archive: this.instanceImportArchive }),
+        });
+        this.instanceDataMessage = `已导入 ${data.count || 0} 个业务文件`;
+      } catch (err) {
+        this.instanceDataError = err.message || '导入业务数据失败';
+      } finally {
+        this.instanceDataLoading = false;
+      }
+    },
+
     async viewArchive(archive) {
       if (!archive?.filename) return;
       this.clearArchiveVerify();
-      this.clearArchivePlan();
       this.archiveDetailArchive = archive;
       this.archiveDetail = null;
       this.archiveDetailError = '';
@@ -2789,7 +2844,6 @@ function app() {
     async verifyArchive(archive) {
       if (!archive?.filename) return;
       this.clearArchiveDetail();
-      this.clearArchivePlan();
       this.archiveVerifyArchive = archive;
       this.archiveVerify = null;
       this.archiveVerifyError = '';
@@ -2969,12 +3023,12 @@ function app() {
       return value.map((item) => String(item));
     },
 
-    archiveVerifyRestorableFiles(verification) {
-      return this.archiveVerifyList(verification?.restorable_files);
+    archiveVerifyFiles(verification) {
+      return this.archiveVerifyList(verification?.restorable_files || verification?.files);
     },
 
-    archiveVerifyRestorableFilesPreview(verification) {
-      const files = this.archiveVerifyRestorableFiles(verification);
+    archiveVerifyFilesPreview(verification) {
+      const files = this.archiveVerifyFiles(verification);
       if (files.length === 0) return '-';
       const preview = files.slice(0, 12);
       const rest = files.length - preview.length;
