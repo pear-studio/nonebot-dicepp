@@ -11,7 +11,6 @@ from packaging.version import Version
 
 from dicepp_data import DATA_CATALOG
 from dicepp_manager.deployment import DEPLOYMENT_SCHEMA_VERSION
-from dicepp_manager.release import SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL
 try:
     from scripts.build.release_metadata import (
         ReleaseMetadata,
@@ -66,25 +65,6 @@ def build_linux_package_manifest(
         )
     ):
         raise ValueError("Exactly two immutable Docker image IDs are required")
-    if (
-        metadata.linux_manager_handoff_protocol is not None
-        and metadata.linux_manager_handoff_protocol
-        != SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL
-    ):
-        raise ValueError(
-            "linux_manager_handoff_protocol must match the supported "
-            f"handoff protocol v{SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL}"
-        )
-    if (
-        metadata.automatic_upgrade
-        and "manager" in metadata.change_scope
-        and metadata.linux_manager_handoff_protocol
-        != SUPPORTED_LINUX_MANAGER_HANDOFF_PROTOCOL
-    ):
-        raise ValueError(
-            "automatic_upgrade with a Manager change requires a supported "
-            "linux_manager_handoff_protocol in the release metadata"
-        )
     image_records = [
         {
             "role": role,

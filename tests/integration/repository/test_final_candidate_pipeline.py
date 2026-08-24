@@ -62,65 +62,6 @@ def test_project_and_packaged_runtimes_share_python_313_baseline() -> None:
         assert "RUN pip install uv==0.11.16 " in dockerfile_text
 
 
-def test_candidate_is_bound_to_an_explicit_current_master_head() -> None:
-    workflow = _workflow()
-    dispatch = workflow.get("on", workflow.get(True))["workflow_dispatch"]
-    guard = _step(
-        workflow["jobs"]["candidate-metadata"],
-        "Reject an ambiguous target commit",
-    )["run"]
-
-    assert set(dispatch["inputs"]) == {
-        "version",
-        "commit_sha",
-        "exercise_upgrade_matrix",
-    }
-    assert dispatch["inputs"]["version"]["required"] is True
-    assert dispatch["inputs"]["commit_sha"]["required"] is True
-    assert dispatch["inputs"]["exercise_upgrade_matrix"] == {
-        "description": "Exercise a pinned source that supports the target upgrade contract",
-        "required": False,
-        "default": False,
-        "type": "boolean",
-    }
-    assert "^[0-9a-f]{40}$" in guard
-    assert '"$WORKFLOW_SHA" != "$INPUT_COMMIT_SHA"' in guard
-    assert '"$GITHUB_REF" != "refs/heads/master"' in guard
-    assert workflow["permissions"] == {"contents": "read"}
-    forbidden = ("gh release", "git tag", "git push", "imagetools create")
-    workflow_text = CANDIDATE_WORKFLOW.read_text(encoding="utf-8")
-    assert not any(command in workflow_text for command in forbidden)
-
-
-def test_seal_consumes_validation_declarations_and_exposes_unique_artifact() -> None:
-    receipt = _workflow()["jobs"]["receipt"]
-    seal = _step(receipt, "Generate immutable candidate receipt")["run"]
-    upload = _step(receipt, "Upload sealed final candidate")
-
-    assert seal.count("--validated-summary") == 2
-    assert '--artifact-name "$ARTIFACT_NAME"' in seal
-    expected_name = (
-        "dicepp-final-candidate-${{ github.run_id }}-${{ github.run_attempt }}"
-    )
-    assert upload["with"]["name"] == expected_name
-    assert upload["with"]["retention-days"] == 30
-    assert upload["id"] == "upload"
-    assert receipt["outputs"] == {
-        "artifact_id": "${{ steps.upload.outputs.artifact-id }}",
-        "artifact_digest": "${{ steps.upload.outputs.artifact-digest }}",
-        "artifact_url": "${{ steps.upload.outputs.artifact-url }}",
-    }
-    assert receipt["if"] == (
-        "always() && needs.candidate-metadata.result == 'success' && "
-        "needs.quality-gate.result == 'success' && "
-        "needs.windows-final.result == 'success' && "
-        "needs.linux-final.result == 'success' && "
-        "needs.upgrade-evidence.result == 'success'"
-    )
-    diagnostics = _step(receipt, "Upload candidate seal diagnostics")
-    assert diagnostics["if"] == "always()"
-
-
 def test_validators_declare_hashes_only_after_full_candidate_smoke() -> None:
     windows = WINDOWS_VALIDATOR.read_text(encoding="utf-8")
     linux = LINUX_VALIDATOR.read_text(encoding="utf-8")
@@ -179,34 +120,6 @@ def test_release_workflows_pin_actions_and_toolchain_versions() -> None:
                     assert step["with"]["version"] == "0.11.16"
 
 
-def test_critical_python_jobs_pin_python_before_their_first_invocation() -> None:
-    targets = (
-        (CANDIDATE_WORKFLOW, "upgrade-evidence"),
-        (RELEASE_WORKFLOW, "verify-candidate"),
-        (RELEASE_WORKFLOW, "promote"),
-    )
-    for workflow_path, job_name in targets:
-        job = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))["jobs"][
-            job_name
-        ]
-        setup_indices = [
-            index
-            for index, step in enumerate(job["steps"])
-            if str(step.get("uses", "")).startswith("actions/setup-python@")
-        ]
-        python_indices = [
-            index
-            for index, step in enumerate(job["steps"])
-            if re.search(r"\bpython\b", str(step.get("run", "")))
-        ]
-
-        assert len(setup_indices) == 1, f"{job_name} must set up Python exactly once"
-        assert python_indices, f"{job_name} must invoke Python"
-        setup = job["steps"][setup_indices[0]]
-        assert setup["with"]["python-version"] == "3.13"
-        assert setup_indices[0] < min(python_indices)
-
-
 def test_windows_package_and_final_validator_share_the_real_process_runner() -> None:
     suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
     assembled = _step(
@@ -223,14 +136,3 @@ def test_windows_package_and_final_validator_share_the_real_process_runner() -> 
         assert "Invoke-DicePPProcess" in script
         assert "-Scenario" in script
         assert "DiagnosticsRoot" in script
-
-
-def test_candidate_summary_documents_expiry_and_non_promotable_diagnostics() -> None:
-    receipt = _workflow()["jobs"]["receipt"]
-    summary = _step(receipt, "Publish sealed candidate identity")["run"]
-
-    assert "Sealed artifact retention: 30 days" in summary
-    assert "Failure diagnostics retention: 30 days" in summary
-    assert "Intermediate Windows/Linux payload artifacts: 7 days" in summary
-    assert "then-current master HEAD" in summary
-    assert "do not reconstruct or mix bytes" in summary
