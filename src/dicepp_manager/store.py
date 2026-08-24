@@ -13,7 +13,7 @@ from .models import ManagerOperation, utc_now
 
 OPERATIONS_SQL = """CREATE TABLE IF NOT EXISTS manager_operations (
     operation_id TEXT PRIMARY KEY,
-    runtime_unit_id TEXT NOT NULL,
+    target TEXT NOT NULL,
     action TEXT NOT NULL,
     status TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -59,24 +59,32 @@ class ManagerOperationStore:
         with self._transaction() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(OPERATIONS_SQL)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(manager_operations)")
+            }
+            if "runtime_unit_id" in columns and "target" not in columns:
+                connection.execute(
+                    "ALTER TABLE manager_operations RENAME COLUMN runtime_unit_id TO target"
+                )
             connection.execute(JOURNAL_SQL)
 
     def save(self, operation: ManagerOperation) -> None:
         with self._transaction() as connection:
             connection.execute(
                 """INSERT INTO manager_operations (
-                       operation_id, runtime_unit_id, action, status, created_at,
+                       operation_id, target, action, status, created_at,
                        updated_at, started_at, finished_at, message, detail
                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(operation_id) DO UPDATE SET
-                       runtime_unit_id=excluded.runtime_unit_id,
+                       target=excluded.target,
                        action=excluded.action, status=excluded.status,
                        updated_at=excluded.updated_at, started_at=excluded.started_at,
                        finished_at=excluded.finished_at, message=excluded.message,
                        detail=excluded.detail""",
                 (
                     operation.operation_id,
-                    operation.runtime_unit_id,
+                    operation.target,
                     operation.action,
                     operation.status,
                     operation.created_at,
@@ -260,7 +268,7 @@ class ManagerOperationStore:
             detail = {}
         return ManagerOperation(
             operation_id=row["operation_id"],
-            runtime_unit_id=row["runtime_unit_id"],
+            target=row["target"],
             action=row["action"],
             status=row["status"],
             created_at=row["created_at"],

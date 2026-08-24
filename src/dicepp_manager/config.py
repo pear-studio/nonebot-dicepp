@@ -8,7 +8,6 @@ from pathlib import Path
 
 from dicepp_data import InstanceLayout
 from .deployment import MANAGER_DEFAULT_PORT
-from .models import validate_runtime_unit_id
 
 
 def _float_env(name: str, default: float) -> float:
@@ -26,19 +25,9 @@ class ManagerSettings:
     layout: InstanceLayout
     host: str = "127.0.0.1"
     port: int = MANAGER_DEFAULT_PORT
-    runtime: str = "unavailable"
-    runtime_unit_id: str = "dicepp-runtime"
-    process_command: str = ""
-    process_cwd: str | None = None
-    process_stop_timeout: float = 2.0
-    docker_command: str = "unix:///var/run/docker.sock"
-    docker_timeout: float = 30.0
     control_heartbeat_timeout: float = 120.0
     control_reload_timeout: float = 5.0
     token_path: Path | None = None
-
-    def __post_init__(self) -> None:
-        validate_runtime_unit_id(self.runtime_unit_id)
 
     @classmethod
     def from_env(cls, default_root: str | os.PathLike[str]) -> "ManagerSettings":
@@ -47,13 +36,6 @@ class ManagerSettings:
             layout=layout,
             host=os.environ.get("DICEPP_MANAGER_HOST", "127.0.0.1"),
             port=int(os.environ.get("DICEPP_MANAGER_PORT", str(MANAGER_DEFAULT_PORT))),
-            runtime=os.environ.get("DICEPP_MANAGER_RUNTIME", "unavailable").strip().lower(),
-            runtime_unit_id=os.environ.get("DICEPP_MANAGER_RUNTIME_UNIT_ID", "dicepp-runtime"),
-            process_command=os.environ.get("DICEPP_MANAGER_PROCESS_COMMAND", ""),
-            process_cwd=os.environ.get("DICEPP_MANAGER_PROCESS_CWD", str(layout.root)),
-            process_stop_timeout=_float_env("DICEPP_MANAGER_PROCESS_STOP_TIMEOUT", 2.0),
-            docker_command=os.environ.get("DICEPP_MANAGER_DOCKER_COMMAND", "unix:///var/run/docker.sock"),
-            docker_timeout=_float_env("DICEPP_MANAGER_DOCKER_TIMEOUT", 30.0),
             control_heartbeat_timeout=_float_env(
                 "DICEPP_MANAGER_CONTROL_HEARTBEAT_TIMEOUT", 120.0
             ),

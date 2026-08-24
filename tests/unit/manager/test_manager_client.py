@@ -59,17 +59,12 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
             return {"operation": {}}
         if path.startswith("/v1/operations"):
             return {"operations": []}
-        if path.endswith("/logs?lines=20") or path == "/v1/logs?lines=20":
-            return {"logs": {}}
         return {"operation": {}}
 
     monkeypatch.setattr(client, "_request", request)
     entries = [
         lambda: client.list_operations(10),
         lambda: client.get_operation("op/id"),
-        lambda: client.operate("unit/id", "start/now"),
-        lambda: client.logs("unit/id", 20),
-        lambda: client.runtime_logs(20),
         lambda: client.control_bots(),
         lambda: client.reload_bots("bot/id"),
     ]
@@ -82,12 +77,6 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
     calls.clear()
     await client.get_operation("op/id with space")
     assert calls[1] == ("GET", "/v1/operations/op%2Fid%20with%20space")
-    calls.clear()
-    await client.operate("unit/id with space", "start/now")
-    assert calls[1] == (
-        "POST",
-        "/v1/runtime-units/unit%2Fid%20with%20space/start%2Fnow",
-    )
 
 
 @pytest.mark.asyncio
@@ -125,5 +114,5 @@ async def test_incompatible_manager_blocks_mutating_request(monkeypatch) -> None
 
     monkeypatch.setattr(client, "_request", request)
     with pytest.raises(ManagerIncompatible, match="compatibility mismatch"):
-        await client.operate("dicepp-runtime", "restart")
+        await client.save_user_config({})
     assert calls == [("GET", "/v1/status")]

@@ -35,7 +35,7 @@ def _run_smoke_check() -> bool:
     ]
     missing = [str(path) for path in required_files if not path.is_file()]
     route_paths = {getattr(route, "path", None) for route in app.routes}
-    required_routes = {"/dashboard", "/api/auth/status", "/api/bots/status"}
+    required_routes = {"/dashboard", "/api/auth/status", "/api/bot/status"}
     missing_routes = sorted(required_routes - route_paths)
 
     if missing or missing_routes:
@@ -118,6 +118,9 @@ def main() -> None:
         settings.host,
         settings.port,
     )
+    # The module entry point is an explicit Bot launcher.  Importing the ASGI
+    # app (including tests and embedded servers) never starts a Bot implicitly.
+    app.state.bot_auto_start = True
 
     uvicorn.run(
         app,

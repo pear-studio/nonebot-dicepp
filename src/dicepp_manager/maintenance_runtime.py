@@ -19,16 +19,8 @@ if TYPE_CHECKING:
 HealthProbe = Callable[[], bool | dict[str, Any] | Awaitable[bool | dict[str, Any]]]
 
 CONTROL_GATE_ENFORCED = "enforced"
-CONTROL_GATE_SKIPPED_NO_BOUND_BOTS = "skipped_no_bound_bots"
-CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL = (
-    "skipped_no_active_control_channel"
-)
+CONTROL_GATE_BOT_STOPPED = "bot_stopped"
 DEFAULT_CONTROL_HEALTH_TIMEOUT = 120.0
-
-_CONTROL_GATE_SKIP_REASONS = {
-    CONTROL_GATE_SKIPPED_NO_BOUND_BOTS: "no_bound_bots",
-    CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL: "no_active_control_channel",
-}
 
 
 class MaintenanceRuntimeSupport:
@@ -59,26 +51,37 @@ class MaintenanceRuntimeSupport:
         self.health_consecutive = health_consecutive
 
     async def capture_control_baseline(self) -> tuple[Any, str]:
-        """Capture a heartbeat and anchor the active-session control gate."""
+        """Require every authenticated Bot control session to be stopped.
+
+        Manager no longer owns Bot lifecycle, so destructive maintenance must
+        never quiesce or restart a Bot on the caller's behalf.  The control
+        service publishes authenticated Bot identities in its thread-safe
+        probe snapshot; an active identity is an explicit blocker.
+        """
         baseline = await self._probe_once(self.control_probe)
         heartbeat = baseline.get("heartbeat") if isinstance(baseline, dict) else None
-        status = await self.service.status()
-        bots = status.get("bots") if isinstance(status, dict) else None
-        if not bots:
-            return heartbeat, CONTROL_GATE_SKIPPED_NO_BOUND_BOTS
-        active_sessions = (
-            baseline.get("active_authenticated_sessions")
-            if isinstance(baseline, dict)
-            else None
-        )
-        if (
-            not isinstance(active_sessions, int)
-            or isinstance(active_sessions, bool)
-            or active_sessions <= 0
-            or baseline.get("ok") is not True
-        ):
-            return heartbeat, CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
-        return heartbeat, CONTROL_GATE_ENFORCED
+        active_bots = baseline.get("active_bots") if isinstance(baseline, dict) else None
+        if not isinstance(active_bots, list):
+            active_bots = []
+        active_bots = [bot_id for bot_id in active_bots if isinstance(bot_id, str)]
+        if not active_bots:
+            # Older or injected probes may only expose session count.  Treat
+            # any authenticated session as active rather than silently
+            # allowing destructive work with an unknown Bot identity.
+            active_sessions = (
+                baseline.get("active_authenticated_sessions")
+                if isinstance(baseline, dict)
+                else None
+            )
+            if isinstance(active_sessions, int) and not isinstance(active_sessions, bool):
+                active_bots = ["unknown"] * max(0, active_sessions)
+        if active_bots:
+            identities = ", ".join(dict.fromkeys(active_bots))
+            raise ArchiveError(
+                "Bot must be stopped before archive, restore, or database cleanup"
+                f" (active control session: {identities})"
+            )
+        return heartbeat, CONTROL_GATE_BOT_STOPPED
 
     async def quiesce(
         self,
@@ -87,40 +90,17 @@ class MaintenanceRuntimeSupport:
         state_callback: Callable[[list[str]], None] | None = None,
         require_known: bool = False,
     ) -> tuple[list[str], list[str]]:
-        units = self.service.units()
-        ids = [unit.runtime_unit_id for unit in units]
-        statuses = await self.service.runtime_adapter.status(ids)
-        if require_known:
-            unknown = [
-                unit_id
-                for unit_id in ids
-                if statuses.get(unit_id) is None
-                or statuses[unit_id].runtime_state == "unknown"
-            ]
-            if unknown:
-                raise ArchiveError(
-                    "无法确认并安全停止 RuntimeUnit：" + "、".join(unknown)
-                )
-        original_running = [
-            unit_id
-            for unit_id, status in statuses.items()
-            if status.runtime_state == "running"
-        ]
+        """Reserve archive work without touching the Dashboard-owned Bot."""
         if state_callback is not None:
-            state_callback(list(original_running))
-        stopped: list[str] = []
-        for unit_id in original_running:
-            await maintenance.operate_runtime_unit(unit_id, "stop")
-            stopped.append(unit_id)
-        return original_running, stopped
+            state_callback([])
+        return [], []
 
     async def restart(
         self,
         maintenance: MaintenanceSession,
         runtime_unit_ids: list[str],
     ) -> None:
-        for unit_id in runtime_unit_ids:
-            await maintenance.operate_runtime_unit(unit_id, "start")
+        """Bot restart is intentionally outside Manager ownership."""
 
     async def best_effort_restart(
         self,
@@ -129,19 +109,6 @@ class MaintenanceRuntimeSupport:
         maintenance_lease: MaintenanceReservation | None = None,
         allow_startup_recovery: bool = False,
     ) -> str | None:
-        if not runtime_unit_ids:
-            return None
-        try:
-            if maintenance_lease is not None:
-                await self.restart(maintenance_lease.session, runtime_unit_ids)
-            else:
-                with self.service.maintenance(
-                    timeout=1,
-                    allow_startup_recovery=allow_startup_recovery,
-                ) as maintenance:
-                    await self.restart(maintenance, runtime_unit_ids)
-        except Exception as exc:
-            return str(exc) or type(exc).__name__
         return None
 
     async def best_effort_restore_state(
@@ -150,32 +117,8 @@ class MaintenanceRuntimeSupport:
         *,
         allow_startup_recovery: bool = False,
     ) -> str | None:
-        """Idempotently restore the exact captured Runtime running set."""
-
-        try:
-            with self.service.maintenance(
-                timeout=1,
-                allow_startup_recovery=allow_startup_recovery,
-            ) as maintenance:
-                units = self.service.units()
-                known = {unit.runtime_unit_id for unit in units}
-                desired = set(runtime_unit_ids)
-                if not desired <= known:
-                    missing = sorted(desired - known)
-                    raise ArchiveError(
-                        f"Captured RuntimeUnit is unavailable: {', '.join(missing)}"
-                    )
-                statuses = await self.service.runtime_adapter.status(sorted(known))
-                for unit_id in sorted(known):
-                    status = statuses.get(unit_id)
-                    running = status is not None and status.runtime_state == "running"
-                    if unit_id in desired and not running:
-                        await maintenance.operate_runtime_unit(unit_id, "start")
-                    elif unit_id not in desired and running:
-                        await maintenance.operate_runtime_unit(unit_id, "stop")
-        except Exception as exc:
-            return str(exc) or type(exc).__name__
         return None
+
 
     def migrate_and_validate_schema(
         self,
@@ -222,15 +165,8 @@ class MaintenanceRuntimeSupport:
         warnings = [
             "External NapCat/QQ/GitHub/LLM services are not hard health checks"
         ]
-        control_skip_reason = _CONTROL_GATE_SKIP_REASONS.get(control_gate)
-        observe_optional_control = (
-            control_failure_is_warning
-            and control_gate == CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL
-        )
-        if expected_running and (
-            control_skip_reason is None or observe_optional_control
-        ):
-            effective_baseline = None if observe_optional_control else control_baseline
+        if expected_running and control_gate == CONTROL_GATE_ENFORCED:
+            effective_baseline = control_baseline
             try:
                 # The enforced target gate must allow real Bot authentication
                 # and first-heartbeat startup time.  Post-rollback control is
@@ -248,9 +184,7 @@ class MaintenanceRuntimeSupport:
                         result.get("heartbeat"), effective_baseline
                     ),
                     failure_message=(
-                        "Bot control channel did not reconnect after restart"
-                        if observe_optional_control
-                        else "Bot control heartbeat did not advance after restart"
+                        "Bot control heartbeat did not advance after restart"
                     ),
                 )
             except Exception as exc:
@@ -266,7 +200,7 @@ class MaintenanceRuntimeSupport:
         elif expected_running:
             control = {
                 "status": "not_applicable",
-                "reason": control_skip_reason,
+                "reason": control_gate,
             }
         else:
             control = {"status": "not_applicable"}
@@ -305,35 +239,8 @@ class MaintenanceRuntimeSupport:
         self,
         expected_running: list[str],
     ) -> list[str]:
-        if not expected_running:
-            return []
-        deadline = asyncio.get_running_loop().time() + self.health_timeout
-        consecutive = 0
-        last_error = "Runtime status unavailable"
-        while asyncio.get_running_loop().time() < deadline:
-            manager = await self.service.status()
-            runtime_rows = {
-                row["runtime_unit_id"]: row
-                for row in manager.get("runtime_units", [])
-                if isinstance(row, dict)
-            }
-            healthy = True
-            for unit_id in expected_running:
-                row = runtime_rows.get(unit_id)
-                runtime = row.get("runtime") if isinstance(row, dict) else None
-                if not isinstance(runtime, dict) or runtime.get("runtime_state") != "running":
-                    healthy = False
-                    last_error = f"RuntimeUnit did not remain running: {unit_id}"
-                    break
-                if runtime.get("health") in {"failed", "unhealthy", "unavailable"}:
-                    healthy = False
-                    last_error = f"RuntimeUnit health failed: {unit_id}"
-                    break
-            consecutive = consecutive + 1 if healthy else 0
-            if consecutive >= self.health_consecutive:
-                return expected_running
-            await asyncio.sleep(self.health_interval)
-        raise ArchiveError(last_error)
+        return list(expected_running)
+
 
     async def _probe_once(self, probe: HealthProbe | None) -> dict[str, Any]:
         if probe is None:

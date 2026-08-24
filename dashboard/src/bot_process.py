@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -31,6 +32,14 @@ class BotProcessStatus:
     @property
     def running(self) -> bool:
         return self.state == "running"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "running": self.running,
+            "pid": self.pid,
+            "returncode": self.returncode,
+        }
 
 
 class BotProcessController:
@@ -204,3 +213,36 @@ class BotProcessController:
 
 
 __all__ = ["BotProcessController", "BotProcessState", "BotProcessStatus"]
+
+
+def default_bot_process_command(project_root: str | os.PathLike[str]) -> tuple[str, ...]:
+    """Resolve the one supported Bot command for the current Dashboard mode."""
+
+    root = Path(project_root)
+    if getattr(sys, "frozen", False):
+        return (str(Path(sys.executable).resolve().with_name("DicePP-Runtime.exe")),)
+    return (sys.executable, "-u", str(root / "bot.py"))
+
+
+def create_bot_process_controller(
+    *,
+    project_root: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    env: Mapping[str, str] | None = None,
+    stop_timeout: float = 2.0,
+) -> BotProcessController:
+    """Build the Dashboard-owned controller without starting a child process."""
+
+    root = Path(project_root)
+    environment = dict(env or {})
+    environment.setdefault("DICEPP_PROJECT_ROOT", str(root))
+    return BotProcessController(
+        command=default_bot_process_command(root),
+        cwd=root,
+        env=environment,
+        log_path=log_path,
+        stop_timeout=stop_timeout,
+    )
+
+
+__all__ += ["create_bot_process_controller", "default_bot_process_command"]

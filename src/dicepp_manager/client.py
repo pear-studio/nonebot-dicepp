@@ -98,21 +98,6 @@ class ManagerClient:
         segment = urllib.parse.quote(operation_id, safe="")
         return (await self._request("GET", f"/v1/operations/{segment}")).get("operation", {})
 
-    async def operate(self, runtime_unit_id: str, action: str) -> dict:
-        await self._ensure_compatible()
-        unit_segment = urllib.parse.quote(runtime_unit_id, safe="")
-        action_segment = urllib.parse.quote(action, safe="")
-        return (await self._request("POST", f"/v1/runtime-units/{unit_segment}/{action_segment}")).get("operation", {})
-
-    async def logs(self, runtime_unit_id: str, lines: int) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(runtime_unit_id, safe="")
-        return (await self._request("GET", f"/v1/runtime-units/{segment}/logs?lines={lines}")).get("logs", {})
-
-    async def runtime_logs(self, lines: int) -> dict:
-        await self._ensure_compatible()
-        return (await self._request("GET", f"/v1/logs?lines={lines}")).get("logs", {})
-
     async def control_bots(self) -> list[dict]:
         await self._ensure_control_capable()
         result = (await self._request("GET", "/v1/control/bots")).get("bots", [])
@@ -177,24 +162,6 @@ class ManagerClient:
             json_body={"enabled": enabled},
         )
 
-    async def normalize_query_database(self, database: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(database, safe="")
-        payload = await self._request(
-            "POST",
-            f"/v1/content/query-databases/{segment}/normalize",
-        )
-        operation = payload.get("operation")
-        return operation if isinstance(operation, dict) else {}
-
-    async def dry_run_query_database_normalization(self, database: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(database, safe="")
-        return await self._request(
-            "POST",
-            f"/v1/content/query-databases/{segment}/normalize/dry-run",
-        )
-
     async def get_bot_config(self, bot_id: str) -> dict:
         await self._ensure_compatible()
         segment = urllib.parse.quote(bot_id, safe="")
@@ -207,30 +174,6 @@ class ManagerClient:
         await self._ensure_compatible()
         return (await self._request("GET", "/v1/archives")).get("archives", [])
 
-    async def estimate_archive(self, profile: str) -> dict:
-        await self._ensure_compatible()
-        return (
-            await self._request(
-                "POST",
-                "/v1/archives/estimate",
-                json_body={"profile": profile},
-            )
-        ).get("estimate", {})
-
-    async def create_archive(
-        self,
-        *,
-        description: str | None = None,
-        profile: str = "regular",
-    ) -> dict:
-        await self._ensure_compatible()
-        payload = await self._request(
-            "POST",
-            "/v1/archives",
-            json_body={"description": description, "profile": profile},
-        )
-        return payload.get("operation", {})
-
     async def archive_detail(self, filename: str) -> dict:
         await self._ensure_compatible()
         segment = urllib.parse.quote(filename, safe="")
@@ -240,30 +183,6 @@ class ManagerClient:
         await self._ensure_compatible()
         segment = urllib.parse.quote(filename, safe="")
         return await self._request("POST", f"/v1/archives/{segment}/verify")
-
-    async def plan_archive_restore(self, filename: str) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        return await self._request("POST", f"/v1/archives/{segment}/restore-plan")
-
-    async def restore_archive(
-        self,
-        filename: str,
-        *,
-        confirm_restore: bool,
-        description: str | None = None,
-    ) -> dict:
-        await self._ensure_compatible()
-        segment = urllib.parse.quote(filename, safe="")
-        payload = await self._request(
-            "POST",
-            f"/v1/archives/{segment}/restore",
-            json_body={
-                "confirm_restore": confirm_restore,
-                "description": description,
-            },
-        )
-        return payload.get("operation", {})
 
     async def delete_archive(self, filename: str) -> dict:
         await self._ensure_compatible()

@@ -28,11 +28,8 @@ from dicepp_manager.archive import MAX_ARCHIVE_BYTES
 from dicepp_manager.client import (
     ManagerClient,
     ManagerClientError,
-    ManagerIncompatible,
-    ManagerUnavailable,
 )
 from dicepp_manager.config import ManagerClientSettings
-from dicepp_manager.models import VALID_ACTIONS
 from dicepp_meta import get_project_info, get_version
 
 from .auth import (
@@ -48,6 +45,7 @@ from .auth import (
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
 from .audit import log_once as audit_log_once
+from .bot_process import BotProcessController, create_bot_process_controller
 from .config import DashboardPaths
 from .query_audit import (
     QueryAuditFormatError,
@@ -63,7 +61,7 @@ logger = logging.getLogger("dashboard")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: initialize Dashboard state and its external Manager client."""
+    """Startup: initialize Dashboard state and its optional Bot controller."""
     db_path = str(DashboardPaths.DASHBOARD_DB)
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     _init_db(db_path)
@@ -74,14 +72,25 @@ async def lifespan(app: FastAPI):
     # 多 worker 部署 (uvicorn --workers > 1) 时，
     # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
     app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
+    controller = getattr(app.state, "bot_process_controller", None)
+    if controller is None:
+        controller = create_bot_process_controller(
+            project_root=DashboardPaths.instance_layout().root,
+            log_path=DashboardPaths.runtime_log_path(),
+        )
+        app.state.bot_process_controller = controller
+    auto_start = bool(getattr(app.state, "bot_auto_start", False))
     layout = DashboardPaths.instance_layout()
     app.state.manager_client = ManagerClient(ManagerClientSettings.from_layout(layout))
     control_poll_task = asyncio.create_task(_poll_manager_control_status(app))
     try:
+        if auto_start:
+            await asyncio.to_thread(controller.start)
         yield
     finally:
         control_poll_task.cancel()
         await asyncio.gather(control_poll_task, return_exceptions=True)
+        await asyncio.to_thread(controller.shutdown)
 
 
 app = FastAPI(title="DicePP Dashboard", version=get_version(), lifespan=lifespan)
@@ -474,50 +483,6 @@ async def archives_list(request: Request):
     return _ok({"archives": archives})
 
 
-@app.post("/api/archives/estimate", dependencies=[Depends(require_auth)])
-async def archives_estimate(request: Request):
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        body = {}
-    if not isinstance(body, dict):
-        _err("Archive estimate request body must be a JSON object", 400)
-    profile = body.get("profile", "regular")
-    if profile not in {"regular", "full"}:
-        _err("profile must be regular or full", 400)
-    try:
-        estimate = await _get_manager_client(request).estimate_archive(profile)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return _ok({"estimate": estimate})
-
-
-@app.post("/api/archives", dependencies=[Depends(require_auth)])
-async def archives_create(request: Request):
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        body = {}
-    if body is None:
-        body = {}
-    if not isinstance(body, dict):
-        _err("Archive request body must be a JSON object", 400)
-    description = body.get("description")
-    profile = body.get("profile", "regular")
-    if description is not None and not isinstance(description, str):
-        _err("description must be a string", 400)
-    if profile not in {"regular", "full"}:
-        _err("profile must be regular or full", 400)
-    try:
-        operation = await _get_manager_client(request).create_archive(
-            description=description,
-            profile=profile,
-        )
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
-
-
 @app.post("/api/archives/{filename:path}/verify", dependencies=[Depends(require_auth)])
 async def archives_verify(filename: str, request: Request):
     try:
@@ -525,39 +490,6 @@ async def archives_verify(filename: str, request: Request):
     except ManagerClientError as exc:
         return _manager_error_response(exc)
     return _ok(payload)
-
-
-@app.post("/api/archives/{filename:path}/restore-plan", dependencies=[Depends(require_auth)])
-async def archives_restore_plan(filename: str, request: Request):
-    try:
-        payload = await _get_manager_client(request).plan_archive_restore(filename)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return _ok(payload)
-
-
-@app.post("/api/archives/{filename:path}/restore", dependencies=[Depends(require_auth)])
-async def archives_restore(filename: str, request: Request):
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        body = {}
-    if not isinstance(body, dict):
-        _err("Archive restore request body must be a JSON object", 400)
-    if body.get("confirm_restore") is not True:
-        _err("confirm_restore must be true", 400)
-    description = body.get("description")
-    if description is not None and not isinstance(description, str):
-        _err("description must be a string", 400)
-    try:
-        operation = await _get_manager_client(request).restore_archive(
-            filename,
-            confirm_restore=True,
-            description=description,
-        )
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    return JSONResponse(status_code=202, content={"ok": True, "operation": operation})
 
 
 @app.get("/api/archives/{filename:path}/export", dependencies=[Depends(require_auth)])
@@ -1383,6 +1315,89 @@ async def bot_status(request: Request):
         return _manager_error_response(exc)
 
 
+def _get_bot_process_controller(request: Request) -> BotProcessController:
+    controller = getattr(request.app.state, "bot_process_controller", None)
+    if controller is None:
+        controller = create_bot_process_controller(
+            project_root=DashboardPaths.instance_layout().root,
+            log_path=DashboardPaths.runtime_log_path(),
+        )
+        request.app.state.bot_process_controller = controller
+    return controller
+
+
+@app.get("/api/bot/status", dependencies=[Depends(require_auth)])
+async def bot_process_status(request: Request):
+    status = await asyncio.to_thread(_get_bot_process_controller(request).status)
+    return _ok({"status": status.to_dict()})
+
+
+@app.post("/api/bot/{action}", dependencies=[Depends(require_auth)])
+async def bot_process_action(action: str, request: Request):
+    if action not in {"start", "stop", "restart"}:
+        _err("Bot action must be start, stop, or restart", 400)
+    controller = _get_bot_process_controller(request)
+    try:
+        status = await asyncio.to_thread(getattr(controller, action))
+    except (OSError, RuntimeError) as exc:
+        audit_log(
+            request.app.state.dashboard_db,
+            f"bot.{action}",
+            "bot",
+            json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
+            ip=request.client.host if request.client else "",
+        )
+        _err(str(exc) or type(exc).__name__, 500)
+    audit_log(
+        request.app.state.dashboard_db,
+        f"bot.{action}",
+        "bot",
+        json.dumps(status.to_dict(), ensure_ascii=False),
+        ip=request.client.host if request.client else "",
+    )
+    return _ok({"status": status.to_dict()})
+
+
+@app.get("/api/bot/logs", dependencies=[Depends(require_auth)])
+async def bot_process_logs(
+    request: Request,
+    lines: int = Query(200, ge=1, le=1000),
+):
+    controller = _get_bot_process_controller(request)
+    text = await asyncio.to_thread(controller.tail_logs, lines)
+    return _ok({
+        "logs": {
+            "text": text,
+            "source": str(DashboardPaths.runtime_log_path()),
+            "lines": len(text.splitlines()),
+            "truncated": False,
+        }
+    })
+
+
+@app.get("/api/manager/operations", dependencies=[Depends(require_auth)])
+async def manager_operations(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Proxy generic archive/query operations; Bot lifecycle is not an operation."""
+    try:
+        return _ok({"operations": await _get_manager_client(request).list_operations(limit)})
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
+
+
+@app.get("/api/manager/operations/{operation_id}", dependencies=[Depends(require_auth)])
+async def manager_operation(operation_id: str, request: Request):
+    try:
+        operation = await _get_manager_client(request).get_operation(operation_id)
+        if isinstance(operation, dict):
+            _audit_query_normalization_result(request, operation)
+        return _ok({"operation": operation})
+    except ManagerClientError as exc:
+        return _manager_error_response(exc)
+
+
 # ── Manager API ───────────────────────────────────────────────────────────────
 
 
@@ -1435,23 +1450,6 @@ async def _poll_manager_control_status(app: FastAPI) -> None:
         await asyncio.sleep(2)
 
 
-def _audit_manager_operation(request: Request, operation: dict, status_code: int) -> None:
-    audit_detail = {
-        "operation_id": operation["operation_id"],
-        "status": operation["status"],
-        "message": operation.get("message", ""),
-        "status_code": status_code,
-    }
-    detail = json.dumps(audit_detail, ensure_ascii=False)
-    audit_log(
-        request.app.state.dashboard_db,
-        f"manager.{operation['action']}",
-        operation["runtime_unit_id"],
-        detail,
-        ip=request.client.host if request.client else "",
-    )
-
-
 def _audit_query_normalization_result(request: Request, operation: dict) -> None:
     """Persist one terminal query-normalization result in Dashboard audit history."""
     if operation.get("action") != "query.normalize":
@@ -1493,120 +1491,6 @@ def _audit_query_normalization_result(request: Request, operation: dict) -> None
         ip=request.client.host if request.client else "",
         ts=operation_ts,
     )
-
-
-@app.get("/api/manager/status", dependencies=[Depends(require_auth)])
-async def manager_status(request: Request):
-    """Return RuntimeUnits, or an explicit unsupported/unavailable state."""
-    try:
-        return _ok(await _get_manager_client(request).status())
-    except ManagerUnavailable as exc:
-        return _ok({
-            "runtime_units": [],
-            "bots": [],
-            "health": {
-                "status": "unavailable",
-                "message": str(exc),
-                "manager_api_version": None,
-            },
-        })
-    except ManagerIncompatible as exc:
-        return _ok({
-            "runtime_units": [],
-            "bots": [],
-            "health": {"status": "unsupported", "message": str(exc)},
-        })
-    except ManagerClientError as exc:
-        return _ok({
-            "runtime_units": [],
-            "bots": [],
-            "health": {
-                "status": "error",
-                "message": str(exc),
-                "status_code": exc.status_code,
-            },
-        })
-
-
-@app.get("/api/manager/operations", dependencies=[Depends(require_auth)])
-async def manager_operations(request: Request, limit: int = Query(50, ge=1, le=200)):
-    """Return recent Manager operations, newest first."""
-    try:
-        operations = await _get_manager_client(request).list_operations(limit)
-    except ManagerClientError as exc:
-        _err(str(exc), exc.status_code)
-    return _ok({"operations": operations})
-
-
-@app.get("/api/manager/logs", dependencies=[Depends(require_auth)])
-async def manager_runtime_logs(
-    request: Request,
-    lines: int = Query(200, ge=1, le=1000),
-):
-    """Return global runtime logs when the configured runtime supports it."""
-    try:
-        logs = await _get_manager_client(request).runtime_logs(lines)
-    except ManagerClientError as exc:
-        _err(str(exc), exc.status_code)
-    return _ok({"logs": logs})
-
-
-@app.get("/api/manager/runtime-units/{runtime_unit_id}/logs", dependencies=[Depends(require_auth)])
-async def manager_unit_logs(
-    runtime_unit_id: str,
-    request: Request,
-    lines: int = Query(200, ge=1, le=1000),
-):
-    """Return diagnostic logs for a RuntimeUnit."""
-    _validate_identifier(runtime_unit_id, "runtime_unit_id")
-    try:
-        logs = await _get_manager_client(request).logs(runtime_unit_id, lines)
-    except ManagerClientError as exc:
-        _err(str(exc), exc.status_code)
-    return _ok({"logs": logs})
-
-
-@app.post("/api/manager/runtime-units/{runtime_unit_id}/{action}", dependencies=[Depends(require_auth)])
-async def manager_unit_action(runtime_unit_id: str, action: str, request: Request):
-    """Submit a RuntimeUnit lifecycle operation to the external Manager."""
-    _validate_identifier(runtime_unit_id, "runtime_unit_id")
-    if action not in VALID_ACTIONS:
-        _err(
-            "Invalid manager action. Allowed: start, stop, restart",
-            400,
-        )
-
-    try:
-        operation_data = await _get_manager_client(request).operate(runtime_unit_id, action)
-    except ManagerClientError as exc:
-        audit_log(
-            request.app.state.dashboard_db,
-            f"manager.{action}",
-            runtime_unit_id,
-            json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
-            ip=request.client.host if request.client else "",
-        )
-        if exc.payload.get("operation"):
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={"ok": False, "message": str(exc), "operation": exc.payload["operation"]},
-            )
-        _err(str(exc), exc.status_code)
-
-    _audit_manager_operation(request, operation_data, 202)
-    content = {"operation": operation_data}
-    return _ok(content)
-
-
-@app.get("/api/manager/operations/{operation_id}", dependencies=[Depends(require_auth)])
-async def manager_operation(operation_id: str, request: Request):
-    """Reconnect to a submitted operation after navigation or disconnection."""
-    try:
-        operation = await _get_manager_client(request).get_operation(operation_id)
-    except ManagerClientError as exc:
-        _err(str(exc), exc.status_code)
-    _audit_query_normalization_result(request, operation)
-    return _ok({"operation": operation})
 
 
 # ── SSE endpoint ────────────────────────────────────────────────────────────────
@@ -1738,50 +1622,6 @@ async def content_queries_enabled(db_name: str, request: Request):
         ip=request.client.host if request.client else "",
     )
     return _ok({"database": db_name, "enabled": enabled})
-
-
-@app.post(
-    "/api/content/queries/{db_name}/normalize/dry-run",
-    dependencies=[Depends(require_auth)],
-)
-async def content_queries_normalize_dry_run(db_name: str, request: Request):
-    """Preview repair effects without changing the database or runtime."""
-    _query_database_path(db_name)
-    try:
-        result = await _get_manager_client(
-            request
-        ).dry_run_query_database_normalization(db_name)
-    except ManagerClientError as exc:
-        audit_log(
-            request.app.state.dashboard_db,
-            "content.query.normalize.dry_run",
-            db_name,
-            json.dumps(
-                {"status": "failed", "message": str(exc)},
-                ensure_ascii=False,
-            ),
-            ip=request.client.host if request.client else "",
-        )
-        return _manager_error_response(exc)
-    return _ok(result)
-
-
-@app.post("/api/content/queries/{db_name}/normalize", dependencies=[Depends(require_auth)])
-async def content_queries_normalize(db_name: str, request: Request):
-    """Start the Manager-owned one-click query database normalization."""
-    _query_database_path(db_name)
-    try:
-        operation = await _get_manager_client(request).normalize_query_database(db_name)
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
-    audit_log(
-        request.app.state.dashboard_db,
-        "content.query.normalize.start",
-        db_name,
-        str(operation.get("operation_id", "")),
-        ip=request.client.host if request.client else "",
-    )
-    return _ok({"operation": operation})
 
 
 @app.get("/api/content/queries/{db_name}/audit", dependencies=[Depends(require_auth)])

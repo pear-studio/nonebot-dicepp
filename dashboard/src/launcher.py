@@ -1,4 +1,4 @@
-"""Windows single-entry launcher with Dashboard, Manager runtime and tray."""
+"""Windows single-entry launcher with Dashboard, one Bot controller, and tray."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from dicepp_manager.config import ManagerClientSettings, ManagerSettings
 from dicepp_manager.windows_autostart import WindowsAutostart
 
 from .app import app
+from .bot_process import BotProcessController, create_bot_process_controller
 from .config import DashboardPaths, DashboardSettings
 from .runtime_log import (
     append_runtime_log_line,
@@ -44,8 +45,6 @@ _TRAY_ACTIONS = (
     "autostart",
     "exit",
 )
-LAUNCHER_RUNTIME_KEY = "dicepp-runtime"
-_TERMINAL_OPERATION_STATUSES = {"succeeded", "failed", "rejected", "interrupted"}
 
 
 @dataclass
@@ -141,7 +140,7 @@ class TrayController:
     def __init__(
         self,
         *,
-        service_provider: Callable[[], ManagerClient],
+        bot_controller: BotProcessController,
         dashboard_url: str,
         log_path: Path,
         open_browser: Callable[[str], bool] = webbrowser.open,
@@ -150,10 +149,8 @@ class TrayController:
         join_services: Callable[[], None] | None = None,
         dashboard_alive: Callable[[], bool] | None = None,
         stop_tray: Callable[[], None] | None = None,
-        runtime_key: str = LAUNCHER_RUNTIME_KEY,
-        operation_timeout: float = 15.0,
     ) -> None:
-        self._service_provider = service_provider
+        self._bot_controller = bot_controller
         self._dashboard_url = dashboard_url
         self._log_path = log_path
         self._open_browser = open_browser
@@ -162,8 +159,6 @@ class TrayController:
         self._join_services = join_services or (lambda: None)
         self._dashboard_alive = dashboard_alive
         self._stop_tray = stop_tray or (lambda: None)
-        self._runtime_key = runtime_key
-        self._operation_timeout = operation_timeout
         self._exiting = False
         self._autostart = None
 
@@ -175,14 +170,12 @@ class TrayController:
             )
             return "DicePP: Dashboard unavailable"
         try:
-            status = _run_async(self._service_provider().status())
-            unit = _first_runtime_unit(status)
-            if unit is None:
-                return "DicePP: RuntimeUnit unavailable"
-            runtime = unit.get("runtime") or {}
-            state = runtime.get("runtime_state", "unknown")
-            health = runtime.get("health", "unknown")
-            return f"DicePP: {state} / {health}"
+            status = self._bot_controller.status()
+            if status.running:
+                return f"DicePP: running (pid {status.pid})"
+            if status.returncode is not None:
+                return f"DicePP: stopped ({status.returncode})"
+            return "DicePP: stopped"
         except Exception as exc:
             logger.exception("tray | status refresh failed")
             append_runtime_log_line(
@@ -231,7 +224,7 @@ class TrayController:
                 raise
             else:
                 stop_status = (
-                    stop_result.get("status", "unknown")
+                    stop_result.get("state", stop_result.get("status", "unknown"))
                     if isinstance(stop_result, dict)
                     else type(stop_result).__name__
                 )
@@ -276,23 +269,9 @@ class TrayController:
 
     def _operate(self, action: str) -> Any:
         try:
-            service = self._service_provider()
-            runtime_unit_id = _run_async(_first_runtime_unit_id(service)) or self._runtime_key
-            append_runtime_log_line(f"tray | {action} {runtime_unit_id}", path=self._log_path)
-            operation = _run_async(service.operate(runtime_unit_id, action))
-            completed = _wait_for_operation_terminal(
-                service,
-                operation,
-                timeout=self._operation_timeout,
-            )
-            if completed.get("status") != "succeeded":
-                append_runtime_log_line(
-                    "tray | "
-                    f"{action} ended with {completed.get('status', 'unknown')}: "
-                    f"{completed.get('message', '')}",
-                    path=self._log_path,
-                )
-            return completed
+            append_runtime_log_line(f"tray | Bot {action}", path=self._log_path)
+            result = getattr(self._bot_controller, action)()
+            return result.to_dict()
         except Exception as exc:
             logger.exception("tray | %s failed", action)
             append_runtime_log_line(
@@ -314,13 +293,10 @@ class TrayController:
 
 def configure_launcher_environment(
     app_dir: str | os.PathLike[str],
-    *,
-    runtime_exe_name: str = "DicePP-Runtime.exe",
 ) -> dict[str, str]:
     """Set default env vars for the packaged Windows single entry."""
     program_path, instance_path = resolve_launcher_roots(app_dir)
     sync_version_owned_config(program_path, instance_path)
-    runtime_path = program_path / runtime_exe_name
     defaults = {
         "DICEPP_APP_DIR": str(program_path),
         "DICEPP_PROJECT_ROOT": str(instance_path),
@@ -330,10 +306,6 @@ def configure_launcher_environment(
         "DICEPP_MANAGER_PORT": "4091",
         "DICEPP_MANAGER_URL": "http://127.0.0.1:4091",
         "DICEPP_MANAGER_TOKEN_FILE": str(instance_path / "manager" / "state" / "api-token"),
-        "DICEPP_MANAGER_RUNTIME": "process",
-        "DICEPP_MANAGER_RUNTIME_UNIT_ID": LAUNCHER_RUNTIME_KEY,
-        "DICEPP_MANAGER_PROCESS_COMMAND": _quote_command([str(runtime_path)]),
-        "DICEPP_MANAGER_PROCESS_CWD": str(instance_path),
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -479,7 +451,7 @@ def dashboard_url(settings: DashboardSettings | None = None) -> str:
 
 
 def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -> None:
-    """Start Dashboard, start runtime once, then run the tray.
+    """Start Dashboard and its Bot controller, then run the tray.
 
     ``background`` keeps the tray available for a user session while avoiding
     foreground UI from unattended launch paths such as login autostart.
@@ -487,7 +459,8 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
     log_path = _launcher_fallback_log_path()
     manager_server: ManagedServerHandle | None = None
     dashboard_server: ManagedServerHandle | None = None
-    controller: TrayController | None = None
+    tray_controller: TrayController | None = None
+    bot_controller: BotProcessController | None = None
     try:
         log_path = rotate_runtime_log()
         configure_file_logging(log_path)
@@ -501,6 +474,12 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         manager_settings = ManagerSettings.from_env(DashboardPaths.PROJECT_ROOT)
         token = ensure_api_token(manager_settings.token_path or manager_settings.layout.manager_token)
         manager_app = create_manager_app(manager_settings, api_token=token)
+        bot_controller = create_bot_process_controller(
+            project_root=DashboardPaths.instance_layout().root,
+            log_path=log_path,
+        )
+        app.state.bot_process_controller = bot_controller
+        app.state.bot_auto_start = True
         # Dashboard readiness is independent from Manager connectivity. Start it
         # first so the local Manager API is available as soon as possible.
         dashboard_server = _start_dashboard_server(settings, log_path)
@@ -525,8 +504,8 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             dashboard_server.join(timeout=10)
             manager_server.join(timeout=10)
 
-        controller = TrayController(
-            service_provider=lambda: manager_client,
+        tray_controller = TrayController(
+            bot_controller=bot_controller,
             dashboard_url=url,
             log_path=log_path,
             stop_dashboard=dashboard_server.request_stop,
@@ -535,28 +514,27 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             dashboard_alive=dashboard_server.is_alive,
         )
         if os.name == "nt":
-            controller.configure_autostart(WindowsAutostart(autostart_launcher_path()))
-        tray = build_tray(controller, fake=fake_tray)
-        controller._stop_tray = tray.stop
+            tray_controller.configure_autostart(WindowsAutostart(autostart_launcher_path()))
+        tray = build_tray(tray_controller, fake=fake_tray)
+        tray_controller._stop_tray = tray.stop
         manager_state = getattr(manager_app, "state", None)
         manager_service = getattr(manager_state, "manager_service", None)
         if manager_service is not None:
             manager_service.set_shutdown_callback(
                 lambda _reason: threading.Thread(
-                    target=controller.exit,
+                    target=tray_controller.exit,
                     name="DicePPManagerShutdown",
                     daemon=False,
                 ).start()
             )
 
-        _auto_start_runtime(controller, log_path)
         if background:
             append_runtime_log_line(
                 "launcher | browser auto-open disabled for background launch",
                 path=log_path,
             )
         elif should_open_browser():
-            controller.open_dashboard()
+            tray_controller.open_dashboard()
         else:
             append_runtime_log_line(
                 "launcher | browser auto-open disabled",
@@ -571,11 +549,11 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
                 )
             )
         finally:
-            controller.exit()
+            tray_controller.exit()
     except BaseException as exc:
-        if controller is not None:
+        if tray_controller is not None:
             try:
-                controller.exit()
+                tray_controller.exit()
             except BaseException as cleanup_exc:
                 logger.exception("launcher | controller cleanup failed")
                 append_runtime_log_line(
@@ -590,6 +568,18 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         if isinstance(exc, Exception):
             _record_launcher_exception(log_path, exc)
         raise
+    finally:
+        # A failure before TrayController construction must still reap the
+        # explicitly-created Bot controller.  Do not leave launcher state on
+        # the module-global Dashboard app for a later embedded run.
+        if bot_controller is not None and tray_controller is None:
+            try:
+                bot_controller.shutdown()
+            except BaseException:
+                logger.exception("launcher | Bot controller cleanup failed")
+        if getattr(app.state, "bot_process_controller", None) is bot_controller:
+            app.state.bot_process_controller = None
+        app.state.bot_auto_start = False
 
 
 def build_tray(controller: TrayController, *, fake: bool = False):
@@ -731,38 +721,11 @@ def _wait_for_manager_service(
     while time.monotonic() < deadline:
         try:
             readiness = _run_async(client.health())
-            _run_async(client.status())
             return readiness
         except Exception:
             pass
         time.sleep(0.05)
     raise TimeoutError("Dashboard Manager service did not start")
-
-
-def _wait_for_operation_terminal(
-    client: ManagerClient,
-    operation: dict,
-    *,
-    timeout: float,
-) -> dict:
-    operation_id = operation.get("operation_id")
-    if not isinstance(operation_id, str) or not operation_id:
-        raise RuntimeError("Manager did not return an operation id")
-    current = operation
-    deadline = time.monotonic() + timeout
-    while current.get("status") not in _TERMINAL_OPERATION_STATUSES:
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Manager operation {operation_id} did not finish within {timeout:g}s"
-            )
-        time.sleep(0.05)
-        current = _run_async(client.get_operation(operation_id))
-    return current
-
-
-def _auto_start_runtime(controller: TrayController, log_path: Path) -> None:
-    append_runtime_log_line("launcher | auto-starting runtime", path=log_path)
-    controller.start_runtime()
 
 
 def _install_launcher_excepthook(log_path: Path) -> None:
@@ -811,35 +774,8 @@ def _append_launcher_fallback_line(message: str) -> None:
         pass
 
 
-async def _first_runtime_unit_id(service: ManagerClient) -> str | None:
-    status = await service.status()
-    unit = _first_runtime_unit(status)
-    if unit is None:
-        return None
-    unit_id = unit.get("runtime_unit_id")
-    return unit_id if isinstance(unit_id, str) and unit_id else None
-
-
-def _first_runtime_unit(status: dict) -> dict | None:
-    units = status.get("runtime_units")
-    if not isinstance(units, list) or not units:
-        return None
-    first = units[0]
-    return first if isinstance(first, dict) else None
-
-
 def _run_async(awaitable):
     return asyncio.run(awaitable)
-
-
-def _quote_command(parts: list[str]) -> str:
-    if os.name == "nt":
-        import subprocess
-
-        return subprocess.list2cmdline(parts)
-    import shlex
-
-    return " ".join(shlex.quote(part) for part in parts)
 
 
 def _build_pystray_icon(controller: TrayController):

@@ -24,7 +24,7 @@ from dicepp_data import (
 )
 
 from .maintenance_runtime import (
-    CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL,
+    CONTROL_GATE_BOT_STOPPED,
     MaintenanceRuntimeSupport,
 )
 from .models import ManagerOperation
@@ -272,6 +272,11 @@ class QueryDatabaseCoordinator:
                 candidate,
             )
             detail["report"] = query_normalization_report_detail(report)
+            baseline, control_gate = (
+                await self.runtime_support.capture_control_baseline()
+            )
+            detail["control_heartbeat_baseline"] = baseline
+            detail["control_gate"] = control_gate
             with self._maintenance_context(maintenance_lease) as maintenance:
                 stage = "stop_runtime"
                 detail["stage"] = stage
@@ -330,7 +335,7 @@ class QueryDatabaseCoordinator:
                 self.store.save(operation)
                 detail["health"] = await self.runtime_support.hard_health(
                     original_running,
-                    control_gate=CONTROL_GATE_SKIPPED_NO_ACTIVE_CONTROL_CHANNEL,
+                    control_gate=CONTROL_GATE_BOT_STOPPED,
                 )
 
             detail["stage"] = "completed"

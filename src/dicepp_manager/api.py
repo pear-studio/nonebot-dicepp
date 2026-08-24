@@ -10,7 +10,6 @@ import tempfile
 import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket
@@ -30,9 +29,8 @@ from .archive import (
     ArchiveInvalidError,
     ArchiveNameError,
     ArchiveNotFoundError,
-    ArchiveRestorePlanVerificationError,
 )
-from .archive_coordinator import ArchiveCoordinator, ArchiveTransactionError
+from .archive_coordinator import ArchiveCoordinator
 from .auth import ensure_api_token, token_matches
 from .config import ManagerSettings
 from .control import ControlChannelService
@@ -43,23 +41,8 @@ from .config_validation import (
     validate_user_candidate,
 )
 from .factory import create_manager_service
-from .models import ManagerAction, VALID_ACTIONS
-from .query_database import (
-    QueryDatabaseCoordinator,
-    QueryDatabaseNormalizationError,
-    prepare_query_database_candidate,
-    query_normalization_report_detail,
-)
-from .runtime import RuntimeOperationUnsupported
 from .maintenance import MaintenanceConflict
-from .maintenance_runtime import MaintenanceRuntimeSupport
-from .service import (
-    MaintenanceReservation,
-    ManagerService,
-    OperationConflict,
-    OperationFailed,
-    UnknownRuntimeUnit,
-)
+from .service import ManagerService
 
 
 def _maintenance_conflict_response(exc: MaintenanceConflict) -> JSONResponse:
@@ -158,36 +141,14 @@ def create_manager_app(
         manager_service.archive_coordinator = ArchiveCoordinator(
             layout=settings.layout,
             service=manager_service,
-            control_probe=control_service.probe,
         )
-    else:
-        # A test or embedding may provide its own coordinator; its control
-        # health gate must still inspect the Manager-owned session service.
-        manager_service.archive_coordinator.control_probe = control_service.probe
     archive_coordinator = manager_service.archive_coordinator
-    runtime_support = manager_service.maintenance_runtime_support
-    if runtime_support is None:
-        runtime_support = getattr(archive_coordinator, "runtime_support", None)
-    if runtime_support is None:
-        runtime_support = MaintenanceRuntimeSupport(
-            layout=settings.layout,
-            service=manager_service,
-            control_probe=control_service.probe,
-        )
-        manager_service.maintenance_runtime_support = runtime_support
-    query_database_coordinator = QueryDatabaseCoordinator(
-        layout=settings.layout,
-        service=manager_service,
-        runtime_support=runtime_support,
-    )
     expected_token = api_token or ensure_api_token(settings.token_path or settings.layout.manager_token)
     tasks: set[asyncio.Task] = set()
-    critical_tasks: set[asyncio.Task] = set()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
-            await archive_coordinator.recover()
             yield
         finally:
             if tasks:
@@ -196,19 +157,13 @@ def create_manager_app(
                     task.cancel()
                 if pending:
                     await asyncio.gather(*pending, return_exceptions=True)
-            if critical_tasks:
-                # Critical archive transactions own the maintenance lease and
-                # must reach a durable outcome before Manager ownership ends.
-                await asyncio.gather(*critical_tasks, return_exceptions=True)
             await control_service.close()
             manager_service.close()
 
     app = FastAPI(title="DicePP Manager", version="2", lifespan=lifespan)
     app.state.manager_service = manager_service
     app.state.operation_tasks = tasks
-    app.state.critical_operation_tasks = critical_tasks
     app.state.control_service = control_service
-    app.state.query_database_coordinator = query_database_coordinator
 
     manager_bearer = HTTPBearer(
         auto_error=False,
@@ -283,169 +238,11 @@ def create_manager_app(
             raise HTTPException(status_code=404, detail="Manager operation not found")
         return {"ok": True, "operation": result.to_dict()}
 
-    @app.get("/v1/logs", dependencies=auth)
-    async def runtime_logs(lines: int = Query(200, ge=1, le=1000)):
-        try:
-            result = await manager_service.runtime_logs(lines)
-        except RuntimeOperationUnsupported as exc:
-            raise HTTPException(status_code=501, detail=str(exc)) from exc
-        return {"ok": True, "logs": result}
-
-    @app.get("/v1/runtime-units/{runtime_unit_id}/logs", dependencies=auth)
-    async def unit_logs(runtime_unit_id: str, lines: int = Query(200, ge=1, le=1000)):
-        try:
-            result = await manager_service.logs(runtime_unit_id, lines)
-        except UnknownRuntimeUnit as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except RuntimeOperationUnsupported as exc:
-            raise HTTPException(status_code=501, detail=str(exc)) from exc
-        return {"ok": True, "logs": result}
-
-    async def finish_operation(manager_operation) -> None:
-        try:
-            await manager_service.run(manager_operation)
-        except OperationFailed:
-            # Durable state is the observable failure channel. Do not emit an
-            # unhandled task exception after the caller has received the id.
-            return
-
-    async def finish_archive_create(
-        manager_operation,
-        body: dict,
-        maintenance_lease: MaintenanceReservation,
-    ) -> None:
-        try:
-            await await_critical_transaction(
-                archive_coordinator.create(
-                    manager_operation,
-                    description=body.get("description"),
-                    profile=body.get("profile", "regular"),
-                    archive_kind=body.get("archive_kind", "manual"),
-                    maintenance_lease=maintenance_lease,
-                )
-            )
-        except ArchiveTransactionError:
-            return
-        except Exception as exc:
-            manager_operation.transition(
-                "failed",
-                message=str(exc) or type(exc).__name__,
-                detail={"error": "unexpected_archive_create_failure"},
-            )
-            manager_service.store.save(manager_operation)
-        finally:
-            maintenance_lease.release()
-
-    async def finish_archive_restore(
-        manager_operation,
-        filename: str,
-        body: dict,
-        maintenance_lease: MaintenanceReservation,
-    ) -> None:
-        try:
-            await await_critical_transaction(
-                archive_coordinator.restore(
-                    manager_operation,
-                    filename=filename,
-                    description=body.get("description"),
-                    maintenance_lease=maintenance_lease,
-                )
-            )
-        except ArchiveTransactionError:
-            return
-        except Exception as exc:
-            manager_operation.transition(
-                "failed",
-                message=str(exc) or type(exc).__name__,
-                detail={
-                    "error": "unexpected_archive_restore_failure",
-                    "target_filename": filename,
-                },
-            )
-            manager_service.store.save(manager_operation)
-        finally:
-            maintenance_lease.release()
-
-    async def finish_query_database_normalize(
-        manager_operation,
-        database: str,
-        source: Path,
-        maintenance_lease: MaintenanceReservation,
-    ) -> None:
-        try:
-            await await_critical_transaction(
-                query_database_coordinator.normalize(
-                    manager_operation,
-                    database=database,
-                    source=source,
-                    maintenance_lease=maintenance_lease,
-                )
-            )
-        except QueryDatabaseNormalizationError:
-            return
-        except Exception as exc:
-            manager_operation.transition(
-                "failed",
-                message=str(exc) or type(exc).__name__,
-                detail={
-                    "database": database,
-                    "stage": "unexpected",
-                    "error": str(exc) or type(exc).__name__,
-                },
-            )
-            manager_service.store.save(manager_operation)
-        finally:
-            maintenance_lease.release()
-
     def track_task(coroutine) -> asyncio.Task:
         task = asyncio.create_task(coroutine)
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return task
-
-    def track_critical_task(coroutine) -> asyncio.Task:
-        task = asyncio.create_task(coroutine)
-        critical_tasks.add(task)
-        task.add_done_callback(critical_tasks.discard)
-        return task
-
-    async def await_critical_transaction(coroutine):
-        """Let a critical transaction reach a durable outcome after cancellation.
-
-        ``asyncio.to_thread`` keeps running after its awaiter is cancelled.  The
-        inner task is therefore shielded and drained before the task that owns
-        the Manager maintenance reservation can leave its finally path.
-        """
-        transaction = asyncio.create_task(coroutine)
-        while True:
-            try:
-                return await asyncio.shield(transaction)
-            except asyncio.CancelledError:
-                if transaction.done():
-                    return transaction.result()
-
-    @app.post("/v1/runtime-units/{runtime_unit_id}/{action}", dependencies=auth, status_code=202)
-    async def operate(runtime_unit_id: str, action: str):
-        if action not in VALID_ACTIONS:
-            raise HTTPException(status_code=400, detail="Allowed actions: start, stop, restart")
-        try:
-            manager_operation = manager_service.submit(runtime_unit_id, cast(ManagerAction, action))
-        except UnknownRuntimeUnit as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except OperationConflict as exc:
-            return JSONResponse(
-                status_code=409,
-                content={"ok": False, "message": str(exc), "operation": exc.operation.to_dict()},
-            )
-        except OperationFailed as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={"ok": False, "message": str(exc), "operation": exc.operation.to_dict()},
-            )
-        task = asyncio.create_task(finish_operation(manager_operation))
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-        return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.get("/v1/config/user", dependencies=auth)
     async def config_user_get():
@@ -558,95 +355,9 @@ def create_manager_app(
             "restart_required": False,
         }
 
-    @app.post(
-        "/v1/content/query-databases/{database}/normalize/dry-run",
-        dependencies=auth,
-    )
-    async def query_database_normalize_dry_run(database: str):
-        """Build and validate a disposable candidate without changing the source."""
-        source = _query_database_path(settings, database)
-        candidate = source.with_name(
-            f".{source.name}.{uuid4().hex}.dry-run.tmp"
-        )
-        try:
-            report = await asyncio.to_thread(
-                prepare_query_database_candidate,
-                source,
-                candidate,
-            )
-        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"数据库无法自动修复：{exc}",
-            ) from exc
-        finally:
-            candidate.unlink(missing_ok=True)
-        detail = query_normalization_report_detail(report)
-        return {
-            "ok": True,
-            "database": database,
-            "requires_confirmation": True,
-            "report": detail,
-        }
-
-    @app.post(
-        "/v1/content/query-databases/{database}/normalize",
-        dependencies=auth,
-        status_code=202,
-    )
-    async def query_database_normalize(database: str):
-        source = _query_database_path(settings, database)
-        try:
-            maintenance_lease = manager_service.reserve_maintenance()
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        try:
-            manager_operation = query_database_coordinator.new_operation()
-            track_critical_task(
-                finish_query_database_normalize(
-                    manager_operation,
-                    database,
-                    source,
-                    maintenance_lease,
-                )
-            )
-        except BaseException:
-            maintenance_lease.release()
-            raise
-        return {"ok": True, "operation": manager_operation.to_dict()}
-
     @app.get("/v1/archives", dependencies=auth)
     async def archives_list():
         return {"ok": True, "archives": archive_coordinator.list()}
-
-    @app.post("/v1/archives/estimate", dependencies=auth)
-    async def archives_estimate(request: Request):
-        body = await _json_body(request)
-        try:
-            estimate = archive_coordinator.estimate(str(body.get("profile", "regular")))
-        except ArchiveError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"ok": True, "estimate": estimate}
-
-    @app.post("/v1/archives", dependencies=auth, status_code=202)
-    async def archives_create(request: Request):
-        body = await _json_body(request)
-        description = body.get("description")
-        if description is not None and not isinstance(description, str):
-            raise HTTPException(status_code=400, detail="description must be a string")
-        try:
-            maintenance_lease = manager_service.reserve_maintenance()
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        try:
-            manager_operation = archive_coordinator.new_operation("archive.create")
-            track_critical_task(
-                finish_archive_create(manager_operation, body, maintenance_lease)
-            )
-        except BaseException:
-            maintenance_lease.release()
-            raise
-        return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.get("/v1/archives/{filename}", dependencies=auth)
     async def archives_detail(filename: str):
@@ -671,65 +382,6 @@ def create_manager_app(
         except ArchiveInvalidError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"ok": True, "verification": verification}
-
-    @app.post("/v1/archives/{filename}/restore-plan", dependencies=auth)
-    async def archives_restore_plan(filename: str):
-        try:
-            plan = archive_coordinator.plan(filename)
-        except ArchiveRestorePlanVerificationError as exc:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": str(exc),
-                    "verification": exc.verification,
-                },
-            )
-        except (ArchiveNameError, ArchiveError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"ok": True, "plan": plan}
-
-    @app.post("/v1/archives/{filename}/restore", dependencies=auth, status_code=202)
-    async def archives_restore(filename: str, request: Request):
-        body = await _json_body(request)
-        if body.get("confirm_restore") is not True:
-            raise HTTPException(status_code=400, detail="confirm_restore must be true")
-        try:
-            maintenance_lease = manager_service.reserve_maintenance()
-        except MaintenanceConflict as exc:
-            return _maintenance_conflict_response(exc)
-        try:
-            plan = archive_coordinator.plan(filename)
-        except ArchiveRestorePlanVerificationError as exc:
-            maintenance_lease.release()
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": str(exc),
-                    "verification": exc.verification,
-                },
-            )
-        except ArchiveError as exc:
-            maintenance_lease.release()
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if plan.get("problems") or plan.get("blocked"):
-            maintenance_lease.release()
-            raise HTTPException(status_code=409, detail="Archive restore plan is blocked")
-        try:
-            manager_operation = archive_coordinator.new_operation("archive.restore")
-            track_critical_task(
-                finish_archive_restore(
-                    manager_operation,
-                    filename,
-                    body,
-                    maintenance_lease,
-                )
-            )
-        except BaseException:
-            maintenance_lease.release()
-            raise
-        return {"ok": True, "operation": manager_operation.to_dict()}
 
     @app.delete("/v1/archives/{filename}", dependencies=auth)
     async def archives_delete(filename: str):

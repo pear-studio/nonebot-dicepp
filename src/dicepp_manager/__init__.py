@@ -1,8 +1,8 @@
 """DicePP lifecycle Manager.
 
-This package is intentionally independent from the Dashboard package.  The
-Dashboard talks to it through :class:`ManagerClient`; only the Manager imports
-runtime adapters and owns lifecycle state.
+This package is intentionally independent from the Dashboard package. The
+Manager owns configuration, archive, and Bot control-channel coordination;
+Dashboard owns the Bot process lifecycle.
 """
 
 from .client import ManagerClient, ManagerClientError, ManagerIncompatible, ManagerUnavailable
@@ -14,9 +14,9 @@ from .deployment import (
     MANAGER_VERSION,
     MINIMUM_DASHBOARD_API_VERSION,
 )
-from .models import ManagerOperation, RuntimeLogs, RuntimeUnit, RuntimeUnitStatus
+from .models import ManagerOperation
 from .owner import ManagerAlreadyRunning
-from .service import ManagerService, OperationConflict, OperationFailed, UnknownRuntimeUnit
+from .service import ManagerService
 
 __all__ = [
     "DASHBOARD_DEFAULT_PORT",
@@ -32,10 +32,4 @@ __all__ = [
     "ManagerOperation",
     "ManagerService",
     "ManagerUnavailable",
-    "OperationConflict",
-    "OperationFailed",
-    "RuntimeLogs",
-    "RuntimeUnit",
-    "RuntimeUnitStatus",
-    "UnknownRuntimeUnit",
 ]

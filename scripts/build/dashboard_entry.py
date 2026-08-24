@@ -7,20 +7,8 @@ import tempfile
 import traceback
 
 
-def _quote_command(parts: list[str]) -> str:
-    if os.name == "nt":
-        import subprocess
-
-        return subprocess.list2cmdline(parts)
-    import shlex
-
-    return " ".join(shlex.quote(part) for part in parts)
-
-
 def _configure_launcher_environment(
     app_dir: str,
-    *,
-    runtime_exe_name: str = "DicePP-Runtime.exe",
 ) -> dict[str, str]:
     program_dir = os.path.abspath(app_dir)
     install_root = (
@@ -29,7 +17,6 @@ def _configure_launcher_environment(
         else program_dir
     )
     _sync_version_owned_config(program_dir, install_root)
-    runtime_path = os.path.join(program_dir, runtime_exe_name)
     defaults = {
         "DICEPP_APP_DIR": program_dir,
         "DICEPP_PROJECT_ROOT": install_root,
@@ -39,10 +26,6 @@ def _configure_launcher_environment(
         "DICEPP_MANAGER_PORT": "4091",
         "DICEPP_MANAGER_URL": "http://127.0.0.1:4091",
         "DICEPP_MANAGER_TOKEN_FILE": os.path.join(install_root, "manager", "state", "api-token"),
-        "DICEPP_MANAGER_RUNTIME": "process",
-        "DICEPP_MANAGER_RUNTIME_UNIT_ID": "dicepp-runtime",
-        "DICEPP_MANAGER_PROCESS_COMMAND": _quote_command([runtime_path]),
-        "DICEPP_MANAGER_PROCESS_CWD": install_root,
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)

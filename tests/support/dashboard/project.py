@@ -119,17 +119,23 @@ def _configure_app_state(
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    previous_controller = getattr(app.state, "bot_process_controller", None)
+    if previous_controller is not None:
+        previous_controller.shutdown()
     app.state.dashboard_db = dashboard_support.init_test_db(project_root)
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
     app.state.status_subscribers = []
-    for attribute in ("manager_client", "manager_settings", "manager_service", "manager_db_path"):
+    for attribute in (
+        "manager_client",
+        "manager_settings",
+        "manager_service",
+        "manager_db_path",
+        "bot_process_controller",
+    ):
         if hasattr(app.state, attribute):
             delattr(app.state, attribute)
-    monkeypatch.delenv("DICEPP_MANAGER_RUNTIME", raising=False)
-    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_COMMAND", raising=False)
-    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_CWD", raising=False)
-    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_STOP_TIMEOUT", raising=False)
+    app.state.bot_auto_start = False
     monkeypatch.delenv("DICEPP_MANAGER_URL", raising=False)
     monkeypatch.delenv("DICEPP_MANAGER_TOKEN_FILE", raising=False)
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)

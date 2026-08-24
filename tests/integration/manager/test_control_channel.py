@@ -15,9 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 import dicepp_security.private_token as manager_auth
 from dicepp_data import InstanceLayout
 from dicepp_manager.api import create_manager_app
-from dicepp_manager.archive_coordinator import ArchiveCoordinator
 from dicepp_manager.config import ManagerSettings
-from dicepp_manager.runtime import UnavailableRuntimeAdapter
 from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
 from plugins.DicePP.core.data.schema import DicePPDatabase
@@ -34,8 +32,6 @@ from dicepp_control.protocol import (
 def _client(tmp_path: Path) -> TestClient:
     layout = InstanceLayout.from_root(tmp_path)
     service = ManagerService(
-        unit_provider=lambda: [],
-        runtime_adapter=UnavailableRuntimeAdapter(),
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )
@@ -524,59 +520,3 @@ async def test_replaced_session_ping_failure_cannot_revoke_successor(
     await service._ping_loop("bot-1", old_socket)
 
     assert service.probe()["active_authenticated_sessions"] == 1
-
-
-@pytest.mark.asyncio
-async def test_archive_control_probe_uses_heartbeat_snapshot_during_new_session(
-    tmp_path: Path,
-) -> None:
-    """Health probes must not inspect Manager-owned sessions from a worker."""
-    from dicepp_manager.control import ControlChannelService
-
-    layout = InstanceLayout.from_root(tmp_path)
-    manager_service = ManagerService(
-        unit_provider=lambda: [],
-        runtime_adapter=UnavailableRuntimeAdapter(),
-        store=ManagerOperationStore(layout.manager_db),
-        state_dir=layout.manager_state_dir,
-    )
-    service = ControlChannelService(
-        project_root=tmp_path,
-        known_bot_ids=lambda: set(),
-    )
-    coordinator = ArchiveCoordinator(
-        layout=layout,
-        service=manager_service,
-        control_probe=service.probe,
-    )
-    existing_socket = _FakeControlSocket()
-    await service._replace_session("existing", existing_socket)
-    await service._handle_message(
-        "existing",
-        existing_socket,
-        status("existing", "3.0.0"),
-    )
-
-    owner_thread = threading.get_ident()
-
-    class OwnerLoopStates(dict):
-        def values(self):
-            assert threading.get_ident() == owner_thread
-            return super().values()
-
-    service._states = OwnerLoopStates(service._states)
-    health_task = asyncio.create_task(
-        coordinator.runtime_support.capture_control_baseline()
-    )
-    new_session_task = asyncio.create_task(
-        service._replace_session("new", _FakeControlSocket())
-    )
-
-    (heartbeat, control_gate), _ = await asyncio.gather(
-        health_task,
-        new_session_task,
-    )
-
-    assert isinstance(heartbeat, str)
-    assert control_gate == "skipped_no_bound_bots"
-    assert {row["bot_id"] for row in service.bot_statuses()} == {"existing", "new"}

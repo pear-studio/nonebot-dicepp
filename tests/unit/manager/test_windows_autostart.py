@@ -1,8 +1,3 @@
-import os
-
-import pytest
-
-from dicepp_manager.process_runtime import _split_command
 from dicepp_manager.windows_autostart import RUN_KEY, VALUE_NAME, WindowsAutostart, autostart_command
 
 
@@ -42,11 +37,3 @@ def test_hkcu_run_toggle_uses_stable_root_entry(tmp_path) -> None:
     assert RUN_KEY.endswith("CurrentVersion\\Run")
     adapter.set_enabled(False)
     assert adapter.enabled() is False
-
-
-@pytest.mark.skipif(os.name != "nt", reason="CommandLineToArgvW is a Windows contract")
-def test_windows_runtime_command_preserves_quoted_executable_path() -> None:
-    assert _split_command('"C:\\Program Files\\DicePP\\DicePP-Runtime.exe" --flag') == [
-        "C:\\Program Files\\DicePP\\DicePP-Runtime.exe",
-        "--flag",
-    ]

@@ -22,24 +22,8 @@ from dicepp_manager.service import ManagerService
 from dicepp_manager.store import ManagerOperationStore
 
 
-class _IdleRuntime:
-    async def status(self, _ids):
-        return {}
-
-    async def operate(self, _runtime_unit_id, _action):
-        raise AssertionError("Config tests do not operate the runtime")
-
-    async def logs(self, _runtime_unit_id, _lines):
-        raise AssertionError("Config tests do not read logs")
-
-    async def runtime_logs(self, _lines):
-        raise AssertionError("Config tests do not read logs")
-
-
 def _app(layout: InstanceLayout):
     service = ManagerService(
-        unit_provider=lambda: [],
-        runtime_adapter=_IdleRuntime(),
         store=ManagerOperationStore(layout.manager_db),
         state_dir=layout.manager_state_dir,
     )

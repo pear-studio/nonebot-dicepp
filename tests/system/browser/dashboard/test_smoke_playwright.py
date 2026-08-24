@@ -98,15 +98,10 @@ def dashboard_url(tmp_path: Path) -> str:
     env["DASHBOARD_HOST"] = "127.0.0.1"
     env["DASHBOARD_PORT"] = str(port)
     for key in (
-        "DICEPP_MANAGER_RUNTIME",
-        "DICEPP_MANAGER_PROCESS_COMMAND",
-        "DICEPP_MANAGER_PROCESS_CWD",
-        "DICEPP_MANAGER_PROCESS_STOP_TIMEOUT",
         "DICEPP_MANAGER_HOST",
         "DICEPP_MANAGER_PORT",
         "DICEPP_MANAGER_URL",
         "DICEPP_MANAGER_TOKEN_FILE",
-        "DICEPP_MANAGER_RELEASE_SCHEDULER",
         "DICEPP_TEST_START_MANAGER",
     ):
         env.pop(key, None)
@@ -115,8 +110,6 @@ def dashboard_url(tmp_path: Path) -> str:
     # publishes its final URL before Dashboard starts.  This avoids a free-port
     # selection race with other full-suite workers.
     env["DICEPP_MANAGER_PORT"] = "0"
-    env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
-    env["DICEPP_MANAGER_RELEASE_SCHEDULER"] = "0"
     env["DICEPP_TEST_START_MANAGER"] = "1"
 
     log_path = tmp_path / "dashboard-server.log"
@@ -250,173 +243,47 @@ def test_setup_form_inline_validation(dashboard_url: str) -> None:
             browser.close()
 
 
-def test_config_edit_requires_runtime_restart(dashboard_url: str, tmp_path: Path) -> None:
-    """A saved config is visibly deferred and never presented as hot-reloaded."""
-    # Create a dummy bot config so a bot is available in the sidebar
+def test_config_edit_saves_without_runtime_operation(
+    dashboard_url: str,
+    tmp_path: Path,
+) -> None:
+    """Config save stays a Manager data action; Bot lifecycle is separate."""
     bots_dir = tmp_path / "config" / "bots"
     bots_dir.mkdir(parents=True, exist_ok=True)
-    (bots_dir / "test_bot.json").write_text(
-        json.dumps({"app": {"name": "test-bot", "version": "1.0.0"}})
-    )
+    (bots_dir / "test_bot.json").write_text("{}", encoding="utf-8")
 
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
-        lifecycle_requests: list[tuple[str, str]] = []
-
-        def route_config_runtime(route):
-            path = urlparse(route.request.url).path
-            method = route.request.method
-            if path == "/api/manager/status" and method == "GET":
-                route.fulfill(
-                    status=200,
-                    content_type="application/json",
-                    body=json.dumps({
-                        "ok": True,
-                        "health": {"status": "ok", "runtime_adapter": "FakeAdapter"},
-                        "bots": [],
-                        "runtime_units": [{
-                            "runtime_unit_id": "dicepp-runtime",
-                            "bot_ids": ["test_bot", "shared_bot"],
-                            "shared_process": True,
-                            "runtime": {"runtime_state": "running", "health": "healthy"},
-                            "manager": {"operation_status": "idle"},
-                        }],
-                    }),
-                )
-                return
-            if path == "/api/manager/runtime-units/dicepp-runtime/restart" and method == "POST":
-                lifecycle_requests.append((method, path))
-                operation_id = f"config-restart-op-{len(lifecycle_requests)}"
-                route.fulfill(
-                    status=200,
-                    content_type="application/json",
-                    body=json.dumps({
-                        "ok": True,
-                        "operation": {
-                            "operation_id": operation_id,
-                            "runtime_unit_id": "dicepp-runtime",
-                            "action": "restart",
-                            "status": "queued",
-                        },
-                    }),
-                )
-                return
-            if path in {
-                "/api/manager/operations/config-restart-op-1",
-                "/api/manager/operations/config-restart-op-2",
-            } and method == "GET":
-                succeeded = path.endswith("-1")
-                route.fulfill(
-                    status=200,
-                    content_type="application/json",
-                    body=json.dumps({
-                        "ok": True,
-                        "operation": {
-                            "operation_id": path.rsplit("/", 1)[-1],
-                            "runtime_unit_id": "dicepp-runtime",
-                            "action": "restart",
-                            "status": "succeeded" if succeeded else "failed",
-                            "message": "" if succeeded else "runtime restart failed",
-                        },
-                    }),
-                )
-                return
-            route.continue_()
-
-        page.route("**/api/manager/**", route_config_runtime)
-
         try:
             _login(page, dashboard_url)
-
-            # Select a bot from the sidebar dropdown
-            # Note: auto-select already picked the first bot; manual selection is a no-op
-            # that keeps this test working regardless of auto-select behavior.
-            # <option> elements are always "hidden" in Playwright's visibility check,
-            # so we must use state="attached" instead of the default "visible".
             page.wait_for_selector(
                 "aside select option[value='test_bot']",
                 state="attached",
                 timeout=10000,
             )
             page.locator("aside select").select_option("test_bot")
-
-            # 3. Click "配置编辑" tab in sidebar navigation
             page.get_by_role("button", name="配置编辑").click()
-
-            # Wait for the Manager-backed user.json read before editing.
             json_view = page.get_by_role("button", name="JSON 视图")
             expect(json_view).to_be_enabled(timeout=10000)
-
-            # 4. Switch to JSON view — simpler than field-level editing
             json_view.click()
-
-            # 5. Modify a canonical BotConfig field in the JSON textarea.
             textarea = page.locator("textarea").first
-            textarea.wait_for(state="visible", timeout=5000)
             expect(textarea).to_be_enabled(timeout=10000)
             textarea.fill('{"nickname": "modified"}')
-
-            # 6. Click save and wait for the matching Dashboard response.  This
-            # binds the subsequent disk assertion to this save rather than a
-            # background request triggered while the editor initializes.
-            expected_user_config = {"nickname": "modified"}
             with page.expect_response(
                 lambda response: (
                     urlparse(response.url).path == "/api/config/user/save"
                     and response.request.method == "POST"
                 )
-            ) as save_response_info:
+            ) as response_info:
                 page.get_by_role("button", name="保存").click()
-            save_response = save_response_info.value
-            assert save_response.status == 200
-            assert save_response.json()["ok"] is True
-
-            # 7. Verify the fixed restart warning and deferred-save feedback.
-            page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
-            assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
-            expect(page.get_by_test_id("config-restart-notice")).to_contain_text(
-                "重启 RuntimeUnit 后才会完整生效"
-            )
-            expect(page.get_by_test_id("config-runtime-accounts")).to_have_text(
-                "test_bot、shared_bot"
-            )
+            assert response_info.value.status == 200
             expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
-                "尚未应用到运行中的 Bot"
+                "配置已保存"
             )
-            expect(page.locator("body")).not_to_contain_text("运行时重载：")
-            page.once("dialog", lambda dialog: dialog.accept())
-            with page.expect_response(
-                "**/api/manager/runtime-units/dicepp-runtime/restart"
-            ):
-                page.get_by_test_id("config-restart-runtime").click()
-            expect(page.get_by_test_id("config-restart-runtime")).to_be_enabled()
-            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
-                "RuntimeUnit 重启成功，新配置已完整生效"
-            )
-
-            # Saving again restores the pending restart notice. A failed
-            # terminal operation must not clear it.
-            with page.expect_response("**/api/config/user/save"):
-                page.get_by_role("button", name="保存").click()
-            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
-                "尚未应用到运行中的 Bot"
-            )
-            page.once("dialog", lambda dialog: dialog.accept())
-            with page.expect_response(
-                "**/api/manager/runtime-units/dicepp-runtime/restart"
-            ):
-                page.get_by_test_id("config-restart-runtime").click()
-            expect(page.get_by_test_id("config-restart-runtime")).to_be_enabled()
-            expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
-                "尚未应用到运行中的 Bot"
-            )
-            assert lifecycle_requests == [
-                ("POST", "/api/manager/runtime-units/dicepp-runtime/restart"),
-                ("POST", "/api/manager/runtime-units/dicepp-runtime/restart"),
-            ]
             _wait_for_json_value(
-                tmp_path / "config" / "user.json", expected_user_config
+                tmp_path / "config" / "user.json",
+                {"nickname": "modified"},
             )
         finally:
             browser.close()
@@ -726,553 +593,90 @@ def test_archive_terminal_operation_reconnects_from_persisted_id(
             browser.close()
 
 
-def test_monitor_tab_loads_initial_status_via_rest(dashboard_url: str) -> None:
-    """Monitor tab uses REST first paint and keeps bot status isolated from Manager failures."""
-    with sync_playwright() as p:
-        browser = launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
-            _login(page, dashboard_url)
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.eventSource?.close();
-                    state.eventSource = null;
-                    state.eventSourceConnected = false;
-                }"""
-            )
-
-            success = page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    const originalApi = state.api;
-                    const calls = [];
-                    state.monitorBots = [];
-                    state.monitorLoading = false;
-                    state.api = async (path) => {
-                        calls.push(path);
-                        if (path === '/api/bots/status') {
-                            return {
-                                ok: true,
-                                bots: [{
-                                    bot_id: 'rest_bot',
-                                    version: '3.0.0',
-                                    online: true,
-                                    last_heartbeat_ts: 1767225600,
-                                }],
-                            };
-                        }
-                        if (path === '/api/manager/status') {
-                            throw new Error('manager unavailable');
-                        }
-                        if (path.startsWith('/api/manager/operations')) {
-                            throw new Error('operations unavailable');
-                        }
-                        return originalApi.call(state, path);
-                    };
-                    try {
-                        await state.loadMonitor();
-                        await window.Alpine.nextTick();
-                        return {
-                            calls,
-                            monitorLoading: state.monitorLoading,
-                            botIds: state.monitorBots.map((bot) => bot.bot_id),
-                        };
-                    } finally {
-                        state.api = originalApi;
-                    }
-                }"""
-            )
-
-            assert set(success["calls"]) == {
-                "/api/bots/status",
-                "/api/manager/status",
-                "/api/manager/operations?limit=50",
-            }
-            assert success["monitorLoading"] is False
-            assert success["botIds"] == ["rest_bot"]
-
-            failure = page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    const originalApi = state.api;
-                    state.monitorBots = [{
-                        bot_id: 'stale_bot',
-                        version: '2.0.0',
-                        online: false,
-                        last_heartbeat_ts: '',
-                    }];
-                    state.monitorLoading = true;
-                    state.api = async (path) => {
-                        if (path === '/api/bots/status') {
-                            throw new Error('network down');
-                        }
-                        return originalApi.call(state, path);
-                    };
-                    try {
-                        await state.loadMonitor();
-                        return {
-                            monitorLoading: state.monitorLoading,
-                            botCount: state.monitorBots.length,
-                        };
-                    } finally {
-                        state.api = originalApi;
-                    }
-                }"""
-            )
-
-            assert failure == {"monitorLoading": False, "botCount": 0}
-        finally:
-            browser.close()
-
-
-def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
+def test_monitor_tab_controls_bot_directly_and_reads_logs(
     dashboard_url: str,
 ) -> None:
-    """Runtime controls, logs, and recent operations are exposed from the monitor tab."""
-    observed_requests: list[tuple[str, str]] = []
+    """The monitor uses synchronous Bot endpoints, with no Manager runtime adapter."""
+    observed: list[tuple[str, str]] = []
+    running = {"value": False}
 
-    def _runtime_api(route) -> None:
+    def bot_api(route) -> None:
         request = route.request
         path = urlparse(request.url).path
         method = request.method
-        observed_requests.append((method, path))
-
-        if path == "/api/bots/status" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "bots": [
-                            {
-                                "bot_id": "ui_bot",
-                                "version": "7.8.9",
-                                "online": True,
-                                "last_heartbeat_ts": 1782921600,
-                            }
-                        ],
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/status" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "health": {
-                            "status": "ok",
-                            "runtime_adapter": "ProcessRuntimeAdapter",
-                        },
-                        "runtime_units": [
-                            {
-                                "runtime_unit_id": "dicepp-runtime",
-                                "bot_ids": ["ui_bot"],
-                                "shared_process": True,
-                                "manager": {
-                                    "operation_status": "idle",
-                                    "operation_id": None,
-                                    "action": None,
-                                },
-                                "runtime": {
-                                    "runtime_state": "running",
-                                    "health": "healthy",
-                                    "message": "ready",
-                                    "detail": {},
-                                },
-                            }
-                        ],
-                        "bots": [],
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/operations" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "operations": [
-                            {
-                                "operation_id": "op-start-visible",
-                                "runtime_unit_id": "dicepp-runtime",
-                                "bot_id": "ui_bot",
-                                "action": "start",
-                                "status": "succeeded",
-                                "message": "started",
-                                "created_at": "2026-07-01T12:00:00Z",
-                                "updated_at": "2026-07-01T12:00:01Z",
-                            }
-                        ],
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/logs" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "logs": {
-                            "bot_id": "runtime",
-                            "text": "runtime log line",
-                            "source": "process",
-                            "lines": 1,
-                            "truncated": False,
-                        },
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/runtime-units/dicepp-runtime/restart" and method == "POST":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "operation": {
-                            "operation_id": "op-restart",
-                            "runtime_unit_id": "dicepp-runtime",
-                            "action": "restart",
-                            "status": "queued",
-                        },
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/operations/op-restart" and method == "GET":
+        observed.append((method, path))
+        if path == "/api/bot/status" and method == "GET":
             route.fulfill(
                 status=200,
                 content_type="application/json",
                 body=json.dumps({
                     "ok": True,
-                    "operation": {
-                        "operation_id": "op-restart",
-                        "runtime_unit_id": "dicepp-runtime",
-                        "action": "restart",
-                        "status": "succeeded",
+                    "status": {
+                        "state": "running" if running["value"] else "stopped",
+                        "running": running["value"],
+                        "pid": 4321 if running["value"] else None,
+                        "returncode": None,
                     },
                 }),
             )
             return
-
-        route.fallback()
+        if path == "/api/bot/logs" and method == "GET":
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "logs": {"text": "bot log line", "lines": 1, "truncated": False},
+                }),
+            )
+            return
+        if path in {"/api/bot/start", "/api/bot/stop", "/api/bot/restart"} and method == "POST":
+            action = path.rsplit("/", 1)[-1]
+            running["value"] = action != "stop"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "status": {
+                        "state": "running" if running["value"] else "stopped",
+                        "running": running["value"],
+                        "pid": 4321 if running["value"] else None,
+                        "returncode": None,
+                    },
+                }),
+            )
+            return
+        route.continue_()
 
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
-
         try:
-            page.route("**/api/bots/status", _runtime_api)
-            page.route("**/api/manager**", _runtime_api)
-            _login(page, dashboard_url)
-
-            expect(page.get_by_role("button", name="运行管理")).to_have_count(0)
-            page.get_by_role("button", name="运行监控").click()
-            page.wait_for_selector('[data-testid="monitor-tab"]', timeout=10000)
-            page.locator('[data-testid="monitor-tab"] td', has_text="ui_bot").first.wait_for(
-                timeout=10000
-            )
-
-            expect(page.locator('[data-testid="monitor-runtime-backend"]')).to_have_text(
-                "Windows 本机进程"
-            )
-            expect(page.locator('[data-testid="monitor-runtime-backend"]')).to_have_attribute(
-                "title",
-                "Windows 本机进程",
-            )
-            expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
-                "ProcessRuntimeAdapter"
-            )
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "Manager：Windows 本机进程"
-            )
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "独立 Manager 服务正常"
-            )
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("ui_bot")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("共享进程")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("健康")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("运行时状态")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("运行中")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("最近操作")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("操作编号")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("结果")
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text("started")
-            for heading in ["Operation", "Action", "Status", "Message"]:
-                expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
-                    heading
-                )
-
-            for action in ["start", "stop", "restart"]:
-                button = page.locator(
-                    f'[data-testid="manager-lifecycle-{action}-dicepp-runtime"]'
-                )
-                expect(button).to_be_enabled()
-
-            expect(page.locator('[data-testid="manager-log-button-ui_bot"]')).to_have_count(0)
-            page.locator('[data-testid="manager-runtime-log-button"]').click()
-            page.locator('[data-testid="manager-logs-panel"]').wait_for(timeout=10000)
-            expect(page.locator('[data-testid="manager-logs-panel"]')).to_contain_text(
-                "运行日志"
-            )
-            expect(page.locator('[data-testid="manager-logs-panel"]')).to_contain_text(
-                "全局 Launcher / Dashboard / Manager / runtime log"
-            )
-            expect(page.locator('[data-testid="manager-logs-text"]')).to_contain_text(
-                "runtime log line"
-            )
-            page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.managerLogs = {
-                        bot_id: 'runtime',
-                        text: '',
-                        source: 'process',
-                        lines: 0,
-                        truncated: false,
-                    };
-                    await window.Alpine.nextTick();
-                }"""
-            )
-            expect(page.locator('[data-testid="manager-logs-text"]')).to_contain_text(
-                "暂无运行日志"
-            )
-
-            with page.expect_response("**/api/manager/runtime-units/dicepp-runtime/restart"):
-                page.locator('[data-testid="manager-lifecycle-restart-dicepp-runtime"]').click()
-
-            page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.managerHealth = {
-                        status: 'ok',
-                        runtime_adapter: 'UnavailableRuntimeAdapter',
-                    };
-                    state.managerRuntimeUnits = [{
-                        runtime_unit_id: 'dicepp-runtime',
-                        bot_ids: ['ui_bot'],
-                        shared_process: true,
-                        manager: {
-                            operation_status: 'idle',
-                            operation_id: null,
-                            action: null,
-                        },
-                        runtime: {
-                            runtime_state: 'unknown',
-                            health: 'unavailable',
-                            message: 'not connected',
-                            detail: {},
-                        },
-                    }];
-                    state.refreshRuntimeRows();
-                    await window.Alpine.nextTick();
-                }"""
-            )
-            for action in ["start", "stop", "restart"]:
-                button = page.locator(
-                    f'[data-testid="manager-lifecycle-{action}-dicepp-runtime"]'
-                )
-                expect(button).to_be_disabled()
-        finally:
-            browser.close()
-
-    assert ("POST", "/api/manager/runtime-units/dicepp-runtime/restart") in observed_requests
-    assert ("GET", "/api/manager/logs") in observed_requests
-
-
-def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
-    dashboard_url: str,
-) -> None:
-    """Unavailable runtime keeps monitor copy user-facing and disables logs."""
-    observed_requests: list[tuple[str, str]] = []
-
-    def _runtime_api(route) -> None:
-        request = route.request
-        path = urlparse(request.url).path
-        method = request.method
-        observed_requests.append((method, path))
-
-        if path == "/api/bots/status" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "bots": [
-                            {
-                                "bot_id": "offline_bot",
-                                "version": "1.2.3",
-                                "online": False,
-                                "last_heartbeat_ts": "",
-                            }
-                        ],
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/status" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "health": {
-                            "status": "unavailable",
-                            "runtime_adapter": "UnavailableRuntimeAdapter",
-                            "message": "Manager runtime adapter is unavailable",
-                        },
-                        "runtime_units": [
-                            {
-                                "runtime_unit_id": "dicepp-runtime",
-                                "bot_ids": ["offline_bot"],
-                                "shared_process": True,
-                                "manager": {
-                                    "operation_status": "idle",
-                                    "operation_id": None,
-                                    "action": None,
-                                },
-                                "runtime": {
-                                    "runtime_state": "unknown",
-                                    "health": "unavailable",
-                                    "message": "",
-                                    "detail": {},
-                                },
-                            }
-                        ],
-                        "bots": [],
-                    }
-                ),
-            )
-            return
-
-        if path == "/api/manager/operations" and method == "GET":
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps({"ok": True, "operations": []}),
-            )
-            return
-
-        route.fallback()
-
-    with sync_playwright() as p:
-        browser = launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
-            page.route("**/api/bots/status", _runtime_api)
-            page.route("**/api/manager**", _runtime_api)
-            _login(page, dashboard_url)
-
-            page.get_by_role("button", name="运行监控").click()
-            page.wait_for_selector('[data-testid="monitor-tab"]', timeout=10000)
-            row = page.locator('[data-testid="monitor-tab"] tbody tr', has_text="offline_bot")
-            row.wait_for(timeout=10000)
-
-            expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
-                "未接入运行时"
-            )
-            expect(row).to_contain_text("共享进程")
-            expect(row).to_contain_text("Manager 不可用")
-            expect(row).to_contain_text("—")
-            expect(row).not_to_contain_text("未知")
-            expect(page.locator('[data-testid="manager-log-button-offline_bot"]')).to_have_count(0)
-
-            log_button = page.locator('[data-testid="manager-runtime-log-button"]')
-            expect(log_button).to_be_disabled()
-            expect(log_button).to_have_attribute(
-                "title",
-                "Manager 未配置，无法读取运行日志",
-            )
-        finally:
-            browser.close()
-
-    assert ("GET", "/api/manager/logs") not in observed_requests
-
-
-def test_monitor_tab_hides_version_operations(dashboard_url: str) -> None:
-    """Monitor tab keeps update/rollback controls out of the visible UI."""
-    with sync_playwright() as p:
-        browser = launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
+            page.route("**/api/bot/**", bot_api)
             _login(page, dashboard_url)
             page.get_by_role("button", name="运行监控").click()
             page.wait_for_selector('[data-testid="monitor-tab"]', timeout=10000)
+            expect(page.get_by_test_id("bot-status")).to_have_text("已停止")
+            page.get_by_test_id("bot-log-button").click()
+            expect(page.get_by_test_id("bot-logs-text")).to_contain_text("bot log line")
 
-            expect(page.locator('[data-testid="manager-version-panel"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="manager-version-update-button"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="manager-version-rollback-button"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="manager-release-preview-button"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="manager-archive-gate"]')).not_to_be_visible()
-            expect(page.get_by_text("版本操作")).not_to_be_visible()
-            expect(page.get_by_text("Target Version")).not_to_be_visible()
-
-            operations = page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    const originalApi = state.api;
-                    state.api = async (path) => {
-                        if (path.startsWith('/api/manager/operations')) {
-                            return {
-                                ok: true,
-                                operations: [
-                                    {
-                                        operation_id: 'op-start',
-                                        bot_id: 'manager_bot',
-                                        action: 'start',
-                                        status: 'succeeded',
-                                    },
-                                    {
-                                        operation_id: 'op-update',
-                                        bot_id: 'manager_bot',
-                                        action: 'update',
-                                        status: 'succeeded',
-                                    },
-                                    {
-                                        operation_id: 'op-rollback',
-                                        bot_id: 'manager_bot',
-                                        action: 'rollback',
-                                        status: 'failed',
-                                    },
-                                ],
-                            };
-                        }
-                        return originalApi.call(state, path);
-                    };
-                    try {
-                        await state.loadManagerOperations();
-                        return state.managerOperations.map((op) => op.action);
-                    } finally {
-                        state.api = originalApi;
-                    }
-                }"""
-            )
-            assert operations == ["start"]
-            expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text("更新")
-            expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text("回滚")
+            page.get_by_test_id("bot-lifecycle-start").click()
+            expect(page.get_by_test_id("bot-status")).to_have_text("运行中")
+            page.get_by_test_id("bot-lifecycle-restart").click()
+            expect(page.get_by_test_id("bot-status")).to_have_text("运行中")
+            page.get_by_test_id("bot-lifecycle-stop").click()
+            expect(page.get_by_test_id("bot-status")).to_have_text("已停止")
+            expect(page.locator("[data-testid^='manager-']")).to_have_count(0)
         finally:
             browser.close()
+
+    assert ("GET", "/api/bot/status") in observed
+    assert ("GET", "/api/bot/logs") in observed
+    assert ("POST", "/api/bot/start") in observed
+    assert ("POST", "/api/bot/restart") in observed
+    assert ("POST", "/api/bot/stop") in observed
+    assert not any("runtime-units" in path for _, path in observed)
 
 
 def test_updates_tab_shows_current_version_and_static_release_link(dashboard_url: str) -> None:
@@ -2249,7 +1653,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             expect(page.locator('[data-testid="archive-restore-button"]')).to_be_disabled()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_contain_text("始终由 Manager 暂停 Bot")
+            ).to_contain_text("恢复事务由 Dashboard 记录结果")
             page.locator('[data-testid="archive-restore-description"]').fill(
                 "operator restore"
             )
@@ -2281,7 +1685,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             failure_row.get_by_role("button", name="恢复预览").click()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_contain_text("始终由 Manager 暂停 Bot")
+            ).to_contain_text("恢复事务由 Dashboard 记录结果")
             page.locator('[data-testid="archive-restore-confirm"]').check()
             page.locator('[data-testid="archive-restore-button"]').click()
             expect(page.locator('[data-testid="archive-restore-error"]')).to_have_text(
@@ -2315,7 +1719,7 @@ def test_archives_tab_manages_mocked_archives(dashboard_url: str) -> None:
             expect(page.locator('[data-testid="archive-restore-error"]')).to_be_hidden()
             expect(
                 page.locator('[data-testid="archive-restore-quiesce-runtime"]')
-            ).to_contain_text("始终由 Manager 暂停 Bot")
+            ).to_contain_text("恢复事务由 Dashboard 记录结果")
             expect(page.locator('[data-testid="archive-plan-panel"]')).to_contain_text(
                 "pre-restore-partial-failure.zip"
             )

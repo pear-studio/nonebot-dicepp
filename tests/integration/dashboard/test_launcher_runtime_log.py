@@ -12,6 +12,7 @@ import time
 import pytest
 
 from dashboard.src import launcher
+from dashboard.src.bot_process import BotProcessStatus
 from dashboard.src.config import DashboardPaths
 from dashboard.src.runtime_log import rotate_runtime_log, runtime_log_path
 from tests.support.paths import find_repository_root
@@ -20,9 +21,7 @@ from tests.support.paths import find_repository_root
 _LAUNCHER_ENV_KEYS = (
     "DICEPP_APP_DIR", "DICEPP_PROJECT_ROOT", "DASHBOARD_HOST", "DASHBOARD_PORT",
     "DICEPP_MANAGER_HOST", "DICEPP_MANAGER_PORT", "DICEPP_MANAGER_URL",
-    "DICEPP_MANAGER_TOKEN_FILE", "DICEPP_MANAGER_RUNTIME",
-    "DICEPP_MANAGER_RUNTIME_UNIT_ID", "DICEPP_MANAGER_PROCESS_COMMAND",
-    "DICEPP_MANAGER_PROCESS_CWD",
+    "DICEPP_MANAGER_TOKEN_FILE",
 )
 
 
@@ -47,48 +46,25 @@ def clean_launcher_env() -> Iterator[None]:
         )
 
 
-class FakeManagerClient:
+class FakeBotController:
     def __init__(self, events: list[str] | None = None) -> None:
-        self.actions: list[tuple[str, str]] = []
-        self.state = "stopped"
+        self.actions: list[str] = []
+        self.running = False
         self.events = events if events is not None else []
-        self.operations: dict[str, dict] = {}
-        self.polls: dict[str, int] = {}
 
-    async def status(self):
-        return {
-            "runtime_units": [{
-                "runtime_unit_id": launcher.LAUNCHER_RUNTIME_KEY,
-                "bot_ids": ["10001", "10002"],
-                "shared_process": True,
-                "runtime": {"runtime_state": self.state, "health": "healthy" if self.state == "running" else "stopped"},
-            }],
-            "health": {"status": "ok"},
-        }
+    def status(self):
+        return BotProcessStatus("running" if self.running else "stopped", pid=123 if self.running else None)
 
-    async def health(self):
-        return {}
-
-    async def operate(self, runtime_unit_id: str, action: str):
-        self.actions.append((runtime_unit_id, action))
+    def _operate(self, action: str):
+        self.actions.append(action)
         self.events.append(f"operate:{action}")
-        self.state = "stopped" if action == "stop" else "running"
-        operation_id = f"op-{len(self.actions)}"
-        self.operations[operation_id] = {
-            "operation_id": operation_id,
-            "status": "queued",
-            "action": action,
-        }
-        self.polls[operation_id] = 0
-        return {"operation_id": operation_id, "status": "queued"}
+        self.running = action != "stop"
+        return self.status()
 
-    async def get_operation(self, operation_id: str):
-        self.polls[operation_id] += 1
-        status = "running" if self.polls[operation_id] == 1 else "succeeded"
-        self.operations[operation_id]["status"] = status
-        label = "terminal" if status == "succeeded" else status
-        self.events.append(f"{label}:{operation_id}")
-        return self.operations[operation_id]
+    def start(self): return self._operate("start")
+    def stop(self): return self._operate("stop")
+    def restart(self): return self._operate("restart")
+    def shutdown(self): return self.stop()
 
 
 def test_frozen_autostart_uses_stable_root_launcher(
@@ -118,13 +94,14 @@ def test_rotate_runtime_log_keeps_latest_ten_histories(tmp_path: Path) -> None:
     assert log_path.read_text(encoding="utf-8") == ""
 
 
-def test_launcher_environment_makes_manager_the_stable_owner(clean_launcher_env, tmp_path: Path) -> None:
+def test_launcher_environment_only_configures_dashboard_and_manager(
+    clean_launcher_env,
+    tmp_path: Path,
+) -> None:
     env = launcher.configure_launcher_environment(tmp_path)
     assert env["DICEPP_MANAGER_URL"] == "http://127.0.0.1:4091"
     assert env["DICEPP_MANAGER_TOKEN_FILE"] == str(tmp_path / "manager" / "state" / "api-token")
-    assert env["DICEPP_MANAGER_RUNTIME"] == "process"
-    assert env["DICEPP_MANAGER_RUNTIME_UNIT_ID"] == launcher.LAUNCHER_RUNTIME_KEY
-    assert "DicePP-Runtime.exe" in env["DICEPP_MANAGER_PROCESS_COMMAND"]
+    assert "DICEPP_BOT_AUTO_START" not in env
 
 
 def test_velopack_current_keeps_mutable_instance_data_in_install_root(
@@ -155,10 +132,6 @@ def test_velopack_current_keeps_mutable_instance_data_in_install_root(
     assert env["DICEPP_MANAGER_TOKEN_FILE"] == str(
         tmp_path / "manager" / "state" / "api-token"
     )
-    assert str(current / "DicePP-Runtime.exe") in env[
-        "DICEPP_MANAGER_PROCESS_COMMAND"
-    ]
-    assert env["DICEPP_MANAGER_PROCESS_CWD"] == str(tmp_path)
     for mutable in ("config", "data", "content", "manager"):
         assert not Path(env["DICEPP_PROJECT_ROOT"], mutable).is_relative_to(current)
     assert not (current / "config" / "global.json").exists()
@@ -370,9 +343,6 @@ def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
     spec.loader.exec_module(module)
 
     assert module._launcher_environment["DICEPP_PROJECT_ROOT"] == str(tmp_path)
-    assert str(current / "DicePP-Runtime.exe") in module._launcher_environment[
-        "DICEPP_MANAGER_PROCESS_COMMAND"
-    ]
     assert not (current / "config" / "global.json").exists()
     assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
     assert (tmp_path / "config" / "bots" / "_template.json").read_text(
@@ -390,37 +360,31 @@ def test_pyinstaller_bootstrap_resolves_velopack_current_before_imports(
     assert (tmp_path / "config" / "global.json").read_bytes() == legacy_global
 
 
-def test_tray_operates_the_shared_runtime_unit_through_manager_client(tmp_dashboard_paths: Path) -> None:
-    client = FakeManagerClient()
+def test_tray_controls_the_shared_bot_controller(tmp_dashboard_paths: Path) -> None:
+    bot = FakeBotController()
     stopped_dashboard: list[bool] = []
     controller = launcher.TrayController(
-        service_provider=lambda: client,
+        bot_controller=bot,
         dashboard_url="http://127.0.0.1:4090/dashboard",
         log_path=DashboardPaths.runtime_log_path(),
         stop_dashboard=lambda: stopped_dashboard.append(True),
     )
     tray = launcher.build_tray(controller, fake=True)
     controller._stop_tray = tray.stop
-    assert tray.menu()[0]["label"] == "DicePP: stopped / stopped"
+    assert tray.menu()[0]["label"] == "DicePP: stopped"
     tray.click("start")
-    assert tray.menu()[0]["label"] == "DicePP: running / healthy"
+    assert tray.menu()[0]["label"] == "DicePP: running (pid 123)"
     tray.click("restart")
     tray.click("exit")
-    assert client.actions == [
-        (launcher.LAUNCHER_RUNTIME_KEY, "start"),
-        (launcher.LAUNCHER_RUNTIME_KEY, "restart"),
-        (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
-    ]
+    assert bot.actions == ["start", "restart", "stop"]
     assert stopped_dashboard == [True]
 
 
-def test_exit_waits_for_stop_terminal_before_stopping_and_joining_services(
-    tmp_dashboard_paths: Path,
-) -> None:
+def test_exit_stops_bot_before_services(tmp_dashboard_paths: Path) -> None:
     events: list[str] = []
-    client = FakeManagerClient(events)
+    bot = FakeBotController(events)
     controller = launcher.TrayController(
-        service_provider=lambda: client,
+        bot_controller=bot,
         dashboard_url="http://127.0.0.1:4090/dashboard",
         log_path=DashboardPaths.runtime_log_path(),
         stop_dashboard=lambda: events.append("stop:dashboard"),
@@ -433,8 +397,6 @@ def test_exit_waits_for_stop_terminal_before_stopping_and_joining_services(
 
     assert events == [
         "operate:stop",
-        "running:op-1",
-        "terminal:op-1",
         "stop:dashboard",
         "stop:manager",
         "join:services",
@@ -443,7 +405,7 @@ def test_exit_waits_for_stop_terminal_before_stopping_and_joining_services(
     log = DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
     ordered_phases = [
         "launcher | phase runtime stop started",
-        "launcher | phase runtime stop completed | status=succeeded",
+        "launcher | phase runtime stop completed | status=stopped",
         "launcher | phase Dashboard stop started",
         "launcher | phase Dashboard stop completed",
         "launcher | phase Manager stop started",
@@ -458,39 +420,6 @@ def test_exit_waits_for_stop_terminal_before_stopping_and_joining_services(
     assert offsets == sorted(offsets)
     assert log.count("elapsed_ms=") >= 6
 
-
-def test_exit_is_bounded_and_still_joins_after_operation_timeout(
-    tmp_dashboard_paths: Path,
-) -> None:
-    events: list[str] = []
-
-    class NeverFinishes(FakeManagerClient):
-        async def get_operation(self, operation_id: str):
-            events.append("poll:running")
-            return {"operation_id": operation_id, "status": "running"}
-
-    client = NeverFinishes(events)
-    controller = launcher.TrayController(
-        service_provider=lambda: client,
-        dashboard_url="http://127.0.0.1:4090/dashboard",
-        log_path=DashboardPaths.runtime_log_path(),
-        stop_dashboard=lambda: events.append("stop:dashboard"),
-        stop_manager=lambda: events.append("stop:manager"),
-        join_services=lambda: events.append("join:services"),
-        stop_tray=lambda: events.append("stop:tray"),
-        operation_timeout=0.01,
-    )
-
-    controller.exit()
-
-    assert "poll:running" in events
-    assert events[-4:] == [
-        "stop:dashboard",
-        "stop:manager",
-        "join:services",
-        "stop:tray",
-    ]
-    assert "did not finish" in DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
 
 
 def test_managed_server_handle_requests_stop_and_joins_non_daemon_thread(
@@ -591,7 +520,7 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
     normal_exit: BaseException | None,
 ) -> None:
     events: list[str] = []
-    client = FakeManagerClient(events)
+    bot = FakeBotController(events)
 
     class FakeHandle:
         def __init__(self, name: str) -> None:
@@ -639,7 +568,7 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
         "ManagerClientSettings",
         SimpleNamespace(from_layout=lambda _layout: object()),
     )
-    monkeypatch.setattr(launcher, "ManagerClient", lambda _settings: client)
+    monkeypatch.setattr(launcher, "create_bot_process_controller", lambda **_kwargs: bot)
     monkeypatch.setattr(launcher, "ensure_api_token", lambda _path: "token")
     monkeypatch.setattr(launcher, "create_manager_app", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(launcher, "_start_server", lambda *_args, **_kwargs: manager_handle)
@@ -652,11 +581,6 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
         launcher,
         "_wait_for_manager_service",
         lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        launcher,
-        "_auto_start_runtime",
-        lambda controller, _path: controller.start_runtime(),
     )
     monkeypatch.setattr(launcher, "WindowsAutostart", lambda _executable: object())
     monkeypatch.setattr(launcher, "should_open_browser", lambda: failure_stage == "open_browser")
@@ -698,12 +622,13 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
             DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
         )
 
-    terminal_events = [event for event in events if event.startswith("terminal:")]
-    assert terminal_events
-    stop_terminal = events.index(terminal_events[-1])
+    assert "operate:stop" in events
+    stop_terminal = events.index("operate:stop")
     assert stop_terminal < events.index("stop:dashboard")
     assert stop_terminal < events.index("stop:manager")
     assert events.count("stop:dashboard") == 1
     assert events.count("stop:manager") == 1
+    assert launcher.app.state.bot_auto_start is False
+    assert getattr(launcher.app.state, "bot_process_controller", None) is None
     assert events.count("join:dashboard") == 1
     assert events.count("join:manager") == 1

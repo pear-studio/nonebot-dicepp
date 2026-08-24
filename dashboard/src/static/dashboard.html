@@ -299,29 +299,8 @@
         </template>
         <template x-if="selectedBotId">
           <div>
-            <div data-testid="config-restart-notice" class="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-lg text-sm">
-              <div class="font-medium">配置修改保存后不会立即改变正在运行的 Bot，重启 RuntimeUnit 后才会完整生效。</div>
-              <template x-if="configRuntimeUnit()">
-                <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    重启 <code x-text="configRuntimeUnit().runtime_unit_id"></code> 会使同一运行单元内的账号短暂离线：
-                    <span data-testid="config-runtime-accounts" class="font-medium" x-text="configRuntimeAccountsLabel()"></span>
-                  </div>
-                  <button
-                    @click="restartConfigRuntime()"
-                    :disabled="managerActionDisabled(configRuntimeUnit(), configRuntimeUnit()?.runtime_unit_id)"
-                    data-testid="config-restart-runtime"
-                    class="px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    x-text="managerActionLoading[configRuntimeUnit()?.runtime_unit_id] ? '重启中' : '重启使配置生效'"
-                  ></button>
-                </div>
-              </template>
-              <div x-show="!configRuntimeUnit()" class="mt-2 text-amber-700">当前无法确定 RuntimeUnit；请到“运行监控”确认 Manager 状态后重启。</div>
-            </div>
             <div x-show="configSaveResult?.saved" data-testid="config-save-feedback" class="mb-4 bg-green-50 border border-green-200 text-green-800 p-3 rounded text-sm">
-              <span x-text="configSaveResult?.restart_required === false
-                ? 'RuntimeUnit 重启成功，新配置已完整生效。'
-                : '配置已原子保存到磁盘，尚未应用到运行中的 Bot；请重启 RuntimeUnit。'"></span>
+              <span x-text="configSaveResult?.saved ? '配置已保存。' : ''"></span>
             </div>
             <div class="flex gap-4 mb-4 border-b">
               <button @click="configView = 'fields'" :class="configView === 'fields' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">字段视图</button>
@@ -435,7 +414,7 @@
             <!-- AI 配置 sub-tab -->
             <div x-show="personaView === 'ai_config'" x-cloak>
               <div class="mb-4 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded text-sm">
-                AI 配置保存后需要重启 RuntimeUnit 才会完整生效；角色卡内容仍可使用 <code>.ai admin reload</code> 专用重载。
+                AI 配置保存后可按需在“运行监控”中重启 Bot；角色卡内容仍可使用 <code>.ai admin reload</code> 专用重载。
               </div>
               <!-- Persona config skeleton -->
               <div x-show="personaConfigLoading" class="space-y-3 p-4">
@@ -691,16 +670,6 @@
                             <p class="text-xs mt-1" :class="queryStats.warning_count > 0 ? 'text-gray-500' : 'text-green-700'" x-text="queryStats.warning_count > 0 ? '点击一项可只查看涉及的数据行。' : '当前数据库没有发现会影响查询的结构问题。'"></p>
                           </div>
                           <div class="flex items-center gap-2">
-                            <button
-                              x-show="queryStats.warning_count > 0"
-                              type="button"
-                              @click.stop="startQueryDatabaseRepair()"
-                              :disabled="queryNormalizeLoading || queryStateLoading"
-                              title="先检查修复会产生的变化；如果有内容无法原样保留，会在执行前让你确认。原数据库会自动保存为已停用的备份。"
-                              data-testid="query-repair-button"
-                              class="px-3 py-1.5 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-                              x-text="queryNormalizeLoading ? '正在检查…' : '一键修复'"
-                            ></button>
                             <button type="button" @click="queryWarningsOpen = false" aria-label="关闭问题列表" class="text-gray-400 hover:text-gray-700 text-xl leading-none">×</button>
                           </div>
                         </div>
@@ -922,42 +891,10 @@
 
         <div class="bg-white rounded-lg shadow mb-4">
           <div class="p-4 border-b">
-            <h3 class="font-semibold">创建存档</h3>
+            <h3 class="font-semibold">存档管理</h3>
           </div>
           <div class="p-4">
             <div class="flex flex-wrap items-end gap-3">
-              <div class="min-w-64 flex-1">
-                <label for="archive-description" class="block text-xs font-medium text-gray-500 mb-1">说明</label>
-                <input
-                  id="archive-description"
-                  x-model.trim="archiveDescription"
-                  data-testid="archive-description-input"
-                  type="text"
-                  class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                  placeholder="可选"
-                  :disabled="archiveCreating"
-                />
-              </div>
-              <div class="w-48">
-                <label for="archive-profile" class="block text-xs font-medium text-gray-500 mb-1">范围</label>
-                <select
-                  id="archive-profile"
-                  x-model="archiveProfile"
-                  data-testid="archive-profile-select"
-                  class="w-full border rounded px-3 py-2 text-sm"
-                  :disabled="archiveCreating"
-                >
-                  <option value="regular">常规（不含 content）</option>
-                  <option value="full">完整（包含 content）</option>
-                </select>
-              </div>
-              <button
-                @click="createArchive()"
-                :disabled="archiveCreating"
-                data-testid="archive-create-button"
-                class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-                x-text="archiveCreating ? '创建中...' : '创建'"
-              ></button>
               <label class="px-4 py-2 border text-sm rounded cursor-pointer hover:bg-gray-50">
                 导入 ZIP
                 <input
@@ -969,15 +906,6 @@
                 />
               </label>
             </div>
-            <div
-              x-show="archiveEstimate"
-              x-cloak
-              data-testid="archive-estimate"
-              class="mt-3 bg-blue-50 border border-blue-200 text-blue-800 p-2 rounded text-sm"
-              x-text="`预计 ${formatFileSize(archiveEstimate?.input_bytes || 0)}，${archiveEstimate?.file_count || 0} 个文件；可用空间 ${formatFileSize(archiveEstimate?.available_bytes || 0)}${archiveEstimate?.large_content_warning ? '；content 较大，Bot 会停机较长时间' : ''}`"
-            ></div>
-            <div x-show="archiveCreateMessage" x-cloak data-testid="archive-create-success" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-2 rounded text-sm" x-text="archiveCreateMessage"></div>
-            <div x-show="archiveCreateError" x-cloak data-testid="archive-create-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-2 rounded text-sm" x-text="archiveCreateError"></div>
           </div>
         </div>
 
@@ -1040,13 +968,6 @@
                         data-testid="archive-verify-button"
                         class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         x-text="archiveVerifying && archiveVerifyArchive?.filename === archive.filename ? '检查中' : '检查存档'"
-                      ></button>
-                      <button
-                        @click="requestArchiveRestorePlan(archive)"
-                        :disabled="!archive.valid || archivePlanLoading || archiveDeleting[archive.filename] === true"
-                        data-testid="archive-plan-button"
-                        class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        x-text="archivePlanLoading && archivePlanArchive?.filename === archive.filename ? '预览中' : '恢复预览'"
                       ></button>
                       <button
                         @click="deleteArchive(archive)"
@@ -1221,7 +1142,7 @@
                       <div
                         data-testid="archive-restore-quiesce-runtime"
                         class="text-sm text-gray-600"
-                      >恢复事务始终由 Manager 暂停 Bot 并按原状态恢复</div>
+                      >恢复事务由 Dashboard 记录结果；Bot 进程请在“运行监控”中单独控制</div>
                       <label class="flex items-center gap-2 text-sm text-gray-700">
                         <input
                           type="checkbox"
@@ -1303,82 +1224,9 @@
                     </div>
                   </template>
                   <div x-show="archiveRestoreRuntimeQuiesce" x-cloak data-testid="archive-restore-runtime-quiesce" class="border rounded">
-                    <div class="px-3 py-2 bg-gray-50 border-b text-sm font-medium">Manager 处理</div>
-                    <div class="p-3 space-y-3 text-sm">
-                      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
-                        <div>
-                          <div class="text-xs text-gray-500">Bot</div>
-                          <div data-testid="archive-restore-runtime-units" class="font-mono text-xs break-all" x-text="archiveRuntimeQuiesceUnits(archiveRestoreRuntimeQuiesce).join(', ') || '-'"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">失败阶段</div>
-                          <div data-testid="archive-restore-runtime-failed-stage" class="font-mono text-xs" x-text="archiveRuntimeStageLabel(archiveRestoreRuntimeQuiesce?.failed_stage)"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">已开始恢复</div>
-                          <div data-testid="archive-restore-runtime-restore-started" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.restore_started)"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">已尝试重启</div>
-                          <div data-testid="archive-restore-runtime-restart-attempted" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.restart_attempted)"></div>
-                        </div>
-                        <div>
-                          <div class="text-xs text-gray-500">启动失败</div>
-                          <div data-testid="archive-restore-runtime-start-failed" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.start_failed)"></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div class="text-xs text-gray-500 mb-1">暂停操作</div>
-                        <div class="overflow-x-auto border rounded">
-                          <table data-testid="archive-restore-runtime-stop-operations" class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                              <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">运行单元</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
-                              </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200">
-                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations')" :key="`restore-stop-${op.operation_id || op.runtime_unit_id || index}`">
-                                <tr>
-                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.runtime_unit_id || '-'"></td>
-                                  <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
-                                  <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
-                                  <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
-                                </tr>
-                              </template>
-                            </tbody>
-                          </table>
-                          <div x-show="archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations').length === 0" data-testid="archive-restore-runtime-stop-empty" class="p-3 text-xs text-gray-500">-</div>
-                        </div>
-                      </div>
-                      <div>
-                        <div class="text-xs text-gray-500 mb-1">恢复启动操作</div>
-                        <div class="overflow-x-auto border rounded">
-                          <table data-testid="archive-restore-runtime-start-operations" class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                              <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">运行单元</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
-                              </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200">
-                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations')" :key="`restore-start-${op.operation_id || op.runtime_unit_id || index}`">
-                                <tr>
-                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.runtime_unit_id || '-'"></td>
-                                  <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
-                                  <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
-                                  <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
-                                </tr>
-                              </template>
-                            </tbody>
-                          </table>
-                          <div x-show="archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations').length === 0" data-testid="archive-restore-runtime-start-empty" class="p-3 text-xs text-gray-500">-</div>
-                        </div>
-                      </div>
+                    <div class="px-3 py-2 bg-gray-50 border-b text-sm font-medium">恢复处理</div>
+                    <div class="p-3 text-sm text-gray-600">
+                      存档恢复不会由 Manager 启停 Bot。需要暂停或重新启动 Bot 时，请在“运行监控”中操作。
                     </div>
                   </div>
                 </div>
@@ -1434,166 +1282,44 @@
       <div x-show="currentTab === 'monitor'" x-cloak data-testid="monitor-tab">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-xl font-bold">运行监控</h2>
-          <div class="flex items-center gap-2">
-            <button
-              @click="loadManagerRuntimeLogs()"
-              :disabled="managerRuntimeLogsDisabled()"
-              :title="managerCanViewRuntimeLogs() ? '读取全局运行日志' : 'Manager 未配置，无法读取运行日志'"
-              data-testid="manager-runtime-log-button"
-              class="px-3 py-1.5 border text-sm rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              x-text="managerLogsLoading && managerLogsBotId === 'runtime' ? '读取中' : '运行日志'"
-            ></button>
-            <button @click="loadMonitor()" :disabled="monitorLoading || managerLoading || managerOperationsLoading" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">刷新</button>
-          </div>
+          <button @click="loadMonitor()" :disabled="monitorLoading" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">刷新</button>
         </div>
 
         <div class="bg-white rounded-lg shadow mb-4">
-          <div class="p-4 border-b">
-            <div class="flex flex-col gap-1">
-              <div class="text-sm font-medium">
-                <div class="text-sm font-medium" x-show="managerHealth?.runtime_adapter">
-                  Manager：<span data-testid="monitor-runtime-backend" :title="runtimeBackendLabel(managerHealth?.runtime_adapter)" x-text="runtimeBackendLabel(managerHealth?.runtime_adapter)"></span>
-                </div>
-              </div>
-              <div class="text-sm text-gray-500" x-text="managerRuntimeSummary()"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-lg shadow overflow-x-auto mb-4">
           <div class="p-4 border-b flex items-center justify-between">
-            <h3 class="font-semibold">运行状态</h3>
-            <span class="text-xs text-gray-500" x-text="monitorLoading || managerLoading ? '加载中...' : `${runtimeBotRows.length} 个 RuntimeUnit`"></span>
-          </div>
-          <div x-show="(monitorLoading && eventSourceConnected) || managerLoading" class="space-y-3 p-4">
-            <div class="animate-pulse bg-gray-200 rounded h-6 w-1/4"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
-          </div>
-          <div x-show="monitorLoading && !eventSourceConnected && runtimeBotRows.length === 0"
-               class="text-center text-gray-500 py-8">
-            无法连接到实时推送，请检查服务器状态
-          </div>
-          <table x-show="!monitorLoading && !managerLoading && runtimeBotRows.length > 0" class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">RuntimeUnit</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">共享账号</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">运行时状态</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-              <template x-for="row in runtimeBotRows" :key="row.runtime_unit_id">
-                <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm font-medium">
-                    <div x-text="row.runtime_unit_id"></div>
-                    <div x-show="row.shared_process" class="text-xs text-blue-600">共享进程，启停作用于全部账号</div>
-                  </td>
-                  <td class="px-4 py-3 text-sm" x-text="(row.bot_ids || []).join('、') || '尚无账号'"></td>
-                  <td class="px-4 py-3 text-sm">
-                    <div class="font-medium" x-text="runtimeStatusPrimary(row.runtime)"></div>
-                    <div x-show="runtimeStatusDetail(row.runtime)" class="text-xs text-gray-500" x-text="runtimeStatusDetail(row.runtime)"></div>
-                    <div class="text-xs text-gray-500" x-show="['queued', 'running'].includes(row.manager?.operation_status)" x-text="`正在${actionLabel(row.manager?.action)}`"></div>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs" x-text="row.runtime?.message || '-'"></td>
-                  <td class="px-4 py-3">
-                    <template x-if="managerHealth?.status === 'ok'">
-                      <div class="flex flex-wrap gap-2">
-                        <template x-for="action in ['start', 'stop', 'restart']" :key="`${row.runtime_unit_id}-${action}`">
-                          <button
-                            @click="managerOperate(row, action)"
-                            :disabled="managerActionDisabled(row, row.runtime_unit_id)"
-                            :title="managerCanOperate(row) ? actionLabel(action) : 'Manager 不可用，操作不可用'"
-                            :data-testid="`manager-lifecycle-${action}-${row.runtime_unit_id}`"
-                            :class="managerActionDisabled(row, row.runtime_unit_id) ? '' : 'hover:bg-gray-100'"
-                            class="px-2 py-1 text-xs border rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                            x-text="managerActionLoading[row.runtime_unit_id] ? '执行中' : actionLabel(action)"
-                          ></button>
-                        </template>
-                      </div>
-                    </template>
-                    <template x-if="managerHealth?.status !== 'ok'">
-                      <span class="text-xs text-gray-400">Manager 不可用</span>
-                    </template>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-          <div x-show="!monitorLoading && !managerLoading && runtimeBotRows.length === 0" class="text-center text-gray-500 py-8">暂无数据</div>
-          <div x-show="!eventSourceConnected && monitorBots.length > 0" class="text-xs text-yellow-600 px-4 pb-3">
-            实时连接已断开，数据可能不是最新
-          </div>
-        </div>
-
-        <div x-show="managerLogsBotId" x-cloak data-testid="manager-logs-panel" class="bg-white rounded-lg shadow mb-4">
-          <div class="p-4 border-b flex items-center justify-between gap-4">
             <div>
-              <h3 class="font-semibold">运行日志</h3>
-              <div class="text-xs text-gray-500 mt-1">全局 Launcher / Dashboard / Manager / runtime log</div>
+              <h3 class="font-semibold">Bot 状态</h3>
+              <p class="text-sm text-gray-500 mt-1" x-text="botStatusDescription()"></p>
             </div>
-            <button @click="clearManagerLogs()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
+            <span data-testid="bot-status" class="text-sm font-medium" :class="botStatus?.running ? 'text-green-600' : 'text-gray-500'" x-text="botStatusLabel()"></span>
           </div>
-          <div class="p-4">
-            <div x-show="managerLogsLoading" class="text-sm text-gray-500">正在读取日志...</div>
-            <div x-show="managerLogsError" data-testid="manager-logs-error" class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm" x-text="managerLogsError"></div>
-            <template x-if="managerLogs && !managerLogsError">
-              <div>
-                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
-                  <span x-text="managerLogs.source || '-'"></span>
-                  <span x-text="`${managerLogs.lines ?? 0} 行`"></span>
-                  <span x-show="managerLogs.truncated">已截断</span>
-                </div>
-                <pre data-testid="manager-logs-text" class="bg-gray-900 text-gray-100 rounded p-3 text-xs overflow-x-auto max-h-96 whitespace-pre-wrap" x-text="managerLogs.text || '暂无运行日志'"></pre>
-              </div>
+          <div class="p-4 flex flex-wrap gap-2">
+            <template x-for="action in ['start', 'stop', 'restart']" :key="action">
+              <button
+                @click="botAction(action)"
+                :disabled="botActionLoading || (action === 'start' && botStatus?.running) || (action === 'stop' && !botStatus?.running)"
+                :data-testid="'bot-lifecycle-' + action"
+                class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                x-text="botActionLoading === action ? '执行中' : actionLabel(action)"
+              ></button>
             </template>
           </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
+        <div class="bg-white rounded-lg shadow mb-4" data-testid="bot-logs-panel">
           <div class="p-4 border-b flex items-center justify-between">
-            <h3 class="font-semibold">最近操作</h3>
-            <span class="text-xs text-gray-500" x-text="managerOperationsLoading ? '加载中...' : `${managerOperations.length} 条`"></span>
+            <div>
+              <h3 class="font-semibold">Bot 运行日志</h3>
+              <p class="text-xs text-gray-500 mt-1">显示 Bot runtime 的尾部日志</p>
+            </div>
+            <button @click="loadBotLogs()" :disabled="botLogsLoading" data-testid="bot-log-button" class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50" x-text="botLogsLoading ? '读取中' : '刷新日志'"></button>
           </div>
-          <div x-show="managerOperationsLoading" class="space-y-3 p-4">
-            <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
-            <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
+          <div class="p-4">
+            <div x-show="botLogsError" data-testid="bot-logs-error" class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm" x-text="botLogsError"></div>
+            <pre data-testid="bot-logs-text" class="bg-gray-900 text-gray-100 rounded p-3 text-xs overflow-x-auto max-h-96 whitespace-pre-wrap" x-text="botLogs?.text || '暂无运行日志'"></pre>
           </div>
-          <table x-show="!managerOperationsLoading && managerOperations.length > 0" class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作编号</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">RuntimeUnit</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">结果</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">时间</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-              <template x-for="op in managerOperations" :key="op.operation_id">
-                <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm font-mono" x-text="shortOperationId(op.operation_id)"></td>
-                  <td class="px-4 py-3 text-sm" x-text="op.runtime_unit_id || '-'"></td>
-                  <td class="px-4 py-3 text-sm" x-text="actionLabel(op.action)"></td>
-                  <td class="px-4 py-3 text-sm" x-text="operationStatusLabel(op.status)"></td>
-                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs">
-                    <div x-text="op.message || '-'"></div>
-                  </td>
-                  <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap" x-text="formatIsoTimestamp(op.updated_at || op.created_at)"></td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-          <div x-show="!managerOperationsLoading && managerOperations.length === 0" class="text-center text-gray-500 py-8">暂无操作记录</div>
         </div>
       </div>
-
       <!-- Tab: 审计日志 -->
       <div x-show="currentTab === 'audit'" x-cloak data-testid="audit-tab">
         <h2 class="text-xl font-bold mb-4">审计日志</h2>
@@ -1921,18 +1647,11 @@ function app() {
 
     // ── Tab: Monitor ──
     monitorBots: [],
-    runtimeBotRows: [],
-
-    // ── Tab: Manager ──
-    managerHealth: null,
-    managerBots: [],
-    managerRuntimeUnits: [],
-    managerOperations: [],
-    managerActionLoading: {},
-    managerLogsBotId: '',
-    managerLogs: null,
-    managerLogsError: '',
-    managerLogsLoading: false,
+    botStatus: null,
+    botActionLoading: '',
+    botLogs: null,
+    botLogsError: '',
+    botLogsLoading: false,
 
     // ── Tab: Archives ──
     archives: [],
@@ -1975,8 +1694,6 @@ function app() {
     personaConfigLoading: false,
     charactersLoading: false,
     contentLoading: false,
-    managerLoading: false,
-    managerOperationsLoading: false,
     monitorLoading: false,
     auditLoading: false,
     saving: false,
@@ -2129,16 +1846,11 @@ function app() {
       this.bots = [];
       this.selectedBotId = '';
       this.monitorBots = [];
-      this.runtimeBotRows = [];
-      this.managerHealth = null;
-      this.managerBots = [];
-      this.managerRuntimeUnits = [];
-      this.managerOperations = [];
-      this.managerActionLoading = {};
-      this.managerLogsBotId = '';
-      this.managerLogs = null;
-      this.managerLogsError = '';
-      this.managerLogsLoading = false;
+      this.botStatus = null;
+      this.botActionLoading = '';
+      this.botLogs = null;
+      this.botLogsError = '';
+      this.botLogsLoading = false;
       this.resetArchivesState();
       this.auditLogs = [];
       this.overviewBots = [];
@@ -2228,11 +1940,9 @@ function app() {
         case 'overview': this.loadOverview(); break;
         case 'config':
           this.loadConfig();
-          this.loadManagerStatus();
           break;
         case 'persona':
           this.loadPersonaConfig();
-          this.loadManagerStatus();
           break;
         case 'content': this.loadContentFiles(this.contentSubdir); break;
         case 'updates': break;
@@ -3122,135 +2832,60 @@ function app() {
       }
     },
 
-    // ── Manager ──
-    async loadManager() {
-      await Promise.all([this.loadManagerStatus(), this.loadManagerOperations()]);
-    },
-
-    async loadManagerStatus() {
-      this.managerLoading = true;
+    // ── Bot process ──
+    async loadBotStatus() {
       try {
-        const data = await this.api('/api/manager/status');
-        this.managerHealth = data.health || null;
-        this.managerBots = data.bots || [];
-        this.managerRuntimeUnits = data.runtime_units || [];
+        const data = await this.api('/api/bot/status');
+        this.botStatus = data.status || null;
       } catch (err) {
-        console?.warn('[DicePP] Failed to load manager status:', err);
-        this.managerHealth = null;
-        this.managerBots = [];
-        this.managerRuntimeUnits = [];
-      } finally {
-        this.refreshRuntimeRows();
-        this.managerLoading = false;
+        console?.warn('[DicePP] Failed to load Bot process status:', err);
+        this.botStatus = null;
       }
     },
 
-    async loadManagerOperations() {
-      this.managerOperationsLoading = true;
+    botStatusLabel() {
+      if (this.botStatus?.running) return '运行中';
+      if (!this.botStatus?.running && this.botStatus?.returncode != null) return '已退出';
+      return '已停止';
+    },
+
+    botStatusDescription() {
+      if (!this.botStatus) return '无法读取 Bot 进程状态';
+      if (this.botStatus.running && this.botStatus.pid) return `PID ${this.botStatus.pid}`;
+      if (this.botStatus.returncode != null) return `退出码 ${this.botStatus.returncode}`;
+      return '当前没有运行中的 Bot 进程';
+    },
+
+    async botAction(action) {
+      if (!['start', 'stop', 'restart'].includes(action)) return;
+      this.botActionLoading = action;
       try {
-        const data = await this.api('/api/manager/operations?limit=50');
-        this.managerOperations = (data.operations || []).filter(
-          (op) => !['update', 'rollback'].includes(op?.action)
-        );
+        const data = await this.api(`/api/bot/${action}`, { method: 'POST' });
+        this.botStatus = data.status || null;
       } catch (err) {
-        console?.warn('[DicePP] Failed to load manager operations:', err);
-        this.managerOperations = [];
+        console?.warn('[DicePP] Bot process action failed:', err);
+        this.botLogsError = err.message || `${action} 失败`;
       } finally {
-        this.managerOperationsLoading = false;
+        this.botActionLoading = '';
       }
     },
 
-    managerRuntimeSummary() {
-      if (this.managerHealth?.status === 'ok') {
-        return '独立 Manager 服务正常；生命周期操作按 RuntimeUnit 执行';
-      }
-      if (this.managerHealth?.status === 'unsupported') return `Manager 版本不兼容：${this.managerHealth?.message || ''}`;
-      if (this.managerHealth?.status === 'unavailable') return `Manager 不可用：${this.managerHealth?.message || ''}`;
-      return 'Manager 状态未知';
-    },
-
-    refreshRuntimeRows() {
-      this.runtimeBotRows = (this.managerRuntimeUnits || []).map((unit) => ({
-        ...unit,
-        monitors: (this.monitorBots || []).filter((bot) => (unit.bot_ids || []).includes(bot?.bot_id)),
-      }));
-    },
-
-    configRuntimeUnit() {
-      return (this.managerRuntimeUnits || []).find(
-        (unit) => (unit.bot_ids || []).includes(this.selectedBotId)
-      ) || null;
-    },
-
-    configRuntimeAccountsLabel() {
-      const ids = this.configRuntimeUnit()?.bot_ids || [];
-      return ids.length > 0 ? ids.join('、') : '尚无已发现账号';
-    },
-
-    async restartConfigRuntime() {
-      const unit = this.configRuntimeUnit();
-      if (!this.managerCanOperate(unit)) return;
-      const accounts = this.configRuntimeAccountsLabel();
-      if (!confirm(`确定重启 ${unit.runtime_unit_id}？账号 ${accounts} 会一起短暂离线。`)) return;
-      const operation = await this.managerOperate(unit, 'restart');
-      if (operation?.status === 'succeeded' && this.configSaveResult?.saved) {
-        this.configSaveResult = {
-          ...this.configSaveResult,
-          restart_required: false,
-        };
-      }
-    },
-
-    managerCanOperate(bot) {
-      return Boolean(bot)
-        && this.managerHealth?.status === 'ok'
-        && this.managerHealth?.runtime_adapter !== 'UnavailableRuntimeAdapter'
-        && bot.runtime?.health !== 'unavailable'
-        && !['queued', 'running'].includes(bot.manager?.operation_status);
-    },
-
-    managerActionDisabled(bot, botId) {
-      return !this.managerCanOperate(bot) || Boolean(this.managerActionLoading[botId || bot?.runtime_unit_id]);
-    },
-
-    managerCanViewRuntimeLogs() {
-      return this.managerHealth?.status === 'ok'
-        && this.managerHealth?.runtime_adapter !== 'UnavailableRuntimeAdapter';
-    },
-
-    managerRuntimeLogsDisabled() {
-      return !this.managerCanViewRuntimeLogs()
-        || (this.managerLogsLoading && this.managerLogsBotId === 'runtime');
-    },
-
-    async managerOperate(bot, action) {
-      if (!this.managerCanOperate(bot)) return null;
-      const unitId = bot.runtime_unit_id;
-      this.managerActionLoading = { ...this.managerActionLoading, [unitId]: true };
+    async loadBotLogs() {
+      this.botLogsLoading = true;
+      this.botLogsError = '';
       try {
-        const data = await this.api(`/api/manager/runtime-units/${encodeURIComponent(unitId)}/${action}`, {
-          method: 'POST',
-        });
-        let operation = data.operation || null;
-        if (operation?.operation_id) {
-          operation = await this.pollManagerOperation(operation.operation_id);
-        }
-        if (operation?.status !== 'succeeded') {
-          throw new Error(operation?.message || `Manager ${action} 操作未成功完成`);
-        }
-        await this.loadMonitor();
-        return operation;
+        const data = await this.api('/api/bot/logs?lines=200');
+        this.botLogs = data.logs || null;
       } catch (err) {
-        console?.warn('[DicePP] Manager operation failed:', err);
-        await this.loadManagerOperations();
-        return null;
+        console?.warn('[DicePP] Failed to load Bot logs:', err);
+        this.botLogs = null;
+        this.botLogsError = err.message || '日志读取失败';
       } finally {
-        const next = { ...this.managerActionLoading };
-        delete next[unitId];
-        this.managerActionLoading = next;
+        this.botLogsLoading = false;
       }
     },
 
+    // Generic Manager operation polling is retained for archive/query workflows.
     async pollManagerOperation(operationId, timeoutMs = 30000) {
       if (!operationId) throw new Error('Manager 未返回 operation_id');
       const deadline = Date.now() + timeoutMs;
@@ -3263,35 +2898,6 @@ function app() {
       throw new Error('Manager 操作等待超时；可刷新页面按 operation_id 继续查看');
     },
 
-    async loadManagerRuntimeLogs() {
-      if (!this.managerCanViewRuntimeLogs()) {
-        this.managerLogsBotId = 'runtime';
-        this.managerLogs = null;
-        this.managerLogsError = 'Manager 未配置，无法读取运行日志';
-        this.managerLogsLoading = false;
-        return;
-      }
-      this.managerLogsBotId = 'runtime';
-      this.managerLogs = null;
-      this.managerLogsError = '';
-      this.managerLogsLoading = true;
-      try {
-        const data = await this.api('/api/manager/logs?lines=200');
-        this.managerLogs = data.logs || null;
-      } catch (err) {
-        console?.warn('[DicePP] Failed to load manager logs:', err);
-        this.managerLogsError = this.managerLogsErrorLabel(err.message);
-      } finally {
-        this.managerLogsLoading = false;
-      }
-    },
-
-    clearManagerLogs() {
-      this.managerLogsBotId = '';
-      this.managerLogs = null;
-      this.managerLogsError = '';
-      this.managerLogsLoading = false;
-    },
 
     // ── Archives ──
     resetArchivesState() {
@@ -3795,25 +3401,11 @@ function app() {
 
     // ── Monitor ──
     async loadMonitor() {
-      this.monitorLoading = this.monitorBots.length === 0;
-      const loadBotStatus = async () => {
-        try {
-          const data = await this.api('/api/bots/status');
-          this.monitorBots = data.bots || [];
-        } catch (err) {
-          console?.warn('[DicePP] Failed to load bot status:', err);
-          this.monitorBots = [];
-        } finally {
-          this.refreshRuntimeRows();
-          this.monitorLoading = false;
-        }
-      };
-      await Promise.all([
-        loadBotStatus(),
-        this.loadManagerStatus(),
-        this.loadManagerOperations(),
-      ]);
+      this.monitorLoading = true;
+      await Promise.all([this.loadBotStatus(), this.loadBotLogs()]);
+      this.monitorLoading = false;
     },
+
 
     // ── Overview ──
     async loadOverview() {
@@ -4014,37 +3606,6 @@ function app() {
       return this.archives.find((item) => item?.filename === filename) || archive;
     },
 
-    archiveRuntimeQuiesceUnits(runtime) {
-      const units = runtime?.runtime_units;
-      return Array.isArray(units) ? units : [];
-    },
-
-    archiveRuntimeQuiesceOperations(runtime, key) {
-      const operations = runtime?.[key];
-      return Array.isArray(operations) ? operations : [];
-    },
-
-    archiveRuntimeQuiesceValue(value) {
-      if (value === null || value === undefined || value === '') return '-';
-      return String(value);
-    },
-
-    archiveBooleanLabel(value) {
-      if (value === true) return '是';
-      if (value === false) return '否';
-      return '-';
-    },
-
-    archiveRuntimeStageLabel(stage) {
-      return {
-        discover: '发现 Bot',
-        stop: '暂停 Bot',
-        plan: '恢复预览',
-        restore: '写入存档',
-        start: '启动 Bot',
-      }[stage] || this.archiveRuntimeQuiesceValue(stage);
-    },
-
     shortOperationId(operationId) {
       return operationId ? String(operationId).slice(0, 8) : '-';
     },
@@ -4067,68 +3628,6 @@ function app() {
       }[status] || status || '-';
     },
 
-    runtimeHealthLabel(health) {
-      return {
-        unavailable: '未配置',
-        healthy: '健康',
-        stopped: '已停止',
-        unknown: '未知',
-      }[health] || health || '-';
-    },
-
-    runtimeStateLabel(state) {
-      return {
-        running: '运行中',
-        stopped: '已停止',
-        unknown: '未知',
-      }[state] || state || '-';
-    },
-
-    runtimeStatusPrimary(runtime) {
-      const health = runtime?.health;
-      const state = runtime?.runtime_state;
-      if (health === 'unavailable') return '—';
-      if (health === 'healthy') return '健康';
-      if (health === 'stopped') return '已停止';
-      if (state && state !== 'unknown') return this.runtimeStateLabel(state);
-      return this.runtimeHealthLabel(health);
-    },
-
-    runtimeStatusDetail(runtime) {
-      const health = runtime?.health;
-      const state = runtime?.runtime_state;
-      if (health === 'unavailable') return '';
-      const stateLabel = this.runtimeStateLabel(state);
-      const primary = this.runtimeStatusPrimary(runtime);
-      if (!state || state === 'unknown' || stateLabel === '-' || stateLabel === primary) return '';
-      return stateLabel;
-    },
-
-    managerStatusLabel(status) {
-      return {
-        ok: '正常',
-      }[status] || status || '-';
-    },
-
-    runtimeBackendLabel(backend) {
-      return {
-        ProcessRuntimeAdapter: 'Windows 本机进程',
-        DockerRuntimeAdapter: 'Linux Docker（标签限定）',
-        DockerSocketRuntimeAdapter: 'Linux Docker Socket（标签限定）',
-        UnavailableRuntimeAdapter: 'Manager 未配置',
-      }[backend] || backend || '-';
-    },
-
-    managerLogsErrorLabel(message) {
-      if (!message) return '日志读取失败';
-      if (message.includes('does not support runtime logs')) {
-        return '当前 Manager 不支持全局运行日志';
-      }
-      if (message.includes('does not support logs') || message.includes('logs are not configured')) {
-        return 'Manager 未配置，无法读取运行日志';
-      }
-      return message;
-    },
   };
 }
 </script>
