@@ -44,7 +44,7 @@ def _app(layout: InstanceLayout):
         state_dir=layout.manager_state_dir,
     )
     return create_manager_app(
-        ManagerSettings(layout=layout, release_scheduler_enabled=False),
+        ManagerSettings(layout=layout),
         service=service,
         api_token="manager-secret",
     )
@@ -157,8 +157,6 @@ def test_clean_query_database_dry_run_still_requires_confirmation(
 
 
 def test_recoverable_update_error_is_canonical_before_manager_persists_it(tmp_path: Path) -> None:
-    from dicepp_manager.release import UpdateSettings
-
     layout = InstanceLayout.from_root(tmp_path)
     layout.config_user.parent.mkdir(parents=True)
     before = b'{"app":{"name":"keep"}}\n'
@@ -175,7 +173,6 @@ def test_recoverable_update_error_is_canonical_before_manager_persists_it(tmp_pa
     assert json.loads(layout.config_user.read_text(encoding="utf-8")) == {
         "update": {"cache_versions": 2}
     }
-    assert UpdateSettings.from_layout(layout).cache_versions == 2
 
 
 def test_recoverable_error_in_existing_bot_does_not_block_user_save(tmp_path: Path) -> None:

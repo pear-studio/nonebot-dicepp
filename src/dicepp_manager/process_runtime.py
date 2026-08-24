@@ -263,7 +263,7 @@ class ProcessRuntimeAdapter:
     def _write_identity(self, identity: dict) -> None:
         if self._identity_path is None:
             return
-        from .upgrade import _atomic_json
+        from ._file_utils import _atomic_json
 
         _atomic_json(self._identity_path, identity)
 

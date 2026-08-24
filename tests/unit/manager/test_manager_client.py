@@ -34,11 +34,7 @@ async def test_health_reads_readiness_without_a_status_handshake(monkeypatch) ->
     calls: list[tuple[str, str]] = []
     expected = {
         "dicepp_version": "3.0.0rc20",
-        "upgrade_handoff": {
-            "owns_runtime_state": True,
-            "pending": False,
-            "results": [{"action": "committed"}],
-        },
+        "upgrade_handoff": None,
     }
 
     async def request(method: str, path: str):
@@ -79,15 +75,6 @@ async def test_every_manager_client_entry_performs_compatibility_handshake(
         lambda: client.runtime_logs(20),
         lambda: client.control_bots(),
         lambda: client.reload_bots("bot/id"),
-        lambda: client.release_status(),
-        lambda: client.check_releases(),
-        lambda: client.download_release("portable"),
-        lambda: client.upgrade_preview(),
-        lambda: client.confirm_upgrade(
-            version="3.1.0",
-            confirmation_token="confirmation-token",
-        ),
-        lambda: client.upgrade_status(),
     ]
     for entry in entries:
         calls.clear()
@@ -143,37 +130,3 @@ async def test_incompatible_manager_blocks_mutating_request(monkeypatch) -> None
     with pytest.raises(ManagerIncompatible, match="compatibility mismatch"):
         await client.operate("dicepp-runtime", "restart")
     assert calls == [("GET", "/v1/status")]
-
-
-@pytest.mark.asyncio
-async def test_upgrade_confirmation_forwards_version_and_one_time_token(
-    monkeypatch,
-) -> None:
-    client = _client()
-    calls: list[tuple[str, str, dict | None]] = []
-
-    async def request(method: str, path: str, *, json_body=None):
-        calls.append((method, path, json_body))
-        if path == "/v1/status":
-            return _compatible_status()
-        return {"operation": {"operation_id": "upgrade-1", "status": "queued"}}
-
-    monkeypatch.setattr(client, "_request", request)
-
-    operation = await client.confirm_upgrade(
-        version="3.1.0",
-        confirmation_token="confirmation-token",
-    )
-
-    assert operation == {"operation_id": "upgrade-1", "status": "queued"}
-    assert calls == [
-        ("GET", "/v1/status", None),
-        (
-            "POST",
-            "/v1/upgrades/confirm",
-            {
-                "version": "3.1.0",
-                "confirmation_token": "confirmation-token",
-            },
-        ),
-    ]

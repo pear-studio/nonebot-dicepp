@@ -54,7 +54,6 @@ def _settings(layout: InstanceLayout) -> ManagerSettings:
     return ManagerSettings(
         layout=layout,
         runtime="unavailable",
-        release_scheduler_enabled=False,
     )
 
 
@@ -93,13 +92,8 @@ def test_startup_gate_rejects_archive_restore_before_operation_or_journal(
             json={"confirm_restore": True},
         )
         config = client.put("/v1/config/user", headers=_auth(), json={"update": {}})
-        upgrade = client.post(
-            "/v1/upgrades/confirm",
-            headers=_auth(),
-            json={"version": "3.1.0", "confirmation_token": "x" * 32},
-        )
 
-    for response in (create, restore, config, upgrade):
+    for response in (create, restore, config):
         assert response.status_code == 409
         assert response.json()["code"] == "maintenance_conflict"
     assert service.store.list_recent() == []
@@ -185,53 +179,6 @@ async def test_manager_client_saves_config_through_stable_manager_routes(tmp_pat
         ("GET", "/v1/status", None),
         ("PUT", "/v1/config/bots/10001", {"bot": True}),
     ]
-
-
-def test_upgrade_is_rejected_before_confirmation_when_maintenance_is_reserved(
-    tmp_path: Path,
-) -> None:
-    class UpgradeCoordinator:
-        install_supported = True
-
-        def __init__(self, service: ManagerService) -> None:
-            self.service = service
-            self.confirmations = 0
-
-        async def recover(self, **_kwargs):
-            return []
-
-        def status(self):
-            return {"active_operation": None, "last_operation": None, "journal": None}
-
-        def confirm(self, **_kwargs):
-            self.confirmations += 1
-            operation = ManagerOperation.create_system("upgrade.install")
-            self.service.store.save(operation)
-            return operation, {"version": "3.1.0"}
-
-        async def run(self, _operation, _package, **_kwargs):
-            raise AssertionError("blocked upgrade must not run")
-
-    layout = InstanceLayout.from_root(tmp_path)
-    service = _service(layout)
-    coordinator = UpgradeCoordinator(service)
-    service.upgrade_coordinator = coordinator
-    app = create_manager_app(_settings(layout), service=service, api_token="manager-secret")
-    reservation = service.reserve_maintenance()
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                "/v1/upgrades/confirm",
-                headers=_auth(),
-                json={"version": "3.1.0", "confirmation_token": "x" * 32},
-            )
-    finally:
-        reservation.release()
-
-    assert response.status_code == 409
-    assert response.json()["code"] == "maintenance_conflict"
-    assert coordinator.confirmations == 0
-    assert service.store.list_recent() == []
 
 
 @pytest.mark.asyncio
@@ -320,11 +267,6 @@ async def test_archive_transaction_is_critical_and_blocks_other_maintenance(
 
             assert len(app.state.critical_operation_tasks) == 1
             second = await client.post(path, headers=_auth(), json=body)
-            upgrade = await client.post(
-                "/v1/upgrades/confirm",
-                headers=_auth(),
-                json={"version": "3.1.0", "confirmation_token": "x" * 32},
-            )
             lifecycle = await client.post(
                 "/v1/runtime-units/dicepp-runtime/restart",
                 headers=_auth(),
@@ -332,8 +274,6 @@ async def test_archive_transaction_is_critical_and_blocks_other_maintenance(
 
         assert second.status_code == 409
         assert second.json()["code"] == "maintenance_conflict"
-        assert upgrade.status_code == 409
-        assert upgrade.json()["code"] == "maintenance_conflict"
         assert lifecycle.status_code == 409
         assert coordinator.created == 1
         assert runtime.actions == []

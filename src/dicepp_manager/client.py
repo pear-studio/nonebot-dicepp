@@ -290,48 +290,6 @@ class ManagerClient:
         token = _read_manager_token(self.settings.token_path)
         return await asyncio.to_thread(self._upload_sync, filename, source, token)
 
-    async def release_status(self) -> dict:
-        await self._ensure_compatible()
-        return await self._request("GET", "/v1/releases/status")
-
-    async def check_releases(self) -> dict:
-        await self._ensure_compatible()
-        return await self._request("POST", "/v1/releases/check")
-
-    async def download_release(self, purpose: str | None = None) -> dict:
-        await self._ensure_compatible()
-        return await self._request(
-            "POST",
-            "/v1/releases/download",
-            json_body={"purpose": purpose},
-        )
-
-    async def upgrade_preview(self) -> dict:
-        await self._ensure_compatible()
-        return await self._request("GET", "/v1/upgrades/preview")
-
-    async def confirm_upgrade(
-        self,
-        *,
-        version: str,
-        confirmation_token: str,
-    ) -> dict:
-        await self._ensure_compatible()
-        payload = await self._request(
-            "POST",
-            "/v1/upgrades/confirm",
-            json_body={
-                "version": version,
-                "confirmation_token": confirmation_token,
-            },
-        )
-        operation = payload.get("operation")
-        return operation if isinstance(operation, dict) else payload
-
-    async def upgrade_status(self) -> dict:
-        await self._ensure_compatible()
-        return await self._request("GET", "/v1/upgrades/status")
-
     async def _request(
         self,
         method: str,

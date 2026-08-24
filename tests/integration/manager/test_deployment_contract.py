@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from types import SimpleNamespace
 
 import yaml
 
@@ -12,7 +11,6 @@ import dashboard.src.manager as dashboard_manager
 from dicepp_data import InstanceLayout
 from dicepp_manager import factory as manager_factory
 from dicepp_manager.config import ManagerSettings
-from dicepp_manager.upgrade import SimpleWindowsVelopackUpgradeAdapter
 
 
 def test_standard_compose_has_manager_boundary_and_socket_exclusivity() -> None:
@@ -75,41 +73,11 @@ def test_windows_launcher_starts_dashboard_before_manager_recovery() -> None:
     )
 
 
-def test_windows_factory_waits_for_launcher_exit_and_restarts_in_background(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    for name in ("Update.exe", "DicePP.exe"):
-        (tmp_path / name).write_bytes(name.encode())
-    monkeypatch.setattr(
-        manager_factory,
-        "os",
-        SimpleNamespace(name="nt", environ={"DICEPP_VELOPACK_APPLY_COMMAND": ""}),
-    )
-    service = manager_factory.create_manager_service(
-        ManagerSettings(
-            layout=InstanceLayout.from_root(tmp_path),
-            runtime="unavailable",
-            release_scheduler_enabled=False,
-        )
-    )
-    try:
-        adapter = service.upgrade_coordinator.platform_adapter
-        assert isinstance(adapter, SimpleWindowsVelopackUpgradeAdapter)
-        assert "--norestart" not in adapter.install_command
-        wait_index = adapter.install_command.index("--waitPid")
-        assert adapter.install_command[wait_index + 1] == "{wait_pid}"
-        assert adapter.install_command[-2:] == ["--", "--background"]
-    finally:
-        service.close()
-
-
 def test_factory_binds_archive_control_health_to_manager_service(tmp_path: Path) -> None:
     service = manager_factory.create_manager_service(
         ManagerSettings(
             layout=InstanceLayout.from_root(tmp_path),
             runtime="unavailable",
-            release_scheduler_enabled=False,
         )
     )
     try:

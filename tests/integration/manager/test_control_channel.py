@@ -40,7 +40,7 @@ def _client(tmp_path: Path) -> TestClient:
         state_dir=layout.manager_state_dir,
     )
     app = create_manager_app(
-        ManagerSettings(layout=layout, release_scheduler_enabled=False),
+        ManagerSettings(layout=layout),
         service=service,
         api_token="manager-api-token",
     )
