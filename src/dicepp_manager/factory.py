@@ -49,9 +49,7 @@ def create_manager_service(settings: ManagerSettings) -> ManagerService:
     for directory in (
         settings.layout.manager_state_dir,
         settings.layout.manager_control_dir,
-        settings.layout.manager_packages_dir,
         settings.layout.manager_backups_dir,
-        settings.layout.manager_recovery_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     owner = ManagerOwnerLock(settings.layout.manager_state_dir)

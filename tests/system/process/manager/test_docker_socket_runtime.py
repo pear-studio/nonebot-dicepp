@@ -14,7 +14,6 @@ from dicepp_manager.docker_runtime import (
     DockerRuntimeError,
     DockerSocketRuntimeAdapter,
 )
-from dicepp_manager.docker_handoff import DockerHandoffExecutor
 
 
 @contextmanager
@@ -106,48 +105,6 @@ async def test_docker_socket_real_http_filters_and_fixed_action_endpoints(
         ]
     }
     assert requests[1] == f"POST {expected_path} HTTP/1.1"
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets are unavailable")
-async def test_handoff_stop_allows_response_beyond_default_socket_timeout(
-    tmp_path: Path,
-) -> None:
-    socket_path = tmp_path / "slow-stop.sock"
-    container_id = "f" * 64
-    with _fake_docker_socket(socket_path, [(204, b"", 0.15)]) as requests:
-        adapter = DockerSocketRuntimeAdapter(
-            socket_path=str(socket_path),
-            allowed_runtime_units={"manager-helper"},
-            timeout=0.05,
-        )
-        await DockerHandoffExecutor(adapter).stop(container_id)
-
-    assert requests == [
-        f"POST /containers/{container_id}/stop?t=30 HTTP/1.1"
-    ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets are unavailable")
-async def test_handoff_bound_delete_accepts_exact_container_already_absent(
-    tmp_path: Path,
-) -> None:
-    socket_path = tmp_path / "missing-delete.sock"
-    container_id = "f" * 64
-    with _fake_docker_socket(
-        socket_path,
-        [(404, b'{"message":"No such container"}')],
-    ) as requests:
-        adapter = DockerSocketRuntimeAdapter(
-            socket_path=str(socket_path),
-            allowed_runtime_units={"manager-helper"},
-        )
-        await DockerHandoffExecutor(adapter).delete(container_id, missing_ok=True)
-
-    assert requests == [
-        f"DELETE /containers/{container_id}?v=0&force=0 HTTP/1.1"
-    ]
 
 
 @pytest.mark.asyncio

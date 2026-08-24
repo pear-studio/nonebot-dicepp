@@ -67,7 +67,7 @@ class FakeManagerClient:
         }
 
     async def health(self):
-        return {"upgrade_handoff": None}
+        return {}
 
     async def operate(self, runtime_unit_id: str, action: str):
         self.actions.append((runtime_unit_id, action))
@@ -100,47 +100,6 @@ def test_frozen_autostart_uses_stable_root_launcher(
     monkeypatch.setattr(sys, "executable", str(current / "DicePP-App.exe"))
 
     assert launcher.autostart_launcher_path() == tmp_path / "DicePP.exe"
-
-
-def test_manager_readiness_waits_for_durable_startup_recovery(monkeypatch) -> None:
-    class ReadinessClient:
-        def __init__(self) -> None:
-            self.health_calls = 0
-            self.status_calls = 0
-
-        async def health(self):
-            self.health_calls += 1
-            pending = self.health_calls == 1
-            return {
-                "upgrade_handoff": {
-                    "owns_runtime_state": True,
-                    "pending": pending,
-                    "results": [
-                        {
-                            "action": (
-                                "awaiting_api_bind" if pending else "committed"
-                            )
-                        }
-                    ],
-                }
-            }
-
-        async def status(self):
-            self.status_calls += 1
-            return {"health": {"status": "ok"}}
-
-    client = ReadinessClient()
-    monkeypatch.setattr(launcher.time, "sleep", lambda _seconds: None)
-
-    readiness = launcher._wait_for_manager_service(client, timeout=1)
-
-    assert readiness["upgrade_handoff"] == {
-        "owns_runtime_state": True,
-        "pending": False,
-        "results": [{"action": "committed"}],
-    }
-    assert client.health_calls == 2
-    assert client.status_calls == 1
 
 
 def test_runtime_log_path_uses_project_data_logs(tmp_dashboard_paths: Path) -> None:
@@ -277,122 +236,6 @@ def test_background_launcher_preserves_normal_exit_signals(
 
     if isinstance(normal_exit, SystemExit):
         assert exc_info.value.code == 0
-
-
-@pytest.mark.parametrize(
-    ("manager_readiness", "expected_actions"),
-    [
-        (
-            {"upgrade_handoff": None},
-            [
-                (launcher.LAUNCHER_RUNTIME_KEY, "start"),
-                (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
-            ],
-        ),
-        (
-            {
-                "upgrade_handoff": {
-                    "owns_runtime_state": True,
-                    "pending": False,
-                    "results": [{"action": "committed"}],
-                }
-            },
-            [(launcher.LAUNCHER_RUNTIME_KEY, "stop")],
-        ),
-        (
-            {
-                "upgrade_handoff": {
-                    "pending": False,
-                    "results": [{"action": "ignored_legacy_windows_upgrade"}],
-                }
-            },
-            [
-                (launcher.LAUNCHER_RUNTIME_KEY, "start"),
-                (launcher.LAUNCHER_RUNTIME_KEY, "stop"),
-            ],
-        ),
-    ],
-)
-def test_background_launcher_respects_startup_recovery_runtime_ownership(
-    monkeypatch,
-    tmp_dashboard_paths: Path,
-    manager_readiness: dict,
-    expected_actions: list[tuple[str, str]],
-) -> None:
-    events: list[str] = []
-    client = FakeManagerClient(events)
-    browser_opens: list[str] = []
-    tray_runs: list[bool] = []
-
-    class FakeHandle:
-        def __init__(self, name: str) -> None:
-            self.name = name
-            self.log_path = DashboardPaths.runtime_log_path()
-
-        def request_stop(self) -> None:
-            events.append(f"stop:{self.name}")
-
-        def join(self, *, timeout: float) -> bool:
-            events.append(f"join:{self.name}")
-            return True
-
-        def is_alive(self) -> bool:
-            return True
-
-    class FakeTray:
-        def run(self, setup=None) -> None:
-            tray_runs.append(True)
-            if setup is not None:
-                setup(self)
-
-        def stop(self) -> None:
-            events.append("stop:tray")
-
-    manager_settings = SimpleNamespace(
-        host="127.0.0.1",
-        port=4091,
-        token_path=tmp_dashboard_paths / "manager" / "state" / "api-token",
-        layout=SimpleNamespace(
-            manager_token=tmp_dashboard_paths / "manager" / "state" / "api-token"
-        ),
-    )
-    monkeypatch.setattr(launcher, "rotate_runtime_log", lambda: DashboardPaths.runtime_log_path())
-    monkeypatch.setattr(launcher, "configure_file_logging", lambda _path: None)
-    monkeypatch.setattr(launcher, "_install_launcher_excepthook", lambda _path: None)
-    monkeypatch.setattr(launcher, "ManagerSettings", SimpleNamespace(from_env=lambda _root: manager_settings))
-    monkeypatch.setattr(
-        launcher,
-        "ManagerClientSettings",
-        SimpleNamespace(from_layout=lambda _layout: object()),
-    )
-    monkeypatch.setattr(launcher, "ManagerClient", lambda _settings: client)
-    monkeypatch.setattr(launcher, "ensure_api_token", lambda _path: "token")
-    monkeypatch.setattr(launcher, "create_manager_app", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(launcher, "_start_server", lambda *_args, **_kwargs: FakeHandle("manager"))
-    monkeypatch.setattr(
-        launcher,
-        "_start_dashboard_server",
-        lambda *_args, **_kwargs: FakeHandle("dashboard"),
-    )
-    monkeypatch.setattr(
-        launcher,
-        "_wait_for_manager_service",
-        lambda *_args, **_kwargs: manager_readiness,
-    )
-    monkeypatch.setattr(launcher, "build_tray", lambda *_args, **_kwargs: FakeTray())
-    monkeypatch.setattr(launcher, "should_open_browser", lambda: True)
-    monkeypatch.setattr(
-        launcher.TrayController,
-        "open_dashboard",
-        lambda self: browser_opens.append(self._dashboard_url),
-    )
-
-    launcher.run_windows_launcher(background=True, fake_tray=True)
-
-    assert tray_runs == [True]
-    assert browser_opens == []
-    assert client.actions == expected_actions
-    assert "background launch" in DashboardPaths.runtime_log_path().read_text(encoding="utf-8")
 
 
 def test_velopack_config_seed_rejects_symlink_destination(
@@ -808,7 +651,7 @@ def test_launcher_failure_or_interrupt_stops_runtime_and_all_servers(
     monkeypatch.setattr(
         launcher,
         "_wait_for_manager_service",
-        lambda *_args, **_kwargs: {"upgrade_handoff": None},
+        lambda *_args, **_kwargs: {},
     )
     monkeypatch.setattr(
         launcher,

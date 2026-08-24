@@ -513,8 +513,7 @@ class ArchiveCoordinator:
             detail = dict(journal.get("detail") or {})
             transaction_id = str(journal["transaction_id"])
             if is_terminal_rollback_failure(journal):
-                # Terminal rollback adjudication rule (shared with
-                # upgrade.UpgradeCoordinator.recover): the rollback already
+                # Terminal rollback adjudication rule: the rollback already
                 # re-applied the pre-restore archive and was adjudicated
                 # failed.  Replaying it after a restart would only repeat
                 # the damage, so this state is terminal and requires manual

@@ -431,6 +431,8 @@ def test_manager_api_requires_its_own_token_and_polls_persisted_operation(tmp_pa
         assert health.status_code == 200
         assert health.json()["ok"] is True
         assert health.json()["dicepp_version"]
+        assert "upgrade_handoff" not in health.json()
+        assert "manager_identity" not in health.json()
 
         submitted = client.post("/v1/runtime-units/dicepp-runtime/restart", headers=headers)
         assert submitted.status_code == 202

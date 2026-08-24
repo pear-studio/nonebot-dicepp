@@ -270,8 +270,6 @@ def create_manager_app(
         return {
             "ok": True,
             "dicepp_version": get_version(),
-            "manager_identity": None,
-            "upgrade_handoff": None,
         }
 
     @app.get("/v1/operations", dependencies=auth)

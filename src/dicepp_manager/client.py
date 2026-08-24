@@ -138,7 +138,7 @@ class ManagerClient:
         ):
             raise ManagerIncompatible(
                 "Manager control channel capability is unavailable; "
-                "upgrade Manager before using this Dashboard",
+                "restart Manager before using this Dashboard",
                 status_code=409,
             )
         return payload

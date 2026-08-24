@@ -107,7 +107,7 @@ class ControlChannelService:
         return rows
 
     def probe(self) -> dict:
-        """Provide the archive/upgrade hard-health view without Dashboard I/O."""
+        """Provide the archive hard-health view without Dashboard I/O."""
         snapshot = self._active_session_snapshot
         latest = snapshot.latest_heartbeat
         if latest is None:
@@ -220,7 +220,7 @@ class ControlChannelService:
             state.websocket = ws
             # A new authenticated transport must earn its own heartbeat.  A
             # heartbeat from the replaced transport is not evidence that the
-            # current session survived an upgrade or restart.
+            # current session survived a restart.
             state.last_heartbeat = None
             self._publish_active_session_snapshot_locked()
         if previous is not None and previous is not ws:

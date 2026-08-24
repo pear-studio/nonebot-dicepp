@@ -32,10 +32,7 @@ def _compatible_status() -> dict:
 async def test_health_reads_readiness_without_a_status_handshake(monkeypatch) -> None:
     client = _client()
     calls: list[tuple[str, str]] = []
-    expected = {
-        "dicepp_version": "3.0.0rc20",
-        "upgrade_handoff": None,
-    }
+    expected = {"dicepp_version": "3.0.0rc20"}
 
     async def request(method: str, path: str):
         calls.append((method, path))

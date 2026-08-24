@@ -502,7 +502,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         token = ensure_api_token(manager_settings.token_path or manager_settings.layout.manager_token)
         manager_app = create_manager_app(manager_settings, api_token=token)
         # Dashboard readiness is independent from Manager connectivity. Start it
-        # first so Manager startup recovery can run its local semantic probe.
+        # first so the local Manager API is available as soon as possible.
         dashboard_server = _start_dashboard_server(settings, log_path)
         manager_server = _start_server(
             manager_app,
@@ -514,7 +514,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         manager_client = ManagerClient(ManagerClientSettings.from_layout(manager_settings.layout))
         app.state.manager_client = manager_client
         url = dashboard_url(settings)
-        manager_readiness = _wait_for_manager_service(
+        _wait_for_manager_service(
             manager_client,
             timeout=60.0,
         )
@@ -544,23 +544,12 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             manager_service.set_shutdown_callback(
                 lambda _reason: threading.Thread(
                     target=controller.exit,
-                    name="DicePPUpgradeHandoff",
+                    name="DicePPManagerShutdown",
                     daemon=False,
                 ).start()
             )
 
-        upgrade_handoff = manager_readiness.get("upgrade_handoff")
-        if (
-            isinstance(upgrade_handoff, dict)
-            and upgrade_handoff.get("owns_runtime_state") is True
-        ):
-            append_runtime_log_line(
-                "launcher | startup recovery owns runtime state; "
-                "skipping generic auto-start",
-                path=log_path,
-            )
-        else:
-            _auto_start_runtime(controller, log_path)
+        _auto_start_runtime(controller, log_path)
         if background:
             append_runtime_log_line(
                 "launcher | browser auto-open disabled for background launch",
@@ -742,10 +731,6 @@ def _wait_for_manager_service(
     while time.monotonic() < deadline:
         try:
             readiness = _run_async(client.health())
-            handoff = readiness.get("upgrade_handoff")
-            if isinstance(handoff, dict) and handoff.get("pending") is True:
-                time.sleep(0.05)
-                continue
             _run_async(client.status())
             return readiness
         except Exception:

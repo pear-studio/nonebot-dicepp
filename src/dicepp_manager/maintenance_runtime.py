@@ -34,7 +34,7 @@ _CONTROL_GATE_SKIP_REASONS = {
 class MaintenanceRuntimeSupport:
     """Runtime stop/start, schema, and local health primitives shared by coordinators.
 
-    This class deliberately does not own an archive or upgrade state machine.  Its
+    This class deliberately does not own an archive state machine. Its
     methods operate only inside the maintenance session supplied by a coordinator,
     except for ``best_effort_restart`` which can safely acquire or reuse a lease.
     """
