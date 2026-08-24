@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -1276,630 +1275,65 @@ def test_monitor_tab_hides_version_operations(dashboard_url: str) -> None:
             browser.close()
 
 
-def test_updates_tab_confirms_verified_install_and_recovers_operation_status(
-    dashboard_url: str,
-) -> None:
-    """Only a verified installable package reaches the explicit upgrade transaction."""
+def test_updates_tab_shows_current_version_and_static_release_link(dashboard_url: str) -> None:
+    """The update tab is informational and never performs online release discovery."""
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
         page = browser.new_page()
+        observed_urls: list[str] = []
+        page.on("request", lambda request: observed_urls.append(request.url))
         try:
             _login(page, dashboard_url)
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    window.upgradeConfirmed = false;
-                    window.upgradeStatusAttempts = 0;
-                    state.api = async (path, options = {}) => {
-                        if (path === '/api/releases/status' || path === '/api/releases/check') {
-                            return {
-                                current_version: '3.0.0',
-                                settings: {channel: 'stable', auto_download: false},
-                                target: {platform: 'windows', arch: 'amd64'},
-                                available: {
-                                    version: '3.1.0',
-                                    compatible: true,
-                                    change_scope: ['runtime', 'dashboard'],
-                                    compatibility: {
-                                        minimum_manager_version: '1.0',
-                                        deployment_schema_version: 2,
-                                    },
-                                    artifacts: [{
-                                        filename: 'DicePP-v3.1.0-win64-Portable.zip',
-                                        size: 1024,
-                                        purpose: 'portable',
-                                    }],
-                                },
-                                download: {
-                                    status: 'verified',
-                                    installable: false,
-                                    filename: 'DicePP-v3.1.0-win64-Portable.zip',
-                                },
-                            };
-                        }
-                        if (path === '/api/upgrades/preview') {
-                            return {
-                                preview: {
-                                    version: '3.1.0',
-                                    confirmation_token: 'one-time-confirmation',
-                                },
-                            };
-                        }
-                        if (path === '/api/upgrades/confirm') {
-                            const body = JSON.parse(options.body);
-                            if (body.version !== '3.1.0' || body.confirmation_token !== 'one-time-confirmation') {
-                                throw new Error('bad confirmation');
-                            }
-                            window.upgradeConfirmed = true;
-                            return {
-                                operation: {
-                                    operation_id: 'upgrade-1',
-                                    status: 'queued',
-                                    detail: {phase: 'preflight', progress: 0},
-                                },
-                            };
-                        }
-                        if (path === '/api/upgrades/status') {
-                            if (window.upgradeConfirmed) {
-                                window.upgradeStatusAttempts += 1;
-                                if (window.upgradeStatusAttempts === 1) {
-                                    throw new Error('simulated disconnect');
-                                }
-                            }
-                            return window.upgradeConfirmed ? {
-                                active_operation: null,
-                                last_operation: {
-                                    operation_id: 'upgrade-1',
-                                    status: 'failed',
-                                    message: 'Upgrade transaction failed',
-                                    detail: {
-                                        target_version: '3.1.0',
-                                        phase: 'rollback',
-                                        progress: 75,
-                                        error: 'migration failed',
-                                        failure_code: 'upgrade_failed',
-                                        rollback_status: 'succeeded',
-                                        rolled_back: true,
-                                        rollback_result: {message: '旧程序与数据已恢复'},
-                                    },
-                                },
-                                journal: {status: 'rolled_back'},
-                            } : {active_operation: null, last_operation: null, journal: null};
-                        }
-                        throw new Error(`unexpected API: ${path}`);
-                    };
-                }"""
-            )
             page.get_by_role("button", name="版本更新").click()
-            page.wait_for_selector('[data-testid="release-available"]', timeout=10000)
 
-            expect(page.locator('[data-testid="release-channel"]')).to_have_text(
-                "正式稳定版"
+            summary = page.get_by_test_id("release-summary")
+            expect(summary).to_contain_text("当前 DicePP 版本")
+            expect(page.get_by_test_id("release-current-version")).to_have_text(
+                f"v{package_version('dicepp')}"
             )
-            expect(
-                page.locator('[data-testid="release-current-version"]')
-            ).to_have_text("3.0.0")
-            expect(page.locator('[data-testid="release-available"]')).to_contain_text(
-                "runtime、dashboard"
+            link = page.get_by_test_id("release-download-link")
+            expect(link).to_have_attribute(
+                "href",
+                "https://github.com/pear-studio/nonebot-dicepp/releases",
             )
-            expect(page.locator('[data-testid="release-download-status"]')).to_contain_text(
-                "尚未安装"
-            )
-            expect(page.locator('[data-testid="upgrade-preview-button"]')).not_to_be_visible()
-
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.releaseState.download.installable = true;
-                }"""
-            )
-            page.locator('[data-testid="upgrade-preview-button"]').click()
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_be_focused()
-            page.keyboard.press("Shift+Tab")
-            expect(
-                page.locator('[data-testid="upgrade-confirmation"]').get_by_role(
-                    "button", name="取消"
-                )
-            ).to_be_focused()
-            page.keyboard.press("Escape")
-            expect(page.locator('[data-testid="upgrade-preview-button"]')).to_be_focused()
-            page.locator('[data-testid="upgrade-preview-button"]').click()
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_be_focused()
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "开始后 Bot 和 Dashboard 会暂时停止服务"
-            )
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "升级前归档"
-            )
-            expect(
-                page.locator('[data-testid="upgrade-windows-recovery-notice"]')
-            ).to_contain_text("运行安装目录中的 DicePP-Recover.cmd")
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "Windows 失败时的人工恢复步骤"
-            )
-            expect(
-                page.locator('[data-testid="upgrade-linux-rollback-notice"]')
-            ).not_to_be_visible()
-
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.releaseState.target.platform = 'linux';
-                }"""
-            )
-            expect(
-                page.locator('[data-testid="upgrade-linux-rollback-notice"]')
-            ).to_be_visible()
-            expect(
-                page.locator('[data-testid="upgrade-windows-recovery-notice"]')
-            ).not_to_be_visible()
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "Linux 安装、迁移或硬性本地健康检查失败时会自动完整回退"
-            )
-            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_contain_text(
-                "Linux 硬性本地健康检查失败时的自动完整回退行为"
-            )
-            expect(page.locator('[data-testid="upgrade-confirm-button"]')).to_be_disabled()
-            page.locator('[data-testid="upgrade-risk-confirm"]').check()
-            page.locator('[data-testid="upgrade-confirm-button"]').click()
-            expect(page.locator('[data-testid="release-action-card"]')).to_be_focused()
-
-            expect(page.locator('[data-testid="upgrade-operation-state"]')).to_have_text(
-                "失败"
-            )
-            expect(page.locator('[data-testid="upgrade-phase"]')).to_have_text("rollback")
-            expect(page.locator('[data-testid="upgrade-progress"]')).to_have_text("75%")
-            expect(page.locator('[data-testid="upgrade-failure"]')).to_have_text(
-                "migration failed"
-            )
-            expect(page.locator('[data-testid="upgrade-rolled-back"]')).to_have_text("是")
-            expect(page.locator('[data-testid="upgrade-rollback-result"]')).to_have_text(
-                "旧程序与数据已恢复"
-            )
-
-            page.evaluate(
-                """async () => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.upgradeStatus = null;
-                    await state.loadUpgradeStatus(true);
-                }"""
-            )
-            expect(page.locator('[data-testid="upgrade-operation-state"]')).to_have_text(
-                "失败"
-            )
+            expect(summary).to_contain_text("不会联网检查或自动安装更新")
+            expect(page.locator('[data-testid="release-check-button"]')).to_have_count(0)
+            expect(page.locator('[data-testid="release-primary-download-button"]')).to_have_count(0)
+            expect(page.locator('[data-testid="upgrade-confirmation"]')).to_have_count(0)
         finally:
             browser.close()
 
+    assert not any("/api/releases/" in url or "/api/upgrades/" in url for url in observed_urls)
 
-def test_updates_tab_adopts_concurrent_download_and_keeps_success_out_of_failure(
+
+def test_mobile_dashboard_shell_keeps_account_controls_visible(
     dashboard_url: str,
 ) -> None:
-    """A 409 adopts the Manager download; successful messages stay neutral."""
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright.chromium)
-        page = browser.new_page()
-        try:
-            _login(page, dashboard_url)
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    window.finishReleaseDownload = false;
-                    const base = {
-                        current_version: '3.0.0-rc.22',
-                        settings: {channel: 'prerelease', auto_download: false},
-                        target: {platform: 'linux', arch: 'amd64'},
-                        install_supported: true,
-                        discovery: {status: 'succeeded'},
-                        available: {
-                            version: '3.0.0-rc.23',
-                            compatible: true,
-                            change_scope: ['manager', 'dashboard'],
-                            compatibility: {
-                                minimum_manager_version: '3.0.0-rc.22',
-                                deployment_schema_version: 2,
-                            },
-                            artifacts: [{
-                                filename: 'DicePP-v3.0.0-rc.23-linux-amd64.tar.zst',
-                                size: 400,
-                                purpose: 'linux-bundle',
-                            }],
-                        },
-                    };
-                    const idle = {...base, download: {status: 'idle'}};
-                    const downloading = {
-                        ...base,
-                        download: {
-                            status: 'downloading',
-                            filename: base.available.artifacts[0].filename,
-                            bytes_downloaded: 100,
-                            size: 400,
-                            installable: false,
-                        },
-                    };
-                    const verified = {
-                        ...base,
-                        download: {
-                            status: 'verified',
-                            filename: base.available.artifacts[0].filename,
-                            bytes_downloaded: 400,
-                            size: 400,
-                            installable: true,
-                        },
-                    };
-                    state.api = async (path, options = {}) => {
-                        if (path === '/api/releases/download' && options.method === 'POST') {
-                            const error = new Error('A release download is already running');
-                            error.status = 409;
-                            throw error;
-                        }
-                        if (path === '/api/releases/status') {
-                            return window.finishReleaseDownload ? verified : (
-                                state.releaseDownloading ? downloading : idle
-                            );
-                        }
-                        if (path === '/api/upgrades/status') {
-                            return {
-                                active_operation: null,
-                                last_operation: {
-                                    operation_id: 'old-upgrade',
-                                    status: 'succeeded',
-                                    message: '旧版本安装成功',
-                                    detail: {target_version: '3.0.0-rc.21', phase: 'committed'},
-                                },
-                            };
-                        }
-                        throw new Error(`unexpected API: ${path}`);
-                    };
-                }"""
-            )
-
-            page.get_by_role("button", name="版本更新").click()
-            page.locator('[data-testid="release-primary-download-button"]').click()
-            expect(page.locator('[data-testid="release-download-progress"]')).to_contain_text(
-                "25%"
-            )
-            expect(page.get_by_role("progressbar", name="更新下载进度")).to_have_attribute(
-                "aria-valuenow", "25"
-            )
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "正在下载更新"
-            )
-            expect(page.locator('[data-testid="release-action-card"]')).not_to_contain_text(
-                "更新安装完成"
-            )
-            expect(page.locator('[data-testid="release-error"]')).not_to_be_visible()
-
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.releaseError = '旧的连接错误';
-                }"""
-            )
-            page.evaluate("window.finishReleaseDownload = true")
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "更新已准备好",
-                timeout=5000,
-            )
-            expect(page.locator('[data-testid="release-error"]')).not_to_be_visible()
-
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.upgradeStatus = {
-                        active_operation: null,
-                        last_operation: {
-                            operation_id: 'upgrade-success',
-                            status: 'succeeded',
-                            message: '已安装 3.0.0-rc.23，运行正常。',
-                            detail: {target_version: '3.0.0-rc.23', phase: 'committed', progress: 100},
-                        },
-                    };
-                }"""
-            )
-            expect(page.locator('[data-testid="upgrade-success"]')).to_have_text(
-                "已安装 3.0.0-rc.23，运行正常。"
-            )
-            expect(page.locator('[data-testid="upgrade-failure"]')).not_to_be_visible()
-        finally:
-            browser.close()
-
-
-def test_updates_tab_reloads_into_manager_download_progress(dashboard_url: str) -> None:
-    """Reloading the page adopts the Manager's persisted in-progress download."""
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright.chromium)
-        page = browser.new_page()
-        download_finished = {"value": False}
-        try:
-            _login(page, dashboard_url)
-            base = {
-                "ok": True,
-                "current_version": "3.0.0-rc.22",
-                "settings": {"channel": "prerelease", "auto_download": False},
-                "target": {"platform": "linux", "arch": "amd64"},
-                "install_supported": True,
-                "available": {
-                    "version": "3.0.0-rc.23",
-                    "compatible": True,
-                    "change_scope": ["manager", "dashboard"],
-                    "compatibility": {
-                        "minimum_manager_version": "3.0.0-rc.22",
-                        "deployment_schema_version": 2,
-                    },
-                    "artifacts": [{
-                        "filename": "DicePP-v3.0.0-rc.23-linux-amd64.tar.zst",
-                        "size": 800,
-                        "purpose": "linux-bundle",
-                    }],
-                },
-            }
-
-            def release_status(route) -> None:
-                route.fulfill(
-                    status=200,
-                    json={
-                        **base,
-                        "download": {
-                            "status": "verified" if download_finished["value"] else "downloading",
-                            "version": "3.0.0-rc.23",
-                            "filename": "DicePP-v3.0.0-rc.23-linux-amd64.tar.zst",
-                            "bytes_downloaded": 800 if download_finished["value"] else 400,
-                            "size": 800,
-                            "installable": download_finished["value"],
-                        },
-                    },
-                )
-
-            page.route("**/api/releases/status", release_status)
-            page.route(
-                "**/api/upgrades/status",
-                lambda route: route.fulfill(
-                    status=200,
-                    json={"ok": True, "active_operation": None, "last_operation": None},
-                ),
-            )
-
-            page.reload()
-            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
-            page.get_by_role("button", name="版本更新").click()
-            expect(page.locator('[data-testid="release-download-progress"]')).to_contain_text(
-                "50%"
-            )
-            download_finished["value"] = True
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "更新已准备好",
-                timeout=5000,
-            )
-        finally:
-            browser.close()
-
-
-def test_updates_tab_adopts_http_409_download_response(dashboard_url: str) -> None:
-    """A 409 adopts a download that finished before the status refresh."""
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright.chromium)
-        page = browser.new_page()
-        download_started = {"value": False}
-        try:
-            _login(page, dashboard_url)
-            base = {
-                "ok": True,
-                "current_version": "3.0.0-rc.22",
-                "settings": {"channel": "prerelease", "auto_download": False},
-                "target": {"platform": "linux", "arch": "amd64"},
-                "install_supported": True,
-                "discovery": {"status": "succeeded", "error": None},
-                "available": {
-                    "version": "3.0.0-rc.23",
-                    "compatible": True,
-                    "change_scope": ["manager"],
-                    "compatibility": {
-                        "minimum_manager_version": "3.0.0-rc.22",
-                        "deployment_schema_version": 2,
-                    },
-                    "artifacts": [{
-                        "filename": "DicePP-v3.0.0-rc.23-linux-amd64.tar.zst",
-                        "size": 400,
-                        "purpose": "linux-bundle",
-                    }],
-                },
-            }
-
-            def release_status(route) -> None:
-                if not download_started["value"]:
-                    download = {"status": "idle"}
-                else:
-                    download = {
-                        "status": "verified",
-                        "version": "3.0.0-rc.23",
-                        "filename": base["available"]["artifacts"][0]["filename"],
-                        "bytes_downloaded": 400,
-                        "size": 400,
-                        "installable": True,
-                    }
-                route.fulfill(status=200, json={**base, "download": download})
-
-            def reject_duplicate_download(route) -> None:
-                download_started["value"] = True
-                route.fulfill(
-                    status=409,
-                    json={"ok": False, "message": "A release download is already running"},
-                )
-
-            page.route("**/api/releases/status", release_status)
-            page.route("**/api/releases/download", reject_duplicate_download)
-            page.route(
-                "**/api/upgrades/status",
-                lambda route: route.fulfill(
-                    status=200,
-                    json={"ok": True, "active_operation": None, "last_operation": None},
-                ),
-            )
-
-            page.get_by_role("button", name="版本更新").click()
-            page.locator('[data-testid="release-primary-download-button"]').click()
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "更新已准备好"
-            )
-            expect(page.locator('[data-testid="release-error"]')).not_to_be_visible()
-        finally:
-            browser.close()
-
-
-def test_updates_tab_reloads_into_manager_discovery_progress(dashboard_url: str) -> None:
-    """Reloaded discovery hides stale results and survives a transient read error."""
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright.chromium)
-        page = browser.new_page()
-        discovery_finished = {"value": False}
-        release_status_calls = {"value": 0}
-        try:
-            _login(page, dashboard_url)
-
-            def release_status(route) -> None:
-                release_status_calls["value"] += 1
-                if release_status_calls["value"] == 2:
-                    route.abort("connectionfailed")
-                    return
-                checking = not discovery_finished["value"]
-                route.fulfill(
-                    status=200,
-                    json={
-                        "ok": True,
-                        "current_version": "3.0.0-rc.22",
-                        "settings": {"channel": "prerelease", "auto_download": False},
-                        "target": {"platform": "linux", "arch": "amd64"},
-                        "available": ({
-                            "version": "3.0.0-rc.21",
-                            "compatible": True,
-                            "artifacts": [],
-                        } if checking else None),
-                        "discovery": {
-                            "status": "checking" if checking else "succeeded",
-                            "error": None,
-                        },
-                        "download": {
-                            "status": "verified",
-                            "version": "3.0.0-rc.21",
-                            "installable": True,
-                            "filename": "DicePP-v3.0.0-rc.21-linux-amd64.tar.zst",
-                        },
-                        "install_supported": True,
-                    },
-                )
-
-            page.route("**/api/releases/status", release_status)
-            page.route(
-                "**/api/upgrades/status",
-                lambda route: route.fulfill(
-                    status=200,
-                    json={"ok": True, "active_operation": None, "last_operation": None},
-                ),
-            )
-
-            page.reload()
-            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
-            page.get_by_role("button", name="版本更新").click()
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "正在检查更新"
-            )
-            expect(page.locator('[data-testid="release-summary"]')).to_contain_text("检查中")
-            expect(page.locator('[data-testid="release-summary"]')).not_to_contain_text(
-                "3.0.0-rc.21"
-            )
-            expect(page.locator('[data-testid="release-primary-download-button"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="release-download-status"]')).not_to_be_visible()
-            expect(page.locator('[data-testid="upgrade-preview-button"]')).not_to_be_visible()
-            expect(
-                page.locator('[data-testid="release-flow"] li[aria-current="step"]')
-            ).to_contain_text("检查")
-            expect(page.locator('[data-testid="release-check-button"]')).to_be_disabled()
-            discovery_finished["value"] = True
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "当前已是最新版本",
-                timeout=5000,
-            )
-        finally:
-            browser.close()
-
-
-def test_updates_tab_is_usable_on_mobile_and_does_not_claim_unchecked_is_latest(
-    dashboard_url: str,
-) -> None:
-    """The mobile shell remains usable and idle discovery is not called latest."""
+    """The compact viewport keeps the account controls reachable without overflow."""
     with sync_playwright() as playwright:
         browser = launch_browser(playwright.chromium)
         page = browser.new_page()
         try:
             page.set_viewport_size({"width": 375, "height": 667})
             _login(page, dashboard_url)
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.api = async (path) => {
-                        if (path === '/api/releases/status') {
-                            return {
-                                current_version: '3.0.0-rc.22',
-                                settings: {channel: 'prerelease', auto_download: false},
-                                target: {platform: 'linux', arch: 'amd64'},
-                                available: null,
-                                discovery: {status: 'idle', error: null},
-                                download: {status: 'idle'},
-                                install_supported: true,
-                            };
-                        }
-                        if (path === '/api/upgrades/status') {
-                            return {active_operation: null, last_operation: null};
-                        }
-                        throw new Error(`unexpected API: ${path}`);
-                    };
-                }"""
-            )
-            page.get_by_role("button", name="版本更新").click()
 
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "尚未检查更新"
-            )
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "未检查"
-            )
-            expect(page.get_by_role("button", name="检查更新")).to_be_visible()
             expect(page.locator('[data-testid="dashboard-about-button"]')).to_be_visible()
             expect(page.get_by_role("button", name="退出登录")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        finally:
+            browser.close()
 
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.releaseState = null;
-                    state.releaseError = 'Manager 暂时不可用';
-                    state.releaseLoading = false;
-                }"""
-            )
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "无法读取更新状态"
-            )
-            expect(page.locator('[data-testid="release-summary"]')).to_contain_text("未知")
 
-            page.evaluate(
-                """() => {
-                    const state = window.Alpine.$data(document.querySelector('[x-data]'));
-                    state.releaseError = '';
-                    state.releaseState = {
-                        current_version: '3.0.0-rc.22',
-                        settings: {channel: 'prerelease', auto_download: false},
-                        target: {platform: 'linux', arch: 'amd64'},
-                        available: {version: '3.0.0-rc.23', compatible: true, artifacts: []},
-                        discovery: {status: 'succeeded'},
-                        download: {status: 'interrupted', error: '连接中断'},
-                        install_supported: true,
-                    };
-                }"""
-            )
-            expect(page.locator('[data-testid="release-action-card"]')).to_contain_text(
-                "下载已中断"
-            )
-
+def test_mobile_audit_log_handles_long_fields_without_overflow(
+    dashboard_url: str,
+) -> None:
+    """Long audit targets remain readable within the compact viewport."""
+    with sync_playwright() as playwright:
+        browser = launch_browser(playwright.chromium)
+        page = browser.new_page()
+        try:
+            page.set_viewport_size({"width": 375, "height": 667})
+            _login(page, dashboard_url)
             page.evaluate(
                 """() => {
                     const state = window.Alpine.$data(document.querySelector('[x-data]'));
@@ -1918,6 +1352,7 @@ def test_updates_tab_is_usable_on_mobile_and_does_not_claim_unchecked_is_latest(
                     }];
                 }"""
             )
+
             expect(page.get_by_test_id("audit-tab")).to_be_visible()
             expect(page.get_by_role("columnheader", name="时间")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
