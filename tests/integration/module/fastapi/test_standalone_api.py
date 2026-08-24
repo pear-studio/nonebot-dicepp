@@ -86,22 +86,6 @@ def test_command_returns_503_when_webchat_enabled():
     assert resp.status_code == 503
 
 
-def test_legacy_reload_route_requires_restart_without_touching_runtime():
-    proxy = _FakeProxy()
-    bot = _FakeBot(proxy)
-    bind_runtime(bot, proxy)
-    client = TestClient(dpp_api)
-
-    response = client.post("/reload")
-
-    assert response.json() == {
-        "ok": False,
-        "message": "通用配置热重载已停用；请重启 Bot RuntimeUnit 使配置生效",
-        "restart_required": True,
-    }
-    assert not hasattr(bot, "reload_config")
-
-
 @pytest.mark.asyncio
 async def test_command_outputs_are_isolated_under_concurrency():
     proxy = _FakeProxy()

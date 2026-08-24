@@ -26,7 +26,7 @@ class ReloadConfigCommand(UserCommandBase):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(
             LOC_RELOAD_DISABLED,
-            "通用配置热重载已停用，请在 Dashboard 重启 Bot RuntimeUnit 使配置生效。",
+            "通用配置热重载已停用，请在 Dashboard 重启 Bot 使配置生效。",
             ".reload 兼容提示；该命令不会修改运行中的配置",
         )
 
@@ -45,4 +45,4 @@ class ReloadConfigCommand(UserCommandBase):
         return ""
 
     def get_description(self) -> str:
-        return ".reload 通用配置热重载已停用；请重启 Bot RuntimeUnit（需骰管理权限）"
+        return ".reload 通用配置热重载已停用；请重启 Bot（需骰管理权限）"

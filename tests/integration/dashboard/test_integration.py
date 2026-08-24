@@ -1,16 +1,9 @@
 """End-to-end integration test covering a full dashboard workflow."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
-from tests.support.dashboard.manager import PersistingConfigManager
-
-
-@pytest.fixture(autouse=True)
-def _install_config_manager(test_client: TestClient) -> None:
-    test_client.app.state.manager_client = PersistingConfigManager()
 
 
 class TestFullFlow:

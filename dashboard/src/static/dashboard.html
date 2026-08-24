@@ -585,14 +585,22 @@
                 <h3 class="font-semibold text-gray-900 break-all" x-text="contentSubdir === 'queries' && selectedQueryDb ? selectedQueryDb : (dirLabels[contentSubdir] || contentSubdir)"></h3>
                 <p class="mt-0.5 text-xs text-gray-500" x-text="contentSubdir === 'queries' && selectedQueryDb ? `查询数据库 · ${selectedQueryDatabaseRecord()?.enabled ? '已启用' : '已停用'}` : (dirDescriptions[contentSubdir] || '')"></p>
               </div>
-              <button
-                x-show="contentSubdir === 'queries' && selectedQueryDb"
-                @click="toggleSelectedQueryDatabase()"
-                :disabled="queryStateLoading || queryNormalizeLoading"
-                class="px-3 py-2 border rounded-lg text-sm font-medium disabled:opacity-50"
-                :class="selectedQueryDatabaseRecord()?.enabled ? 'border-gray-300 text-gray-700 hover:bg-gray-100' : 'border-green-300 text-green-700 hover:bg-green-50'"
-                x-text="queryStateLoading ? '处理中…' : (selectedQueryDatabaseRecord()?.enabled ? '停用数据库' : '启用数据库')"
-              ></button>
+              <div x-show="contentSubdir === 'queries' && selectedQueryDb" class="flex items-center gap-2">
+                <button
+                  @click="startQueryDatabaseRepair()"
+                  :disabled="queryStateLoading || queryNormalizeLoading"
+                  data-testid="query-repair-button"
+                  title="先检查修复会产生的变化"
+                  class="px-3 py-2 border border-amber-300 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-50 disabled:opacity-50"
+                >一键修复</button>
+                <button
+                  @click="toggleSelectedQueryDatabase()"
+                  :disabled="queryStateLoading || queryNormalizeLoading"
+                  class="px-3 py-2 border rounded-lg text-sm font-medium disabled:opacity-50"
+                  :class="selectedQueryDatabaseRecord()?.enabled ? 'border-gray-300 text-gray-700 hover:bg-gray-100' : 'border-green-300 text-green-700 hover:bg-green-50'"
+                  x-text="queryStateLoading ? '处理中…' : (selectedQueryDatabaseRecord()?.enabled ? '停用数据库' : '启用数据库')"
+                ></button>
+              </div>
             </header>
             <div class="flex-1 min-h-0 p-4 flex flex-col">
 
@@ -3035,26 +3043,12 @@ function app() {
       return rest > 0 ? `${preview.join('\n')}\n... +${rest}` : preview.join('\n');
     },
 
-    shortOperationId(operationId) {
-      return operationId ? String(operationId).slice(0, 8) : '-';
-    },
-
     actionLabel(action) {
       return {
         start: '启动',
         stop: '停止',
         restart: '重启',
       }[action] || action || '-';
-    },
-
-    operationStatusLabel(status) {
-      return {
-        queued: '排队中',
-        running: '执行中',
-        succeeded: '成功',
-        failed: '失败',
-        rejected: '已拒绝',
-      }[status] || status || '-';
     },
 
   };

@@ -112,7 +112,7 @@ class TestReloadTombstoneIntegration(_BotTestBase):
         result = "\n".join(str(command) for command in cmds)
 
         self.assertIn("通用配置热重载已停用", result)
-        self.assertIn("重启 Bot RuntimeUnit", result)
+        self.assertIn("重启 Bot", result)
         self.assertNotIn("掷骰结果", result)
 
 

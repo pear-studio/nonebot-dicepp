@@ -152,7 +152,6 @@ hiddenimports = [
 # keeps its graph visible to Analysis.
 hiddenimports += collect_submodules('nonebot')
 hiddenimports += collect_submodules('lark')
-hiddenimports += collect_submodules('dicepp_security')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件

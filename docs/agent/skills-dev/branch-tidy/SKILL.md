@@ -90,9 +90,9 @@ branch-tidy/master-ba059304-001-work
 若多个 commit 必须共同完成且不能在不创造过渡代码的前提下保持测试全绿，可组成连续编号系列：
 
 ```text
-feat(manager): 重构归档事务 [1/3]：建立状态模型
-feat(manager): 重构归档事务 [2/3]：迁移执行流程
-feat(manager): 重构归档事务 [3/3]：完成恢复与验证
+feat(data): 重构归档事务 [1/3]：建立状态模型
+feat(data): 重构归档事务 [2/3]：迁移执行流程
+feat(data): 重构归档事务 [3/3]：完成恢复与验证
 ```
 
 系列中不得夹入其他主题；中间节点至少保持语法、import、build 和配置可加载，最后节点通过相关验证。最后一个拆分 commit 的 tree 必须与源 commit tree 相同。

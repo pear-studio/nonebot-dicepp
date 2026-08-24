@@ -108,7 +108,7 @@ fail_under = 60
 # ── 版本号自动递增 ────────────────────────────────────────────────────────────
 # 使用: uv run bump-my-version bump patch/minor/major；默认只改文件，不自动 commit/tag。
 # version-release 会先同步 uv.lock 和 release notes，再显式创建单一 release commit；
-# tag 仅由通过验证的 Promotion workflow 在发布 draft Release 时创建。
+# release workflow 只接受与 pyproject 版本一致的正式 tag。
 # 仅开发环境安装 (dependency-groups.dev)，不会进入生产部署
 [tool.bumpversion]
 current_version = "3.0.0"

@@ -45,7 +45,7 @@ description: 每次创建或重写 Git commit 前使用。检查实际变更边�
 | `core` | Bot 核心框架、命令、数据、数据库及适配器 |
 | `module` | roll、deck、character 等其他功能模块 |
 | `dashboard` | Dashboard 前端及其交互 |
-| `manager` | Manager 服务及管理接口 |
+| `runtime` | Bot 进程控制、数据运行时及部署运行时 |
 | `dev` | 测试基础设施、开发工具、构建、CI、发布及环境配置 |
 | `agent` | Agent 规则、技能及同步工具 |
 | `docs` | 架构、开发指南等项目文档 |

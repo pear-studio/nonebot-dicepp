@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from dashboard.src.config import DashboardPaths
 from tests.support.paths import find_repository_root
@@ -22,7 +21,7 @@ def test_schema_loader_uses_frozen_asset_without_source_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The onefile asset supplies UpdateConfig even when no source tree exists."""
+    """The onefile asset supplies the Bot schema without a source tree."""
     frozen_root = tmp_path / "_MEIPASS"
     schema_path = frozen_root / "dashboard_config_schema" / "pydantic_models.py"
     schema_path.parent.mkdir(parents=True)
@@ -52,9 +51,6 @@ def test_schema_loader_uses_frozen_asset_without_source_tree(
             type(provider) is schema.ProviderConfig
             for provider in schema.BotConfig().persona_ai.providers.values()
         )
-        assert schema.UpdateConfig.model_validate({"check_interval_hours": 12.0}).check_interval_hours == 12.0
-        with pytest.raises(ValidationError, match="cache_versions"):
-            schema.UpdateConfig.model_validate({"cache_versions": True})
     finally:
         app_module._pydantic_module_cache = previous_cache
 

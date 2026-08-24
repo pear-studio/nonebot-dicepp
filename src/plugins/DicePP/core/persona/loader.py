@@ -53,7 +53,7 @@ class PersonaLoader:
         """Update the character directory and reload all personas.
 
         Available to explicit Persona lifecycle code; general configuration
-        changes are applied by restarting the RuntimeUnit.
+        changes are applied by restarting the Bot.
         """
         self._dir = Path(path)
         self.reload()

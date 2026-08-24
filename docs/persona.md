@@ -169,7 +169,7 @@ content/characters/mychar/
 - 定时分享只发送给 `proactive_always_send_users` 和 `proactive_always_send_groups` 中明确列出的目标；两个列表都为空时不会发送。重复的同一私聊或群聊只会收到一次。
 - 主动分享与该私聊或群聊中的正常对话串行执行，不计入普通用户的 `daily_limit` 配额。若会话正忙或生成失败，当前时间窗口内可以重试。
 
-需要立即停止时使用 `.ai admin pause`；确认后用 `.ai admin resume` 恢复。修改配置后需重启 Bot RuntimeUnit 使新设置完整生效。
+需要立即停止时使用 `.ai admin pause`；确认后用 `.ai admin resume` 恢复。修改配置后需重启 Bot 使新设置完整生效。
 
 ## 常见问题
 
@@ -212,7 +212,7 @@ https://api.minimaxi.com/v1
 .ai admin pause
 ```
 
-再调整 `config/user.json` 中的主动消息相关配置并重启 Bot RuntimeUnit。
+再调整 `config/user.json` 中的主动消息相关配置并重启 Bot。
 
 ### 修改角色卡后没有生效
 

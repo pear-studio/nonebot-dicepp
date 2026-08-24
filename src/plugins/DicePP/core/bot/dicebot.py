@@ -492,7 +492,7 @@ class Bot:
 
         await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
-        # Configuration is read-only for the lifetime of this RuntimeUnit.
+        # Configuration is read-only for the lifetime of this Bot process.
 
     def reboot(self):
         """重启bot"""

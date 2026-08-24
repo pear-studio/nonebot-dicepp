@@ -186,7 +186,7 @@ class TestBotConfig:
         assert saved == new_config
 
     def test_bot_config_read_nonexistent(self, test_client: TestClient):
-        """Reading a non-existent bot config preserves Manager's 404 contract."""
+        """Reading a non-existent bot config returns the local 404 contract."""
         setup_auth(test_client)
         resp = test_client.get("/api/config/bots/nonexistent_bot")
         assert resp.status_code == 404

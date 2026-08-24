@@ -95,9 +95,6 @@ def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
         message = _compact(detail.get("message") or "")
         if message:
             parts.append(message)
-        operation_id = _compact(detail.get("operation_id") or "")
-        if operation_id:
-            parts.append(f"操作 ID：{operation_id}")
         summary = " · ".join(parts)
     elif detail is not None:
         status = str(detail.get("status") or "")
@@ -162,9 +159,7 @@ def log_once(
                     (entry_ts, operator, action, target, detail, ip),
                 )
             elif ts is not None and exists[1] != entry_ts:
-                # Manager results may be discovered later when the audit page
-                # opens. Preserve the operation's completion time instead of
-                # making several recovered results look simultaneous.
+                # Preserve an explicitly supplied event time for duplicate rows.
                 conn.execute(
                     "UPDATE audit SET ts = ? WHERE id = ?",
                     (entry_ts, exists[0]),

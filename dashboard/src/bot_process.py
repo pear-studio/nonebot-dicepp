@@ -1,6 +1,6 @@
 """Single-Bot subprocess lifecycle control.
 
-This module deliberately owns no RuntimeUnit identity, operation journal, or
+This module deliberately owns no multi-instance identity, operation journal, or
 restart policy. A caller supplies one command, working directory, environment
 overlay, and Bot log path; the controller owns at most one child process for
 that configuration.

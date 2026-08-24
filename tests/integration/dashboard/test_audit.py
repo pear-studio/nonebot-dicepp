@@ -106,25 +106,9 @@ class TestAuditList:
             ("config.bot.save", "bots/demo", ""),
             ("config.user.save", "user.json", ""),
             ("persona.character.save", "调查员", ""),
-            (
-                "manager.start",
-                "dicepp-runtime",
-                json.dumps({"operation_id": "start-1", "status": "queued"}),
-            ),
-            (
-                "manager.stop",
-                "dicepp-runtime",
-                json.dumps({"operation_id": "stop-1", "status": "succeeded"}),
-            ),
-            (
-                "manager.restart",
-                "dicepp-runtime",
-                json.dumps({
-                    "operation_id": "restart-1",
-                    "status": "failed",
-                    "message": "无法启动",
-                }),
-            ),
+            ("bot.start", "bot", json.dumps({"status": "running"})),
+            ("bot.stop", "bot", json.dumps({"status": "stopped"})),
+            ("bot.restart", "bot", json.dumps({"status": "running"})),
             ("content.query.enable", "rules", ""),
             ("content.query.disable", "rules", ""),
             (
@@ -151,9 +135,9 @@ class TestAuditList:
             "config.bot.save": "保存 Bot 配置",
             "config.user.save": "保存全局配置",
             "persona.character.save": "保存角色配置",
-            "manager.start": "启动 Bot 已提交",
-            "manager.stop": "停止 Bot 成功",
-            "manager.restart": "重启 Bot 失败",
+            "bot.start": "启动 Bot 进行中",
+            "bot.stop": "停止 Bot",
+            "bot.restart": "重启 Bot 进行中",
             "content.query.enable": "启用查询库",
             "content.query.disable": "停用查询库",
             "custom.event": "custom.event",
@@ -162,7 +146,6 @@ class TestAuditList:
         assert presented["auth.login"]["target_label"] == "管理员账户"
         assert presented["config.bot.save"]["target_label"] == "demo"
         assert presented["config.user.save"]["target_label"] == "全局配置"
-        assert presented["manager.restart"]["summary"] == "无法启动 · 操作 ID：restart-1"
         assert presented["custom.event"]["action_label"] == "custom.event"
         assert presented["custom.event"]["summary"] == "成功 · 完成"
         assert presented["custom.event"]["tone"] == "success"

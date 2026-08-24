@@ -39,9 +39,9 @@ jobs:
           ./scripts/build/assemble_windows_package.ps1
           $version = [regex]::Match((Get-Content pyproject.toml | Select-String '^version =').Line, '"([^"\r\n]+)"').Groups[1].Value
           if ((& dist/DicePP/DicePP-Runtime.exe --version) -ne "DicePP v$version") { throw "Runtime version mismatch" }
-          if ((& dist/DicePP/DicePP.exe --version) -ne "DicePP Dashboard v$version") { throw "Dashboard version mismatch" }
           & dist/DicePP/DicePP-Runtime.exe --smoke-check
-          & dist/DicePP/DicePP.exe --smoke-check
+          $dashboard = Start-Process -FilePath "dist/DicePP/DicePP.exe" -ArgumentList "--smoke-check" -Wait -PassThru
+          if ($dashboard.ExitCode -ne 0) { throw "Dashboard smoke check failed" }
           Compress-Archive -Path dist/DicePP -DestinationPath "DicePP-${{ github.ref_name }}-win64-Portable.zip"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

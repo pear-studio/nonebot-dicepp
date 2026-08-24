@@ -25,7 +25,7 @@ def _make_bot():
     bot = MagicMock()
     bot.account = "test_bot"
     bot.loc_helper.format_loc_text.return_value = (
-        "通用配置热重载已停用，请在 Dashboard 重启 Bot RuntimeUnit 使配置生效。"
+        "通用配置热重载已停用，请在 Dashboard 重启 Bot 使配置生效。"
     )
     return bot
 
@@ -57,7 +57,7 @@ async def test_reload_tombstone_explains_restart_without_changing_bot_state():
     assert len(results) == 1
     assert isinstance(results[0], BotSendMsgCommand)
     assert "通用配置热重载已停用" in results[0].msg
-    assert "重启 Bot RuntimeUnit" in results[0].msg
+    assert "重启 Bot" in results[0].msg
     assert bot.config is original_config
     bot.reload_config.assert_not_called()
     bot._cfg_loader.reload.assert_not_called()
@@ -68,4 +68,4 @@ def test_reload_tombstone_description_points_to_runtime_restart():
     description = ReloadConfigCommand(_make_bot()).get_description()
 
     assert ".reload" in description
-    assert "重启 Bot RuntimeUnit" in description
+    assert "重启 Bot" in description

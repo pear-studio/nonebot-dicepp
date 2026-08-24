@@ -367,8 +367,8 @@ def canonicalize_config_layer(
     """Return one runtime config layer's canonical form without writing files.
 
     This is the validation half of :class:`ConfigLoader`'s layer handling.
-    Callers that need to check a prospective configuration (such as the
-    Manager API) can use it with the same in-memory legacy migration but
+    Callers that need to check a prospective configuration can use it with the
+    same in-memory legacy migration but
     without file persistence.  It preserves the runtime rule that unknown
     critical-looking fields are rejected rather than silently ignored.
     """
@@ -504,7 +504,7 @@ def resolve_config_layers(
 ) -> ResolvedConfigLayers:
     """Resolve config layers without reading or writing files.
 
-    This is the single acceptance contract shared by Runtime and Manager:
+    This is the single acceptance contract shared by the Bot and Dashboard:
     canonicalize each sparse layer, merge it over a fresh built-in model, then
     validate cross-layer constraints on the final configuration.
     """

@@ -1,7 +1,7 @@
 """Shared contracts for DicePP query database files.
 
 The module intentionally uses only the standard library so Bot, Dashboard and
-Manager can agree on the same logical fields and enablement state.
+Dashboard and Bot code can agree on the same logical fields and enablement state.
 """
 
 from __future__ import annotations

@@ -22,13 +22,13 @@
 - 问题表现:
     - MemoryMonitorConfig（core/config/pydantic_models.py:596）功能为死代码：生产 memory_monitor.enable=false
     - 阈值语义损坏：percent = bot自身RSS / 系统总内存，3.6GB 小机上 90% = 3.3GB 未触发机器已先冻死；警告档 master 通知代码被注释（dicebot.py:377），预警名存实亡
-    - .m reboot 自重启（core/bot/dicebot.py:523 reboot_async，os.exec 原地替换）对 Manager 完全不可见：无 audit、无状态上报，与 Manager 统一管理 bot 生命周期方向相悖
-    - Dashboard 已提供完整重启链路（UI 按钮 + Manager docker/process adapter restart，含 Windows 托盘），.m reboot/.m memory 价值已被覆盖
+    - .m reboot 自重启（core/bot/dicebot.py:523 reboot_async，os.exec 原地替换）对 Dashboard 完全不可见：无 audit、无状态上报，与单一 Bot controller 生命周期方向相悖
+    - Dashboard 已提供完整重启链路（UI 按钮 + Bot controller restart，含 Windows 托盘），.m reboot/.m memory 价值已被覆盖
 - 开发备忘:
     - 删除：MemoryMonitorConfig 模型及 dashboard 元数据、_check_memory_and_handle 及 tick 挂载（dicebot.py:316,351）、get_memory_status()、.m memory/.m mem 指令（module/common/master_command.py:206）、.m reboot 全套（立即/延迟/rebooter 汇报，master_command.py:71-121 及 dicebot.py:660-671 启动回报分支）、reboot()/reboot_async()、config/common.py:27-30 相关常量
     - 需验证：旧 config/global.json 含 memory_monitor 键，删除模型后 pydantic 对未知字段的兼容行为（extra 策略）
     - 同步清理相关测试与文档（docs/ 中 .m reboot/.m memory 说明）
-    - 自愈需求后续由 Manager watchdog 承接（见性能监控展示条目），不在 bot 内重建
+    - 自愈需求不在 bot 内重建；如未来需要，应重新设计为独立的运维能力
     - 来源：.temp/prod-handoff/20260804-memory-monitor-enhancement.md
 
 ## dashboard
@@ -51,7 +51,7 @@
     - 所有写操作需要登录鉴权、输入校验、事务保护和审计记录
     - 明确 Dashboard 提交后 Bot 如何看到变更，以及新建、替换、删除数据库时的连接刷新规则
     - 明确完整归档与 Dashboard 并发写入时的一致性策略
-    - 按最终写入归属更新 Manager 架构文档
+    - 按最终写入归属更新 runtime 架构文档
 
 ## dice_hub
 
@@ -70,27 +70,6 @@
     - 集中命令执行、错误转换和用户回复，避免命令 Adapter 了解远端调用细节
     - 明确旧 DiceHub 配置和数据的保留、迁移或废弃策略
     - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
-
-## dicepp_manager
-
-### [B-260804-63f4b2] 性能监控展示（Manager 采集 + Dashboard 实时值与短窗口趋势）
-- 创建: 2026-08-04
-- 优先级: P1
-- 类型: feature
-- 改动量: XL
-- 问题表现:
-    - Dashboard 目前无任何内存/CPU/进程级资源指标，Overview 仅展示 bot online/version/last_heartbeat
-    - bot 侧 get_memory_status()（core/bot/dicebot.py:380）采集的数据不出进程：不落库、不上报，仅 .m memory 指令可见
-    - 2026-08-04 生产 3.6GB 小机内存耗尽整机冻死，失控源在 bot 之外（napcat/宿主机进程），bot 内监控完全无感知
-    - 生产已补 earlyoom + atop 兜底，但不能假设其他部署设备（Windows / Windows Server / 其他 Linux）也有，需产品级跨平台性能展示
-- 开发备忘:
-    - Manager 侧采集：按 DICEPP_MANAGER_RUNTIME 分派——process（Windows/原生）用 psutil 采宿主机+子进程；docker 用 docker.sock Engine API（/info + /containers/{id}/stats），compose 模板给 manager 加 /proc:ro 挂载以读真实整机内存，无 /proc 时降级到 docker /info 视角
-    - 放宽容器枚举标签过滤（当前仅 io.dicepp.* 标签容器，docker_runtime.py:242），纳入 napcat
-    - Manager 内存环形缓冲保留 1~2 小时采样（10~30s 间隔），不落库、无保留策略
-    - 数据链路：扩展现有控制通道/Manager API（/v1/control/bots 聚合点），RuntimeUnitStatus 加指标字段；Dashboard 轮询 Manager 展示实时值卡片 + 迷你趋势曲线
-    - 注意 docker stats 为流式接口，需低开销采样方式；compose 变更影响部署合同测试 tests/integration/manager/test_deployment_contract.py
-    - 后续方向（不在本期）：Manager watchdog 自愈（RSS 超阈值→restart runtime unit，替代已删除的 bot 自重启）、落库时序长周期曲线、cgroup limit 百分比阈值
-    - 来源：.temp/prod-handoff/20260804-memory-monitor-enhancement.md
 
 ## persona
 
