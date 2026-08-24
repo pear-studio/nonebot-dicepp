@@ -48,11 +48,6 @@ from dicepp_data.instance_data import (
     import_instance_data,
     instance_data_marker_path,
 )
-from dicepp_manager.client import (
-    ManagerClient,
-    ManagerClientError,
-)
-from dicepp_manager.config import ManagerClientSettings
 from dicepp_meta import get_project_info, get_version
 
 from .auth import (
@@ -119,8 +114,6 @@ async def lifespan(app: FastAPI):
         app.state.bot_process_controller = controller
     auto_start = bool(getattr(app.state, "bot_auto_start", False))
     layout = DashboardPaths.instance_layout()
-    app.state.manager_client = ManagerClient(ManagerClientSettings.from_layout(layout))
-    control_poll_task = asyncio.create_task(_poll_manager_control_status(app))
     try:
         if auto_start:
             blocker = _bot_start_blocker(layout)
@@ -130,8 +123,6 @@ async def lifespan(app: FastAPI):
                 await asyncio.to_thread(controller.start)
         yield
     finally:
-        control_poll_task.cancel()
-        await asyncio.gather(control_poll_task, return_exceptions=True)
         await asyncio.to_thread(controller.shutdown)
 
 
@@ -287,7 +278,7 @@ def _is_xlsx(path: Path) -> bool:
 
 
 def _config_save_result(result: dict, **extra: object) -> dict:
-    """Expose Manager's deferred-application contract to the Dashboard."""
+    """Expose the local save result and required restart indication."""
     return _ok({
         **extra,
         "saved": bool(result.get("saved", True)),
@@ -519,13 +510,6 @@ def _instance_data_error_response(exc: InstanceDataError) -> JSONResponse:
     return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
 
 
-def _manager_error_response(exc: ManagerClientError) -> JSONResponse:
-    content = dict(exc.payload)
-    content.setdefault("ok", False)
-    content.setdefault("message", str(exc) or type(exc).__name__)
-    return JSONResponse(status_code=exc.status_code, content=content)
-
-
 def _data_maintenance_lock(request: Request) -> asyncio.Lock:
     lock = getattr(request.app.state, "data_maintenance_lock", None)
     if lock is None:
@@ -605,7 +589,7 @@ async def archives_export(filename: str, request: Request):
 
 @app.get("/api/health")
 async def dashboard_health(request: Request):
-    """Dashboard's own readiness only; Bot control belongs to Manager."""
+    """Return Dashboard readiness; Bot lifecycle is local to this process."""
     db_path = getattr(request.app.state, "dashboard_db", None)
     if not isinstance(db_path, str):
         return JSONResponse(
@@ -1086,7 +1070,7 @@ async def config_set(request: Request):
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
 async def config_reset(request: Request):
-    """Remove a key from user.json, then persist it through Manager."""
+    """Remove a key from user.json, then persist it locally."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
@@ -1160,7 +1144,7 @@ async def config_user_get(request: Request):
 
 @app.post("/api/config/user/save", dependencies=[Depends(require_auth)])
 async def config_user_save(request: Request):
-    """Validate then overwrite user.json through Manager and audit the save."""
+    """Validate then overwrite user.json locally and audit the save."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
@@ -1428,10 +1412,7 @@ def _compute_llm_usage(persona_db_path: Path, today: str) -> Optional[dict]:
 @app.get("/api/overview", dependencies=[Depends(require_auth)])
 async def overview(request: Request, bot_id: Optional[str] = Query(None)):
     """Aggregate overview: bot status, core stats, persona stats, LLM usage."""
-    try:
-        result = {"bots": await _get_manager_client(request).control_bots()}
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+    result = {"bots": await _local_bot_statuses(request)}
 
     if bot_id:
         _validate_identifier(bot_id, "bot_id")
@@ -1448,11 +1429,25 @@ async def overview(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.get("/api/bots/status", dependencies=[Depends(require_auth)])
 async def bot_status(request: Request):
-    """Return Manager-owned Bot control state."""
-    try:
-        return _ok({"bots": await _get_manager_client(request).control_bots()})
-    except ManagerClientError as exc:
-        return _manager_error_response(exc)
+    """Return local config identities and the single Bot process state."""
+    return _ok({"bots": await _local_bot_statuses(request)})
+
+
+async def _local_bot_statuses(request: Request) -> list[dict]:
+    bots = []
+    config_dir = DashboardPaths.instance_layout().config_bots_dir
+    if config_dir.exists():
+        for path in sorted(config_dir.glob("*.json")):
+            if path.name == "_template.json":
+                continue
+            bots.append({"bot_id": path.stem})
+    status = await asyncio.to_thread(_get_bot_process_controller(request).status)
+    for bot in bots:
+        bot["online"] = status.running
+        bot["version"] = get_version()
+        bot["last_heartbeat_ts"] = None
+        bot["status"] = status.to_dict()
+    return bots
 
 
 def _get_bot_process_controller(request: Request) -> BotProcessController:
@@ -1529,58 +1524,6 @@ async def bot_process_logs(
     })
 
 
-# ── Manager API ───────────────────────────────────────────────────────────────
-
-
-def _get_manager_client(request: Request) -> ManagerClient:
-    """Return the configured HTTP client; never construct a runtime backend."""
-    client = getattr(request.app.state, "manager_client", None)
-    if client is None:
-        client = ManagerClient(
-            ManagerClientSettings.from_layout(
-                getattr(request.app.state, "dashboard_paths", DashboardPaths).instance_layout()
-            )
-        )
-        request.app.state.manager_client = client
-    return client
-
-
-async def _publish_manager_bot_statuses(app: FastAPI, bots: list[dict]) -> None:
-    """Forward Manager state to Dashboard's browser-only SSE subscribers."""
-    subscribers = getattr(app.state, "status_subscribers", [])
-    payload = json.dumps({"bots": bots}, ensure_ascii=False, sort_keys=True)
-    dead = []
-    for queue in list(subscribers):
-        try:
-            queue.put_nowait(payload)
-        except Exception:
-            dead.append(queue)
-    for queue in dead:
-        try:
-            subscribers.remove(queue)
-        except ValueError:
-            pass
-
-
-async def _poll_manager_control_status(app: FastAPI) -> None:
-    """Keep Dashboard SSE fresh by polling Manager, never Dashboard storage."""
-    previous: str | None = None
-    while True:
-        try:
-            client = app.state.manager_client
-            bots = await client.control_bots()
-            snapshot = json.dumps(bots, ensure_ascii=False, sort_keys=True)
-            if snapshot != previous:
-                previous = snapshot
-                await _publish_manager_bot_statuses(app, bots)
-        except (AttributeError, ManagerClientError):
-            # Manager may be starting or an old mixed-version Manager may be
-            # present. HTTP callers receive the explicit client error instead
-            # of falling back to Dashboard's former direct channel.
-            pass
-        await asyncio.sleep(2)
-
-
 # ── SSE endpoint ────────────────────────────────────────────────────────────────
 
 
@@ -1588,19 +1531,16 @@ async def _poll_manager_control_status(app: FastAPI) -> None:
 async def events_stream(request: Request):
     """SSE endpoint: pushes bot status updates to connected dashboard clients."""
     queue: asyncio.Queue = asyncio.Queue()
-    subscribers: list = request.app.state.status_subscribers
-    subscribers.append(queue)
+    subscribers: list = []
 
     async def _generate():
         try:
-            try:
-                bots = await _get_manager_client(request).control_bots()
-            except ManagerClientError:
-                bots = []
+            bots = await _local_bot_statuses(request)
             yield f"data: {json.dumps({'bots': bots})}\n\n"
             while True:
-                payload = await queue.get()
-                yield f"data: {payload}\n\n"
+                await asyncio.sleep(2)
+                bots = await _local_bot_statuses(request)
+                yield f"data: {json.dumps({'bots': bots})}\n\n"
         except (asyncio.CancelledError, GeneratorExit):
             pass
         finally:

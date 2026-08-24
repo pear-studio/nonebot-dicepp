@@ -1,7 +1,5 @@
 import sqlite3
-import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import aiosqlite
@@ -13,7 +11,6 @@ from plugins.DicePP.core.data.schema import (
     AsyncSchemaMigration,
     BOT_CORE_TARGET,
     BOT_LOG_TARGET,
-    DicePPDatabase,
     SchemaMigration,
     SchemaMigrationError,
     SchemaTarget,
@@ -539,8 +536,6 @@ async def test_bot_database_connect_repository_smoke_uses_temp_project_root():
         assert await db.user_config.list_all() == []
     finally:
         await db.close()
-
-
 @pytest.mark.asyncio
 async def test_persona_bot_core_fragment_tables_exist_after_bot_database_connect():
     bot_id = f"persona_fragment_{uuid.uuid4().hex}"
@@ -555,56 +550,3 @@ async def test_persona_bot_core_fragment_tables_exist_after_bot_database_connect
         } <= _tables(Path(db._db_path))
     finally:
         await db.close()
-
-
-def test_local_token_create_read_roundtrip_through_dicepp_db(tmp_path: Path):
-    instance_db = DicePPDatabase(tmp_path)
-
-    token = instance_db.ensure_local_control_token()
-
-    assert len(token) == 64
-    assert instance_db.read_local_control_token() == token
-    assert _metadata(tmp_path / "data" / "dicepp.db")["target_name"] == "instance"
-    assert "local_control_token" in _tables(tmp_path / "data" / "dicepp.db")
-
-
-def test_local_token_concurrent_ensure_returns_single_persisted_token(tmp_path: Path):
-    for index in range(5):
-        project_root = tmp_path / f"concurrent-{index}"
-        worker_count = 32
-        barrier = threading.Barrier(worker_count)
-
-        def ensure_token() -> str:
-            barrier.wait(timeout=5)
-            return DicePPDatabase(project_root).ensure_local_control_token()
-
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            tokens = list(executor.map(lambda _: ensure_token(), range(worker_count)))
-
-        assert len(set(tokens)) == 1
-        conn = sqlite3.connect(project_root / "data" / "dicepp.db")
-        try:
-            token_rows = conn.execute(
-                "SELECT id, token FROM local_control_token"
-            ).fetchall()
-            migration_rows = conn.execute(
-                "SELECT version, name FROM schema_migrations"
-            ).fetchall()
-        finally:
-            conn.close()
-        assert token_rows == [(1, tokens[0])]
-        assert migration_rows == [(1, "create_latest_schema")]
-
-
-def test_old_runtime_token_file_is_not_used_as_token_source(tmp_path: Path):
-    old_path = tmp_path / "data" / "runtime" / "local-control.token"
-    old_path.parent.mkdir(parents=True)
-    old_path.write_text("old-token", encoding="utf-8")
-    instance_db = DicePPDatabase(tmp_path)
-
-    assert instance_db.read_local_control_token() is None
-    new_token = instance_db.ensure_local_control_token()
-
-    assert new_token != "old-token"
-    assert instance_db.read_local_control_token() == new_token
-    assert old_path.read_text(encoding="utf-8") == "old-token"

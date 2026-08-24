@@ -130,29 +130,6 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
-        # Manager 控制通道（源码环境显式启用，Windows EXE 默认连接本机）
-        self._control_channel = None
-        try:
-            from dicepp_control.control_token import ensure_token
-            from plugins.DicePP.module.dashboard_reporter.ws_client import (
-                ControlChannelClient,
-                resolve_manager_url,
-            )
-
-            ws_url = resolve_manager_url()
-            if ws_url:
-
-                project_root = Paths.PROJECT_ROOT
-                self._control_channel = ControlChannelClient(
-                    bot_id=self.account,
-                    manager_url=ws_url,
-                    token_provider=lambda: ensure_token(project_root),
-                )
-        except ImportError:
-            logger.warning("[Bot] Control channel unavailable, skipping Manager connection")
-        except Exception as exc:
-            logger.warning(f"[Bot] Control channel init failed: {exc}")
-
         # 消息发送后跨模块通知 hook 列表
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
         self._post_send_hooks: List[PostSendHook] = []
@@ -508,9 +485,6 @@ class Bot:
             await asyncio.gather(self.tick_task, return_exceptions=True)
             self.tick_task = None
 
-        if self._control_channel is not None:
-            await self._control_channel.stop()
-
         log_runtime = self.log_runtime
         self.log_runtime = None
         if log_runtime is not None:
@@ -583,17 +557,12 @@ class Bot:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
-        # This synchronous debug helper owns only a short-lived loop.  A
-        # persistent Manager control task would be orphaned when it returns;
-        # production async startup still enables the channel below.
-        loop.run_until_complete(self.delay_init_command(start_control_channel=False))
+        loop.run_until_complete(self.delay_init_command())
 
-    async def delay_init_command(self, *, start_control_channel: bool = True):
+    async def delay_init_command(self):
         """在载入本地化文本和配置等数据后调用"""
         async with self._delay_init_lock:
             if self._delay_init_done:
-                if start_control_channel and self._control_channel is not None:
-                    await self._control_channel.connect()
                 return
             try:
                 await self.db.connect()
@@ -680,10 +649,6 @@ class Bot:
                     pass
 
             self._delay_init_done = True
-
-        # Connect Manager control channel after init is fully done
-        if start_control_channel and self._control_channel is not None:
-            await self._control_channel.connect()
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:

@@ -118,52 +118,9 @@ class InstanceLayout:
         return self.data_root / "backups"
 
     @property
-    def manager_dir(self) -> Path:
-        """Return the Manager-owned instance boundary.
-
-        Manager state is deliberately outside ``dashboard/data`` so the
-        lifecycle authority can survive Dashboard replacement or failure.
-        """
-        return self.root / "manager"
-
-    @property
-    def manager_state_dir(self) -> Path:
-        return self.manager_dir / "state"
-
-    @property
-    def manager_db(self) -> Path:
-        return self.manager_state_dir / "manager.db"
-
-    @property
-    def manager_token(self) -> Path:
-        return self.manager_state_dir / "api-token"
-
-    @property
-    def manager_control_dir(self) -> Path:
-        """Return the Bot↔Manager credential boundary.
-
-        Dashboard deliberately does not mount this directory.  It is kept
-        separate from ``manager/state`` because Dashboard needs the latter's
-        HTTP API token but must never be able to read Bot control credentials.
-        """
-        return self.manager_dir / "control"
-
-    @property
-    def manager_control_token(self) -> Path:
-        return self.manager_control_dir / "control-token"
-
-    @property
-    def manager_packages_dir(self) -> Path:
-        return self.manager_dir / "packages"
-
-    @property
-    def manager_backups_dir(self) -> Path:
-        return self.manager_dir / "backups"
-
-    @property
-    def manager_recovery_dir(self) -> Path:
-        """Return short-lived Windows program recovery material storage."""
-        return self.manager_dir / "recovery"
+    def archive_dir(self) -> Path:
+        """Stable on-disk archive inventory path."""
+        return self.root / "manager" / "backups"
 
     def area_root(self, area: str) -> Path:
         roots = {

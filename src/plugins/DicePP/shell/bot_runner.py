@@ -183,11 +183,6 @@ class BotRunner:
         """Whether the Bot lifecycle is currently active."""
         return self._started
 
-    @property
-    def manager_control_enabled(self) -> bool:
-        """Whether the Bot has initialized its Manager control channel."""
-        return self.bot is not None and self.bot._control_channel is not None
-
     async def start(self) -> None:
         """启动 Bot 实例"""
         if self._started:

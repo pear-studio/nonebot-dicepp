@@ -52,10 +52,8 @@ def _run_smoke_check() -> bool:
 def ensure_dirs() -> None:
     """Ensure Dashboard-owned runtime directories exist.
 
-    Creates dashboard/data/ only. Dashboard never writes to config/:
-    config/ may be mounted read-only (Docker topology) and Manager is the
-    sole writer of config files. Missing config files are tolerated by all
-    read paths and materialized by Manager on first config save.
+    Creates dashboard/data/ only. Config writes remain local to Dashboard;
+    missing config files are tolerated by all read paths.
     """
     data_dir = DashboardPaths.DATA_DIR
     os.makedirs(data_dir, exist_ok=True)

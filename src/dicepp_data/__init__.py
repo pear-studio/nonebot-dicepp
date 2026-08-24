@@ -1,7 +1,7 @@
 """Shared DicePP instance layout and persistent-data catalog.
 
 This package intentionally depends only on the Python standard library so the
-Bot, Dashboard, and Manager can inspect instance data before starting NoneBot.
+Bot and Dashboard can inspect instance data before starting NoneBot.
 """
 
 from .assets import (

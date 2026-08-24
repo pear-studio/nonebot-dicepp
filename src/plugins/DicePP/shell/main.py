@@ -105,7 +105,6 @@ def cmd_serve(args) -> None:
             host=args.host,
             port=args.port,
             tick=args.tick,
-            manager_url=args.manager,
             json_output=args.json,
         )
     except (ValueError, RuntimeError) as exc:
@@ -416,11 +415,6 @@ def main() -> None:
                               help="TCP port (0 = auto-assign a free port)")
     serve_parser.add_argument("--tick", action="store_true",
                               help="Enable the background tick loop (persona/scheduler)")
-    serve_parser.add_argument(
-        "--manager",
-        default="",
-        help="Local Manager address, e.g. http://127.0.0.1:4091",
-    )
     serve_parser.add_argument("--timeout", type=float, default=10.0,
                               help="Stop timeout in seconds (only with --stop)")
     serve_parser.add_argument("--json", action="store_true", help="Print startup JSON")

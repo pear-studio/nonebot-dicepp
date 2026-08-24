@@ -21,38 +21,25 @@ class WindowsAutostart:
             if os.name != "nt":
                 raise RuntimeError("Windows login autostart is only available on Windows")
             import winreg as registry_module
-
             registry = registry_module
         self._registry = registry
         self._command = autostart_command(executable)
 
     def enabled(self) -> bool:
-        registry = self._registry
         try:
-            with registry.OpenKey(registry.HKEY_CURRENT_USER, RUN_KEY, 0, registry.KEY_READ) as key:
-                value, _kind = registry.QueryValueEx(key, VALUE_NAME)
+            with self._registry.OpenKey(self._registry.HKEY_CURRENT_USER, RUN_KEY, 0, self._registry.KEY_READ) as key:
+                value, _kind = self._registry.QueryValueEx(key, VALUE_NAME)
         except FileNotFoundError:
             return False
         return value == self._command
 
     def set_enabled(self, enabled: bool) -> None:
-        registry = self._registry
         if enabled:
-            with registry.CreateKeyEx(
-                registry.HKEY_CURRENT_USER,
-                RUN_KEY,
-                0,
-                registry.KEY_SET_VALUE,
-            ) as key:
-                registry.SetValueEx(key, VALUE_NAME, 0, registry.REG_SZ, self._command)
+            with self._registry.CreateKeyEx(self._registry.HKEY_CURRENT_USER, RUN_KEY, 0, self._registry.KEY_SET_VALUE) as key:
+                self._registry.SetValueEx(key, VALUE_NAME, 0, self._registry.REG_SZ, self._command)
             return
         try:
-            with registry.OpenKey(
-                registry.HKEY_CURRENT_USER,
-                RUN_KEY,
-                0,
-                registry.KEY_SET_VALUE,
-            ) as key:
-                registry.DeleteValue(key, VALUE_NAME)
+            with self._registry.OpenKey(self._registry.HKEY_CURRENT_USER, RUN_KEY, 0, self._registry.KEY_SET_VALUE) as key:
+                self._registry.DeleteValue(key, VALUE_NAME)
         except FileNotFoundError:
             pass

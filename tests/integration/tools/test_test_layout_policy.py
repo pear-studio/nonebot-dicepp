@@ -545,7 +545,7 @@ def test_dashboard_integration_allows_canonical_dicepp_imports(
     target = tests_root / "integration" / "dashboard" / "test_boundary.py"
     target.parent.mkdir(parents=True)
     target.write_text(
-        "from dicepp_control.protocol import encode\n",
+        "from plugins.DicePP.shell.main import main\n",
         encoding="utf-8",
     )
 

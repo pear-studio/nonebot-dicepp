@@ -127,17 +127,11 @@ def _configure_app_state(
     app.state.login_failures = {}
     app.state.status_subscribers = []
     for attribute in (
-        "manager_client",
-        "manager_settings",
-        "manager_service",
-        "manager_db_path",
         "bot_process_controller",
     ):
         if hasattr(app.state, attribute):
             delattr(app.state, attribute)
     app.state.bot_auto_start = False
-    monkeypatch.delenv("DICEPP_MANAGER_URL", raising=False)
-    monkeypatch.delenv("DICEPP_MANAGER_TOKEN_FILE", raising=False)
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
 
 

@@ -78,8 +78,6 @@ def _check_critical_modules() -> list[str]:
         # Reached from DicePP's ordinary plugin graph; keep it explicit here
         # so the frozen smoke check also proves shared project metadata works.
         "dicepp_meta",
-        "dicepp_control.control_token",
-        "dicepp_control.protocol",
         "dicepp_security.private_token",
         "lark",
         "aiosqlite",

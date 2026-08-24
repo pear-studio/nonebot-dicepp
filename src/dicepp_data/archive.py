@@ -103,8 +103,8 @@ class ArchiveInvalidError(ArchiveError):
 
 
 def backups_dir(layout: InstanceLayout) -> Path:
-    """Return the Manager-owned archive directory."""
-    return layout.manager_backups_dir
+    """Return the instance archive inventory directory."""
+    return layout.archive_dir
 
 
 def _utc_now() -> datetime:
@@ -183,7 +183,7 @@ def estimate_archive(
     layout: InstanceLayout,
     profile: str = ARCHIVE_PROFILE_REGULAR,
 ) -> dict:
-    """Estimate snapshot input and available Manager repository space."""
+    """Estimate snapshot input and available archive directory space."""
     profile = _validate_profile(profile)
     payloads = collect_archive_payloads(layout, profile)
     total = 0
@@ -1382,7 +1382,7 @@ def import_archive(
     archive_dir: Path | None = None,
     max_bytes: int = MAX_ARCHIVE_BYTES,
 ) -> dict:
-    """Stream an uploaded archive into Manager storage and verify before publish."""
+    """Stream an uploaded archive into local inventory and verify before publish."""
     safe_archive_path(filename, layout=layout, archive_dir=archive_dir)
     target_dir = archive_dir or backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1433,7 +1433,7 @@ def export_archive_path(
     layout: InstanceLayout,
     archive_dir: Path | None = None,
 ) -> Path:
-    """Return a verified regular file path for the Manager HTTP download route."""
+    """Return a verified regular file path for the Dashboard download route."""
     path = _existing_regular_archive_path(
         filename,
         layout=layout,

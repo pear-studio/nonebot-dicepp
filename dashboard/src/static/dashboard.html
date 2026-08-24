@@ -388,7 +388,7 @@
             <!-- JSON view -->
             <div x-show="configView === 'json'" x-cloak>
               <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
-              <div x-show="configLoading" data-testid="config-json-loading" class="text-sm text-gray-500 mb-2">正在从 Manager 读取配置…</div>
+              <div x-show="configLoading" data-testid="config-json-loading" class="text-sm text-gray-500 mb-2">正在读取配置…</div>
               <textarea x-model="userConfigText" :disabled="configLoading || !userConfigReady" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500" @input="validateJson"></textarea>
               <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
               <button @click="saveUserConfig" :disabled="configLoading || !userConfigReady || !userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
@@ -1790,7 +1790,7 @@ function app() {
         this.userConfig = {};
         this.userConfigText = '';
         this.userConfigValid = true;
-        this.userConfigLoadError = '无法从 Manager 读取 user.json；请检查 Manager 后重试。';
+        this.userConfigLoadError = '无法读取 user.json，请稍后重试。';
       }
     },
 
@@ -2700,7 +2700,7 @@ function app() {
         });
         this.archiveEstimate = estimateData.estimate || null;
         if (this.archiveEstimate && this.archiveEstimate.enough_space === false) {
-          throw new Error('Manager 存档目录空间不足');
+          throw new Error('存档目录空间不足');
         }
         const data = await this.api('/api/archives', {
           method: 'POST',

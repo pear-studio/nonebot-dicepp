@@ -4,10 +4,6 @@ from typing import Optional, TYPE_CHECKING
 from fastapi import FastAPI, HTTPException, Request
 
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender
-from plugins.DicePP.module.dashboard_reporter.ws_client import (
-    CONFIG_RELOAD_DISABLED_MESSAGE,
-)
-
 if TYPE_CHECKING:
     from plugins.DicePP.core.bot import Bot
 
@@ -95,15 +91,4 @@ async def execute_command(request: Request):
         "error": None,
         "messages": messages,
         "raw_command_count": len(commands or []),
-    }
-
-
-@dpp_api.post("/reload")
-async def reload_config():
-    """Retain the legacy route while refusing unsafe partial application."""
-    _require_runtime()
-    return {
-        "ok": False,
-        "message": CONFIG_RELOAD_DISABLED_MESSAGE,
-        "restart_required": True,
     }

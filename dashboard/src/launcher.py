@@ -19,11 +19,7 @@ from typing import Any
 
 import uvicorn
 
-from dicepp_manager.api import create_manager_app
-from dicepp_manager.auth import ensure_api_token
-from dicepp_manager.client import ManagerClient
-from dicepp_manager.config import ManagerClientSettings, ManagerSettings
-from dicepp_manager.windows_autostart import WindowsAutostart
+from .windows_autostart import WindowsAutostart
 
 from .app import app
 from .bot_process import BotProcessController, create_bot_process_controller
@@ -145,7 +141,6 @@ class TrayController:
         log_path: Path,
         open_browser: Callable[[str], bool] = webbrowser.open,
         stop_dashboard: Callable[[], None] | None = None,
-        stop_manager: Callable[[], None] | None = None,
         join_services: Callable[[], None] | None = None,
         dashboard_alive: Callable[[], bool] | None = None,
         stop_tray: Callable[[], None] | None = None,
@@ -155,7 +150,6 @@ class TrayController:
         self._log_path = log_path
         self._open_browser = open_browser
         self._stop_dashboard = stop_dashboard or (lambda: None)
-        self._stop_manager = stop_manager or (lambda: None)
         self._join_services = join_services or (lambda: None)
         self._dashboard_alive = dashboard_alive
         self._stop_tray = stop_tray or (lambda: None)
@@ -237,7 +231,6 @@ class TrayController:
         finally:
             for label, callback in (
                 ("Dashboard", self._stop_dashboard),
-                ("Manager", self._stop_manager),
                 ("services", self._join_services),
                 ("tray", self._stop_tray),
             ):
@@ -302,10 +295,6 @@ def configure_launcher_environment(
         "DICEPP_PROJECT_ROOT": str(instance_path),
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_PORT": "4090",
-        "DICEPP_MANAGER_HOST": "127.0.0.1",
-        "DICEPP_MANAGER_PORT": "4091",
-        "DICEPP_MANAGER_URL": "http://127.0.0.1:4091",
-        "DICEPP_MANAGER_TOKEN_FILE": str(instance_path / "manager" / "state" / "api-token"),
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
@@ -457,7 +446,6 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
     foreground UI from unattended launch paths such as login autostart.
     """
     log_path = _launcher_fallback_log_path()
-    manager_server: ManagedServerHandle | None = None
     dashboard_server: ManagedServerHandle | None = None
     tray_controller: TrayController | None = None
     bot_controller: BotProcessController | None = None
@@ -471,45 +459,24 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
 
         ensure_dirs()
         settings = DashboardSettings()
-        manager_settings = ManagerSettings.from_env(DashboardPaths.PROJECT_ROOT)
-        token = ensure_api_token(manager_settings.token_path or manager_settings.layout.manager_token)
-        manager_app = create_manager_app(manager_settings, api_token=token)
         bot_controller = create_bot_process_controller(
             project_root=DashboardPaths.instance_layout().root,
             log_path=log_path,
         )
         app.state.bot_process_controller = bot_controller
         app.state.bot_auto_start = True
-        # Dashboard readiness is independent from Manager connectivity. Start it
-        # first so the local Manager API is available as soon as possible.
         dashboard_server = _start_dashboard_server(settings, log_path)
-        manager_server = _start_server(
-            manager_app,
-            host=manager_settings.host,
-            port=manager_settings.port,
-            thread_name="DicePPManager",
-            log_path=log_path,
-        )
-        manager_client = ManagerClient(ManagerClientSettings.from_layout(manager_settings.layout))
-        app.state.manager_client = manager_client
         url = dashboard_url(settings)
-        _wait_for_manager_service(
-            manager_client,
-            timeout=60.0,
-        )
 
         def stop_and_join_services() -> None:
             assert dashboard_server is not None
-            assert manager_server is not None
             dashboard_server.join(timeout=10)
-            manager_server.join(timeout=10)
 
         tray_controller = TrayController(
             bot_controller=bot_controller,
             dashboard_url=url,
             log_path=log_path,
             stop_dashboard=dashboard_server.request_stop,
-            stop_manager=manager_server.request_stop,
             join_services=stop_and_join_services,
             dashboard_alive=dashboard_server.is_alive,
         )
@@ -517,17 +484,6 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             tray_controller.configure_autostart(WindowsAutostart(autostart_launcher_path()))
         tray = build_tray(tray_controller, fake=fake_tray)
         tray_controller._stop_tray = tray.stop
-        manager_state = getattr(manager_app, "state", None)
-        manager_service = getattr(manager_state, "manager_service", None)
-        if manager_service is not None:
-            manager_service.set_shutdown_callback(
-                lambda _reason: threading.Thread(
-                    target=tray_controller.exit,
-                    name="DicePPManagerShutdown",
-                    daemon=False,
-                ).start()
-            )
-
         if background:
             append_runtime_log_line(
                 "launcher | browser auto-open disabled for background launch",
@@ -562,7 +518,6 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
                 )
         _stop_and_join_server_handles(
             dashboard_server,
-            manager_server,
             timeout=10,
         )
         if isinstance(exc, Exception):
@@ -593,7 +548,6 @@ def main() -> None:
     parser.add_argument("--launcher-fake-tray", action="store_true")
     parser.add_argument(
         "--background",
-        "--manager-tray",
         dest="background",
         action="store_true",
     )
@@ -710,22 +664,6 @@ def _dashboard_server_config(settings: DashboardSettings) -> uvicorn.Config:
         log_level="info",
         log_config=None,
     )
-
-
-def _wait_for_manager_service(
-    client: ManagerClient,
-    *,
-    timeout: float,
-) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            readiness = _run_async(client.health())
-            return readiness
-        except Exception:
-            pass
-        time.sleep(0.05)
-    raise TimeoutError("Dashboard Manager service did not start")
 
 
 def _install_launcher_excepthook(log_path: Path) -> None:

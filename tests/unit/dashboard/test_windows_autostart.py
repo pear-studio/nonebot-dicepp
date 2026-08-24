@@ -1,4 +1,4 @@
-from dicepp_manager.windows_autostart import RUN_KEY, VALUE_NAME, WindowsAutostart, autostart_command
+from dashboard.src.windows_autostart import RUN_KEY, VALUE_NAME, WindowsAutostart, autostart_command
 
 
 class _Key:

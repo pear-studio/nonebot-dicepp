@@ -74,9 +74,9 @@ def test_import_archive_and_marker_block_start(test_client, tmp_path: Path) -> N
     source_layout.config_dir.mkdir(parents=True)
     source_layout.config_user.write_text('{"master": ["archive"]}', encoding="utf-8")
     summary, _manifest = create_archive(layout=source_layout, profile="regular")
-    target_archive_dir = layout.manager_backups_dir
+    target_archive_dir = layout.archive_dir
     target_archive_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_layout.manager_backups_dir / summary["filename"], target_archive_dir / summary["filename"])
+    shutil.copy2(source_layout.archive_dir / summary["filename"], target_archive_dir / summary["filename"])
 
     assert test_client.post("/api/instance/clear", json={"confirm": True}).status_code == 200
     imported = test_client.post(

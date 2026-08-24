@@ -94,56 +94,27 @@ uv run dicepp-shell serve combat_test --port 0
 `--port 0` 会自动选择可用端口。Runtime 仅允许监听 `127.0.0.1` 或
 `::1`，不作为生产服务使用。
 
-接入同一工作区下的本地 Dashboard 和 Manager 时，必须先在该 workspace 启动
-Manager 并确认其带 token 的健康接口就绪；不要把 `serve --manager` 指向一个尚未
-运行的 `4091` 端口。完整的一键联调（固定 `dashboard-dev` session）推荐使用：
+需要联调同一工作区下的本地 Dashboard 时，直接让 Dashboard 和 Shell 指向同一
+workspace。完整的一键联调（固定 `dashboard-dev` session）推荐使用：
 
 ```bash
 python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py start
 # 结束时：python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 ```
 
-需要使用自定义 session 时，按以下顺序在三个终端启动：
+需要使用自定义 session 时：
 
 ```bash
-# 终端 1：先让 Manager 使用 init 命令打印出的 session workspace。
-# runtime=unavailable 只适用于本地联调，不会启动生产 Bot 进程。
+# 终端 1：让 Dashboard 使用相同 workspace。
 DICEPP_PROJECT_ROOT=.dicepp-shell/combat_test \
-  DICEPP_MANAGER_HOST=127.0.0.1 \
-  DICEPP_MANAGER_PORT=4091 \
-  DICEPP_MANAGER_RUNTIME=unavailable \
-  DICEPP_MANAGER_RELEASE_SCHEDULER=false \
-  uv run python -m dicepp_manager
-
-# 终端 2：等待 Manager 生成 token 并通过认证 health（命令不会打印 token），
-# 然后在同一终端启动 Dashboard。
-TOKEN_FILE=.dicepp-shell/combat_test/manager/state/api-token
-until [ -s "$TOKEN_FILE" ] \
-  && TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")" \
-  && curl --fail --silent -H "Authorization: Bearer $TOKEN" \
-    http://127.0.0.1:4091/v1/health >/dev/null; do
-  sleep 0.2
-done
-
-# 终端 2：让 Dashboard 使用相同 workspace。
-DICEPP_PROJECT_ROOT=.dicepp-shell/combat_test \
-  DICEPP_MANAGER_URL=http://127.0.0.1:4091 \
   uv run python -m dashboard
 
-# 终端 3：连接已就绪的 Manager。
+# 终端 2：启动 Shell Runtime。
 uv run dicepp-shell serve combat_test \
-  --manager http://127.0.0.1:4091
+  --port 0
 ```
 
-PowerShell 使用自定义 session 时也必须把三者指向同一 workspace。例如终端 1 先
-设置 `$env:DICEPP_PROJECT_ROOT = (Resolve-Path .dicepp-shell/combat_test)`、
-`$env:DICEPP_MANAGER_RUNTIME = "unavailable"` 和
-`$env:DICEPP_MANAGER_RELEASE_SCHEDULER = "false"` 后运行
-`uv run python -m dicepp_manager`；终端 2 用
-`$token = (Get-Content .dicepp-shell/combat_test/manager/state/api-token -Raw).Trim()`
-和 `Invoke-WebRequest -Headers @{ Authorization = "Bearer $token" } http://127.0.0.1:4091/v1/health`
-确认它就绪，再带相同 `DICEPP_PROJECT_ROOT` 启动 Dashboard。Bot、Dashboard 与 Manager
-必须指向同一 session workspace，才能使用专用控制 token、配置和数据库。
+PowerShell 使用自定义 session 时设置相同的 `DICEPP_PROJECT_ROOT` 即可。
 
 默认禁用自动 tick，以保证测试确定性；需要验证 Persona、scheduler 等后台
 流程时显式添加 `--tick`。

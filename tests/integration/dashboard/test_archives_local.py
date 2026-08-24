@@ -67,3 +67,15 @@ def test_archive_create_rejects_non_string_description(test_client: TestClient) 
 
     assert response.status_code == 400
     assert "description must be a string or null" in response.json()["message"]
+
+
+def test_local_bot_status_has_dashboard_contract(test_client: TestClient) -> None:
+    setup_auth(test_client)
+    test_client.app.state.bot_process_controller = StoppedController()
+    response = test_client.get("/api/bots/status")
+    assert response.status_code == 200
+    bots = response.json()["bots"]
+    assert bots
+    assert all(bot["online"] is False for bot in bots)
+    assert all(bot["version"] for bot in bots)
+    assert all(bot["last_heartbeat_ts"] is None for bot in bots)

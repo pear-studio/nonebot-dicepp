@@ -13,9 +13,9 @@ _ACTION_PRESENTATION: dict[str, tuple[str, str]] = {
     "config.bot.save": ("保存 Bot 配置", "info"),
     "config.user.save": ("保存全局配置", "info"),
     "persona.character.save": ("保存角色配置", "info"),
-    "manager.start": ("启动 Bot", "success"),
-    "manager.stop": ("停止 Bot", "neutral"),
-    "manager.restart": ("重启 Bot", "warning"),
+    "bot.start": ("启动 Bot", "success"),
+    "bot.stop": ("停止 Bot", "neutral"),
+    "bot.restart": ("重启 Bot", "warning"),
     "content.query.enable": ("启用查询库", "success"),
     "content.query.disable": ("停用查询库", "neutral"),
 }
@@ -85,7 +85,7 @@ def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
         summary = "配置已保存"
     elif action == "persona.character.save":
         summary = "角色配置已保存"
-    elif action.startswith("manager.") and detail is not None:
+    elif action.startswith("bot.") and detail is not None:
         status = str(detail.get("status") or "")
         status_label, status_tone = _STATUS_PRESENTATION.get(status, ("", tone))
         if status_label:

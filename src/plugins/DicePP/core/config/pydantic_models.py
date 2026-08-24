@@ -734,56 +734,6 @@ class ModeConfig(BaseModel):
     default: str = Field(default="DND5E2024", title="默认模式")
 
 
-class UpdateConfig(BaseModel):
-    """Manager-consumed release discovery and download preferences."""
-
-    model_config = ConfigDict(
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "runtime",
-        }
-    )
-
-    discovery_enabled: bool = Field(default=True, title="自动发现新版本")
-    auto_download: bool = Field(default=False, title="自动下载新版本")
-    channel: Literal["stable", "prerelease"] = Field(
-        default="stable",
-        title="更新频道",
-    )
-    check_interval_hours: float = Field(
-        default=24.0,
-        gt=0,
-        le=168,
-        title="检查间隔（小时）",
-    )
-    cache_versions: int = Field(
-        default=2,
-        ge=1,
-        le=20,
-        title="保留下载版本数",
-    )
-
-    @field_validator("check_interval_hours", mode="before")
-    @classmethod
-    def validate_interval(cls, value):
-        import math
-
-        if (
-            isinstance(value, bool)
-            or type(value) not in {int, float}
-            or not math.isfinite(float(value))
-        ):
-            raise ValueError("check_interval_hours must be a finite number")
-        return value
-
-    @field_validator("cache_versions", mode="before")
-    @classmethod
-    def validate_cache_versions(cls, value):
-        if type(value) is not int:
-            raise ValueError("cache_versions must be an integer")
-        return value
-
 
 # ── Top-level BotConfig ──────────────────────────────────────────────────────
 
@@ -869,4 +819,3 @@ class BotConfig(BaseModel):
     query: QueryConfig = Field(default_factory=QueryConfig, title="查询模块")
     log: LogConfig = Field(default_factory=LogConfig, title="日志模块")
     mode: ModeConfig = Field(default_factory=ModeConfig, title="模式模块")
-    update: UpdateConfig = Field(default_factory=UpdateConfig, title="版本更新")
