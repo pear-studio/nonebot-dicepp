@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -12,7 +11,6 @@ from dashboard.src.runtime_service import BotNotStopped, BotRuntimeService
 
 def test_frozen_autostart_uses_portable_launcher(tmp_path: Path, monkeypatch) -> None:
     portable = tmp_path / "DicePP"
-    monkeypatch.setattr(os, "name", "nt", raising=False)
     monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
     monkeypatch.setattr(launcher.sys, "executable", str(portable / "DicePP.exe"))
     assert launcher.autostart_launcher_path() == portable / "DicePP.exe"
