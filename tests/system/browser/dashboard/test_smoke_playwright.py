@@ -112,7 +112,7 @@ def dashboard_url(tmp_path: Path) -> str:
             ],
             cwd=str(PROJECT_ROOT),
             env=env,
-            stdin=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
             stdout=server_log,
             stderr=subprocess.STDOUT,
             text=True,
@@ -124,11 +124,10 @@ def dashboard_url(tmp_path: Path) -> str:
             try:
                 wait_for_server(f"{base_url}/api/auth/status")
             except TimeoutError as exc:
-                assert proc.stdin is not None
                 stop_server_process(
                     proc,
                     name="Dashboard smoke server",
-                    request_stop=proc.stdin.close,
+                    request_stop=proc.terminate,
                 )
                 server_log.flush()
                 server_log.seek(0)
@@ -144,11 +143,10 @@ def dashboard_url(tmp_path: Path) -> str:
                 )
             yield base_url
         finally:
-            assert proc.stdin is not None
             stop_server_process(
                 proc,
                 name="Dashboard smoke server",
-                request_stop=proc.stdin.close,
+                request_stop=proc.terminate,
             )
 
 
