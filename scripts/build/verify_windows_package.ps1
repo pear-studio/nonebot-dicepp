@@ -25,7 +25,7 @@ function Get-ListeningPids([int]$Port) {
         Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-$tempRoot = (Resolve-Path -LiteralPath ([System.IO.Path]::GetTempPath())).Path
+$tempRoot = (Resolve-Path -LiteralPath ([System.IO.Path]::GetTempPath())).Path.TrimEnd([System.IO.Path]::DirectorySeparatorChar)
 $verifyDist = Join-Path $tempRoot ("DicePP-verify-" + [guid]::NewGuid().ToString("N"))
 $process = $null
 $ports = @(4090, 8080)
