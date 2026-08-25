@@ -207,10 +207,12 @@ def test_malformed_account_config_ignored(dd):
 # ── 9.2: Pydantic validation errors ──────────────────────────────────────────
 
 
-def test_critical_invalid_type_raises_config_validation_error(dd):
-    _write(dd.user_config, {"master": "not-a-list"})
+def test_invalid_known_field_raises_without_rewriting(dd):
+    original = {"master": "not-a-list"}
+    _write(dd.user_config, original)
     with pytest.raises(ConfigValidationError):
         dd.loader().load()
+    assert _read(dd.user_config) == original
 
 
 def test_valid_bool_string_accepted(dd):
@@ -223,24 +225,6 @@ def test_valid_bool_string_accepted(dd):
 # ── canonical rewrite ────────────────────────────────────────────────────────
 
 
-def test_canonical_rewrite_drops_unknown_ordinary_user_fields(dd):
-    _write(dd.user_config, {
-        "chat_interval": 99,
-        "old_plain_field": True,
-        "persona_ai": {
-            "enabled": True,
-            "max_short_term_chars": 1500,
-        },
-    })
-
-    dd.loader().load()
-    saved = _read(dd.user_config)
-
-    assert "old_plain_field" not in saved
-    assert "max_short_term_chars" not in saved["persona_ai"]
-    assert saved["persona_ai"]["enabled"] is True
-
-
 def test_canonical_rewrite_preserves_comment_metadata(dd):
     _write(dd.user_config, {
         "_comment": "top-level guidance",
@@ -251,61 +235,13 @@ def test_canonical_rewrite_preserves_comment_metadata(dd):
         },
     })
 
-    with patch('plugins.DicePP.core.config.loader.logger.warning') as warning:
-        cfg = dd.loader().load()
+    cfg = dd.loader().load()
     saved = _read(dd.user_config)
 
     assert saved["_comment"] == "top-level guidance"
     assert saved["persona_ai"]["_comment_persona"] == "nested guidance"
     assert "_comment" not in cfg.model_dump()
     assert "_comment_persona" not in cfg.persona_ai.model_dump()
-    assert not any(
-        call.args
-        and str(call.args[0]).startswith("[Config] Dropping unknown field")
-        for call in warning.call_args_list
-    )
-
-
-def test_canonical_rewrite_defaultizes_recoverable_ordinary_field_error(dd):
-    _write(dd.user_config, {"chat_interval": "not-a-number"})
-
-    cfg = dd.loader().load()
-    saved = _read(dd.user_config)
-
-    assert cfg.chat_interval == 20
-    assert saved["chat_interval"] == 20
-
-
-def test_canonical_rewrite_enforces_wrapped_model_field_constraints(dd):
-    _write(dd.user_config, {
-        "persona_ai": {
-            "segment_target_chars": 0,
-            "providers": {
-                "minimax": {
-                    "models": [{
-                        "name": "constraint-probe",
-                        "category": "llm",
-                        "capabilities": ["text"],
-                        "quality": 2,
-                        "cost": 0.4,
-                    }],
-                },
-            },
-        },
-    })
-
-    cfg = dd.loader().load()
-    saved = _read(dd.user_config)
-
-    assert cfg.persona_ai.segment_target_chars == 30
-    assert saved["persona_ai"]["segment_target_chars"] == 30
-    assert cfg.persona_ai.providers["minimax"].models[0].quality == 0.5
-    assert (
-        saved["persona_ai"]["providers"]["minimax"]["models"][0]["quality"]
-        == 0.5
-    )
-
-
 def test_canonical_rewrite_uses_current_search_max_chars_field(dd):
     _write(dd.user_config, {
         "persona_ai": {
@@ -320,77 +256,14 @@ def test_canonical_rewrite_uses_current_search_max_chars_field(dd):
     assert saved["persona_ai"]["search_max_chars"] == 111
 
 
-def test_canonical_rewrite_keeps_critical_field_errors_hard(dd):
-    original = {"master": "not-a-list"}
+def test_unknown_field_fails_without_rewriting(dd):
+    original = {"chat_interval": 42, "removed_setting": True}
     _write(dd.user_config, original)
 
     with pytest.raises(ConfigValidationError):
         dd.loader().load()
 
     assert _read(dd.user_config) == original
-    assert list(dd.root.rglob("*.bak")) == []
-
-
-def test_unknown_fields_with_critical_sounding_substrings_are_not_rejected(dd):
-    """Fields like 'executive_summary' contain markers ('exec') but are NOT
-    critical because the marker must appear as a whole underscore-delimited
-    token.
-
-    'evaluation_url' IS critical ('url' is a whole token) and tested
-    separately.
-    """
-    _write(dd.user_config, {
-        "chat_interval": 42,
-        "executive_summary": "should be dropped not rejected",
-        "pathological_case": 123,
-    })
-
-    cfg = dd.loader().load()
-
-    assert cfg.chat_interval == 42
-    saved = _read(dd.user_config)
-    assert "executive_summary" not in saved
-    assert "pathological_case" not in saved
-
-
-def test_unknown_fields_with_url_token_are_still_critical(dd):
-    """'url' as a standalone underscore-delimited token is critical
-    (e.g. 'evaluation_url' splits into ['evaluation', 'url'])."""
-    _write(dd.user_config, {
-        "chat_interval": 42,
-        "evaluation_url": "https://example.com",
-    })
-
-    with pytest.raises(ConfigValidationError):
-        dd.loader().load()
-
-
-def test_unknown_fields_with_token_as_boundary_word_still_critical(dd):
-    """'token' as a whole underscore-delimited token IS critical (e.g. 'my_token',
-    'token_type')."""
-    _write(dd.user_config, {
-        "chat_interval": 42,
-        "my_token": "secret-value",
-    })
-
-    with pytest.raises(ConfigValidationError):
-        dd.loader().load()
-
-
-def test_unknown_fields_are_dropped_without_crashing(dd):
-    """Dropping an unknown non-critical field must not crash startup."""
-    _write(dd.user_config, {
-        "chat_interval": 42,
-        "old_plain_field": True,
-        "another_unknown": {"nested": "value"},
-    })
-
-    cfg = dd.loader().load()
-    saved = _read(dd.user_config)
-
-    assert cfg.chat_interval == 42
-    assert "old_plain_field" not in saved
-    assert "another_unknown" not in saved
 
 
 def test_canonical_rewrite_does_not_write_env_overrides(dd):

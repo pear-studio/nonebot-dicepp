@@ -9,7 +9,6 @@ Priority (high → low):
 """
 import json
 import os
-import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,44 +25,6 @@ _BOTS_DIR = "bots"
 _GLOBAL_USER = "user.json"
 _ACCOUNT_TEMPLATE = "_template.json"
 _COMMENT_METADATA_PREFIX = "_comment"
-
-_CRITICAL_FIELD_NAMES = {
-    "master",
-    "admin",
-    "friend_token",
-    "white_list_group",
-    "white_list_user",
-    "character_path",
-    "data_path",
-    "api_url",
-    "webchat_url",
-    "base_url",
-    "api_key",
-}
-_CRITICAL_FIELD_MARKERS = (
-    "api_key",
-    "token",
-    "secret",
-    "password",
-    "credential",
-    "auth",
-    "master",
-    "admin",
-    "permission",
-    "endpoint",
-    "url",
-    "path",
-    "remote",
-    "delete",
-    "restore",
-    "exec",
-)
-_CRITICAL_MARKER_PATTERN = re.compile(
-    r"(?:^|_)("
-    + "|".join(re.escape(marker) for marker in _CRITICAL_FIELD_MARKERS)
-    + r")(?:_|$)"
-)
-
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merge override into base (override wins)."""
@@ -139,22 +100,6 @@ def _list_item_model_type(annotation: Any) -> Optional[type[BaseModel]]:
     return item_type if _is_model_type(item_type) else None
 
 
-def _field_default_value(field: Any) -> Any:
-    return field.get_default(call_default_factory=True)
-
-
-def _field_has_default(field: Any) -> bool:
-    return not field.is_required()
-
-
-def _is_critical_path(path: tuple[str, ...]) -> bool:
-    leaf = path[-1] if path else ""
-    lowered = leaf.lower()
-    if lowered in _CRITICAL_FIELD_NAMES:
-        return True
-    return _CRITICAL_MARKER_PATTERN.search(lowered) is not None
-
-
 def _config_validation_error(path: Path, message: str) -> "ConfigValidationError":
     return ConfigValidationError(f"[Config] Canonical rewrite rejected {path}: {message}")
 
@@ -216,90 +161,40 @@ def _locate_model_field_core_schema(
     return None
 
 
-def _canonicalize_default_value(
-    annotation: Any,
-    value: Any,
-    *,
-    path: Path,
-    field_path: tuple[str, ...],
-) -> Any:
-    if _is_model_type(annotation):
-        return _canonicalize_model_dict(
-            annotation,
-            {},
-            path=path,
-            field_path=field_path,
-            fill_missing_defaults=True,
-        )
-    return _dump_json_value(annotation, value)
-
-
 def _canonicalize_model_dict(
     model_type: type[BaseModel],
     raw: Dict[str, Any],
     *,
     path: Path,
     field_path: tuple[str, ...] = (),
-    fill_missing_defaults: bool,
 ) -> Dict[str, Any]:
     canonical: Dict[str, Any] = {}
-    consumed: set[str] = set()
-
-    for name, field in model_type.model_fields.items():
-        input_key = name if name in raw else None
-        output_key = name
-
-        if input_key is None:
-            current_path = field_path + (name,)
-            if fill_missing_defaults and _field_has_default(field) and not _is_critical_path(current_path):
-                default = _field_default_value(field)
-                canonical[output_key] = _canonicalize_default_value(
-                    field.annotation,
-                    default,
-                    path=path,
-                    field_path=current_path,
-                )
+    for name, value in raw.items():
+        if name.startswith(_COMMENT_METADATA_PREFIX):
+            canonical[name] = value
             continue
 
-        consumed.add(input_key)
+        field = model_type.model_fields.get(name)
         current_path = field_path + (name,)
-        value = raw[input_key]
+        if field is None:
+            raise _config_validation_error(
+                path,
+                f"unknown field '{'.'.join(current_path)}' is not part of the current schema",
+            )
+
         try:
-            canonical[output_key] = _canonicalize_field_value(
+            canonical[name] = _canonicalize_field_value(
                 model_type,
-                name,
                 field.annotation,
                 value,
                 path=path,
                 field_path=current_path,
-                fill_missing_defaults=fill_missing_defaults,
             )
         except ValidationError as exc:
-            if _is_critical_path(current_path) or not _field_has_default(field):
-                raise _config_validation_error(
-                    path,
-                    f"critical or required field '{'.'.join(current_path)}' is invalid: {exc}",
-                ) from exc
-            default = _field_default_value(field)
-            canonical[output_key] = _dump_json_value(field.annotation, default)
-
-    for key in raw:
-        if key in consumed:
-            continue
-        if key.startswith(_COMMENT_METADATA_PREFIX):
-            canonical[key] = raw[key]
-            continue
-        current_path = field_path + (key,)
-        if _is_critical_path(current_path):
             raise _config_validation_error(
                 path,
-                f"unknown critical-looking field '{'.'.join(current_path)}' must be migrated explicitly",
-            )
-        logger.warning(
-            "[Config] Dropping unknown field {!r} from {}",
-            ".".join(current_path),
-            path,
-        )
+                f"field '{'.'.join(current_path)}' is invalid: {exc}",
+            ) from exc
 
     return canonical
 
@@ -307,33 +202,23 @@ def _canonicalize_model_dict(
 def canonicalize_config_layer(
     raw: Dict[str, Any],
     *,
-    fill_missing_defaults: bool,
     path: Path | None = None,
 ) -> Dict[str, Any]:
-    """Return one runtime config layer's canonical form without writing files.
-
-    This is the validation half of :class:`ConfigLoader`'s layer handling.
-    Callers that need to check a prospective configuration can use it without
-    file persistence.  It preserves the runtime rule that unknown
-    critical-looking fields are rejected rather than silently ignored.
-    """
+    """Validate and canonicalize one sparse runtime config layer."""
     return _canonicalize_model_dict(
         BotConfig,
         raw,
         path=path if path is not None else Path("<in-memory configuration>"),
-        fill_missing_defaults=fill_missing_defaults,
     )
 
 
 def _canonicalize_field_value(
     owner_model_type: type[BaseModel],
-    field_name: str,
     annotation: Any,
     value: Any,
     *,
     path: Path,
     field_path: tuple[str, ...],
-    fill_missing_defaults: bool,
 ) -> Any:
     if _is_model_type(annotation):
         if not isinstance(value, dict):
@@ -343,7 +228,6 @@ def _canonicalize_field_value(
             value,
             path=path,
             field_path=field_path,
-            fill_missing_defaults=fill_missing_defaults,
         )
 
     dict_value_model = _dict_value_model_type(annotation)
@@ -361,7 +245,6 @@ def _canonicalize_field_value(
                     item,
                     path=path,
                     field_path=item_path,
-                    fill_missing_defaults=fill_missing_defaults,
                 )
         return canonical
 
@@ -375,14 +258,13 @@ def _canonicalize_field_value(
                     item,
                     path=path,
                     field_path=field_path + (str(index),),
-                    fill_missing_defaults=fill_missing_defaults,
                 )
             canonical_items.append(item)
         return _dump_json_value(annotation, canonical_items)
 
     return _dump_model_field_json_value(
         owner_model_type,
-        field_name,
+        field_path[-1],
         annotation,
         value,
     )
@@ -455,12 +337,10 @@ def resolve_config_layers(
     """
     canonical_user = canonicalize_config_layer(
         user_raw,
-        fill_missing_defaults=False,
         path=user_path,
     )
     canonical_account = canonicalize_config_layer(
         account_raw,
-        fill_missing_defaults=False,
         path=account_path,
     )
     merged = BotConfig().model_dump(mode="json")
