@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import fnmatch
-import hashlib
-import json
 import os
 import re
 import string
@@ -30,9 +28,6 @@ class SchemaReference:
     def __post_init__(self) -> None:
         if not self.name or self.latest_version < 1:
             raise ValueError("Schema reference requires a name and positive version")
-
-    def to_dict(self) -> dict[str, str | int]:
-        return {"name": self.name, "latest_version": self.latest_version}
 
     def validate_target(self, target: "SchemaTargetLike") -> None:
         if target.name != self.name or target.latest_version != self.latest_version:
@@ -73,8 +68,6 @@ class DataAsset:
     kind: DataAssetKind
     schema: SchemaReference | None = None
     excludes: tuple[str, ...] = ()
-    restore: str = "exact"
-    sensitive: bool = False
 
     def __post_init__(self) -> None:
         if self.area not in {"config", "data", "content"}:
@@ -108,31 +101,6 @@ class DataAsset:
             in string.Formatter().parse(self.pattern)
             if field_name is not None
         )
-
-    @property
-    def logical_pattern(self) -> str:
-        if self.pattern in {"", "."}:
-            return self.area
-        return f"{self.area}/{self.pattern}"
-
-    @property
-    def logical_glob(self) -> str:
-        if self.pattern in {"", "."}:
-            return self.area
-        return f"{self.area}/{_template_to_glob(self.pattern)}"
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "id": self.id,
-            "area": self.area,
-            "pattern": self.pattern,
-            "restore_scope": self.restore_scope,
-            "kind": self.kind.value,
-            "schema": self.schema.to_dict() if self.schema else None,
-            "excludes": list(self.excludes),
-            "restore": self.restore,
-            "sensitive": self.sensitive,
-        }
 
     def resolve(self, layout: InstanceLayout, **values: str) -> Path:
         expected = set(self.parameter_names)
@@ -191,12 +159,12 @@ class DataAsset:
         relative = logical_path[len(prefix):]
         if not relative:
             return None
-        logical_glob = _template_to_glob(self.pattern)
+        glob_pattern = _template_to_glob(self.pattern)
         if self.kind is DataAssetKind.DIRECTORY:
-            if logical_glob in {"", "."}:
+            if glob_pattern in {"", "."}:
                 matched = True
             else:
-                directory = logical_glob.rstrip("/")
+                directory = glob_pattern.rstrip("/")
                 matched = relative.startswith(f"{directory}/")
             parameters: dict[str, str] = {}
         else:
@@ -317,22 +285,6 @@ class DataAssetCatalog:
         if len(ids) != len(set(ids)):
             raise ValueError("DataAsset ids must be unique")
 
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "format_version": 1,
-            "assets": [asset.to_dict() for asset in sorted(self.assets, key=lambda item: item.id)],
-        }
-
-    @property
-    def digest(self) -> str:
-        payload = json.dumps(
-            self.to_dict(),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
-
     def collect(self, layout: InstanceLayout) -> list[DataAssetMatch]:
         matches = [
             match
@@ -440,7 +392,6 @@ USER_CONFIG_ASSET = DataAsset(
     pattern="user.json",
     restore_scope=".",
     kind=DataAssetKind.FILE,
-    sensitive=True,
 )
 BOT_CONFIGS_ASSET = DataAsset(
     id="config.bots",
@@ -449,7 +400,6 @@ BOT_CONFIGS_ASSET = DataAsset(
     restore_scope="bots",
     kind=DataAssetKind.FILE_SET,
     excludes=("_template.json",),
-    sensitive=True,
 )
 INSTANCE_DB_ASSET = DataAsset(
     id="data.instance",

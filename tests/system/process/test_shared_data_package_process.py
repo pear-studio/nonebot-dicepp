@@ -17,7 +17,7 @@ def test_shared_data_package_import_does_not_start_nonebot(pytestconfig) -> None
             sys.executable,
             "-c",
             "import sys; import dicepp_data; "
-            "assert 'nonebot' not in sys.modules; print(dicepp_data.DATA_CATALOG.digest)",
+            "assert 'nonebot' not in sys.modules",
         ],
         cwd=root,
         env=env,
@@ -28,7 +28,6 @@ def test_shared_data_package_import_does_not_start_nonebot(pytestconfig) -> None
     )
 
     assert result.returncode == 0, result.stderr
-    assert len(result.stdout.strip()) == 64
 
 
 def test_bot_and_dashboard_facades_resolve_the_same_instance(

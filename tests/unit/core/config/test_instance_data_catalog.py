@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from dicepp_data import (
     BOT_CORE_ASSET,
     CONTENT_ASSET,
-    DATA_CATALOG,
     InstanceLayout,
     LOCAL_IMAGES_ASSET,
     PERSONA_DB_ASSET,
@@ -34,19 +32,6 @@ def test_instance_layout_applies_project_and_compatible_data_override() -> None:
     assert BOT_CORE_ASSET.resolve(layout, bot_id="12345") == (
         external_data.resolve() / "bots" / "12345" / "bot_data.db"
     )
-
-
-def test_catalog_description_and_digest_are_stable_and_machine_readable() -> None:
-    description = DATA_CATALOG.to_dict()
-    encoded = json.dumps(description, sort_keys=True, separators=(",", ":"))
-
-    assert description["format_version"] == 1
-    assert [asset["id"] for asset in description["assets"]] == sorted(
-        asset.id for asset in DATA_CATALOG.assets
-    )
-    assert len(DATA_CATALOG.digest) == 64
-    assert DATA_CATALOG.digest == DATA_CATALOG.digest
-    assert "personas_data_{character}.db" in encoded
 
 
 def test_asset_parameters_cannot_escape_the_instance() -> None:

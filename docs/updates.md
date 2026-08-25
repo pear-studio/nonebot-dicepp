@@ -4,11 +4,13 @@ DicePP 当前采用手工更新。Dashboard 只展示当前版本和 GitHub Rele
 
 ## Windows Portable
 
+历史版本 ZIP/存档与当前版本不兼容。Windows 更新只通过旧 Portable 目录的 `source_path` 导入 `config/`、`data/` 和 `content/`。
+
 1. 退出旧目录中的 `DicePP.exe`，停止旧 Bot 并释放 Dashboard 端口；不必从旧 Dashboard 导出存档。
 2. 从 [GitHub Releases](https://github.com/pear-studio/nonebot-dicepp/releases) 下载目标 `win64-Portable.zip`。
 3. 解压到新的空目录，不覆盖旧目录，并启动新目录的 `DicePP.exe`。
 4. 在新 Dashboard 停止 Bot，点击“清空业务数据”，然后在存档页输入旧 Portable 根目录路径，按 [Windows 部署](./windows.md) 的导入说明导入配置、业务数据和内容；清空是因为新 Bot 首次启动可能已经创建业务文件，目录导入要求目标为空。
-5. 启动 Bot 并确认 Dashboard 和 Bot 状态；需要迁移旧 ZIP 存档时，使用独立的“导入 ZIP”操作。
+5. 启动 Bot 并确认 Dashboard 和 Bot 状态。
 
 当前不提供 Windows Setup、Velopack、自动下载、自动安装或自动回滚。
 
