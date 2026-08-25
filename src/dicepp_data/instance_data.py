@@ -8,7 +8,6 @@ maintenance lock and verify that the Bot is stopped before calling them.
 
 from __future__ import annotations
 
-import os
 import shutil
 import sqlite3
 import zipfile
@@ -70,16 +69,11 @@ def clear_instance_data(layout: InstanceLayout) -> dict[str, object]:
 def import_instance_data(
     layout: InstanceLayout,
     *,
-    archive: str | None = None,
-    source_root: str | os.PathLike[str] | None = None,
+    archive: str,
 ) -> dict[str, object]:
     """Import catalog assets into an empty target and migrate SQLite forward."""
-    if archive is not None and source_root is not None:
-        raise InstanceDataSourceError("Choose an archive or source_path, not both")
-    if archive is None and source_root is None:
-        raise InstanceDataSourceError("An archive or source_path is required")
-    if isinstance(source_root, str) and not source_root.strip():
-        raise InstanceDataSourceError("source_path must be a non-empty directory path")
+    if not isinstance(archive, str) or not archive.strip():
+        raise InstanceDataSourceError("archive must be a non-empty filename")
     if not instance_data_is_empty(layout):
         raise InstanceDataNotEmptyError(
             "Business data is not empty; clear the instance before importing"
@@ -87,10 +81,7 @@ def import_instance_data(
     imported: list[str] = []
     migrated: list[dict[str, object]] = []
     try:
-        if archive is not None:
-            imported = _import_archive(layout, archive)
-        else:
-            imported = _import_directory(layout, Path(source_root))
+        imported = _import_archive(layout, archive)
         for logical_path in imported:
             asset = DATA_CATALOG.find_for_logical_path(
                 logical_path, profile=ARCHIVE_PROFILE_FULL
@@ -113,26 +104,6 @@ def import_instance_data(
         raise InstanceDataSourceError(str(exc) or type(exc).__name__) from exc
 
     return {"imported": sorted(imported), "count": len(imported), "migrations": migrated}
-
-
-def _import_directory(layout: InstanceLayout, source_root: Path) -> list[str]:
-    source_root = source_root.expanduser().resolve()
-    if not source_root.exists() or not source_root.is_dir():
-        raise InstanceDataSourceError("source_path must be an existing directory")
-    target_root = layout.root.resolve()
-    try:
-        source_root.relative_to(target_root)
-    except ValueError:
-        pass
-    else:
-        raise InstanceDataSourceError("source_path must not be the target instance or one of its children")
-    source_layout = InstanceLayout.from_root(source_root)
-    imported: list[str] = []
-    for match in DATA_CATALOG.collect(source_layout, ARCHIVE_PROFILE_FULL):
-        target = _target_for_logical_path(layout, match.logical_path)
-        _copy_file(match.path, target, match.logical_path)
-        imported.append(match.logical_path)
-    return imported
 
 
 def _import_archive(layout: InstanceLayout, filename: str) -> list[str]:
@@ -188,13 +159,6 @@ def _target_for_logical_path(layout: InstanceLayout, logical_path: str) -> Path:
     if target.path.exists() and target.path.is_symlink():
         raise InstanceDataSourceError(f"Target path is a symlink: {logical_path}")
     return target.path
-
-
-def _copy_file(source: Path, target: Path, logical_path: str) -> None:
-    if source.is_symlink() or not source.is_file():
-        raise InstanceDataSourceError(f"Source is not a regular file: {logical_path}")
-    with source.open("rb") as handle:
-        _copy_stream(handle, target, logical_path)
 
 
 def _copy_stream(source, target: Path, logical_path: str) -> None:

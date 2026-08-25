@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dashboard.src.bot_process import BotProcessStatus
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
@@ -39,32 +37,6 @@ def test_clear_preserves_dashboard_state_and_template(test_client) -> None:
     assert layout.runtime_log.read_text(encoding="utf-8") == "keep runtime log"
 
 
-def test_import_old_directory_requires_empty_target_and_copies_catalog_files(
-    test_client, tmp_path: Path
-) -> None:
-    setup_auth(test_client)
-    test_client.app.state.bot_process_controller = StoppedController()
-    source = tmp_path / "old-instance"
-    (source / "config").mkdir(parents=True)
-    (source / "config" / "user.json").write_text('{"master": ["old"]}', encoding="utf-8")
-
-    blocked = test_client.post(
-        "/api/instance/import",
-        json={"confirm": True, "source_path": str(source)},
-    )
-    assert blocked.status_code == 409
-    assert "not empty" in blocked.json()["message"]
-
-    cleared = test_client.post("/api/instance/clear", json={"confirm": True})
-    assert cleared.status_code == 200
-    imported = test_client.post(
-        "/api/instance/import",
-        json={"confirm": True, "source_path": str(source)},
-    )
-    assert imported.status_code == 200, imported.text
-    assert DashboardPaths.instance_layout().config_user.read_text(encoding="utf-8") == '{"master": ["old"]}'
-
-
 def test_failed_import_does_not_leave_a_bot_start_gate(test_client) -> None:
     setup_auth(test_client)
     test_client.app.state.bot_process_controller = StoppedController()
@@ -78,31 +50,11 @@ def test_failed_import_does_not_leave_a_bot_start_gate(test_client) -> None:
     assert started.status_code == 200, started.text
 
 
-def test_clear_and_import_reject_running_bot(test_client, tmp_path: Path) -> None:
+def test_clear_and_import_reject_running_bot(test_client) -> None:
     setup_auth(test_client)
     test_client.app.state.bot_process_controller = RunningController()
     assert test_client.post("/api/instance/clear", json={"confirm": True}).status_code == 409
     assert test_client.post(
         "/api/instance/import",
-        json={"confirm": True, "source_path": str(tmp_path)},
+        json={"confirm": True, "archive": "missing.zip"},
     ).status_code == 409
-
-
-def test_import_rejects_blank_or_nested_source_path(test_client) -> None:
-    setup_auth(test_client)
-    test_client.app.state.bot_process_controller = StoppedController()
-    blank = test_client.post(
-        "/api/instance/import",
-        json={"confirm": True, "source_path": "  "},
-    )
-    assert blank.status_code == 400
-    layout = DashboardPaths.instance_layout()
-    nested = layout.root / "nested-old-instance"
-    nested.mkdir()
-    assert test_client.post("/api/instance/clear", json={"confirm": True}).status_code == 200
-    response = test_client.post(
-        "/api/instance/import",
-        json={"confirm": True, "source_path": str(nested)},
-    )
-    assert response.status_code == 422
-    assert "target instance" in response.json()["message"]

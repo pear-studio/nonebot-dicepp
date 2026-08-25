@@ -655,13 +655,8 @@ async def instance_import(request: Request):
     if not isinstance(body, dict) or body.get("confirm") is not True:
         _err("confirm must be true for importing business data", 400)
     archive = body.get("archive")
-    source_path = body.get("source_path")
-    if archive is not None and not isinstance(archive, str):
-        _err("archive must be a filename", 400)
-    if source_path is not None and not isinstance(source_path, str):
-        _err("source_path must be a directory path", 400)
-    if isinstance(source_path, str) and not source_path.strip():
-        _err("source_path must be a non-empty directory path", 400)
+    if not isinstance(archive, str) or not archive.strip():
+        _err("archive must be a non-empty filename", 400)
     controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
@@ -671,7 +666,6 @@ async def instance_import(request: Request):
         return import_instance_data(
             _archive_layout(),
             archive=archive,
-            source_root=source_path,
         )
 
     try:
