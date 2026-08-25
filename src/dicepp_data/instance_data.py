@@ -24,7 +24,6 @@ from dicepp_data import (
 from dicepp_data.archive import (
     ArchiveError,
     MANIFEST_NAME,
-    read_archive_detail,
     safe_archive_path,
     verify_archive,
 )
@@ -144,23 +143,26 @@ def _import_archive(layout: InstanceLayout, filename: str) -> list[str]:
             raise InstanceDataSourceError(
                 "Archive verification failed" + (f": {problems}" if problems else "")
             )
-        _summary, manifest = read_archive_detail(filename, layout=layout)
         path = safe_archive_path(filename, layout=layout)
     except ArchiveError:
         raise
-    files = manifest.get("checksum", {}).get("files", {})
-    if not isinstance(files, dict):
-        raise InstanceDataSourceError("Archive manifest checksum is missing")
+    restorable_files = verification.get("restorable_files")
+    if not isinstance(restorable_files, list):
+        raise InstanceDataSourceError("Archive verification files are missing")
     imported: list[str] = []
     with zipfile.ZipFile(path, "r") as archive:
-        for logical_path in sorted(files):
+        for logical_path in restorable_files:
+            if not isinstance(logical_path, str):
+                raise InstanceDataSourceError("Archive verification returned an invalid file path")
             if logical_path == MANIFEST_NAME:
                 continue
             asset = DATA_CATALOG.find_for_logical_path(
                 logical_path, profile=ARCHIVE_PROFILE_FULL
             )
             if asset is None:
-                continue
+                raise InstanceDataSourceError(
+                    f"Unsupported catalog path: {logical_path}"
+                )
             target = _target_for_logical_path(layout, logical_path)
             with archive.open(logical_path, "r") as source:
                 _copy_stream(source, target, logical_path)

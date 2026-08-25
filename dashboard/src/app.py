@@ -33,7 +33,6 @@ from dicepp_data.archive import (
     ArchiveNotFoundError,
     create_archive,
     delete_archive,
-    estimate_archive,
     export_archive_path,
     import_archive,
     list_archives,
@@ -508,17 +507,6 @@ async def archives_list(request: Request):
     except ArchiveError as exc:
         return _archive_error_response(exc)
     return _ok({"archives": archives})
-
-
-@app.post("/api/archives/estimate", dependencies=[Depends(require_auth)])
-async def archives_estimate(request: Request):
-    body = await request.json()
-    profile = body.get("profile", "regular") if isinstance(body, dict) else "regular"
-    try:
-        result = await asyncio.to_thread(estimate_archive, layout=_archive_layout(), profile=profile)
-    except ArchiveError as exc:
-        return _archive_error_response(exc)
-    return _ok(result)
 
 
 @app.post("/api/archives", dependencies=[Depends(require_auth)])

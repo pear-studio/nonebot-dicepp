@@ -5,11 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import sqlite3
 import stat
-import sys
-import tempfile
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,8 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Iterator
 from uuid import uuid4
-
-from packaging.version import InvalidVersion, Version
 
 from dicepp_data import (
     ARCHIVE_PROFILE_FULL,
@@ -32,7 +27,6 @@ from dicepp_meta import get_version as get_dicepp_version
 
 ARCHIVE_FORMAT_VERSION = 3
 MANIFEST_NAME = "manifest.json"
-CHECKSUM_ALGORITHM = "sha256"
 SUPPORTED_PROFILES = {ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL}
 MAX_ARCHIVE_BYTES = 16 * 1024**3
 MAX_MEMBER_BYTES = 8 * 1024**3
@@ -40,16 +34,6 @@ MAX_TOTAL_UNCOMPRESSED_BYTES = 32 * 1024**3
 MAX_MEMBER_COUNT = 100_000
 MAX_MANIFEST_BYTES = 2 * 1024**2
 SUPPORTED_ZIP_COMPRESSION = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
-SCOPE_EXCLUDED = [
-    "config/bots/_template.json",
-    "dashboard/data/dashboard.db",
-    "content",
-    "data/backups",
-    "data/runtime",
-    "data/bots/*/logs",
-    "protocol adapter data",
-    "LLOneBot data",
-]
 
 
 @dataclass(frozen=True)
@@ -153,37 +137,6 @@ def _validate_profile(profile: str) -> str:
     return profile
 
 
-def estimate_archive(
-    layout: InstanceLayout,
-    profile: str = ARCHIVE_PROFILE_REGULAR,
-) -> dict:
-    """Estimate snapshot input and available archive directory space."""
-    profile = _validate_profile(profile)
-    payloads = collect_archive_payloads(layout, profile)
-    total = 0
-    for payload in payloads:
-        try:
-            total += payload.path.stat().st_size
-        except OSError:
-            continue
-    target = backups_dir(layout)
-    probe = target if target.exists() else target.parent
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    free = shutil.disk_usage(probe).free
-    return {
-        "profile": profile,
-        "file_count": len(payloads),
-        "input_bytes": total,
-        "available_bytes": free,
-        "enough_space": free > total + 64 * 1024**2,
-        "requires_runtime_stop": True,
-        "large_content_warning": (
-            profile == ARCHIVE_PROFILE_FULL and total >= 256 * 1024**2
-        ),
-    }
-
-
 def _archive_filename(now: datetime, description: str | None) -> str:
     slug = sanitize_description_slug(description)
     suffix = f"-{slug}" if slug else ""
@@ -197,52 +150,26 @@ def _build_manifest(
     profile: str,
     files: list[dict],
 ) -> dict:
-    grouped: dict[str, list[dict]] = {}
-    checksums: dict[str, str] = {}
-    for item in files:
-        grouped.setdefault(str(item["asset_id"]), []).append(
-            {
-                "path": item["path"],
-                "size": item["size"],
-                "sha256": item["sha256"],
-            }
-        )
-        checksums[str(item["path"])] = str(item["sha256"])
-    assets = []
-    for asset in DATA_CATALOG.for_profile(profile):
-        assets.append(
-            {
-                "id": asset.id,
-                "kind": asset.kind.value,
-                "schema": asset.schema.to_dict() if asset.schema else None,
-                "sensitive": asset.sensitive,
-                "files": sorted(grouped.get(asset.id, []), key=lambda row: row["path"]),
-            }
-        )
     return {
         "format_version": ARCHIVE_FORMAT_VERSION,
         "created_at": created_at,
         "dicepp_version": get_dicepp_version(),
-        "source_platform": sys.platform,
         "description": description,
         "profile": profile,
-        "sensitive": any(asset["sensitive"] for asset in assets),
-        "catalog": {
-            "digest": DATA_CATALOG.digest,
-            "description": DATA_CATALOG.to_dict(),
-        },
-        "assets": assets,
-        "files": sorted(files, key=lambda row: row["path"]),
-        "scope": {
-            "included": [
-                asset.logical_glob for asset in DATA_CATALOG.for_profile(profile)
+        "sensitive": any(
+            asset.sensitive for asset in DATA_CATALOG.for_profile(profile)
+        ),
+        "files": sorted(
+            [
+                {
+                    "path": item["path"],
+                    "size": item["size"],
+                    "sha256": item["sha256"],
+                }
+                for item in files
             ],
-            "excluded": SCOPE_EXCLUDED,
-        },
-        "checksum": {
-            "algorithm": CHECKSUM_ALGORITHM,
-            "files": checksums,
-        },
+            key=lambda row: row["path"],
+        ),
     }
 
 
@@ -292,7 +219,6 @@ def create_archive(
     tmp = target.with_name(f"{target.name}.inprogress")
     _checkpoint_managed_sqlite_assets(layout, profile)
     payloads = collect_archive_payloads(layout, profile)
-    _validate_source_sqlite_payloads(payloads, profile=profile)
     file_records: list[dict] = []
     manifest: dict | None = None
 
@@ -305,18 +231,16 @@ def create_archive(
                         f"Archive payload cannot be read safely: {payload.arcname}"
                     )
                 checksum, size = written
-                asset = DATA_CATALOG.find_for_logical_path(
+                if DATA_CATALOG.find_for_logical_path(
                     payload.arcname,
                     profile=profile,
-                )
-                if asset is None:
+                ) is None:
                     raise ArchiveError(
                         f"Collected payload is not owned by the profile: {payload.arcname}"
                     )
                 file_records.append(
                     {
                         "path": payload.arcname,
-                        "asset_id": asset.id,
                         "size": size,
                         "sha256": checksum,
                     }
@@ -421,7 +345,7 @@ def archive_summary(path: Path) -> dict:
                 return summary
             manifest = _read_manifest_from_open_archive(archive)
             profile = _manifest_profile(manifest)
-            _validate_catalog(manifest)
+            files = _manifest_files(manifest)
     except (OSError, ArchiveError, KeyError, json.JSONDecodeError, zipfile.BadZipFile):
         return summary
 
@@ -433,9 +357,7 @@ def archive_summary(path: Path) -> dict:
         summary["dicepp_version"] = manifest.get("dicepp_version", "")
         summary["profile"] = profile
         summary["sensitive"] = bool(manifest.get("sensitive"))
-        checksum = manifest.get("checksum")
-        files = checksum.get("files") if isinstance(checksum, dict) else None
-        summary["file_count"] = len(files) if isinstance(files, dict) else 0
+        summary["file_count"] = len(files)
     return summary
 
 
@@ -444,12 +366,10 @@ def _archive_summary_from_manifest(
     stat_info: object,
     manifest: dict,
 ) -> dict:
-    _validate_catalog(manifest)
+    files = _manifest_files(manifest)
     fallback_created_at = _format_created_at(
         datetime.fromtimestamp(stat_info.st_mtime, timezone.utc)
     )
-    checksum = manifest.get("checksum")
-    files = checksum.get("files") if isinstance(checksum, dict) else None
     return {
         "filename": path.name,
         "size": stat_info.st_size,
@@ -460,7 +380,7 @@ def _archive_summary_from_manifest(
         "dicepp_version": manifest.get("dicepp_version", ""),
         "profile": _manifest_profile(manifest),
         "sensitive": bool(manifest.get("sensitive")),
-        "file_count": len(files) if isinstance(files, dict) else 0,
+        "file_count": len(files),
     }
 
 
@@ -501,30 +421,25 @@ def read_archive_detail(
         return _archive_summary_from_manifest(path, stat_info, manifest), manifest
 
 
-def _validate_manifest_for_verify(manifest: dict) -> dict[str, str]:
-    format_version = manifest.get("format_version")
-    if format_version != ARCHIVE_FORMAT_VERSION:
+def _manifest_files(manifest: dict) -> list[dict]:
+    if manifest.get("format_version") != ARCHIVE_FORMAT_VERSION:
         raise ArchiveInvalidError("Unsupported archive format version")
     _manifest_profile(manifest)
-    _validate_catalog(manifest)
-    files_v3 = manifest.get("files")
-    if not isinstance(files_v3, list):
+    files = manifest.get("files")
+    if not isinstance(files, list):
         raise ArchiveInvalidError("Archive manifest files must be an array")
-    checksum = manifest.get("checksum")
-    if not isinstance(checksum, dict):
-        raise ArchiveInvalidError("Archive manifest checksum must be an object")
-    if checksum.get("algorithm") != CHECKSUM_ALGORITHM:
-        raise ArchiveInvalidError("Unsupported archive checksum algorithm")
-    files = checksum.get("files")
-    if not isinstance(files, dict):
-        raise ArchiveInvalidError("Archive manifest checksum.files must be an object")
+    if any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("path"), str)
+        or not isinstance(item.get("size"), int)
+        or item["size"] < 0
+        or not isinstance(item.get("sha256"), str)
+        for item in files
+    ):
+        raise ArchiveInvalidError("Archive manifest contains an invalid file record")
+    if len({item["path"] for item in files}) != len(files):
+        raise ArchiveInvalidError("Archive manifest contains duplicate file records")
     return files
-
-
-def _validate_catalog(manifest: dict) -> None:
-    catalog = manifest.get("catalog")
-    if not isinstance(catalog, dict) or catalog.get("digest") != DATA_CATALOG.digest:
-        raise ArchiveInvalidError("Archive manifest catalog is incompatible")
 
 
 def _is_safe_manifest_arcname(arcname: str) -> bool:
@@ -636,211 +551,57 @@ def _verify_open_archive(
     archive_summary_data: dict,
     manifest: dict,
 ) -> dict:
-    checksum_files = _validate_manifest_for_verify(manifest)
-
-    problems: list[str] = _validate_zip_structure(archive)
-    warnings: list[str] = []
-    restorable_files: list[str] = []
+    files = _manifest_files(manifest)
     profile = _manifest_profile(manifest)
-    manifest_asset_map: dict[str, dict] = {}
+    problems: list[str] = _validate_zip_structure(archive)
+    restorable_files: list[str] = []
+    names = set(archive.namelist())
+    declared = set()
+    for record in files:
+        arcname = record["path"]
+        expected_digest = record["sha256"]
+        if not _is_safe_manifest_arcname(arcname):
+            problems.append(f"Unsafe manifest archive path: {arcname!r}")
+            continue
+        if arcname == MANIFEST_NAME:
+            problems.append(f"Manifest must not declare itself as payload: {arcname}")
+            continue
+        declared.add(arcname)
+        owner = DATA_CATALOG.find_for_logical_path(arcname, profile=profile)
+        if owner is None:
+            problems.append(f"Unsupported restore path: {arcname}")
+            continue
+        if arcname not in names:
+            problems.append(f"Manifest payload is missing from zip: {arcname}")
+            continue
+        try:
+            actual_digest = _sha256_zip_member(archive, arcname)
+            info = archive.getinfo(arcname)
+        except (KeyError, OSError, zipfile.BadZipFile) as exc:
+            problems.append(f"Cannot read zip payload {arcname}: {exc}")
+            continue
+        if actual_digest != expected_digest:
+            problems.append(f"Checksum mismatch for {arcname}")
+            continue
+        if info.file_size != record["size"]:
+            problems.append(f"File record size mismatch for {arcname}")
+            continue
+        restorable_files.append(arcname)
 
-    archive_version = manifest.get("dicepp_version")
-    current_version = get_dicepp_version()
-    parsed_archive_version: Version | None = None
-    try:
-        parsed_archive_version = Version(archive_version)
-    except (InvalidVersion, TypeError):
-        problems.append("Archive DicePP version is missing or invalid")
-    try:
-        parsed_current_version = Version(current_version)
-    except (InvalidVersion, TypeError):
-        problems.append("Current DicePP version cannot be determined")
-    else:
-        if (
-            parsed_archive_version is not None
-            and parsed_archive_version > parsed_current_version
-        ):
-            problems.append(
-                "Archive was created by a newer DicePP version: "
-                f"{archive_version} > {current_version}"
-            )
-    records = manifest.get("files", [])
-    record_map = {
-        item.get("path"): item
-        for item in records
-        if isinstance(item, dict) and isinstance(item.get("path"), str)
-    }
-    if len(record_map) != len(records):
-        problems.append("Archive manifest contains duplicate or invalid file records")
-    for path, digest in checksum_files.items():
-        record = record_map.get(path)
-        if not isinstance(record, dict):
-            problems.append(f"Missing file record for {path}")
-        elif record.get("sha256") != digest:
-            problems.append(f"File record checksum mismatch for {path}")
-        elif not isinstance(record.get("size"), int) or record["size"] < 0:
-            problems.append(f"Invalid file record size for {path}")
-    manifest_assets = manifest.get("assets")
-    if not isinstance(manifest_assets, list):
-        problems.append("Archive manifest assets must be an array")
-        manifest_assets = []
-    expected_assets = {
-        asset.id: asset for asset in DATA_CATALOG.for_profile(profile)
-    }
-    seen_asset_ids: set[str] = set()
-    asset_declared_paths: set[tuple[str, str]] = set()
-    for item in manifest_assets:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
-            problems.append("Archive manifest contains an invalid asset record")
-            continue
-        asset_id = item["id"]
-        if asset_id in seen_asset_ids:
-            problems.append(f"Duplicate archive asset record: {asset_id}")
-            continue
-        seen_asset_ids.add(asset_id)
-        manifest_asset_map[asset_id] = item
-        expected = expected_assets.get(asset_id)
-        if expected is None:
-            problems.append(f"Archive contains unsupported asset: {asset_id}")
-            continue
-        schema = item.get("schema")
-        if expected.schema is None:
-            if schema is not None:
-                problems.append(f"Unexpected schema reference for {asset_id}")
-        elif not isinstance(schema, dict):
-            problems.append(f"Missing schema reference for {asset_id}")
-        elif schema.get("name") != expected.schema.name:
-            problems.append(f"Schema identity mismatch for {asset_id}")
-        elif not isinstance(schema.get("latest_version"), int):
-            problems.append(f"Invalid schema version for {asset_id}")
-        elif schema["latest_version"] > expected.schema.latest_version:
-            problems.append(
-                f"Archive schema is newer than this DicePP version: "
-                f"{asset_id}@{schema['latest_version']}"
-            )
-        asset_files = item.get("files")
-        if not isinstance(asset_files, list):
-            problems.append(f"Asset files must be an array: {asset_id}")
-            continue
-        for asset_file in asset_files:
-            if not isinstance(asset_file, dict):
-                problems.append(f"Invalid asset file record: {asset_id}")
-                continue
-            path = asset_file.get("path")
-            top_record = record_map.get(path)
-            if (
-                not isinstance(path, str)
-                or not isinstance(top_record, dict)
-                or top_record.get("asset_id") != asset_id
-                or asset_file.get("size") != top_record.get("size")
-                or asset_file.get("sha256") != top_record.get("sha256")
-            ):
-                problems.append(f"Asset file record mismatch: {asset_id}:{path}")
-            else:
-                asset_declared_paths.add((asset_id, path))
-    missing_assets = set(expected_assets) - seen_asset_ids
-    if missing_assets:
-        problems.append(
-            "Archive manifest is missing catalog assets: "
-            + ", ".join(sorted(missing_assets))
-        )
-    for path, record in record_map.items():
-        if not isinstance(record, dict):
-            continue
-        owner = DATA_CATALOG.find_for_logical_path(path, profile=profile)
-        if owner is not None and record.get("asset_id") != owner.id:
-            problems.append(f"File record asset mismatch for {path}")
-        asset_id = record.get("asset_id") if isinstance(record, dict) else None
-        if (
-            isinstance(asset_id, str)
-            and (asset_id, path) not in asset_declared_paths
-        ):
-            problems.append(f"File record is absent from asset declaration: {path}")
-
-    try:
-        names = set(archive.namelist())
-        for arcname, expected_digest in checksum_files.items():
-            if not isinstance(arcname, str) or not _is_safe_manifest_arcname(arcname):
-                problems.append(f"Unsafe manifest archive path: {arcname!r}")
-                continue
-            if arcname == MANIFEST_NAME:
-                problems.append(f"Manifest must not declare itself as payload: {arcname}")
-                continue
-            if not isinstance(expected_digest, str):
-                problems.append(f"Invalid checksum digest for {arcname}")
-                continue
-            if arcname not in names:
-                problems.append(f"Manifest payload is missing from zip: {arcname}")
-                continue
-            try:
-                actual_digest = _sha256_zip_member(archive, arcname)
-            except (KeyError, OSError, zipfile.BadZipFile) as exc:
-                problems.append(f"Cannot read zip payload {arcname}: {exc}")
-                continue
-            if actual_digest != expected_digest:
-                problems.append(f"Checksum mismatch for {arcname}")
-                continue
-            if DATA_CATALOG.find_for_logical_path(arcname, profile=profile) is None:
-                problems.append(f"Unsupported restore path: {arcname}")
-                continue
-            owner = DATA_CATALOG.find_for_logical_path(arcname, profile=profile)
-            if owner is not None and owner.schema is not None:
-                record = record_map.get(arcname)
-                asset_id = record.get("asset_id") if isinstance(record, dict) else None
-                asset_record = (
-                    manifest_asset_map.get(asset_id)
-                    if isinstance(asset_id, str)
-                    else None
-                )
-                declared_schema = (
-                    asset_record.get("schema")
-                    if isinstance(asset_record, dict)
-                    else None
-                )
-                schema_problem = _inspect_archived_sqlite_schema(
-                    archive,
-                    arcname,
-                    expected_name=owner.schema.name,
-                    maximum_version=owner.schema.latest_version,
-                    declared_schema=declared_schema,
-                )
-                if schema_problem is not None:
-                    problems.append(schema_problem)
-                    continue
-            record = record_map.get(arcname)
-            try:
-                info = archive.getinfo(arcname)
-            except KeyError:
-                info = None
-            if info is not None and isinstance(record, dict) and info.file_size != record.get("size"):
-                problems.append(f"File record size mismatch for {arcname}")
-                continue
-            restorable_files.append(arcname)
-
-        declared = {
-            arcname
-            for arcname in checksum_files
-            if isinstance(arcname, str)
-        }
-        extras = sorted(
-            name for name in names
-            if name != MANIFEST_NAME and not name.endswith("/") and name not in declared
-        )
-        for arcname in extras:
-            problems.append(f"Zip contains undeclared payload file: {arcname}")
-    except zipfile.BadZipFile as exc:
-        raise ArchiveInvalidError("Archive zip cannot be read") from exc
+    extras = sorted(
+        name for name in names
+        if name != MANIFEST_NAME and not name.endswith("/") and name not in declared
+    )
+    problems.extend(f"Zip contains undeclared payload file: {name}" for name in extras)
 
     return {
         "archive": archive_summary_data,
         "manifest": manifest,
         "verified": not problems,
         "problems": problems,
-        "warnings": warnings,
         "restorable_files": sorted(restorable_files),
         "profile": profile,
         "sensitive": bool(manifest.get("sensitive")),
-        "declared_asset_ids": sorted(seen_asset_ids),
     }
 
 
@@ -862,157 +623,10 @@ def _structure_failure_verification(
         "manifest": None,
         "verified": False,
         "problems": problems,
-        "warnings": [],
         "restorable_files": [],
         "profile": ARCHIVE_PROFILE_REGULAR,
         "sensitive": False,
-        "declared_asset_ids": [],
     }
-
-
-def _inspect_archived_sqlite_schema(
-    archive: zipfile.ZipFile,
-    arcname: str,
-    *,
-    expected_name: str,
-    maximum_version: int,
-    declared_schema: dict | None,
-) -> str | None:
-    """Cross-check archived SQLite metadata without extracting into the instance."""
-    temporary_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            prefix="dicepp-archive-schema-",
-            suffix=".db",
-            delete=False,
-        ) as temporary:
-            temporary_path = temporary.name
-            with archive.open(arcname, "r") as source:
-                remaining = MAX_MEMBER_BYTES
-                while True:
-                    chunk = source.read(min(1024 * 1024, remaining + 1))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    if remaining < 0:
-                        return f"SQLite payload exceeds limit: {arcname}"
-                    temporary.write(chunk)
-            temporary.flush()
-        return _inspect_sqlite_schema_path(
-            Path(temporary_path),
-            display_path=arcname,
-            expected_name=expected_name,
-            maximum_version=maximum_version,
-            declared_schema=declared_schema,
-        )
-    finally:
-        if temporary_path is not None:
-            try:
-                Path(temporary_path).unlink()
-            except OSError:
-                pass
-
-
-def _validate_source_sqlite_payloads(
-    payloads: list[ArchivePayload],
-    *,
-    profile: str,
-) -> None:
-    for payload in payloads:
-        asset = DATA_CATALOG.find_for_logical_path(payload.arcname, profile=profile)
-        if asset is None or asset.schema is None:
-            continue
-        problem = _inspect_sqlite_schema_path(
-            payload.path,
-            display_path=payload.arcname,
-            expected_name=asset.schema.name,
-            maximum_version=asset.schema.latest_version,
-            declared_schema=asset.schema.to_dict(),
-        )
-        if problem is not None:
-            raise ArchiveError(problem)
-
-
-def _inspect_sqlite_schema_path(
-    path: Path,
-    *,
-    display_path: str,
-    expected_name: str,
-    maximum_version: int,
-    declared_schema: dict | None,
-) -> str | None:
-    try:
-        connection = sqlite3.connect(
-            f"{path.resolve().as_uri()}?mode=ro",
-            uri=True,
-        )
-        try:
-            try:
-                rows = connection.execute(
-                    "SELECT key, value FROM schema_metadata"
-                ).fetchall()
-            except sqlite3.OperationalError as exc:
-                if str(exc) == "no such table: schema_metadata":
-                    return (
-                        "SQLite schema metadata is missing: "
-                        f"{display_path}"
-                    )
-                raise
-        finally:
-            connection.close()
-    except sqlite3.Error as exc:
-        return (
-            f"SQLite schema metadata cannot be read: {display_path}: {exc}"
-        )
-    metadata = {str(key): str(value) for key, value in rows}
-    required_metadata = {
-        "application",
-        "target_name",
-        "current_version",
-        "created_at",
-        "updated_at",
-    }
-    missing_metadata = sorted(required_metadata - set(metadata))
-    if missing_metadata:
-        return (
-            f"SQLite schema metadata is incomplete: {display_path}; "
-            f"missing {', '.join(missing_metadata)}"
-        )
-    if metadata["application"] != "dicepp":
-        return (
-            f"SQLite schema application mismatch: {display_path}; "
-            "expected dicepp"
-        )
-    if metadata.get("target_name") != expected_name:
-        return (
-            f"SQLite schema identity mismatch: {display_path}; "
-            f"expected {expected_name}"
-        )
-    if declared_schema is not None and declared_schema.get("name") != metadata.get(
-        "target_name"
-    ):
-        return (
-            f"SQLite schema does not match manifest declaration: {display_path}"
-        )
-    try:
-        current_version = int(metadata["current_version"])
-    except ValueError:
-        return f"SQLite schema version is invalid: {display_path}"
-    if current_version < 1:
-        return f"SQLite schema version is invalid: {display_path}"
-    if current_version > maximum_version:
-        return (
-            "Archive schema is newer than this DicePP version: "
-            f"{display_path}@{current_version}"
-        )
-    if declared_schema is not None:
-        declared_version = declared_schema.get("latest_version")
-        if not isinstance(declared_version, int) or current_version > declared_version:
-            return (
-                "SQLite schema is newer than manifest declaration: "
-                f"{display_path}"
-            )
-    return None
 
 
 def delete_archive(
