@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from dashboard.src.bot_process import BotProcessStatus
 from dashboard.src.config import DashboardPaths
@@ -75,7 +76,14 @@ def test_import_directory_copies_catalog_data_and_ignores_runtime_state(
         json.dumps({"master": ["10001"], "nickname": "old-bot"}),
         encoding="utf-8",
     )
-    apply_schema_target(source.data_root / "dicepp.db", INSTANCE_TARGET)
+    source_db = source.data_root / "dicepp.db"
+    apply_schema_target(source_db, INSTANCE_TARGET)
+    source_connection = sqlite3.connect(source_db)
+    source_connection.execute("PRAGMA journal_mode=WAL")
+    source_connection.execute("PRAGMA wal_autocheckpoint=0")
+    source_connection.execute("CREATE TABLE wal_entries (value TEXT)")
+    source_connection.execute("INSERT INTO wal_entries VALUES ('committed in WAL')")
+    source_connection.commit()
     source_content = source.content_decks_dir / "custom.txt"
     source_content.parent.mkdir(parents=True, exist_ok=True)
     source_content.write_text("old content", encoding="utf-8")
@@ -88,10 +96,13 @@ def test_import_directory_copies_catalog_data_and_ignores_runtime_state(
     old_manager.parent.mkdir(parents=True, exist_ok=True)
     old_manager.write_text("{}", encoding="utf-8")
 
-    response = test_client.post(
-        "/api/instance/import",
-        json={"confirm": True, "source_path": str(source.root)},
-    )
+    try:
+        response = test_client.post(
+            "/api/instance/import",
+            json={"confirm": True, "source_path": str(source.root)},
+        )
+    finally:
+        source_connection.close()
 
     assert response.status_code == 200, response.text
     assert response.json()["imported"] == [
@@ -106,6 +117,10 @@ def test_import_directory_copies_catalog_data_and_ignores_runtime_state(
         "master"
     ] == ["10001"]
     assert response.json()["migrations"][0]["path"] == "data/dicepp.db"
+    with sqlite3.connect(target.data_root / "dicepp.db") as connection:
+        assert connection.execute("SELECT value FROM wal_entries").fetchone() == (
+            "committed in WAL",
+        )
     assert (target.content_decks_dir / "custom.txt").read_text(encoding="utf-8") == "old content"
     assert not (target.backups_dir / "old.zip").exists()
     assert not (target.logs_dir / "old.log").exists()

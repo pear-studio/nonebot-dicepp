@@ -16,8 +16,6 @@ from typing import BinaryIO, Iterator
 from uuid import uuid4
 
 from dicepp_data import (
-    ARCHIVE_PROFILE_FULL,
-    ARCHIVE_PROFILE_REGULAR,
     DATA_CATALOG,
     DataAssetKind,
     InstanceLayout,
@@ -25,11 +23,8 @@ from dicepp_data import (
 
 from dicepp_meta import get_version as get_dicepp_version
 
-ARCHIVE_FORMAT_VERSION = 3
-LEGACY_ARCHIVE_FORMAT_VERSIONS = {1, 2}
+ARCHIVE_FORMAT_VERSION = 1
 MANIFEST_NAME = "manifest.json"
-CHECKSUM_ALGORITHM = "sha256"
-SUPPORTED_PROFILES = {ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL}
 MAX_ARCHIVE_BYTES = 16 * 1024**3
 MAX_MEMBER_BYTES = 8 * 1024**3
 MAX_TOTAL_UNCOMPRESSED_BYTES = 32 * 1024**3
@@ -95,26 +90,23 @@ def _safe_arcname(arcname: str) -> str:
     return posix.as_posix()
 
 
-def collect_archive_payloads(
-    layout: InstanceLayout,
-    profile: str = ARCHIVE_PROFILE_REGULAR,
-) -> list[ArchivePayload]:
-    """Collect files included in one archive profile."""
+def collect_archive_payloads(layout: InstanceLayout) -> list[ArchivePayload]:
+    """Collect files included in the complete manual backup."""
     return [
         ArchivePayload(path=match.path, arcname=_safe_arcname(match.logical_path))
-        for match in DATA_CATALOG.collect(layout, profile)
+        for match in DATA_CATALOG.collect(layout)
     ]
 
 
-def _checkpoint_managed_sqlite_assets(layout: InstanceLayout, profile: str) -> None:
+def _checkpoint_managed_sqlite_assets(layout: InstanceLayout) -> None:
     """Fold every catalogued SQLite WAL into its main database before snapshotting.
 
     Archive creation only stores the main ``.db`` payload.  After the Runtime has
     stopped, a successful truncate checkpoint makes that payload a complete
     snapshot while keeping the archive format independent from SQLite sidecars.
     """
-    for match in DATA_CATALOG.collect(layout, profile):
-        asset = DATA_CATALOG.find_for_logical_path(match.logical_path, profile=profile)
+    for match in DATA_CATALOG.collect(layout):
+        asset = DATA_CATALOG.find_for_logical_path(match.logical_path)
         if asset is None or asset.kind is not DataAssetKind.SQLITE:
             continue
         try:
@@ -133,12 +125,6 @@ def _checkpoint_managed_sqlite_assets(layout: InstanceLayout, profile: str) -> N
             )
 
 
-def _validate_profile(profile: str) -> str:
-    if profile not in SUPPORTED_PROFILES:
-        raise ArchiveError(f"Unsupported archive profile: {profile!r}")
-    return profile
-
-
 def _archive_filename(now: datetime, description: str | None) -> str:
     slug = sanitize_description_slug(description)
     suffix = f"-{slug}" if slug else ""
@@ -149,7 +135,6 @@ def _build_manifest(
     *,
     created_at: str,
     description: str,
-    profile: str,
     files: list[dict],
 ) -> dict:
     return {
@@ -157,10 +142,6 @@ def _build_manifest(
         "created_at": created_at,
         "dicepp_version": get_dicepp_version(),
         "description": description,
-        "profile": profile,
-        "sensitive": any(
-            asset.sensitive for asset in DATA_CATALOG.for_profile(profile)
-        ),
         "files": sorted(
             [
                 {
@@ -211,15 +192,14 @@ def create_archive(
     layout: InstanceLayout,
 ) -> tuple[dict, dict]:
     """Create one complete manual backup and return ``(summary, manifest)``."""
-    profile = ARCHIVE_PROFILE_FULL
     target_dir = backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
     now = _utc_now()
     filename = _archive_filename(now, description)
     target = target_dir / filename
     tmp = target.with_name(f"{target.name}.inprogress")
-    _checkpoint_managed_sqlite_assets(layout, profile)
-    payloads = collect_archive_payloads(layout, profile)
+    _checkpoint_managed_sqlite_assets(layout)
+    payloads = collect_archive_payloads(layout)
     file_records: list[dict] = []
     manifest: dict | None = None
 
@@ -232,12 +212,9 @@ def create_archive(
                         f"Archive payload cannot be read safely: {payload.arcname}"
                     )
                 checksum, size = written
-                if DATA_CATALOG.find_for_logical_path(
-                    payload.arcname,
-                    profile=profile,
-                ) is None:
+                if DATA_CATALOG.find_for_logical_path(payload.arcname) is None:
                     raise ArchiveError(
-                        f"Collected payload is not owned by the profile: {payload.arcname}"
+                        f"Collected payload is not owned by the catalog: {payload.arcname}"
                     )
                 file_records.append(
                     {
@@ -249,7 +226,6 @@ def create_archive(
             manifest = _build_manifest(
                 created_at=_format_created_at(now),
                 description=description or "",
-                profile=profile,
                 files=file_records,
             )
             archive.writestr(
@@ -345,8 +321,7 @@ def archive_summary(path: Path) -> dict:
             if _validate_zip_structure(archive):
                 return summary
             manifest = _read_manifest_from_open_archive(archive)
-            profile = _manifest_profile(manifest)
-            files = _manifest_files(manifest, archive=archive)
+            files = _manifest_files(manifest)
     except (OSError, ArchiveError, KeyError, json.JSONDecodeError, zipfile.BadZipFile):
         return summary
 
@@ -356,8 +331,6 @@ def archive_summary(path: Path) -> dict:
         summary["description"] = manifest.get("description", "")
         summary["format_version"] = manifest.get("format_version")
         summary["dicepp_version"] = manifest.get("dicepp_version", "")
-        summary["profile"] = profile
-        summary["sensitive"] = bool(manifest.get("sensitive"))
         summary["file_count"] = len(files)
     return summary
 
@@ -366,10 +339,8 @@ def _archive_summary_from_manifest(
     path: Path,
     stat_info: object,
     manifest: dict,
-    *,
-    archive: zipfile.ZipFile,
 ) -> dict:
-    files = _manifest_files(manifest, archive=archive)
+    files = _manifest_files(manifest)
     fallback_created_at = _format_created_at(
         datetime.fromtimestamp(stat_info.st_mtime, timezone.utc)
     )
@@ -381,8 +352,6 @@ def _archive_summary_from_manifest(
         "description": manifest.get("description", ""),
         "format_version": manifest.get("format_version"),
         "dicepp_version": manifest.get("dicepp_version", ""),
-        "profile": _manifest_profile(manifest),
-        "sensitive": bool(manifest.get("sensitive")),
         "file_count": len(files),
     }
 
@@ -422,34 +391,15 @@ def read_archive_detail(
             raise ArchiveInvalidError("; ".join(structure))
         manifest = _read_manifest_from_open_archive(archive)
         return (
-            _archive_summary_from_manifest(path, stat_info, manifest, archive=archive),
+            _archive_summary_from_manifest(path, stat_info, manifest),
             manifest,
         )
 
 
-def _manifest_files(
-    manifest: dict,
-    *,
-    archive: zipfile.ZipFile,
-) -> list[dict]:
+def _manifest_files(manifest: dict) -> list[dict]:
     format_version = manifest.get("format_version")
-    if type(format_version) is not int or format_version not in {
-        *LEGACY_ARCHIVE_FORMAT_VERSIONS,
-        ARCHIVE_FORMAT_VERSION,
-    }:
+    if format_version != ARCHIVE_FORMAT_VERSION:
         raise ArchiveInvalidError("Unsupported archive format version")
-    _manifest_profile(manifest)
-
-    if format_version in LEGACY_ARCHIVE_FORMAT_VERSIONS:
-        checksum_files = _manifest_checksum_files(manifest)
-        records: list[dict] = []
-        for path, digest in checksum_files.items():
-            try:
-                size = archive.getinfo(path).file_size
-            except KeyError:
-                size = None
-            records.append({"path": path, "size": size, "sha256": digest})
-        return records
 
     files = manifest.get("files")
     if not isinstance(files, list):
@@ -465,25 +415,6 @@ def _manifest_files(
         raise ArchiveInvalidError("Archive manifest contains an invalid file record")
     if len({item["path"] for item in files}) != len(files):
         raise ArchiveInvalidError("Archive manifest contains duplicate file records")
-    return files
-
-
-def _manifest_checksum_files(manifest: dict) -> dict[str, str]:
-    checksum = manifest.get("checksum")
-    if not isinstance(checksum, dict):
-        raise ArchiveInvalidError("Archive manifest checksum must be an object")
-    if checksum.get("algorithm") != CHECKSUM_ALGORITHM:
-        raise ArchiveInvalidError("Unsupported archive checksum algorithm")
-    files = checksum.get("files")
-    if not isinstance(files, dict):
-        raise ArchiveInvalidError("Archive manifest checksum.files must be an object")
-    if any(
-        not isinstance(path, str) or not isinstance(digest, str)
-        for path, digest in files.items()
-    ):
-        raise ArchiveInvalidError(
-            "Archive manifest checksum.files must map paths to digests"
-        )
     return files
 
 
@@ -503,21 +434,6 @@ def _sha256_zip_member(archive: zipfile.ZipFile, arcname: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _manifest_profile(manifest: dict) -> str:
-    format_version = manifest.get("format_version")
-    if type(format_version) is not int or format_version not in {
-        *LEGACY_ARCHIVE_FORMAT_VERSIONS,
-        ARCHIVE_FORMAT_VERSION,
-    }:
-        raise ArchiveInvalidError("Unsupported archive format version")
-    if format_version == 1:
-        return ARCHIVE_PROFILE_REGULAR
-    try:
-        return _validate_profile(str(manifest.get("profile", "")))
-    except ArchiveError as exc:
-        raise ArchiveInvalidError(str(exc)) from exc
 
 
 def _zip_member_is_regular(info: zipfile.ZipInfo) -> bool:
@@ -576,7 +492,6 @@ def verify_archive(
             path,
             stat_info,
             manifest,
-            archive=archive,
         )
         return _verify_open_archive(archive, archive_summary_data, manifest)
 
@@ -598,7 +513,6 @@ def verify_archive_path(path: Path, *, expected_filename: str | None = None) -> 
                 path,
                 path_stat,
                 manifest,
-                archive=archive,
             )
             if expected_filename:
                 summary["filename"] = expected_filename
@@ -612,8 +526,7 @@ def _verify_open_archive(
     archive_summary_data: dict,
     manifest: dict,
 ) -> dict:
-    files = _manifest_files(manifest, archive=archive)
-    profile = _manifest_profile(manifest)
+    files = _manifest_files(manifest)
     problems: list[str] = _validate_zip_structure(archive)
     restorable_files: list[str] = []
     names = set(archive.namelist())
@@ -628,7 +541,7 @@ def _verify_open_archive(
             problems.append(f"Manifest must not declare itself as payload: {arcname}")
             continue
         declared.add(arcname)
-        owner = DATA_CATALOG.find_for_logical_path(arcname, profile=profile)
+        owner = DATA_CATALOG.find_for_logical_path(arcname)
         if owner is None:
             problems.append(f"Unsupported restore path: {arcname}")
             continue
@@ -644,7 +557,7 @@ def _verify_open_archive(
         if actual_digest != expected_digest:
             problems.append(f"Checksum mismatch for {arcname}")
             continue
-        if record["size"] is not None and info.file_size != record["size"]:
+        if info.file_size != record["size"]:
             problems.append(f"File record size mismatch for {arcname}")
             continue
         restorable_files.append(arcname)
@@ -661,8 +574,6 @@ def _verify_open_archive(
         "verified": not problems,
         "problems": problems,
         "restorable_files": sorted(restorable_files),
-        "profile": profile,
-        "sensitive": bool(manifest.get("sensitive")),
     }
 
 
@@ -685,8 +596,6 @@ def _structure_failure_verification(
         "verified": False,
         "problems": problems,
         "restorable_files": [],
-        "profile": ARCHIVE_PROFILE_REGULAR,
-        "sensitive": False,
     }
 
 

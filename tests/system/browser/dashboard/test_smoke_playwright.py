@@ -527,10 +527,7 @@ def test_archive_detail_race_does_not_reopen_detail_panel(dashboard_url: str) ->
                             created_at: '2026-01-01T01:02:03Z',
                             dicepp_version: 'late-version',
                             description: 'late detail',
-                            checksum: {
-                              algorithm: 'sha256',
-                              files: {'config/user.json': 'abc'},
-                            },
+                            files: [{path: 'config/user.json', size: 3, sha256: 'abc'}],
                           },
                         });
                       });
@@ -548,10 +545,7 @@ def test_archive_detail_race_does_not_reopen_detail_panel(dashboard_url: str) ->
                           },
                           manifest: {
                             format_version: 1,
-                            checksum: {
-                              algorithm: 'sha256',
-                              files: {'config/user.json': 'abc'},
-                            },
+                            files: [{path: 'config/user.json', size: 3, sha256: 'abc'}],
                           },
                           verified: true,
                           problems: [],

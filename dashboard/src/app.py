@@ -502,8 +502,6 @@ async def archives_create(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         _err("Request body must be a JSON object", 400)
-    if "profile" in body:
-        _err("profile is not supported; archives are always full", 400)
     description = body.get("description")
     if description is not None and not isinstance(description, str):
         _err("description must be a string or null", 400)

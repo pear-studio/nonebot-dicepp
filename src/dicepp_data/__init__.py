@@ -5,8 +5,6 @@ Bot and Dashboard can inspect instance data before starting NoneBot.
 """
 
 from .assets import (
-    ARCHIVE_PROFILE_FULL,
-    ARCHIVE_PROFILE_REGULAR,
     BOT_CORE_ASSET,
     BOT_CORE_SCHEMA,
     BOT_LOG_ASSET,
@@ -59,8 +57,6 @@ from .query_normalize import (
 )
 
 __all__ = [
-    "ARCHIVE_PROFILE_FULL",
-    "ARCHIVE_PROFILE_REGULAR",
     "BOT_CONFIGS_ASSET",
     "BOT_CORE_ASSET",
     "BOT_CORE_SCHEMA",

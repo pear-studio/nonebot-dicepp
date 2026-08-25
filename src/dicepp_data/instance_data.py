@@ -15,7 +15,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from dicepp_data import (
-    ARCHIVE_PROFILE_FULL,
     DATA_CATALOG,
     DataAsset,
     DataAssetKind,
@@ -44,7 +43,7 @@ class InstanceDataSourceError(InstanceDataError):
 
 def instance_data_is_empty(layout: InstanceLayout) -> bool:
     """Return whether any catalog-managed business asset exists."""
-    return not DATA_CATALOG.collect(layout, ARCHIVE_PROFILE_FULL)
+    return not DATA_CATALOG.collect(layout)
 
 
 def clear_instance_data(layout: InstanceLayout) -> dict[str, object]:
@@ -55,11 +54,9 @@ def clear_instance_data(layout: InstanceLayout) -> dict[str, object]:
     outside the catalog are untouched.
     """
     removed: list[str] = []
-    for match in DATA_CATALOG.collect(layout, ARCHIVE_PROFILE_FULL):
+    for match in DATA_CATALOG.collect(layout):
         _remove_managed_path(match.path, match.logical_path, removed)
-        asset = DATA_CATALOG.find_for_logical_path(
-            match.logical_path, profile=ARCHIVE_PROFILE_FULL
-        )
+        asset = DATA_CATALOG.find_for_logical_path(match.logical_path)
         if asset is not None and asset.kind is DataAssetKind.SQLITE:
             for suffix in ("-wal", "-shm"):
                 sidecar = match.path.with_name(match.path.name + suffix)
@@ -104,7 +101,7 @@ def import_instance_directory(
         raise InstanceDataSourceError(f"Import source is not a directory: {source_path}")
 
     source_layout = InstanceLayout.from_root(source_root)
-    matches = DATA_CATALOG.collect(source_layout, ARCHIVE_PROFILE_FULL)
+    matches = DATA_CATALOG.collect(source_layout)
     if not matches:
         raise InstanceDataSourceError(
             "No importable DicePP data found in source directory"
@@ -113,8 +110,12 @@ def import_instance_directory(
     try:
         for match in matches:
             target = _target_for_logical_path(layout, match.logical_path)
-            with match.path.open("rb") as source:
-                _copy_stream(source, target, match.logical_path)
+            asset = DATA_CATALOG.find_for_logical_path(match.logical_path)
+            if asset is not None and asset.kind is DataAssetKind.SQLITE:
+                _backup_sqlite(match.path, target, match.logical_path)
+            else:
+                with match.path.open("rb") as source:
+                    _copy_stream(source, target, match.logical_path)
             imported.append(match.logical_path)
         migrated = _migrate_imported_files(layout, imported)
     except (OSError, sqlite3.Error, ValueError, SchemaLifecycleError) as exc:
@@ -129,9 +130,7 @@ def _migrate_imported_files(
 ) -> list[dict[str, object]]:
     migrated: list[dict[str, object]] = []
     for logical_path in imported:
-        asset = DATA_CATALOG.find_for_logical_path(
-            logical_path, profile=ARCHIVE_PROFILE_FULL
-        )
+        asset = DATA_CATALOG.find_for_logical_path(logical_path)
         if asset is None or asset.schema is None:
             continue
         result = _migrate_schema(_target_for_logical_path(layout, logical_path), asset)
@@ -168,9 +167,7 @@ def _import_archive(layout: InstanceLayout, filename: str) -> list[str]:
                 raise InstanceDataSourceError("Archive verification returned an invalid file path")
             if logical_path == MANIFEST_NAME:
                 continue
-            asset = DATA_CATALOG.find_for_logical_path(
-                logical_path, profile=ARCHIVE_PROFILE_FULL
-            )
+            asset = DATA_CATALOG.find_for_logical_path(logical_path)
             if asset is None:
                 raise InstanceDataSourceError(
                     f"Unsupported catalog path: {logical_path}"
@@ -183,9 +180,7 @@ def _import_archive(layout: InstanceLayout, filename: str) -> list[str]:
 
 
 def _target_for_logical_path(layout: InstanceLayout, logical_path: str) -> Path:
-    asset = DATA_CATALOG.find_for_logical_path(
-        logical_path, profile=ARCHIVE_PROFILE_FULL
-    )
+    asset = DATA_CATALOG.find_for_logical_path(logical_path)
     if asset is None:
         raise InstanceDataSourceError(f"Unsupported catalog path: {logical_path}")
     target = asset.restore_target(layout, logical_path)
@@ -210,6 +205,22 @@ def _copy_stream(source, target: Path, logical_path: str) -> None:
         raise InstanceDataSourceError(f"Target directory is a symlink: {logical_path}")
     with target.open("xb") as handle:
         shutil.copyfileobj(source, handle, length=1024 * 1024)
+
+
+def _backup_sqlite(source: Path, target: Path, logical_path: str) -> None:
+    """Copy a catalog SQLite database, including committed WAL pages."""
+    if target.exists():
+        raise InstanceDataSourceError(f"Target already exists: {logical_path}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.parent.is_symlink():
+        raise InstanceDataSourceError(f"Target directory is a symlink: {logical_path}")
+    source_connection = sqlite3.connect(source)
+    target_connection = sqlite3.connect(target)
+    try:
+        source_connection.backup(target_connection)
+    finally:
+        target_connection.close()
+        source_connection.close()
 
 
 def _remove_managed_path(path: Path, logical_path: str, removed: list[str]) -> None:

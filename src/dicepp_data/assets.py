@@ -15,10 +15,6 @@ from typing import Iterable, Protocol
 
 from .layout import InstanceLayout
 
-ARCHIVE_PROFILE_REGULAR = "regular"
-ARCHIVE_PROFILE_FULL = "full"
-
-
 class DataAssetKind(str, Enum):
     FILE = "file"
     FILE_SET = "file_set"
@@ -75,7 +71,6 @@ class DataAsset:
     pattern: str
     restore_scope: str
     kind: DataAssetKind
-    profiles: tuple[str, ...]
     schema: SchemaReference | None = None
     excludes: tuple[str, ...] = ()
     restore: str = "exact"
@@ -84,8 +79,8 @@ class DataAsset:
     def __post_init__(self) -> None:
         if self.area not in {"config", "data", "content"}:
             raise ValueError(f"Unsupported asset area: {self.area!r}")
-        if not self.id or not self.profiles:
-            raise ValueError("DataAsset requires an id and at least one profile")
+        if not self.id:
+            raise ValueError("DataAsset requires an id")
         pattern = PurePosixPath(self.pattern)
         if pattern.is_absolute() or ".." in pattern.parts or "\\" in self.pattern:
             raise ValueError(f"Unsafe asset pattern: {self.pattern!r}")
@@ -133,7 +128,6 @@ class DataAsset:
             "pattern": self.pattern,
             "restore_scope": self.restore_scope,
             "kind": self.kind.value,
-            "profiles": list(self.profiles),
             "schema": self.schema.to_dict() if self.schema else None,
             "excludes": list(self.excludes),
             "restore": self.restore,
@@ -339,26 +333,17 @@ class DataAssetCatalog:
         ).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    def for_profile(self, profile: str) -> tuple[DataAsset, ...]:
-        return tuple(asset for asset in self.assets if profile in asset.profiles)
-
-    def collect(self, layout: InstanceLayout, profile: str) -> list[DataAssetMatch]:
+    def collect(self, layout: InstanceLayout) -> list[DataAssetMatch]:
         matches = [
             match
-            for asset in self.for_profile(profile)
+            for asset in self.assets
             for match in asset.iter_matches(layout)
         ]
         return sorted(matches, key=lambda item: item.logical_path)
 
-    def find_for_logical_path(
-        self,
-        logical_path: str,
-        *,
-        profile: str | None = None,
-    ) -> DataAsset | None:
-        assets = self.for_profile(profile) if profile is not None else self.assets
+    def find_for_logical_path(self, logical_path: str) -> DataAsset | None:
         return next(
-            (asset for asset in assets if asset.matches_logical_path(logical_path)),
+            (asset for asset in self.assets if asset.matches_logical_path(logical_path)),
             None,
         )
 
@@ -455,7 +440,6 @@ USER_CONFIG_ASSET = DataAsset(
     pattern="user.json",
     restore_scope=".",
     kind=DataAssetKind.FILE,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     sensitive=True,
 )
 BOT_CONFIGS_ASSET = DataAsset(
@@ -464,7 +448,6 @@ BOT_CONFIGS_ASSET = DataAsset(
     pattern="bots/*.json",
     restore_scope="bots",
     kind=DataAssetKind.FILE_SET,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     excludes=("_template.json",),
     sensitive=True,
 )
@@ -474,7 +457,6 @@ INSTANCE_DB_ASSET = DataAsset(
     pattern="dicepp.db",
     restore_scope=".",
     kind=DataAssetKind.SQLITE,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     schema=INSTANCE_SCHEMA,
 )
 BOT_CORE_ASSET = DataAsset(
@@ -483,7 +465,6 @@ BOT_CORE_ASSET = DataAsset(
     pattern="bots/{bot_id}/bot_data.db",
     restore_scope="bots",
     kind=DataAssetKind.SQLITE,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     schema=BOT_CORE_SCHEMA,
 )
 BOT_LOG_ASSET = DataAsset(
@@ -492,7 +473,6 @@ BOT_LOG_ASSET = DataAsset(
     pattern="bots/{bot_id}/log.db",
     restore_scope="bots",
     kind=DataAssetKind.SQLITE,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     schema=BOT_LOG_SCHEMA,
 )
 PERSONA_DB_ASSET = DataAsset(
@@ -501,7 +481,6 @@ PERSONA_DB_ASSET = DataAsset(
     pattern="bots/{bot_id}/personas_data_{character}.db",
     restore_scope="bots",
     kind=DataAssetKind.SQLITE,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
     schema=PERSONA_SCHEMA,
 )
 LOCAL_IMAGES_ASSET = DataAsset(
@@ -510,7 +489,6 @@ LOCAL_IMAGES_ASSET = DataAsset(
     pattern="local_images",
     restore_scope="local_images",
     kind=DataAssetKind.DIRECTORY,
-    profiles=(ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL),
 )
 CONTENT_ASSET = DataAsset(
     id="content.user",
@@ -518,7 +496,6 @@ CONTENT_ASSET = DataAsset(
     pattern=".",
     restore_scope=".",
     kind=DataAssetKind.DIRECTORY,
-    profiles=(ARCHIVE_PROFILE_FULL,),
 )
 
 DATA_CATALOG = DataAssetCatalog(
