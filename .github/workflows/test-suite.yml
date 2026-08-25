@@ -25,6 +25,28 @@ jobs:
       - name: Run quick representative suite
         run: uv run pytest -m quick -n0 --tb=short -q
 
+  runtime-normal-path:
+    name: Current Runtime Normal Path
+    runs-on: ubuntu-latest
+    needs: quick
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        with:
+          version: "0.11.16"
+      - name: Install dependencies
+        run: uv sync --frozen --group dev
+      - name: Run current runtime normal-path contracts
+        run: >-
+          uv run pytest -n0 -q
+          tests/system/process/dashboard/test_bot_process.py
+          tests/integration/dashboard/test_launcher_runtime_log.py
+          tests/integration/dashboard/test_archives_local.py
+          tests/integration/dashboard/test_instance_data.py
+
   docker-smoke:
     name: Single Image Smoke
     runs-on: ubuntu-latest

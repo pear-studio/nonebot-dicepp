@@ -83,6 +83,23 @@ def test_windows_workflow_builds_and_smokes_the_portable_contract() -> None:
     assert len(steps) == 7
 
 
+def test_reusable_suite_guards_current_runtime_normal_path() -> None:
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
+    job = suite["jobs"]["runtime-normal-path"]
+    command = _step(job, "Run current runtime normal-path contracts")["run"]
+
+    assert job["needs"] == "quick"
+    assert "uv run pytest -n0 -q" in command
+    for test_path in (
+        "tests/system/process/dashboard/test_bot_process.py",
+        "tests/integration/dashboard/test_launcher_runtime_log.py",
+        "tests/integration/dashboard/test_archives_local.py",
+        "tests/integration/dashboard/test_instance_data.py",
+    ):
+        assert test_path in command
+    assert "tests/integration/manager" not in command
+
+
 def test_release_updates_latest_only_for_stable_tags() -> None:
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     publish = workflow["jobs"]["publish"]
