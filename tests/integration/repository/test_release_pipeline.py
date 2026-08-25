@@ -118,6 +118,15 @@ def test_reusable_suite_guards_current_runtime_normal_path() -> None:
     assert "tests/integration/manager" not in command
 
 
+def test_dashboard_setup_instructions_use_the_single_dicepp_service() -> None:
+    html = (ROOT / "dashboard" / "src" / "static" / "dashboard.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docker compose run --rm --no-deps dicepp python -m dashboard admin init" in html
+    assert "docker compose run --rm --no-deps dashboard" not in html
+
+
 def test_release_updates_latest_only_for_stable_tags() -> None:
     workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     publish = workflow["jobs"]["publish"]
