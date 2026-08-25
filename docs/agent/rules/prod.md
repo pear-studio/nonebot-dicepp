@@ -11,7 +11,7 @@
 
 ## 当前部署合同
 
-- Linux 只有一个 `dicepp` Compose service，使用 `ghcr.io/pear-studio/nonebot-dicepp:<tag>`；`DICEPP_IMAGE_TAG=latest` 表示当前最新正式镜像。
+- Linux 只有一个 `dicepp` Compose service；发布 Compose 只引用 `ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}`，不包含源码构建或镜像覆盖 fallback。
 - Compose 文件固定为目标 Release 提供的 `docker-compose.yml`，不得拼接隐藏 override、Docker Socket 或其他控制服务。
 - 持久化目录是 `config/`、`data/`（含 `data/backups/` 存档）、`content/` 和 `dashboard/data/`。
 - Windows 只使用 Portable ZIP：`DicePP.exe` 直接控制同目录的 `DicePP-Runtime.exe`，不使用 Setup、Velopack 或在线安装器。

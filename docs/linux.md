@@ -69,8 +69,9 @@ DICEPP_IMAGE_TAG=<TAG> docker compose up -d
 需要从源码构建时：
 
 ```bash
-docker compose build dicepp
-docker compose up -d dicepp
+docker build -f Dockerfile -t dicepp:local .
 ```
+
+这是源码构建验证命令；正式部署仍使用上面的 GHCR 镜像 Compose 文件。
 
 镜像启动命令是 `python -m dashboard`，它会在正常入口中启动 Dashboard 并 auto-start 同目录的 `bot.py` 子进程；导入 Python 模块或测试不会隐式启动 Bot。

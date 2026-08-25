@@ -36,7 +36,10 @@ def test_compose_describes_one_dashboard_and_bot_service():
 
     assert set(compose["services"]) == {"dicepp"}
     service = compose["services"]["dicepp"]
-    assert service["build"]["dockerfile"] == "Dockerfile"
+    assert service["image"] == (
+        "ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}"
+    )
+    assert "build" not in service
     assert service["ports"] == ["4090:4090"]
     assert service["expose"] == ["8080"]
     assert service["environment"]["DICEPP_ONEBOT_HOST"] == "0.0.0.0"

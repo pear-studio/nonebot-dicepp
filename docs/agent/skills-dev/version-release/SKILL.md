@@ -27,7 +27,7 @@ Windows：
 Linux：
 
 - `Dockerfile` 是唯一官方镜像构建文件；
-- `docker-compose.yml` 只有 `dicepp` 一个 service；
+- `docker-compose.yml` 只有 `dicepp` 一个 service，且只引用 `ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}`，不包含 `build` 段；
 - 镜像 CMD 是 `python -m dashboard`，Dashboard 正常入口 auto-start 一个 Bot 子进程；
 - 镜像发布到 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z`。
 
