@@ -4,7 +4,7 @@ Tests for core/config/loader.py
 Covers:
   9.1  Hierarchical loading (model defaults < user overrides < account < env vars)
   9.2  Pydantic validation errors
-  9.5  Atomic config update (reload keeps old config on failure)
+  9.5  Canonical config persistence
 """
 import json
 import os
@@ -37,10 +37,6 @@ class _DataDir:
         (tmp / "personas").mkdir(parents=True, exist_ok=True)
 
     @property
-    def legacy_global_cfg(self) -> Path:
-        return self.root / "global.json"
-
-    @property
     def user_config(self) -> Path:
         return self.root / "user.json"
 
@@ -71,15 +67,6 @@ def test_load_empty_dir_uses_defaults(dd):
     assert cfg.roll.enable is True
     assert cfg.mode.default == "DND5E2024"
     assert cfg.chat_interval == 20
-
-
-def test_legacy_global_config_is_ignored_and_untouched(dd):
-    legacy = {"chat_interval": 99, "mode": {"default": "COC7"}}
-    _write(dd.legacy_global_cfg, legacy)
-    cfg = dd.loader().load()
-    assert cfg.chat_interval == 20
-    assert cfg.mode.default == "DND5E2024"
-    assert _read(dd.legacy_global_cfg) == legacy
 
 
 def test_user_config_overrides_model_defaults(dd):
@@ -207,15 +194,6 @@ def test_no_template_no_account_still_loads(dd):
 # ── malformed JSON ────────────────────────────────────────────────────────────
 
 
-def test_malformed_global_config_ignored(dd):
-    malformed = "{ this is not json }"
-    dd.legacy_global_cfg.write_text(malformed, encoding="utf-8")
-    cfg = dd.loader().load()
-    assert cfg.mode.default == "DND5E2024"
-    assert cfg.chat_interval == 20
-    assert dd.legacy_global_cfg.read_text(encoding="utf-8") == malformed
-
-
 def test_malformed_account_config_ignored(dd):
     _write(dd.account_cfg("bot1"), {})  # write empty first to create file
     malformed = "BAD JSON"
@@ -328,20 +306,18 @@ def test_canonical_rewrite_enforces_wrapped_model_field_constraints(dd):
     )
 
 
-def test_canonical_rewrite_uses_validation_alias_priority(dd):
+def test_canonical_rewrite_uses_current_search_max_chars_field(dd):
     _write(dd.user_config, {
         "persona_ai": {
             "search_max_chars": 111,
-            "search_chat_history_max_chars": 222,
         },
     })
 
     cfg = dd.loader().load()
     saved = _read(dd.user_config)
 
-    assert cfg.persona_ai.search_max_chars == 222
-    assert saved["persona_ai"]["search_chat_history_max_chars"] == 222
-    assert "search_max_chars" not in saved["persona_ai"]
+    assert cfg.persona_ai.search_max_chars == 111
+    assert saved["persona_ai"]["search_max_chars"] == 111
 
 
 def test_canonical_rewrite_keeps_critical_field_errors_hard(dd):
@@ -451,55 +427,6 @@ def test_canonical_rewrite_keeps_nested_user_and_account_layers_partial(dd):
     assert cfg.roll.enable is False
     assert _read(dd.user_config) == {"persona_ai": {"enabled": True}}
     assert _read(dd.account_cfg("bot1")) == {"roll": {"enable": False}}
-
-
-# ── 9.5: Atomic update / reload ──────────────────────────────────────────────
-
-
-def test_reload_updates_config(dd):
-    _write(dd.user_config, {"chat_interval": 10})
-    loader = dd.loader()
-    cfg1 = loader.load()
-    assert cfg1.chat_interval == 10
-
-    _write(dd.user_config, {"chat_interval": 42})
-    cfg2 = loader.reload()
-    assert cfg2.chat_interval == 42
-    assert loader.config.chat_interval == 42
-
-
-def test_reload_keeps_old_config_on_validation_failure(dd):
-    _write(dd.user_config, {"chat_interval": 10})
-    loader = dd.loader()
-    cfg_before = loader.load()
-
-    _write(dd.user_config, {"master": "bad-type"})
-    with pytest.raises(ConfigValidationError):
-        loader.reload()
-
-    # Old config must still be accessible
-    assert loader.config.chat_interval == 10
-    assert loader.config is cfg_before
-
-
-def test_reload_atomic_on_success(dd):
-    _write(dd.user_config, {"nickname": "before"})
-    loader = dd.loader()
-    loader.load()
-
-    _write(dd.user_config, {"nickname": "after"})
-    new_cfg = loader.reload()
-    assert new_cfg.nickname == "after"
-    assert loader.config is new_cfg
-
-
-def test_reload_with_new_account_file(dd):
-    loader = dd.loader("mybot")
-    loader.load()
-
-    _write(dd.account_cfg("mybot"), {"master": ["new_master"]})
-    cfg = loader.reload()
-    assert "new_master" in cfg.master
 
 
 def test_config_property_lazy_loads(dd):

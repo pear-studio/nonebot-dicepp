@@ -38,9 +38,7 @@ _CRITICAL_FIELD_NAMES = {
     "api_url",
     "webchat_url",
     "base_url",
-    "upload_endpoint",
     "api_key",
-    "upload_token",
 }
 _CRITICAL_FIELD_MARKERS = (
     "api_key",
@@ -103,35 +101,6 @@ def _load_json_file_for_rewrite(path: Path) -> tuple[Dict[str, Any], bool]:
         return {}, False
 
 
-def _migrate_legacy_log_web_config(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Move legacy flat upload settings into ``log.web`` per config layer.
-
-    ``upload_enable`` deliberately has no replacement: Web publishing is now
-    controlled exclusively by an explicit user command and a configured endpoint.
-    """
-    log_config = raw.get("log")
-    if not isinstance(log_config, dict):
-        return raw
-    legacy_keys = {"upload_enable", "upload_endpoint", "upload_token"}
-    if not legacy_keys.intersection(log_config):
-        return raw
-
-    migrated = dict(raw)
-    migrated_log = dict(log_config)
-    web_config = migrated_log.get("web")
-    migrated_web = dict(web_config) if isinstance(web_config, dict) else {}
-    if "endpoint" not in migrated_web and "upload_endpoint" in migrated_log:
-        migrated_web["endpoint"] = migrated_log["upload_endpoint"]
-    if "token" not in migrated_web and "upload_token" in migrated_log:
-        migrated_web["token"] = migrated_log["upload_token"]
-    if migrated_web:
-        migrated_log["web"] = migrated_web
-    for key in legacy_keys:
-        migrated_log.pop(key, None)
-    migrated["log"] = migrated_log
-    return migrated
-
-
 def _write_json_file_atomic(path: Path, data: Dict[str, Any]) -> None:
     """Atomically write canonical JSON without creating backup files."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,29 +145,6 @@ def _field_default_value(field: Any) -> Any:
 
 def _field_has_default(field: Any) -> bool:
     return not field.is_required()
-
-
-def _field_input_keys(name: str, field: Any) -> list[str]:
-    keys: list[str] = []
-    alias = getattr(field, "validation_alias", None)
-    if isinstance(alias, str):
-        keys.append(alias)
-    choices = getattr(alias, "choices", None)
-    if choices:
-        keys.extend(str(choice) for choice in choices)
-    field_alias = getattr(field, "alias", None)
-    if isinstance(field_alias, str):
-        keys.append(field_alias)
-    # Keep the Python field name as a compatibility fallback, but only after
-    # every Pydantic validation alias.  When both are present Pydantic gives
-    # the alias precedence and canonicalization must select the same value.
-    keys.append(name)
-    return list(dict.fromkeys(keys))
-
-
-def _field_output_key(name: str, field: Any) -> str:
-    alias = getattr(field, "serialization_alias", None)
-    return alias if isinstance(alias, str) else name
 
 
 def _is_critical_path(path: tuple[str, ...]) -> bool:
@@ -300,8 +246,8 @@ def _canonicalize_model_dict(
     consumed: set[str] = set()
 
     for name, field in model_type.model_fields.items():
-        input_key = next((key for key in _field_input_keys(name, field) if key in raw), None)
-        output_key = _field_output_key(name, field)
+        input_key = name if name in raw else None
+        output_key = name
 
         if input_key is None:
             current_path = field_path + (name,)
@@ -367,14 +313,13 @@ def canonicalize_config_layer(
     """Return one runtime config layer's canonical form without writing files.
 
     This is the validation half of :class:`ConfigLoader`'s layer handling.
-    Callers that need to check a prospective configuration can use it with the
-    same in-memory legacy migration but
-    without file persistence.  It preserves the runtime rule that unknown
+    Callers that need to check a prospective configuration can use it without
+    file persistence.  It preserves the runtime rule that unknown
     critical-looking fields are rejected rather than silently ignored.
     """
     return _canonicalize_model_dict(
         BotConfig,
-        _migrate_legacy_log_web_config(raw),
+        raw,
         path=path if path is not None else Path("<in-memory configuration>"),
         fill_missing_defaults=fill_missing_defaults,
     )
@@ -518,7 +463,7 @@ def resolve_config_layers(
         fill_missing_defaults=False,
         path=account_path,
     )
-    merged = BotConfig().model_dump(mode="json", by_alias=True)
+    merged = BotConfig().model_dump(mode="json")
     merged = _deep_merge(merged, canonical_user)
     merged = _deep_merge(merged, canonical_account)
     if apply_environment:
@@ -544,7 +489,6 @@ class ConfigLoader:
     Usage:
         loader = ConfigLoader(account="my_bot_id")
         config = loader.load()
-        loader.reload()   # atomic hot-reload
     """
 
     def __init__(self, data_path: Optional[str] = None, account: str = ""):
@@ -565,15 +509,6 @@ class ConfigLoader:
         cfg = self._build_config()
         self._config = cfg
         return cfg
-
-    def reload(self) -> BotConfig:
-        """
-        Atomically reload config.  On validation failure keeps old config
-        and raises so the caller can report the error.
-        """
-        new_cfg = self._build_config()   # may raise ValidationError
-        self._config = new_cfg           # atomic reference swap
-        return new_cfg
 
     # ── internals ───────────────────────────────────────────────────────────
 
@@ -628,7 +563,7 @@ class ConfigLoader:
 
 
 class ConfigValidationError(Exception):
-    """Raised when Pydantic validation fails during config load/reload."""
+    """Raised when Pydantic validation fails during config load."""
 
     def __init__(
         self,

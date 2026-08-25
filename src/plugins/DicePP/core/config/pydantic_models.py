@@ -8,7 +8,6 @@ Config is loaded hierarchically by ConfigLoader:
 from typing import List, Literal, Optional, Dict
 
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -200,8 +199,6 @@ class PersonaConfig(BaseModel):
     )
     search_max_chars: int = Field(
         default=180, title="搜索结果最大字符数",
-        validation_alias="search_chat_history_max_chars",
-        serialization_alias="search_chat_history_max_chars",
         description="搜索结果中每条消息的最大字符数",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
