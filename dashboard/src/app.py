@@ -915,26 +915,12 @@ def _cached_config_layout() -> dict:
 
 
 def _find_meta(dotted: str, meta: dict) -> dict:
-    """Match a dotted data key against static schema metadata keys.
-
-    Three-level fallback for dynamic keys (e.g. providers.<name>.api_key):
-    1. Exact match
-    2. Remove one segment at a time (skip the dynamic key segment)
-    3. Prefix truncation from right (parent node fallback for tab/section)
-    """
+    """Match exact metadata keys and the explicit provider field shape."""
     if dotted in meta:
         return meta[dotted]
     parts = dotted.split(".")
-    # Level 2: try removing each segment (skip dynamic key)
-    for i in range(len(parts)):
-        candidate = ".".join(parts[:i] + parts[i+1:])
-        if candidate in meta:
-            return meta[candidate]
-    # Level 3: prefix fallback (get tab/section from parent, label less precise)
-    for i in range(len(parts) - 1, 0, -1):
-        prefix = ".".join(parts[:i])
-        if prefix in meta:
-            return meta[prefix]
+    if len(parts) == 4 and parts[:2] == ["persona_ai", "providers"]:
+        return meta.get("persona_ai.providers." + parts[3], {})
     return {}
 
 

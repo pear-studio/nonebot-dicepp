@@ -354,10 +354,12 @@ class TestFieldMetadata:
         m = _find_meta("persona_ai.providers.anthropic.api_key", field_meta)
         assert m["title"] == "API Key"
 
-        # Parent fallback: no leaf match, falls back to intermediate node
+        # Unknown provider field has no static metadata.
         m = _find_meta("persona_ai.providers.openai.unknown_field", field_meta)
-        assert m["tab"] == "persona"
-        assert m["section"] == "providers"
+        assert m == {}
+
+        # Other paths do not use dynamic segment deletion.
+        assert _find_meta("persona_ai.other.value", field_meta) == {}
 
         # Completely unknown key returns empty
         m = _find_meta("nonexistent.field.path", field_meta)
