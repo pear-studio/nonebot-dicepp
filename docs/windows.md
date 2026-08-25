@@ -19,15 +19,15 @@ DicePP/
 ├─ config/
 ├─ content/
 ├─ data/
-├─ dashboard/data/
-└─ manager/backups/
+│  └─ backups/
+└─ dashboard/data/
 ```
 
 `DicePP-Runtime.exe` 是由 Dashboard 控制的 Bot 子进程，不需要单独双击。托盘和 Dashboard 的启动、停止、重启操作作用于这一个进程；退出 Dashboard 时会先停止 Bot。
 
 ## 数据与配置
 
-配置、内容、运行数据库、日志、Dashboard 数据和存档都在 Portable 根目录。旧版本的存档继续使用 `manager/backups/`，不会因为部署方式简化而迁移或丢失。
+配置、内容、运行数据库、日志、Dashboard 数据和存档 `data/backups/` 都在 Portable 根目录。程序不会自动发现或迁移旧目录中的存档；需要时请手工搬移到 `data/backups/`。
 
 Dashboard 保存配置后会提示需要重启；不会通过隐藏服务热重载。归档、清空和空实例导入要求 Bot 已停止，并由 Dashboard 在本进程内串行执行。
 

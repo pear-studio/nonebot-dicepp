@@ -30,8 +30,6 @@ services:
       - ./data:/app/data:rw
       - ./content:/app/content:rw
       - ./dashboard/data:/app/dashboard/data:rw
-      # 保留已有实例的存档物理位置，不迁移旧数据。
-      - ./manager/backups:/app/manager/backups:rw
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4090/api/health', timeout=3).read()"]

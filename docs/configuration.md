@@ -5,11 +5,9 @@ DicePP 使用 JSON 配置。常用文件是：
 - `config/bots/{QQ号}.json`：单个 Bot 账号配置；
 - `config/user.json`：实例级稀疏覆盖和 API Key；
 - `content/`：角色卡、牌组、随机表和查询库；
-- `data/`：Bot 运行数据库和日志；
+- `data/`：Bot 运行数据库、日志和存档 `data/backups/`；
 - `dashboard/data/`：Dashboard 管理员和 session 数据；
-- `manager/backups/`：兼容旧目录名称的存档库存。
-
-`manager/backups/` 只是历史存档路径，不代表当前仍有 Manager 服务。不要提交包含密码或 API Key 的 JSON。
+- `data/backups/`：Dashboard 存档库存。不要提交包含密码或 API Key 的 JSON。
 
 ## 配置优先级
 
@@ -100,4 +98,4 @@ Windows 请退出并重新启动 `DicePP.exe`。如果配置不生效，先检�
 
 ## 数据维护
 
-创建存档、清空业务数据和导入空实例前，必须停止 Bot。导入目标必须为空实例，导入期间 marker 会拒绝启动 Bot；Dashboard 管理数据库、session、日志、程序文件和存档不会被清空。
+创建存档、清空业务数据和导入空实例前，必须停止 Bot。Dashboard 管理数据库、session、日志、程序文件和存档不会被清空。

@@ -86,14 +86,13 @@ jobs:
           fi
           docker build "${docker_args[@]}" .
           test "$(docker run --rm --network=none "$IMAGE" python -m dashboard --version)" = "DicePP Dashboard v$expected"
-          mkdir -p smoke/{config,data,content,dashboard/data,manager/backups}
+          mkdir -p smoke/{config,data,content,dashboard/data}
           docker run -d --name dicepp-release-smoke -p 127.0.0.1:4090:4090 -p 127.0.0.1:8080:8080 \
             -e DICEPP_ONEBOT_HOST=0.0.0.0 \
             -v "$PWD/smoke/config:/app/config" \
             -v "$PWD/smoke/data:/app/data" \
             -v "$PWD/smoke/content:/app/content" \
             -v "$PWD/smoke/dashboard/data:/app/dashboard/data" \
-            -v "$PWD/smoke/manager/backups:/app/manager/backups" \
             "$IMAGE"
           trap 'docker rm -f dicepp-release-smoke >/dev/null 2>&1 || true' EXIT
           dashboard_ready=false

@@ -30,6 +30,7 @@ def test_instance_layout_applies_project_and_compatible_data_override() -> None:
     assert layout.config_user == instance.resolve() / "config" / "user.json"
     assert layout.content_dir == instance.resolve() / "content"
     assert layout.data_root == external_data.resolve()
+    assert layout.backups_dir == external_data.resolve() / "backups"
     assert BOT_CORE_ASSET.resolve(layout, bot_id="12345") == (
         external_data.resolve() / "bots" / "12345" / "bot_data.db"
     )

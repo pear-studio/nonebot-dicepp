@@ -78,7 +78,7 @@ class ArchiveInvalidError(ArchiveError):
 
 def backups_dir(layout: InstanceLayout) -> Path:
     """Return the instance archive inventory directory."""
-    return layout.archive_dir
+    return layout.backups_dir
 
 
 def _utc_now() -> datetime:
@@ -280,12 +280,11 @@ def create_archive(
     description: str | None = None,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
     profile: str = ARCHIVE_PROFILE_REGULAR,
 ) -> tuple[dict, dict]:
     """Create a local zip archive and return ``(summary, manifest)``."""
     profile = _validate_profile(profile)
-    target_dir = archive_dir or backups_dir(layout)
+    target_dir = backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
     now = _utc_now()
     filename = _archive_filename(now, description)
@@ -356,7 +355,6 @@ def safe_archive_path(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> Path:
     """Return the backups-dir path for a safe archive filename."""
     if not filename or filename != Path(filename).name:
@@ -374,17 +372,15 @@ def safe_archive_path(
     if Path(filename).suffix.lower() != ".zip":
         raise ArchiveNameError("Archive filename must end with .zip")
 
-    target_dir = archive_dir or backups_dir(layout)
-    return target_dir / filename
+    return backups_dir(layout) / filename
 
 
 def _existing_regular_archive_path(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> Path:
-    path = safe_archive_path(filename, layout=layout, archive_dir=archive_dir)
+    path = safe_archive_path(filename, layout=layout)
     if path.is_symlink() or not path.is_file():
         raise ArchiveNotFoundError(f"Archive not found: {filename}")
     return path
@@ -395,13 +391,11 @@ def _open_existing_archive(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> Iterator[tuple[Path, object, zipfile.ZipFile]]:
     """Open one regular archive file for inspection."""
     path = _existing_regular_archive_path(
         filename,
         layout=layout,
-        archive_dir=archive_dir,
     )
     try:
         archive = zipfile.ZipFile(path, "r")
@@ -494,13 +488,11 @@ def read_archive_detail(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> tuple[dict, dict]:
     """Return ``(summary, manifest)`` for a regular archive zip filename."""
     with _open_existing_archive(
         filename,
         layout=layout,
-        archive_dir=archive_dir,
     ) as (path, stat_info, archive):
         structure = _validate_zip_structure(archive)
         if structure:
@@ -604,13 +596,11 @@ def verify_archive(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> dict:
     """Verify a save archive manifest and payload checksums without restoring."""
     with _open_existing_archive(
         filename,
         layout=layout,
-        archive_dir=archive_dir,
     ) as (path, stat_info, archive):
         structure = _validate_zip_structure(archive)
         if structure:
@@ -1029,10 +1019,9 @@ def delete_archive(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> dict:
     """Delete a regular archive zip and return its summary."""
-    path = _existing_regular_archive_path(filename, layout=layout, archive_dir=archive_dir)
+    path = _existing_regular_archive_path(filename, layout=layout)
     summary = archive_summary(path)
     try:
         path.unlink()
@@ -1044,10 +1033,9 @@ def delete_archive(
 def list_archives(
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> list[dict]:
     """List local zip archive summaries, newest first."""
-    target_dir = archive_dir or backups_dir(layout)
+    target_dir = backups_dir(layout)
     if not target_dir.exists() or not target_dir.is_dir():
         return []
     archives = [
@@ -1063,14 +1051,13 @@ def import_archive(
     source: BinaryIO,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
     max_bytes: int = MAX_ARCHIVE_BYTES,
 ) -> dict:
     """Stream an uploaded archive into local inventory and verify before publish."""
-    safe_archive_path(filename, layout=layout, archive_dir=archive_dir)
-    target_dir = archive_dir or backups_dir(layout)
+    safe_archive_path(filename, layout=layout)
+    target_dir = backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = safe_archive_path(filename, layout=layout, archive_dir=target_dir)
+    target = safe_archive_path(filename, layout=layout)
     if target.exists():
         target = target_dir / (
             f"{target.stem}-imported-{uuid4().hex[:8]}{target.suffix.lower()}"
@@ -1111,15 +1098,13 @@ def export_archive_path(
     filename: str,
     *,
     layout: InstanceLayout,
-    archive_dir: Path | None = None,
 ) -> Path:
     """Return a verified regular file path for the Dashboard download route."""
     path = _existing_regular_archive_path(
         filename,
         layout=layout,
-        archive_dir=archive_dir,
     )
-    verification = verify_archive(filename, layout=layout, archive_dir=archive_dir)
+    verification = verify_archive(filename, layout=layout)
     if not verification["verified"]:
         raise ArchiveInvalidError("Archive cannot be exported because verification failed")
     return path

@@ -117,11 +117,6 @@ class InstanceLayout:
     def backups_dir(self) -> Path:
         return self.data_root / "backups"
 
-    @property
-    def archive_dir(self) -> Path:
-        """Stable on-disk archive inventory path."""
-        return self.root / "manager" / "backups"
-
     def area_root(self, area: str) -> Path:
         roots = {
             "config": self.config_dir,
