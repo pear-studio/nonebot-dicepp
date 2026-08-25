@@ -742,7 +742,7 @@ def _load_pydantic_models_module():
     Module reference is cached so _cached_config_field_metadata() and
     _cached_config_layout() share a single import.  PyInstaller onefile builds
     carry the canonical schema as a minimal data asset under ``_MEIPASS``;
-    source-tree candidates are development fallbacks only.
+    source runs load it from the repository tree.
     """
     global _pydantic_module_cache
     if _pydantic_module_cache is not None:
@@ -758,17 +758,12 @@ def _load_pydantic_models_module():
         if frozen_root
         else None
     )
-    candidates = tuple(
-        path
-        for path in (
-            frozen_candidate,
-            DashboardPaths.PROJECT_ROOT / source_relative_path,
-            DashboardPaths.SOURCE_ROOT / source_relative_path,
-        )
-        if path is not None
+    _pydantic_path = (
+        frozen_candidate
+        if frozen_candidate is not None
+        else DashboardPaths.SOURCE_ROOT / source_relative_path
     )
-    _pydantic_path = next((path for path in candidates if path.exists()), None)
-    if _pydantic_path is None:
+    if not _pydantic_path.exists():
         raise DashboardConfigSchemaError(
             "Dashboard configuration schema asset is missing"
         )
@@ -1217,15 +1212,7 @@ async def persona_character_save(name: str, request: Request):
 
     yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: .tmp + fsync + os.replace.
-    tmp_path = yaml_path.with_suffix(".yaml.tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    fd = os.open(str(tmp_path), os.O_RDWR)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp_path, yaml_path)
+    yaml_path.write_text(content, encoding="utf-8")
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "persona.character.save", name, "",

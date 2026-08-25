@@ -6,7 +6,6 @@ import argparse
 import logging
 import os
 import sys
-import tempfile
 import threading
 import time
 import webbrowser
@@ -251,7 +250,7 @@ def run_windows_launcher(*, background: bool = False) -> None:
     ``background`` keeps the tray available for a user session while avoiding
     foreground UI from unattended launch paths such as login autostart.
     """
-    log_path = _launcher_fallback_log_path()
+    log_path = DashboardPaths.runtime_log_path()
     dashboard_server: ManagedServerHandle | None = None
     tray_controller: TrayController | None = None
     bot_controller: BotProcessController | None = None
@@ -475,13 +474,6 @@ def _install_launcher_excepthook(log_path: Path) -> None:
     sys.excepthook = _hook
 
 
-def _launcher_fallback_log_path() -> Path:
-    try:
-        return DashboardPaths.runtime_log_path()
-    except Exception:
-        return Path(tempfile.gettempdir()) / "dicepp-launcher-fallback.log"
-
-
 def _record_launcher_exception(log_path: Path, exc: BaseException) -> None:
     if getattr(exc, "_dicepp_launcher_logged", False):
         return
@@ -495,20 +487,7 @@ def _record_launcher_exception(log_path: Path, exc: BaseException) -> None:
             exc_info=(type(exc), exc, exc.__traceback__),
         )
     message = f"launcher | fatal error: {type(exc).__name__}: {exc}"
-    try:
-        append_runtime_log_line(message, path=log_path)
-    except Exception:
-        _append_launcher_fallback_line(message)
-
-
-def _append_launcher_fallback_line(message: str) -> None:
-    try:
-        fallback = Path(tempfile.gettempdir()) / "dicepp-launcher-fallback.log"
-        append_runtime_log_line(message, path=fallback)
-    except Exception:
-        # A fatal exception must retain its original failure semantics even if
-        # every usable diagnostic destination is unavailable.
-        pass
+    append_runtime_log_line(message, path=log_path)
 
 
 def _build_pystray_icon(controller: TrayController):

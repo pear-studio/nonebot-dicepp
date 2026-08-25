@@ -7,10 +7,8 @@ Dashboard and Bot code can agree on the same logical fields and enablement state
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 
 QUERY_DATA_REQUIRED_FIELDS = ("名称", "内容")
@@ -67,30 +65,17 @@ def load_query_database_state(directory: Path) -> QueryDatabaseState:
 
 
 def save_query_database_state(directory: Path, state: QueryDatabaseState) -> None:
-    """Atomically persist state without touching Bot configuration files."""
+    """Persist state without touching Bot configuration files."""
     directory.mkdir(parents=True, exist_ok=True)
     path = query_database_state_path(directory)
     payload = {
         "version": 1,
         "disabled": sorted(state.disabled, key=str.casefold),
     }
-    with NamedTemporaryFile(
-        "w",
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
-        dir=directory,
-        prefix=f"{QUERY_DATABASE_STATE_FILE}.",
-        suffix=".tmp",
-        delete=False,
-    ) as stream:
-        temporary = Path(stream.name)
-        json.dump(payload, stream, ensure_ascii=False, indent=2)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    try:
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    )
 
 
 def set_query_database_enabled(directory: Path, database: str, enabled: bool) -> QueryDatabaseState:

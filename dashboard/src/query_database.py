@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
 from dicepp_data import (
@@ -85,25 +83,20 @@ def report_detail(report) -> dict[str, Any]:
 
 
 def write_normalized_database(source: Path, report) -> None:
-    directory = source.parent
-    with NamedTemporaryFile(dir=directory, prefix=f".{source.name}.", suffix=".normalized.tmp", delete=False) as handle:
-        candidate = Path(handle.name)
-    try:
-        with closing(sqlite3.connect(candidate)) as connection:
-            with connection:
-                connection.execute("CREATE TABLE data (名称 TEXT, 英文 TEXT, 来源 TEXT, 内容 TEXT)")
-                connection.execute("CREATE TABLE redirect (名称 TEXT, 重定向 TEXT)")
-                connection.executemany("INSERT INTO data VALUES (?, ?, ?, ?)", [(row.name, row.english, row.source, row.content) for row in report.rows])
-                connection.executemany("INSERT INTO redirect VALUES (?, ?)", [(row.alias, row.target) for row in report.redirects])
-                connection.commit()
-                if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise sqlite3.DatabaseError("规范后的数据库完整性检查失败")
-        with candidate.open("r+b") as handle:
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(candidate, source)
-    finally:
-        candidate.unlink(missing_ok=True)
+    with closing(sqlite3.connect(source)) as connection:
+        with connection:
+            connection.execute("DROP TABLE IF EXISTS redirect")
+            connection.execute("DROP TABLE IF EXISTS data")
+            connection.execute("CREATE TABLE data (名称 TEXT, 英文 TEXT, 来源 TEXT, 内容 TEXT)")
+            connection.execute("CREATE TABLE redirect (名称 TEXT, 重定向 TEXT)")
+            connection.executemany(
+                "INSERT INTO data VALUES (?, ?, ?, ?)",
+                [(row.name, row.english, row.source, row.content) for row in report.rows],
+            )
+            connection.executemany(
+                "INSERT INTO redirect VALUES (?, ?)",
+                [(row.alias, row.target) for row in report.redirects],
+            )
 
 
 __all__ = ["normalization_report", "read_query_rows", "report_detail", "write_normalized_database"]

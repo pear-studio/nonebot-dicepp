@@ -172,7 +172,7 @@ class TestBotConfig:
         assert data["config"]["enabled"] is True
 
     def test_bot_config_save(self, test_client: TestClient, tmp_dashboard_paths):
-        """``POST /api/config/bots/{bot_id}/save`` atomically saves config."""
+        """``POST /api/config/bots/{bot_id}/save`` saves config."""
         setup_auth(test_client)
         new_config = {"master": ["new_master"], "enabled": False, "extra": True}
         resp = test_client.post(
@@ -381,7 +381,7 @@ class TestFieldMetadata:
             / "pydantic_models.py"
         ).exists()
 
-        # Invalidate caches so the source-location fallback is exercised.
+        # Invalidate caches so the source-tree schema path is exercised.
         import dashboard.src.app as app_mod
         app_mod._pydantic_module_cache = None
         app_mod._config_field_metadata_cache = None

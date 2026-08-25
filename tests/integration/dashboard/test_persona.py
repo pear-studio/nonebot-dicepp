@@ -134,10 +134,6 @@ class TestSaveCharacter:
         assert saved_path.exists()
         assert saved_path.read_text() == yaml_content
 
-        # Verify no .tmp file left behind
-        tmp_path = DashboardPaths.CONTENT_DIR / "characters" / "newchar" / "character.yaml.tmp"
-        assert not tmp_path.exists(), ".tmp file was not cleaned up"
-
     def test_save_character_path_traversal(self, test_client: TestClient, tmp_dashboard_paths):
         """Path traversal on save is rejected — tested via _is_path_traversal directly."""
         from dashboard.src.app import _is_path_traversal
