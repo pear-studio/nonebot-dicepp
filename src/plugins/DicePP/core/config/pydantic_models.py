@@ -603,20 +603,6 @@ class PersonaConfig(BaseModel):
     )
 
 
-class MemoryMonitorConfig(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "advanced",
-        }
-    )
-
-    enable: bool = Field(default=False, title="启用内存监控")
-    warn_percent: int = Field(default=80, title="警告百分比")
-    restart_percent: int = Field(default=90, title="重启百分比")
-    restart_mb: int = Field(default=2048, title="重启阈值（MB）")
-
-
 class HealthMonitorConfig(BaseModel):
     """Bot 健康监控配置"""
 
@@ -810,7 +796,6 @@ class BotConfig(BaseModel):
     # ── Subsystem configs ────────────────────────────────────────────────────
 
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
-    memory_monitor: MemoryMonitorConfig = Field(default_factory=MemoryMonitorConfig, title="内存监控")
     health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig, title="健康监控")
     dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig, title="DiceHub")
     roll: RollConfig = Field(default_factory=RollConfig, title="掷骰模块")

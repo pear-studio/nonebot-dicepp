@@ -4,7 +4,6 @@
 
 from typing import List, Tuple, Any
 import os
-import asyncio
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command.const import *
@@ -13,7 +12,6 @@ from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from plugins.DicePP.core.data.models import BotControl
 
-LOC_REBOOT = "master_reboot"
 LOC_SEND_MASTER = "master_send_to_master"
 LOC_SEND_TARGET = "master_send_to_target"
 LOC_LOG_CLEAN = "master_log_clean"
@@ -31,12 +29,11 @@ DC_CTRL = "master_control"
 class MasterCommand(UserCommandBase):
     """
     Master指令
-    包括: reboot, send
+    包括: send
     """
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_REBOOT, "重启已完毕。", "重启完成")
         bot.loc_helper.register_loc_text(LOC_SEND_MASTER,
                                          "发送消息: {msg} 至 {id} (类型:{type})",
                                          "用.m send指令发送消息时给Master的回复")
@@ -68,59 +65,7 @@ class MasterCommand(UserCommandBase):
         feedback: str
         command_list: List[BotCommandBase] = []
 
-        if arg_str == "reboot" or arg_str == "reboot now":
-            # 立即重启
-            await self.bot.db.bot_control.upsert(BotControl(key="rebooter", value=meta.user_id))
-            try:
-                self.bot.reboot()
-                feedback = self.format_loc(LOC_REBOOT)
-            except Exception:
-                return self.bot.handle_exception("重启时出现错误")
-        elif arg_str == "reboot info":
-            # 显示重启相关信息（用于调试虚拟环境问题）
-            import sys
-            import platform
-            info_lines = [
-                "📋 重启环境信息",
-                f"Python: {sys.executable}",
-                f"版本: {sys.version.split()[0]}",
-                f"平台: {platform.system()} {platform.release()}",
-                f"工作目录: {os.getcwd()}",
-                f"启动参数: {' '.join(sys.argv)}",
-            ]
-            # 检测虚拟环境
-            venv = os.environ.get("VIRTUAL_ENV")
-            if venv:
-                info_lines.append(f"虚拟环境: {venv}")
-            else:
-                info_lines.append("虚拟环境: (未检测到)")
-            feedback = "\n".join(info_lines)
-        elif arg_str.startswith("reboot delay"):
-            # 延迟重启: .m reboot delay 60
-            parts = arg_str.split()
-            delay_sec = 60
-            if len(parts) >= 3:
-                try:
-                    delay_sec = int(parts[2])
-                except ValueError:
-                    feedback = "延迟秒数必须为整数"
-                    command_list.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
-                    return command_list
-            
-            await self.bot.db.bot_control.upsert(BotControl(key="rebooter", value=meta.user_id))
-            
-            async def delayed_reboot():
-                from plugins.DicePP.core.command import BotSendMsgCommand
-                # 发送倒计时提醒
-                await self.bot.send_msg_to_master(f"⏰ 骰娘将在 {delay_sec} 秒后重启...")
-                await asyncio.sleep(delay_sec)
-                self.bot.reboot()
-                return []
-            
-            import asyncio
-            self.bot.scheduler.schedule(delayed_reboot, timeout=delay_sec + 30)
-            feedback = f"已安排延迟重启，将在 {delay_sec} 秒后执行"
-        elif arg_str.startswith("send"):
+        if arg_str.startswith("send"):
             arg_list = arg_str[4:].split(":", 2)
             if len(arg_list) == 3:
                 target_type, target, msg = (arg.strip() for arg in arg_list)
@@ -203,24 +148,6 @@ class MasterCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_LOG_STATUS_DONE, count=len(files_info), size_kb=int(total_size/1024), recent=recent_txt)
             else:
                 feedback = "未知log子命令，可用: log status | log-clean"
-        elif arg_str == "memory" or arg_str == "mem":
-            # 内存状态查询
-            status = self.bot.get_memory_status()
-            if status:
-                warn_pct = self.bot.config.memory_monitor.warn_percent
-                restart_pct = self.bot.config.memory_monitor.restart_percent
-                restart_mb = self.bot.config.memory_monitor.restart_mb
-                feedback = (
-                    f"📊 内存状态\n"
-                    f"当前占用: {status['rss_mb']:.1f} MB ({status['percent']:.1f}%)\n"
-                    f"系统总内存: {status['total_mb']:.0f} MB\n"
-                    f"系统已用: {status['system_percent']:.1f}%\n"
-                    f"---\n"
-                    f"警告阈值: {warn_pct}%\n"
-                    f"重启阈值: {restart_pct}% 或 {restart_mb}MB"
-                )
-            else:
-                feedback = "无法获取内存信息，可能未安装 psutil"
         elif arg_str == "silent" or arg_str == "silent status":
             # 查询静默模式状态
             _ctrl_row = await self.bot.db.bot_control.get("silent_startup")
@@ -243,18 +170,12 @@ class MasterCommand(UserCommandBase):
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "m":  # help后的接着的内容
-         return ".m reboot 立即重启骰娘\n" \
-             ".m reboot info 查看重启环境信息\n" \
-             ".m reboot delay <秒> 延迟重启\n" \
-             ".m send 命令骰娘发送信息\n" \
-             ".m memory 查看内存状态\n" \
+         return ".m send 命令骰娘发送信息\n" \
              ".m log-clean 清空日志目录\n" \
              ".m log status 查看日志状态\n" \
              ".m silent on/off 开启/关闭静默模式（启动时不发送通知）"
         if keyword.startswith("m"):
-            if keyword.endswith("reboot"):
-                return ".m reboot 立即重启\n.m reboot info 查看环境\n.m reboot delay 60 延迟60秒重启"
-            elif keyword.endswith("send"):
+            if keyword.endswith("send"):
                 return ".m send [user/group]:[账号/群号]:[消息内容]"
         return ""
 

@@ -23,12 +23,6 @@ CFG_GROUP_EXPIRE_WARNING = "group_expire_warning_time"
 CFG_WHITE_LIST_GROUP = "white_list_group"
 CFG_WHITE_LIST_USER = "white_list_user"
 
-# ── Memory monitor ───────────────────────────────────────────────────────────
-CFG_MEMORY_MONITOR_ENABLE = "memory_monitor_enable"
-CFG_MEMORY_WARN_PERCENT = "memory_warn_percent"
-CFG_MEMORY_RESTART_PERCENT = "memory_restart_percent"
-CFG_MEMORY_RESTART_MB = "memory_restart_mb"
-
 # ── DiceHub ──────────────────────────────────────────────────────────────────
 CFG_HUB_API_URL = "dicehub_api_url"
 CFG_HUB_API_KEY = "dicehub_api_key"

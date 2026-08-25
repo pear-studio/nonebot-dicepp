@@ -412,7 +412,6 @@ class TestMultiCommand:
 
 class TestMaster:
     async def test_non_master_rejected(self, h):
-        await h.send_group(".m reboot", checker=lambda s: not s)
         await h.send_group(".m send", checker=lambda s: not s)
 
     async def test_master_send_validation(self, h):

@@ -21,7 +21,7 @@ from plugins.DicePP.core.communication import RequestData, FriendRequestData, Jo
 from plugins.DicePP.core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from plugins.DicePP.core.communication import GroupInfo
 from plugins.DicePP.core.data import BotDatabase
-from plugins.DicePP.core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
+from plugins.DicePP.core.data.models import UserStat, GroupStat, MetaStat, UserNickname
 from plugins.DicePP.core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
 
 import shutil
@@ -32,13 +32,6 @@ if TYPE_CHECKING:
 # 日志清理相关常量
 LOGS_SUBDIR = "logs"
 LOG_RETENTION_SECONDS = 24 * 3600  # 24小时
-
-# 内存监控
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
 
 NICKNAME_ERROR = "UNDEF_NAME"
 
@@ -289,8 +282,6 @@ class Bot:
                         await self.tick_daily(bot_commands)
                     # 保存 meta_stat 到数据库
                     await self.db.meta_stat.upsert(MetaStat(key="meta", data=meta_stat.serialize()))
-                    # 内存监控检查
-                    await self._check_memory_and_handle()
                     # 更新计时器
                     time_counter[0] = loop_begin_time
 
@@ -319,60 +310,9 @@ class Bot:
             # 健康监控：周期性心跳超时检测
             self.health_monitor.check_heartbeat()
 
-            # 控制通道由 ControlChannelClient 内部定时发送 status，不需 tick 驱动
-
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)
             await asyncio.sleep(free_time)
-
-    async def _check_memory_and_handle(self) -> None:
-        """内存监控：检查内存使用情况，必要时发送警告或触发重启"""
-        if not PSUTIL_AVAILABLE:
-            return
-        if not self.config.memory_monitor.enable:
-            return
-
-        status = self.get_memory_status()
-        if not status:
-            return
-
-        rss_mb = status["rss_mb"]
-        percent = status["percent"]
-        warn_pct = self.config.memory_monitor.warn_percent
-        restart_pct = self.config.memory_monitor.restart_percent
-        restart_mb = self.config.memory_monitor.restart_mb
-
-        if percent >= restart_pct or rss_mb >= restart_mb:
-            msg = f"⚠️ 内存超限，正在自动重启\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n阈值: {restart_pct}% 或 {restart_mb}MB"
-            logger.error(f"[MemoryMonitor] 内存超限，触发自动重启: {rss_mb:.0f}MB ({percent:.1f}%)")
-            await self.send_msg_to_master(msg)
-            await asyncio.sleep(2)
-            self.reboot()
-        elif percent >= warn_pct:
-            msg = f"⚠️ 内存使用较高\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n警告阈值: {warn_pct}%\n建议关注运行状态"
-            logger.warning(f"[MemoryMonitor] 内存警告: {rss_mb:.0f}MB ({percent:.1f}%)")
-            # 避免频繁警告，这里只记录日志，Master消息由用户手动查询
-            # await self.send_msg_to_master(msg)
-
-    def get_memory_status(self) -> Optional[Dict]:
-        """获取当前内存使用状态，返回 None 表示无法获取"""
-        if not PSUTIL_AVAILABLE:
-            return None
-        try:
-            process = psutil.Process()
-            mem_info = process.memory_info()
-            rss_mb = mem_info.rss / (1024 * 1024)
-            vm = psutil.virtual_memory()
-            total_mb = vm.total / (1024 * 1024)
-            percent = (rss_mb / total_mb) * 100
-            return {
-                "rss_mb": rss_mb,
-                "total_mb": total_mb,
-                "percent": percent,
-                "system_percent": vm.percent,
-            }
-        except (AttributeError, TypeError, KeyError):
-            return None
 
     async def tick_daily(self, bot_commands):
         # 更新用户统计 —— 逐行原子 daily_update（per-row 异常保护）
@@ -494,52 +434,6 @@ class Bot:
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # Configuration is read-only for the lifetime of this Bot process.
 
-    def reboot(self):
-        """重启bot"""
-        asyncio.create_task(self.reboot_async())
-
-    async def reboot_async(self):
-        logger.info("[Bot] [Reboot] 开始重启")
-        await self.shutdown_async()
-        import sys
-        import platform
-        
-        python = sys.executable
-        cwd = os.getcwd()
-        
-        # 记录重启信息用于调试
-        logger.debug(f"[Bot] [Reboot] Python: {python}")
-        logger.debug(f"[Bot] [Reboot] Args: {sys.argv}")
-        logger.debug(f"[Bot] [Reboot] CWD: {cwd}")
-        
-        if platform.system() == "Windows":
-            # Windows: 使用 subprocess 启动新进程，然后退出当前进程
-            import subprocess
-            logger.info("[Bot] [Reboot] Windows 模式：启动新进程后退出")
-            try:
-                # 保留环境变量（包括虚拟环境的 PATH）
-                env = os.environ.copy()
-                subprocess.Popen(
-                    [python] + sys.argv,
-                    cwd=cwd,
-                    env=env,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                )
-            except (OSError, RuntimeError) as e:
-                logger.error(f"[Bot] [Reboot] 启动新进程失败: {e}")
-                # 回退到简单方式
-                subprocess.Popen([python] + sys.argv, cwd=cwd)
-            await asyncio.sleep(1)
-            os._exit(0)
-        else:
-            # Linux/macOS: 使用 os.execl 替换当前进程
-            logger.info("[Bot] [Reboot] Unix 模式：execl 替换进程")
-            # 切换到原始工作目录
-            os.chdir(cwd)
-            os.execl(python, python, *sys.argv)
-        # self.start_up()
-        # await self.delay_init_command()
-
     def register_command(self, registry=None):
         from plugins.DicePP.core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY
         if registry is None:
@@ -626,18 +520,9 @@ class Bot:
                     if is_silent:
                         logger.info("[Bot] 静默模式已开启，跳过发送启动通知")
                     else:
-                        # 给上次reboot的Admin或Master汇报
-                        _rebooter_row = await self.db.bot_control.get("rebooter")
-                        rebooter = _rebooter_row.value if _rebooter_row else ""
-                        if rebooter != "":
-                            await self.db.bot_control.upsert(BotControl(key="rebooter", value=""))
-                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(rebooter)])
+                        for master in self.config.master:
+                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
                             await self.proxy.process_bot_command(command)
-                        # 如果不存在reboot者，则给所有Master汇报
-                        else:
-                            for master in self.config.master:
-                                command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
-                                await self.proxy.process_bot_command(command)
                 else:
                     logger.info(init_info)
 

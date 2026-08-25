@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import os
 import sys
@@ -81,53 +80,6 @@ class ManagedServerHandle:
                 path=self.log_path,
             )
         return stopped
-
-
-class FakeTray:
-    """Small in-memory tray used by smoke tests and unit tests."""
-
-    def __init__(self, controller: "TrayController") -> None:
-        self.controller = controller
-        self.visible = False
-        self.clicked: list[str] = []
-
-    def menu(self) -> list[dict[str, str]]:
-        status = self.controller.status_label()
-        return [
-            {"action": "status", "label": status},
-            {"action": "open_dashboard", "label": "Open Dashboard"},
-            {"action": "start", "label": "Start DicePP"},
-            {"action": "stop", "label": "Stop DicePP"},
-            {"action": "restart", "label": "Restart DicePP"},
-            {"action": "autostart", "label": "登录后自动启动"},
-            {"action": "exit", "label": "Exit DicePP"},
-        ]
-
-    def click(self, action: str) -> Any:
-        if action not in _TRAY_ACTIONS:
-            raise ValueError(f"Unknown tray action: {action}")
-        self.clicked.append(action)
-        if action == "status":
-            return self.controller.status_label()
-        if action == "open_dashboard":
-            return self.controller.open_dashboard()
-        if action == "start":
-            return self.controller.start_runtime()
-        if action == "stop":
-            return self.controller.stop_runtime()
-        if action == "restart":
-            return self.controller.restart_runtime()
-        if action == "autostart":
-            return self.controller.toggle_autostart()
-        return self.controller.exit()
-
-    def run(self, setup: Callable[["FakeTray"], None] | None = None) -> None:
-        self.visible = True
-        if setup is not None:
-            setup(self)
-
-    def stop(self) -> None:
-        self.visible = False
 
 
 class TrayController:
@@ -311,7 +263,7 @@ def dashboard_url(settings: DashboardSettings | None = None) -> str:
     return f"http://127.0.0.1:{settings.port}/dashboard"
 
 
-def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -> None:
+def run_windows_launcher(*, background: bool = False) -> None:
     """Start Dashboard and its Bot controller, then run the tray.
 
     ``background`` keeps the tray available for a user session while avoiding
@@ -361,7 +313,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         )
         if os.name == "nt":
             tray_controller.configure_autostart(WindowsAutostart(autostart_launcher_path()))
-        tray = build_tray(tray_controller, fake=fake_tray)
+        tray = build_tray(tray_controller)
         tray_controller._stop_tray = tray.stop
         if background:
             append_runtime_log_line(
@@ -418,15 +370,12 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
         app.state.bot_auto_start = False
 
 
-def build_tray(controller: TrayController, *, fake: bool = False):
-    if fake:
-        return FakeTray(controller)
+def build_tray(controller: TrayController):
     return _build_pystray_icon(controller)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--launcher-fake-tray", action="store_true")
     parser.add_argument(
         "--background",
         dest="background",
@@ -451,7 +400,6 @@ def main() -> None:
     try:
         run_windows_launcher(
             background=args.background,
-            fake_tray=args.launcher_fake_tray,
         )
     except Exception:
         if args.background:
@@ -580,10 +528,6 @@ def _append_launcher_fallback_line(message: str) -> None:
         # A fatal exception must retain its original failure semantics even if
         # every usable diagnostic destination is unavailable.
         pass
-
-
-def _run_async(awaitable):
-    return asyncio.run(awaitable)
 
 
 def _build_pystray_icon(controller: TrayController):

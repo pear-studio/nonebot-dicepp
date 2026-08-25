@@ -12,25 +12,6 @@
 
 ---
 
-## core/bot
-
-### [B-260804-2929ef] 移除 bot 内嵌内存监控与自重启机制
-- 创建: 2026-08-04
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - MemoryMonitorConfig（core/config/pydantic_models.py:596）功能为死代码：生产 memory_monitor.enable=false
-    - 阈值语义损坏：percent = bot自身RSS / 系统总内存，3.6GB 小机上 90% = 3.3GB 未触发机器已先冻死；警告档 master 通知代码被注释（dicebot.py:377），预警名存实亡
-    - .m reboot 自重启（core/bot/dicebot.py:523 reboot_async，os.exec 原地替换）对 Dashboard 完全不可见：无 audit、无状态上报，与单一 Bot controller 生命周期方向相悖
-    - Dashboard 已提供完整重启链路（UI 按钮 + Bot controller restart，含 Windows 托盘），.m reboot/.m memory 价值已被覆盖
-- 开发备忘:
-    - 删除：MemoryMonitorConfig 模型及 dashboard 元数据、_check_memory_and_handle 及 tick 挂载（dicebot.py:316,351）、get_memory_status()、.m memory/.m mem 指令（module/common/master_command.py:206）、.m reboot 全套（立即/延迟/rebooter 汇报，master_command.py:71-121 及 dicebot.py:660-671 启动回报分支）、reboot()/reboot_async()、config/common.py:27-30 相关常量
-    - 需验证：旧 config/global.json 含 memory_monitor 键，删除模型后 pydantic 对未知字段的兼容行为（extra 策略）
-    - 同步清理相关测试与文档（docs/ 中 .m reboot/.m memory 说明）
-    - 自愈需求不在 bot 内重建；如未来需要，应重新设计为独立的运维能力
-    - 来源：.temp/prod-handoff/20260804-memory-monitor-enhancement.md
-
 ## dashboard
 
 ### [B-260731-cf6a1d] 设计 Dashboard 查询资料与群私设管理

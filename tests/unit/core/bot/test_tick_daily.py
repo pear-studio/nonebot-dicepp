@@ -123,8 +123,6 @@ async def test_tick_loop_starts_and_exits_on_cancel():
     bot.command_dict = {}
     bot.scheduler.pending = False
     bot.proxy = None
-    bot.config.memory_monitor.enable = False
-
     # meta_stat.get is awaited in the loop body
     bot.db.meta_stat.get = AsyncMock(return_value=None)
 
