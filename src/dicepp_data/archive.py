@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import sqlite3
@@ -41,7 +40,6 @@ MAX_ARCHIVE_BYTES = 16 * 1024**3
 MAX_MEMBER_BYTES = 8 * 1024**3
 MAX_TOTAL_UNCOMPRESSED_BYTES = 32 * 1024**3
 MAX_MEMBER_COUNT = 100_000
-MAX_COMPRESSION_RATIO = 250
 MAX_MANIFEST_BYTES = 2 * 1024**2
 SUPPORTED_ZIP_COMPRESSION = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
 LEGACY_V1_ASSET_IDS = {
@@ -54,10 +52,6 @@ LEGACY_V1_ASSET_IDS = {
     "data.local_images",
 }
 
-SCOPE_INCLUDED = [
-    asset.logical_glob
-    for asset in DATA_CATALOG.for_profile(ARCHIVE_PROFILE_REGULAR)
-]
 SCOPE_EXCLUDED = [
     "config/bots/_template.json",
     "dashboard/data/dashboard.db",
@@ -221,7 +215,6 @@ def _build_manifest(
     created_at: str,
     description: str,
     profile: str,
-    archive_kind: str,
     files: list[dict],
     opaque_sqlite_files: list[str],
 ) -> dict:
@@ -254,7 +247,6 @@ def _build_manifest(
         "source_platform": sys.platform,
         "description": description,
         "profile": profile,
-        "archive_kind": archive_kind,
         "sensitive": any(asset["sensitive"] for asset in assets),
         "compatibility": {
             "opaque_sqlite": {
@@ -281,40 +273,14 @@ def _build_manifest(
     }
 
 
-def _path_matches_open_file(path_stat: os.stat_result, file_stat: os.stat_result) -> bool:
-    try:
-        return os.path.samestat(path_stat, file_stat)
-    except OSError:
-        return (
-            path_stat.st_ino == file_stat.st_ino
-            and path_stat.st_dev == file_stat.st_dev
-        )
-
-
 def _open_regular_payload(path: Path):
-    """Open *path* only if it still names the same non-symlink regular file."""
-    if path.is_symlink():
+    """Open one catalogued regular file for archive streaming."""
+    if path.is_symlink() or not path.is_file():
         return None
     try:
-        handle = path.open("rb")
+        return path.open("rb")
     except (FileNotFoundError, OSError):
         return None
-
-    try:
-        file_stat = os.fstat(handle.fileno())
-        path_stat = os.lstat(path)
-    except OSError:
-        handle.close()
-        return None
-
-    if (
-        not stat.S_ISREG(file_stat.st_mode)
-        or stat.S_ISLNK(path_stat.st_mode)
-        or not _path_matches_open_file(path_stat, file_stat)
-    ):
-        handle.close()
-        return None
-    return handle
 
 
 def _write_payload_to_archive(
@@ -343,13 +309,9 @@ def create_archive(
     layout: InstanceLayout,
     archive_dir: Path | None = None,
     profile: str = ARCHIVE_PROFILE_REGULAR,
-    archive_kind: str = "manual",
-    phase_callback=None,
 ) -> tuple[dict, dict]:
     """Create a local zip archive and return ``(summary, manifest)``."""
     profile = _validate_profile(profile)
-    if archive_kind not in {"manual", "system"}:
-        raise ArchiveError(f"Unsupported archive kind: {archive_kind!r}")
     target_dir = archive_dir or backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
     now = _utc_now()
@@ -364,8 +326,6 @@ def create_archive(
 
     try:
         with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            if phase_callback is not None:
-                phase_callback("stream")
             for payload in payloads:
                 written = _write_payload_to_archive(archive, payload)
                 if written is None:
@@ -393,7 +353,6 @@ def create_archive(
                 created_at=_format_created_at(now),
                 description=description or "",
                 profile=profile,
-                archive_kind=archive_kind,
                 files=file_records,
                 opaque_sqlite_files=opaque_sqlite_files,
             )
@@ -401,17 +360,13 @@ def create_archive(
                 MANIFEST_NAME,
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
             )
-        _fsync_file(tmp)
         # Verify the exact bytes written before making the archive observable.
         verification = verify_archive_path(tmp, expected_filename=target.name)
         if not verification["verified"]:
             raise ArchiveInvalidError(
                 "New archive verification failed: " + "; ".join(verification["problems"])
             )
-        if phase_callback is not None:
-            phase_callback("publish")
-        os.replace(tmp, target)
-        _fsync_directory(target_dir)
+        tmp.replace(target)
     except Exception:
         try:
             tmp.unlink()
@@ -458,25 +413,9 @@ def _existing_regular_archive_path(
     archive_dir: Path | None = None,
 ) -> Path:
     path = safe_archive_path(filename, layout=layout, archive_dir=archive_dir)
-    try:
-        path_stat = os.lstat(path)
-    except FileNotFoundError as exc:
-        raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-    except OSError as exc:
-        raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-
-    if not stat.S_ISREG(path_stat.st_mode) or stat.S_ISLNK(path_stat.st_mode):
+    if path.is_symlink() or not path.is_file():
         raise ArchiveNotFoundError(f"Archive not found: {filename}")
     return path
-
-
-def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
-    return (
-        left.st_dev == right.st_dev
-        and left.st_ino == right.st_ino
-        and left.st_size == right.st_size
-        and left.st_mtime == right.st_mtime
-    )
 
 
 @contextmanager
@@ -485,50 +424,19 @@ def _open_existing_archive(
     *,
     layout: InstanceLayout,
     archive_dir: Path | None = None,
-) -> Iterator[tuple[Path, os.stat_result, zipfile.ZipFile]]:
-    """Open one regular archive file and keep the fd through the operation."""
-    path = safe_archive_path(filename, layout=layout, archive_dir=archive_dir)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = -1
-    handle: BinaryIO | None = None
-    archive: zipfile.ZipFile | None = None
+) -> Iterator[tuple[Path, object, zipfile.ZipFile]]:
+    """Open one regular archive file for inspection."""
+    path = _existing_regular_archive_path(
+        filename,
+        layout=layout,
+        archive_dir=archive_dir,
+    )
     try:
-        try:
-            fd = os.open(path, flags)
-        except FileNotFoundError as exc:
-            raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-        except OSError as exc:
-            raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-
-        fd_stat = os.fstat(fd)
-        if not stat.S_ISREG(fd_stat.st_mode):
-            raise ArchiveNotFoundError(f"Archive not found: {filename}")
-
-        try:
-            path_stat = os.lstat(path)
-        except FileNotFoundError as exc:
-            raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-        except OSError as exc:
-            raise ArchiveNotFoundError(f"Archive not found: {filename}") from exc
-        if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISREG(path_stat.st_mode):
-            raise ArchiveNotFoundError(f"Archive not found: {filename}")
-        if not _same_file_identity(fd_stat, path_stat):
-            raise ArchiveInvalidError(f"Archive changed while opening: {filename}")
-
-        handle = os.fdopen(fd, "rb")
-        fd = -1
-        try:
-            archive = zipfile.ZipFile(handle, "r")
-        except zipfile.BadZipFile as exc:
-            raise ArchiveInvalidError("Archive zip cannot be read") from exc
-        yield path, fd_stat, archive
-    finally:
-        if archive is not None:
-            archive.close()
-        if handle is not None:
-            handle.close()
-        if fd != -1:
-            os.close(fd)
+        archive = zipfile.ZipFile(path, "r")
+    except zipfile.BadZipFile as exc:
+        raise ArchiveInvalidError("Archive zip cannot be read") from exc
+    with archive:
+        yield path, path.stat(), archive
 
 
 def archive_summary(path: Path) -> dict:
@@ -558,7 +466,6 @@ def archive_summary(path: Path) -> dict:
         summary["format_version"] = manifest.get("format_version")
         summary["dicepp_version"] = manifest.get("dicepp_version", "")
         summary["profile"] = profile
-        summary["archive_kind"] = manifest.get("archive_kind", "manual")
         summary["sensitive"] = bool(manifest.get("sensitive"))
         summary["opaque_sqlite_count"] = opaque_sqlite_count
         checksum = manifest.get("checksum")
@@ -569,7 +476,7 @@ def archive_summary(path: Path) -> dict:
 
 def _archive_summary_from_manifest(
     path: Path,
-    stat_info: os.stat_result,
+    stat_info: object,
     manifest: dict,
 ) -> dict:
     fallback_created_at = _format_created_at(
@@ -586,7 +493,6 @@ def _archive_summary_from_manifest(
         "format_version": manifest.get("format_version"),
         "dicepp_version": manifest.get("dicepp_version", ""),
         "profile": _manifest_profile(manifest),
-        "archive_kind": manifest.get("archive_kind", "manual"),
         "sensitive": bool(manifest.get("sensitive")),
         "opaque_sqlite_count": _manifest_opaque_sqlite_count(manifest),
         "file_count": len(files) if isinstance(files, dict) else 0,
@@ -727,14 +633,6 @@ def _sha256_zip_member(archive: zipfile.ZipFile, arcname: str) -> str:
     return digest.hexdigest()
 
 
-def _archive_arcname_in_restore_scope(arcname: str) -> bool:
-    # Legacy v1 archives are always interpreted as regular.
-    return DATA_CATALOG.find_for_logical_path(
-        arcname,
-        profile=ARCHIVE_PROFILE_REGULAR,
-    ) is not None
-
-
 def _manifest_profile(manifest: dict) -> str:
     if manifest.get("format_version") == LEGACY_ARCHIVE_FORMAT_VERSION:
         return ARCHIVE_PROFILE_REGULAR
@@ -777,14 +675,6 @@ def _validate_zip_structure(archive: zipfile.ZipFile) -> list[str]:
         if info.file_size > MAX_MEMBER_BYTES:
             problems.append(f"Zip member is too large: {name}")
         total += info.file_size
-        if info.compress_size == 0 and info.file_size:
-            problems.append(f"Suspicious zero-size compressed member: {name}")
-        elif (
-            info.compress_size
-            and info.file_size / info.compress_size > MAX_COMPRESSION_RATIO
-            and info.file_size > 1024**2
-        ):
-            problems.append(f"Suspicious compression ratio: {name}")
     if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
         problems.append("Archive uncompressed payload exceeds safety limit")
     return problems
@@ -812,12 +702,9 @@ def verify_archive(
 
 def verify_archive_path(path: Path, *, expected_filename: str | None = None) -> dict:
     """Verify an already-openable path used by create/import before publication."""
-    try:
-        path_stat = os.lstat(path)
-    except OSError as exc:
-        raise ArchiveInvalidError("Archive cannot be inspected") from exc
-    if not stat.S_ISREG(path_stat.st_mode) or stat.S_ISLNK(path_stat.st_mode):
+    if path.is_symlink() or not path.is_file():
         raise ArchiveInvalidError("Archive must be a regular file")
+    path_stat = path.stat()
     if path_stat.st_size > MAX_ARCHIVE_BYTES:
         raise ArchiveInvalidError("Archive exceeds compressed size limit")
     try:
@@ -1118,7 +1005,7 @@ def _legacy_declared_asset_ids(manifest: dict) -> set[str]:
 
 def _structure_failure_verification(
     path: Path,
-    stat_info: os.stat_result,
+    stat_info: object,
     problems: list[str],
 ) -> dict:
     fallback_created_at = _format_created_at(
@@ -1173,7 +1060,6 @@ def _inspect_archived_sqlite_schema(
                         )
                     temporary.write(chunk)
             temporary.flush()
-            os.fsync(temporary.fileno())
         return _inspect_sqlite_schema_path(
             Path(temporary_path),
             display_path=arcname,
@@ -1323,24 +1209,6 @@ def _inspect_sqlite_schema_path(
     return SQLiteSchemaInspection()
 
 
-def _fsync_file(path: Path) -> None:
-    """Persist a completed file before publishing it with ``os.replace``."""
-    # Windows requires a writable handle for FlushFileBuffers (used by
-    # ``os.fsync``), even though this helper never changes the contents.
-    with path.open("r+b") as handle:
-        os.fsync(handle.fileno())
-
-
-def _fsync_directory(directory: Path) -> None:
-    if os.name == "nt":
-        return
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
 def delete_archive(
     filename: str,
     *,
@@ -1404,20 +1272,16 @@ def import_archive(
                     raise ArchiveInvalidError("Imported archive exceeds size limit")
                 handle.write(chunk)
             handle.flush()
-            os.fsync(handle.fileno())
         verification = verify_archive_path(tmp, expected_filename=target.name)
         if not verification["verified"]:
             raise ArchiveInvalidError(
                 "Imported archive verification failed: "
                 + "; ".join(verification["problems"])
             )
-        os.replace(tmp, target)
-        _fsync_directory(target.parent)
-        _fsync_directory(target_dir)
+        tmp.replace(target)
         return {
             "archive": archive_summary(target),
             "verification": verification,
-            "restored": False,
         }
     except Exception:
         try:
