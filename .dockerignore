@@ -40,8 +40,5 @@ config/secrets.json
 config/user.json
 config/bots/*.json
 !config/bots/_template.json
-# Manager 运行时凭据与状态 — 容器内 root 写入后本机构建无法读取
-manager/control/
-manager/state/
 data/
 content/

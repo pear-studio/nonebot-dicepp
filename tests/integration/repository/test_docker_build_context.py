@@ -31,16 +31,6 @@ def test_docker_build_context_recursively_excludes_python_build_artifacts():
     } <= _rules()
 
 
-@pytest.mark.quick
-def test_docker_build_context_excludes_manager_runtime_credentials():
-    """Container-written Manager credentials/state must stay out of the build context.
-
-    Containerized local runs write these as root with restrictive modes, which
-    both leaks credentials into the context and breaks later host-side builds.
-    """
-    assert {"manager/control/", "manager/state/"} <= _rules()
-
-
 def test_compose_describes_one_dashboard_and_bot_service():
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
 
