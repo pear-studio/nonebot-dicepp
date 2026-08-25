@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import os
-import stat
 import sys
 import tempfile
 import threading
@@ -29,6 +28,7 @@ from .runtime_log import (
     configure_file_logging,
     rotate_runtime_log,
 )
+from .runtime_service import BotRuntimeService, BotStartBlocked
 
 logger = logging.getLogger("dashboard.launcher")
 
@@ -137,6 +137,7 @@ class TrayController:
         self,
         *,
         bot_controller: BotProcessController,
+        runtime_service: BotRuntimeService | None = None,
         dashboard_url: str,
         log_path: Path,
         open_browser: Callable[[str], bool] = webbrowser.open,
@@ -146,6 +147,10 @@ class TrayController:
         stop_tray: Callable[[], None] | None = None,
     ) -> None:
         self._bot_controller = bot_controller
+        self._runtime_service = runtime_service or BotRuntimeService(
+            bot_controller,
+            layout=DashboardPaths.instance_layout(),
+        )
         self._dashboard_url = dashboard_url
         self._log_path = log_path
         self._open_browser = open_browser
@@ -263,8 +268,14 @@ class TrayController:
     def _operate(self, action: str) -> Any:
         try:
             append_runtime_log_line(f"tray | Bot {action}", path=self._log_path)
-            result = getattr(self._bot_controller, action)()
+            result = self._runtime_service.operate_sync(action)
             return result.to_dict()
+        except BotStartBlocked as exc:
+            append_runtime_log_line(
+                f"tray | {action} blocked: {exc}",
+                path=self._log_path,
+            )
+            return {"ok": False, "message": str(exc)}
         except Exception as exc:
             logger.exception("tray | %s failed", action)
             append_runtime_log_line(
@@ -282,138 +293,6 @@ class TrayController:
     def toggle_autostart(self) -> None:
         if self._autostart is not None:
             self._autostart.set_enabled(not self._autostart.enabled())
-
-
-def configure_launcher_environment(
-    app_dir: str | os.PathLike[str],
-) -> dict[str, str]:
-    """Set default env vars for the packaged Windows single entry."""
-    program_path, instance_path = resolve_launcher_roots(app_dir)
-    sync_version_owned_config(program_path, instance_path)
-    defaults = {
-        "DICEPP_APP_DIR": str(program_path),
-        "DICEPP_PROJECT_ROOT": str(instance_path),
-        "DASHBOARD_HOST": "127.0.0.1",
-        "DASHBOARD_PORT": "4090",
-    }
-    for key, value in defaults.items():
-        os.environ.setdefault(key, value)
-    return {key: os.environ[key] for key in defaults}
-
-
-def sync_version_owned_config(program_dir: Path, instance_root: Path) -> None:
-    """Seed missing version-owned defaults without overwriting an instance."""
-    if program_dir == instance_root:
-        return
-    for relative in (Path("config/bots/_template.json"),):
-        source = program_dir / relative
-        if not source.is_file() or source.is_symlink():
-            continue
-        destination = instance_root / relative
-        _ensure_safe_seed_parent(instance_root, relative.parent)
-        if _existing_safe_config(destination):
-            continue
-        descriptor, temporary_str = tempfile.mkstemp(
-            prefix=f".{destination.name}.",
-            suffix=".tmp",
-            dir=destination.parent,
-        )
-        temporary = Path(temporary_str)
-        try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(source.read_bytes())
-                output.flush()
-                os.fsync(output.fileno())
-            try:
-                os.link(temporary, destination)
-            except FileExistsError:
-                _existing_safe_config(destination)
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
-        else:
-            temporary.unlink(missing_ok=True)
-
-
-def _existing_safe_config(path: Path) -> bool:
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return False
-    attributes = getattr(info, "st_file_attributes", 0)
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    if (
-        path.is_symlink()
-        or (reparse and attributes & reparse)
-        or not stat.S_ISREG(info.st_mode)
-    ):
-        raise RuntimeError(f"Refusing unsafe instance config destination: {path}")
-    return True
-
-
-def _ensure_safe_seed_parent(
-    instance_root: Path,
-    relative_parent: Path,
-) -> Path:
-    root_info = _validate_seed_directory(instance_root, root=instance_root)
-    root_identity = (root_info.st_dev, root_info.st_ino)
-    current = instance_root
-    ancestors = [instance_root]
-    for component in relative_parent.parts:
-        _validate_seed_directory(
-            instance_root,
-            root=instance_root,
-            identity=root_identity,
-        )
-        current = current / component
-        try:
-            current.mkdir()
-        except FileExistsError:
-            pass
-        _validate_seed_directory(current, root=instance_root)
-        ancestors.append(current)
-    for ancestor in ancestors:
-        identity = root_identity if ancestor == instance_root else None
-        _validate_seed_directory(
-            ancestor,
-            root=instance_root,
-            identity=identity,
-        )
-    return current
-
-
-def _validate_seed_directory(
-    path: Path,
-    *,
-    root: Path,
-    identity: tuple[int, int] | None = None,
-) -> os.stat_result:
-    info = path.lstat()
-    attributes = getattr(info, "st_file_attributes", 0)
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    if (
-        path.is_symlink()
-        or (reparse and attributes & reparse)
-        or not stat.S_ISDIR(info.st_mode)
-        or (
-            identity is not None
-            and (info.st_dev, info.st_ino) != identity
-        )
-    ):
-        raise RuntimeError(f"Refusing unsafe instance config directory: {path}")
-    root_resolved = root.resolve(strict=True)
-    resolved = path.resolve(strict=True)
-    if not resolved.is_relative_to(root_resolved):
-        raise RuntimeError(f"Instance config directory escapes stable root: {path}")
-    return info
-
-
-def resolve_launcher_roots(
-    app_dir: str | os.PathLike[str],
-) -> tuple[Path, Path]:
-    """Return the Portable directory as both executable and data root."""
-    program = Path(app_dir).resolve()
-    return program, program
 
 
 def autostart_launcher_path() -> Path:
@@ -442,6 +321,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
     dashboard_server: ManagedServerHandle | None = None
     tray_controller: TrayController | None = None
     bot_controller: BotProcessController | None = None
+    runtime_service: BotRuntimeService | None = None
     try:
         log_path = rotate_runtime_log()
         configure_file_logging(log_path)
@@ -456,7 +336,12 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
             project_root=DashboardPaths.instance_layout().root,
             log_path=log_path,
         )
+        runtime_service = BotRuntimeService(
+            bot_controller,
+            layout=DashboardPaths.instance_layout(),
+        )
         app.state.bot_process_controller = bot_controller
+        app.state.bot_runtime_service = runtime_service
         app.state.bot_auto_start = True
         dashboard_server = _start_dashboard_server(settings, log_path)
         url = dashboard_url(settings)
@@ -467,6 +352,7 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
 
         tray_controller = TrayController(
             bot_controller=bot_controller,
+            runtime_service=runtime_service,
             dashboard_url=url,
             log_path=log_path,
             stop_dashboard=dashboard_server.request_stop,
@@ -527,6 +413,8 @@ def run_windows_launcher(*, background: bool = False, fake_tray: bool = False) -
                 logger.exception("launcher | Bot controller cleanup failed")
         if getattr(app.state, "bot_process_controller", None) is bot_controller:
             app.state.bot_process_controller = None
+        if getattr(app.state, "bot_runtime_service", None) is runtime_service:
+            app.state.bot_runtime_service = None
         app.state.bot_auto_start = False
 
 
@@ -646,17 +534,6 @@ def _stop_and_join_server_handles(
                 f"launcher | failed to join {handle.name}: {exc}",
                 path=handle.log_path,
             )
-
-
-def _dashboard_server_config(settings: DashboardSettings) -> uvicorn.Config:
-    # PyInstaller windowed executables may set stdout/stderr to None.
-    return uvicorn.Config(
-        app,
-        host=settings.host,
-        port=settings.port,
-        log_level="info",
-        log_config=None,
-    )
 
 
 def _install_launcher_excepthook(log_path: Path) -> None:

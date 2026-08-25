@@ -131,7 +131,6 @@ class TestQueryDbEntries:
         monkeypatch.setattr(dashboard_app, "report_detail", lambda _report: {})
         monkeypatch.setattr(dashboard_app, "write_normalized_database", blocking_write)
         test_client.app.state.bot_process_controller = Controller()
-        test_client.app.state.data_maintenance_lock = asyncio.Lock()
         request = SimpleNamespace(app=test_client.app, client=None)
 
         normalize_task = asyncio.create_task(

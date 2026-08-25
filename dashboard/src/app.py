@@ -46,7 +46,6 @@ from dicepp_data.instance_data import (
     InstanceDataNotEmptyError,
     clear_instance_data,
     import_instance_data,
-    instance_data_marker_path,
 )
 from dicepp_meta import get_project_info, get_version
 
@@ -78,14 +77,10 @@ from .query_audit import (
     list_query_entries,
     list_query_redirects,
 )
+from .runtime_service import BotNotStopped, BotRuntimeService, BotStartBlocked
 
 logger = logging.getLogger("dashboard")
 
-
-def _bot_start_blocker(layout) -> str | None:
-    if instance_data_marker_path(layout).exists():
-        return "Business data import is incomplete; clear the instance before starting Bot"
-    return None
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
@@ -104,7 +99,6 @@ async def lifespan(app: FastAPI):
     # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
     app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
     # Serialize Bot lifecycle changes with in-place data maintenance.
-    app.state.data_maintenance_lock = asyncio.Lock()
     controller = getattr(app.state, "bot_process_controller", None)
     if controller is None:
         controller = create_bot_process_controller(
@@ -112,15 +106,20 @@ async def lifespan(app: FastAPI):
             log_path=DashboardPaths.runtime_log_path(),
         )
         app.state.bot_process_controller = controller
+    runtime_service = getattr(app.state, "bot_runtime_service", None)
+    if runtime_service is None or runtime_service.controller is not controller:
+        runtime_service = BotRuntimeService(
+            controller,
+            layout=DashboardPaths.instance_layout(),
+        )
+        app.state.bot_runtime_service = runtime_service
     auto_start = bool(getattr(app.state, "bot_auto_start", False))
-    layout = DashboardPaths.instance_layout()
     try:
         if auto_start:
-            blocker = _bot_start_blocker(layout)
-            if blocker:
-                logger.error(blocker)
-            else:
-                await asyncio.to_thread(controller.start)
+            try:
+                await runtime_service.operate("start")
+            except BotStartBlocked as exc:
+                logger.error(str(exc))
         yield
     finally:
         await asyncio.to_thread(controller.shutdown)
@@ -510,14 +509,6 @@ def _instance_data_error_response(exc: InstanceDataError) -> JSONResponse:
     return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
 
 
-def _data_maintenance_lock(request: Request) -> asyncio.Lock:
-    lock = getattr(request.app.state, "data_maintenance_lock", None)
-    if lock is None:
-        lock = asyncio.Lock()
-        request.app.state.data_maintenance_lock = lock
-    return lock
-
-
 @app.get("/api/archives", dependencies=[Depends(require_auth)])
 async def archives_list(request: Request):
     del request
@@ -551,19 +542,23 @@ async def archives_create(request: Request):
     if description is not None and not isinstance(description, str):
         _err("description must be a string or null", 400)
     controller = _get_bot_process_controller(request)
-    async with _data_maintenance_lock(request):
-        status = await asyncio.to_thread(controller.status)
-        if status.state != "stopped":
-            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before archive creation"})
-        try:
-            summary, manifest = await asyncio.to_thread(
-                create_archive,
-                layout=_archive_layout(),
-                profile=profile,
-                description=description,
-            )
-        except ArchiveError as exc:
-            return _archive_error_response(exc)
+    runtime_service = _get_bot_runtime_service(request)
+
+    def create_when_stopped():
+        if controller.status().state != "stopped":
+            raise BotNotStopped("Bot must be stopped before archive creation")
+        return create_archive(
+            layout=_archive_layout(),
+            profile=profile,
+            description=description,
+        )
+
+    try:
+        summary, manifest = await runtime_service.run_maintenance(create_when_stopped)
+    except BotNotStopped as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
+    except ArchiveError as exc:
+        return _archive_error_response(exc)
     return _ok({"archive": summary, "manifest": manifest})
 
 
@@ -672,14 +667,19 @@ async def instance_clear(request: Request):
     if not isinstance(body, dict) or body.get("confirm") is not True:
         _err("confirm must be true for clearing business data", 400)
     controller = _get_bot_process_controller(request)
-    async with _data_maintenance_lock(request):
-        status = await asyncio.to_thread(controller.status)
-        if status.state != "stopped":
-            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before clearing business data"})
-        try:
-            result = await asyncio.to_thread(clear_instance_data, _archive_layout())
-        except InstanceDataError as exc:
-            return _instance_data_error_response(exc)
+    runtime_service = _get_bot_runtime_service(request)
+
+    def clear_when_stopped():
+        if controller.status().state != "stopped":
+            raise BotNotStopped("Bot must be stopped before clearing business data")
+        return clear_instance_data(_archive_layout())
+
+    try:
+        result = await runtime_service.run_maintenance(clear_when_stopped)
+    except BotNotStopped as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
+    except InstanceDataError as exc:
+        return _instance_data_error_response(exc)
     return _ok(result)
 
 
@@ -697,19 +697,23 @@ async def instance_import(request: Request):
     if isinstance(source_path, str) and not source_path.strip():
         _err("source_path must be a non-empty directory path", 400)
     controller = _get_bot_process_controller(request)
-    async with _data_maintenance_lock(request):
-        status = await asyncio.to_thread(controller.status)
-        if status.state != "stopped":
-            return JSONResponse(status_code=409, content={"ok": False, "message": "Bot must be stopped before importing business data"})
-        try:
-            result = await asyncio.to_thread(
-                import_instance_data,
-                _archive_layout(),
-                archive=archive,
-                source_root=source_path,
-            )
-        except InstanceDataError as exc:
-            return _instance_data_error_response(exc)
+    runtime_service = _get_bot_runtime_service(request)
+
+    def import_when_stopped():
+        if controller.status().state != "stopped":
+            raise BotNotStopped("Bot must be stopped before importing business data")
+        return import_instance_data(
+            _archive_layout(),
+            archive=archive,
+            source_root=source_path,
+        )
+
+    try:
+        result = await runtime_service.run_maintenance(import_when_stopped)
+    except BotNotStopped as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
+    except InstanceDataError as exc:
+        return _instance_data_error_response(exc)
     return _ok(result)
 
 
@@ -1461,6 +1465,18 @@ def _get_bot_process_controller(request: Request) -> BotProcessController:
     return controller
 
 
+def _get_bot_runtime_service(request: Request) -> BotRuntimeService:
+    controller = _get_bot_process_controller(request)
+    service = getattr(request.app.state, "bot_runtime_service", None)
+    if service is None or service.controller is not controller:
+        service = BotRuntimeService(
+            controller,
+            layout=DashboardPaths.instance_layout(),
+        )
+        request.app.state.bot_runtime_service = service
+    return service
+
+
 @app.get("/api/bot/status", dependencies=[Depends(require_auth)])
 async def bot_process_status(request: Request):
     status = await asyncio.to_thread(_get_bot_process_controller(request).status)
@@ -1471,39 +1487,27 @@ async def bot_process_status(request: Request):
 async def bot_process_action(action: str, request: Request):
     if action not in {"start", "stop", "restart"}:
         _err("Bot action must be start, stop, or restart", 400)
-    controller = _get_bot_process_controller(request)
-    lock = getattr(request.app.state, "data_maintenance_lock", None)
-    if lock is None:
-        lock = asyncio.Lock()
-        request.app.state.data_maintenance_lock = lock
-    async with lock:
-        blocker = _bot_start_blocker(DashboardPaths.instance_layout()) if action in {"start", "restart"} else None
-        if blocker:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "ok": False,
-                    "message": blocker,
-                },
-            )
-        try:
-            status = await asyncio.to_thread(getattr(controller, action))
-        except (OSError, RuntimeError) as exc:
-            audit_log(
-                request.app.state.dashboard_db,
-                f"bot.{action}",
-                "bot",
-                json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
-                ip=request.client.host if request.client else "",
-            )
-            _err(str(exc) or type(exc).__name__, 500)
+    runtime_service = _get_bot_runtime_service(request)
+    try:
+        status = await runtime_service.operate(action)
+    except BotStartBlocked as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
+    except (OSError, RuntimeError) as exc:
         audit_log(
             request.app.state.dashboard_db,
             f"bot.{action}",
             "bot",
-            json.dumps(status.to_dict(), ensure_ascii=False),
+            json.dumps({"status": "failed", "message": str(exc)}, ensure_ascii=False),
             ip=request.client.host if request.client else "",
         )
+        _err(str(exc) or type(exc).__name__, 500)
+    audit_log(
+        request.app.state.dashboard_db,
+        f"bot.{action}",
+        "bot",
+        json.dumps(status.to_dict(), ensure_ascii=False),
+        ip=request.client.host if request.client else "",
+    )
     return _ok({"status": status.to_dict()})
 
 
@@ -1670,22 +1674,21 @@ async def content_queries_normalize(db_name: str, request: Request):
     """Normalize a query database locally while the controlled Bot is stopped."""
     db_path = _query_database_path(db_name)
     controller = _get_bot_process_controller(request)
-    lock = getattr(request.app.state, "data_maintenance_lock", None)
-    if lock is None:
-        lock = asyncio.Lock()
-        request.app.state.data_maintenance_lock = lock
-    async with lock:
-        status = await asyncio.to_thread(controller.status)
-        if status.state != "stopped":
-            return JSONResponse(
-                status_code=409,
-                content={"ok": False, "message": "Bot must be stopped before query database normalization"},
-            )
-        try:
-            report = await asyncio.to_thread(normalization_report, db_path)
-            await asyncio.to_thread(write_normalized_database, db_path, report)
-        except (OSError, ValueError, sqlite3.DatabaseError) as exc:
-            _err(f"数据库无法自动修复：{exc}", 400)
+    runtime_service = _get_bot_runtime_service(request)
+
+    def normalize_when_stopped():
+        if controller.status().state != "stopped":
+            raise BotNotStopped("Bot must be stopped before query database normalization")
+        report = normalization_report(db_path)
+        write_normalized_database(db_path, report)
+        return report
+
+    try:
+        report = await runtime_service.run_maintenance(normalize_when_stopped)
+    except BotNotStopped as exc:
+        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
+    except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+        _err(f"数据库无法自动修复：{exc}", 400)
     return _ok({"database": db_name, "normalized": True, "report": report_detail(report)})
 
 
