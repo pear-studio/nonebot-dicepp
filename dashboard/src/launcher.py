@@ -309,12 +309,7 @@ def run_windows_launcher(*, background: bool = False) -> None:
             )
 
         try:
-            tray.run(
-                setup=lambda _icon: append_runtime_log_line(
-                    "launcher | startup complete",
-                    path=log_path,
-                )
-            )
+            tray.run(setup=lambda icon: _setup_tray_icon(icon, log_path))
         finally:
             tray_controller.exit()
     except BaseException as exc:
@@ -488,6 +483,11 @@ def _record_launcher_exception(log_path: Path, exc: BaseException) -> None:
         )
     message = f"launcher | fatal error: {type(exc).__name__}: {exc}"
     append_runtime_log_line(message, path=log_path)
+
+
+def _setup_tray_icon(icon, log_path: Path) -> None:
+    icon.visible = True
+    append_runtime_log_line("launcher | startup complete", path=log_path)
 
 
 def _build_pystray_icon(controller: TrayController):

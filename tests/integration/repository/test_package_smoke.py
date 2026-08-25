@@ -7,7 +7,12 @@ from pathlib import Path
 def test_windows_package_verification_is_shared_by_build_and_release():
     script = Path("scripts/build/verify_windows_package.ps1")
     assert script.is_file()
-    assert "Start-Process" in script.read_text(encoding="utf-8")
+    verification = script.read_text(encoding="utf-8")
+    assert "Start-Process" in verification
+    assert "GetTempPath" in verification
+    assert "Copy-Item" in verification
+    assert "Remove-Item -LiteralPath $verifyDist" in verification
+    assert "-WorkingDirectory $verifyDist" in verification
 
     build = Path("scripts/build/build.bat").read_text(encoding="utf-8")
     test_workflow = Path(".github/workflows/test-suite.yml").read_text(encoding="utf-8")

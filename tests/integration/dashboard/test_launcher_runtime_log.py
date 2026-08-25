@@ -31,3 +31,11 @@ def test_launcher_tray_stops_bot_before_dashboard(tmp_path: Path) -> None:
     )
     controller.exit()
     assert events[:2] == ["bot", "dashboard"]
+
+
+def test_tray_setup_makes_custom_pystray_icon_visible(tmp_path: Path) -> None:
+    icon = type("Icon", (), {"visible": False})()
+
+    launcher._setup_tray_icon(icon, tmp_path / "runtime.log")
+
+    assert icon.visible is True

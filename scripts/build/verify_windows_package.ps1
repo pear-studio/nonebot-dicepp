@@ -7,9 +7,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 $resolvedDist = (Resolve-Path -LiteralPath $DistDir).Path
-$runtime = Join-Path $resolvedDist "DicePP-Runtime.exe"
-$launcher = Join-Path $resolvedDist "DicePP.exe"
-if (-not (Test-Path -LiteralPath $runtime) -or -not (Test-Path -LiteralPath $launcher)) {
+$sourceRuntime = Join-Path $resolvedDist "DicePP-Runtime.exe"
+$sourceLauncher = Join-Path $resolvedDist "DicePP.exe"
+if (-not (Test-Path -LiteralPath $sourceRuntime) -or -not (Test-Path -LiteralPath $sourceLauncher)) {
     throw "Portable directory must contain DicePP.exe and DicePP-Runtime.exe"
 }
 
@@ -20,27 +20,34 @@ if (-not $Version) {
     $Version = $versionLine.Matches[0].Groups[1].Value
 }
 
-$runtimeVersion = (& $runtime --version | Out-String).Trim()
-if ($runtimeVersion -ne "DicePP v$Version") {
-    throw "Runtime version mismatch: expected DicePP v$Version, got $runtimeVersion"
-}
-
 function Get-ListeningPids([int]$Port) {
     @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-$ports = @(4090, 8080)
-foreach ($port in $ports) {
-    if (@(Get-ListeningPids $port).Count -gt 0) {
-        throw "Port $port is already in use"
-    }
-}
-
+$tempRoot = (Resolve-Path -LiteralPath ([System.IO.Path]::GetTempPath())).Path
+$verifyDist = Join-Path $tempRoot ("DicePP-verify-" + [guid]::NewGuid().ToString("N"))
 $process = $null
+$ports = @(4090, 8080)
 try {
+    New-Item -ItemType Directory -Path $verifyDist -Force | Out-Null
+    Get-ChildItem -LiteralPath $resolvedDist -Force | Copy-Item -Destination $verifyDist -Recurse -Force
+
+    $runtime = Join-Path $verifyDist "DicePP-Runtime.exe"
+    $launcher = Join-Path $verifyDist "DicePP.exe"
+    $runtimeVersion = (& $runtime --version | Out-String).Trim()
+    if ($runtimeVersion -ne "DicePP v$Version") {
+        throw "Runtime version mismatch: expected DicePP v$Version, got $runtimeVersion"
+    }
+
+    foreach ($port in $ports) {
+        if (@(Get-ListeningPids $port).Count -gt 0) {
+            throw "Port $port is already in use"
+        }
+    }
+
     $process = Start-Process -FilePath $launcher -ArgumentList @("--background") `
-        -WorkingDirectory $resolvedDist -WindowStyle Hidden -PassThru
+        -WorkingDirectory $verifyDist -WindowStyle Hidden -PassThru
     $ready = $false
     for ($i = 0; $i -lt 45; $i++) {
         $health = (& curl.exe --silent --output NUL --write-out "%{http_code}" --max-time 2 `
@@ -65,4 +72,8 @@ finally {
             Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         }
     }
+    if ((Split-Path -Parent $verifyDist) -ne $tempRoot) {
+        throw "Refusing to remove verification directory outside the system temp directory"
+    }
+    Remove-Item -LiteralPath $verifyDist -Recurse -Force -ErrorAction SilentlyContinue
 }
