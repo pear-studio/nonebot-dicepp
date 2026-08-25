@@ -44,6 +44,7 @@ from dicepp_data.instance_data import (
     InstanceDataNotEmptyError,
     clear_instance_data,
     import_instance_data,
+    import_instance_directory,
 )
 from dicepp_meta import get_project_info, get_version
 
@@ -655,18 +656,24 @@ async def instance_import(request: Request):
     if not isinstance(body, dict) or body.get("confirm") is not True:
         _err("confirm must be true for importing business data", 400)
     archive = body.get("archive")
-    if not isinstance(archive, str) or not archive.strip():
+    source_path = body.get("source_path")
+    if (archive is None) == (source_path is None):
+        _err("Provide exactly one of archive or source_path", 400)
+    if archive is not None and (not isinstance(archive, str) or not archive.strip()):
         _err("archive must be a non-empty filename", 400)
+    if source_path is not None and (
+        not isinstance(source_path, str) or not source_path.strip()
+    ):
+        _err("source_path must be a non-empty directory path", 400)
     controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
     def import_when_stopped():
         if controller.status().state != "stopped":
             raise BotNotStopped("Bot must be stopped before importing business data")
-        return import_instance_data(
-            _archive_layout(),
-            archive=archive,
-        )
+        if source_path is not None:
+            return import_instance_directory(_archive_layout(), source_path)
+        return import_instance_data(_archive_layout(), archive=archive)
 
     try:
         result = await runtime_service.run_maintenance(import_when_stopped)

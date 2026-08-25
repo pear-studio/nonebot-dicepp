@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import sqlite3
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from dicepp_data import (
@@ -78,32 +79,72 @@ def import_instance_data(
         raise InstanceDataNotEmptyError(
             "Business data is not empty; clear the instance before importing"
         )
-    imported: list[str] = []
-    migrated: list[dict[str, object]] = []
     try:
         imported = _import_archive(layout, archive)
-        for logical_path in imported:
-            asset = DATA_CATALOG.find_for_logical_path(
-                logical_path, profile=ARCHIVE_PROFILE_FULL
-            )
-            if asset is None or asset.schema is None:
-                continue
-            result = _migrate_schema(
-                _target_for_logical_path(layout, logical_path), asset
-            )
-            migrated.append(
-                {
-                    "path": logical_path,
-                    "current_version": result.current_version,
-                    "target_version": result.target_version,
-                    "applied_versions": result.applied_versions,
-                    "created": result.created,
-                }
-            )
+        migrated = _migrate_imported_files(layout, imported)
     except (ArchiveError, OSError, sqlite3.Error, ValueError, SchemaLifecycleError) as exc:
         raise InstanceDataSourceError(str(exc) or type(exc).__name__) from exc
 
     return {"imported": sorted(imported), "count": len(imported), "migrations": migrated}
+
+
+def import_instance_directory(
+    layout: InstanceLayout,
+    source_path: str,
+) -> dict[str, object]:
+    """Import current catalog assets from a legacy DicePP instance directory."""
+    if not instance_data_is_empty(layout):
+        raise InstanceDataNotEmptyError(
+            "Business data is not empty; clear the instance before importing"
+        )
+    if not isinstance(source_path, str) or not source_path.strip():
+        raise InstanceDataSourceError("source_path must be a non-empty directory path")
+    source_root = Path(source_path).expanduser().resolve()
+    if not source_root.is_dir():
+        raise InstanceDataSourceError(f"Import source is not a directory: {source_path}")
+
+    source_layout = InstanceLayout.from_root(source_root)
+    matches = DATA_CATALOG.collect(source_layout, ARCHIVE_PROFILE_FULL)
+    if not matches:
+        raise InstanceDataSourceError(
+            "No importable DicePP data found in source directory"
+        )
+    imported: list[str] = []
+    try:
+        for match in matches:
+            target = _target_for_logical_path(layout, match.logical_path)
+            with match.path.open("rb") as source:
+                _copy_stream(source, target, match.logical_path)
+            imported.append(match.logical_path)
+        migrated = _migrate_imported_files(layout, imported)
+    except (OSError, sqlite3.Error, ValueError, SchemaLifecycleError) as exc:
+        raise InstanceDataSourceError(str(exc) or type(exc).__name__) from exc
+
+    return {"imported": sorted(imported), "count": len(imported), "migrations": migrated}
+
+
+def _migrate_imported_files(
+    layout: InstanceLayout,
+    imported: Iterable[str],
+) -> list[dict[str, object]]:
+    migrated: list[dict[str, object]] = []
+    for logical_path in imported:
+        asset = DATA_CATALOG.find_for_logical_path(
+            logical_path, profile=ARCHIVE_PROFILE_FULL
+        )
+        if asset is None or asset.schema is None:
+            continue
+        result = _migrate_schema(_target_for_logical_path(layout, logical_path), asset)
+        migrated.append(
+            {
+                "path": logical_path,
+                "current_version": result.current_version,
+                "target_version": result.target_version,
+                "applied_versions": result.applied_versions,
+                "created": result.created,
+            }
+        )
+    return migrated
 
 
 def _import_archive(layout: InstanceLayout, filename: str) -> list[str]:
@@ -207,5 +248,6 @@ __all__ = [
     "InstanceDataSourceError",
     "clear_instance_data",
     "import_instance_data",
+    "import_instance_directory",
     "instance_data_is_empty",
 ]
