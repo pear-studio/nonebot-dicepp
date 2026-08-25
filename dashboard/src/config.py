@@ -10,7 +10,7 @@ _INSTANCE_LAYOUT = InstanceLayout.from_env(_SOURCE_ROOT)
 
 
 class DashboardPaths:
-    """Compatibility facade over the shared :class:`InstanceLayout`."""
+    """Dashboard paths backed by the shared :class:`InstanceLayout`."""
 
     PROJECT_ROOT = _INSTANCE_LAYOUT.root
 
@@ -40,7 +40,7 @@ class DashboardPaths:
 
     @classmethod
     def instance_layout(cls) -> InstanceLayout:
-        return InstanceLayout.from_legacy_paths(cls)
+        return InstanceLayout.from_root(cls.PROJECT_ROOT, data_root=cls.DATA_ROOT)
 
     @classmethod
     def bot_data_db_path(cls, bot_id: str) -> Path:

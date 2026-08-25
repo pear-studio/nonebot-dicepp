@@ -90,7 +90,6 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     _init_db(db_path)
     app.state.dashboard_db = db_path
-    app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
     # Serialize Bot lifecycle changes with in-place data maintenance.
     controller = getattr(app.state, "bot_process_controller", None)
@@ -192,18 +191,6 @@ def _ok(data: dict = None) -> dict:
 def _err(message: str, status_code: int = 400) -> HTTPException:
     """Raise an error response."""
     raise HTTPException(status_code=status_code, detail={"ok": False, "message": message})
-
-
-def _read_json_safe(path: Path) -> dict:
-    """Read a JSON file, return empty dict if missing or corrupted."""
-    if not path.exists():
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        logger.warning(f"Skipping unreadable config file: {path}")
-        return {}
 
 
 def _is_path_traversal(path: str, base: Path) -> bool:

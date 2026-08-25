@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dashboard.src.app import app
-from dashboard.src.config import DashboardPaths
 from tests.support.dashboard import app as dashboard_support
 
 
@@ -123,7 +122,6 @@ def _configure_app_state(
     if previous_controller is not None:
         previous_controller.shutdown()
     app.state.dashboard_db = dashboard_support.init_test_db(project_root)
-    app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
     for attribute in (
         "bot_process_controller",

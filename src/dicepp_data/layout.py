@@ -12,9 +12,8 @@ from typing import Mapping
 class InstanceLayout:
     """Resolve every mutable path belonging to one DicePP instance.
 
-    ``data_root`` remains separately overridable for compatibility with the
-    existing Dashboard ``DICEPP_DATA_DIR`` deployment option. New deployments
-    should normally keep it at ``root / "data"``.
+    ``data_root`` remains separately overridable for the Dashboard
+    ``DICEPP_DATA_DIR`` deployment option.
     """
 
     root: Path
@@ -45,17 +44,6 @@ class InstanceLayout:
         env = os.environ if environ is None else environ
         root = env.get("DICEPP_PROJECT_ROOT", str(default_root))
         return cls.from_root(root, data_root=env.get("DICEPP_DATA_DIR"))
-
-    @classmethod
-    def from_legacy_paths(cls, paths: object) -> "InstanceLayout":
-        """Adapt the existing class-style Paths facades during migration."""
-        root = Path(getattr(paths, "PROJECT_ROOT"))
-        data_root = getattr(paths, "DATA_ROOT", None)
-        if data_root is None:
-            data_root = getattr(paths, "DATA_DIR", None)
-        if data_root is None:
-            data_root = Path(getattr(paths, "DATA_BOTS_DIR")).parent
-        return cls.from_root(root, data_root=data_root)
 
     @property
     def config_dir(self) -> Path:

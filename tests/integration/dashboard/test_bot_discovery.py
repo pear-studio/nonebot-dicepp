@@ -1,13 +1,9 @@
 """Tests for the ``/api/bots`` bot-discovery endpoint."""
 
-from pathlib import Path
-
-import pytest
 from fastapi.testclient import TestClient
 
-from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import init_test_db, patch_paths, setup_auth
-from dashboard.src.app import app, _init_db
+from dashboard.src.app import app
 
 
 class TestListBots:
@@ -38,7 +34,6 @@ class TestListBots:
         patch_paths(monkeypatch, project_root)
         db_path = init_test_db(project_root)
         app.state.dashboard_db = db_path
-        app.state.dashboard_paths = DashboardPaths
 
         monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
         client = TestClient(

@@ -7,7 +7,7 @@ from plugins.DicePP.frozen import get_project_root
 
 
 def _derive_paths(layout: InstanceLayout) -> dict[str, Path]:
-    """Compatibility attribute map backed by the shared instance layout."""
+    """Current path attribute map backed by the shared instance layout."""
     return {
         "PROJECT_ROOT": layout.root,
         "CONFIG_DIR": layout.config_dir,
@@ -66,7 +66,7 @@ class Paths:
 
     @classmethod
     def instance_layout(cls) -> InstanceLayout:
-        return InstanceLayout.from_legacy_paths(cls)
+        return cls._layout
 
     @classmethod
     def bot_data_dir(cls, bot_id: str) -> Path:

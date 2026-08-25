@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dashboard.src.bot_process import BotProcessStatus
+from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
 from tests.support.fs_utils import symlink_or_skip
 
@@ -149,7 +150,7 @@ class TestQueryDbEntries:
         self, test_client: TestClient
     ) -> None:
         setup_auth(test_client)
-        source = Path(test_client.app.state.dashboard_paths.CONTENT_DIR) / "queries" / "test_queries.db"
+        source = DashboardPaths.CONTENT_DIR / "queries" / "test_queries.db"
         before = source.read_bytes()
 
         class RunningController:
@@ -184,7 +185,7 @@ class TestQueryDbEntries:
         assert response.status_code == 200
         assert response.json()["normalized"] is True
         with sqlite3.connect(
-            Path(test_client.app.state.dashboard_paths.CONTENT_DIR)
+            DashboardPaths.CONTENT_DIR
             / "queries"
             / "test_queries.db"
         ) as connection:
