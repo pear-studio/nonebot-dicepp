@@ -38,7 +38,6 @@ dependencies = [
     "loguru>=0.7.0",
     "pystray>=0.19",
     "pillow>=10.0",
-    "packaging>=24.0",
 ]
 
 [project.scripts]
