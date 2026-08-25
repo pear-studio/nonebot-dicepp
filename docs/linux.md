@@ -40,7 +40,13 @@ curl -fsS http://127.0.0.1:4090/api/health
 
 ## 首次配置
 
-打开 Dashboard 初始化管理员密码，添加或编辑 Bot 配置，然后按页面提示重启 Bot。配置保存只报告 `restart_required`，不会启动隐藏的配置热重载通道。
+打开 Dashboard 前，先在唯一的 `dicepp` service 中初始化管理员密码：
+
+```bash
+docker compose run --rm --no-deps dicepp python -m dashboard admin init
+```
+
+然后打开 Dashboard 添加或编辑 Bot 配置，再按页面提示重启 Bot。配置保存只报告 `restart_required`，不会启动隐藏的配置热重载通道。
 
 创建存档、清空业务数据和导入空实例前，必须在 Dashboard 停止 Bot。导入目标必须是业务数据为空的实例。管理数据库、Dashboard session、日志和程序文件不会被清空。
 
