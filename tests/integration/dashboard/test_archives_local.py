@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from dashboard.src.bot_process import BotProcessStatus
+from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
 
 
@@ -26,6 +27,8 @@ def test_archive_create_is_local_and_visible_in_inventory_and_detail(
 ) -> None:
     setup_auth(test_client)
     test_client.app.state.bot_process_controller = StoppedController()
+    for database in DashboardPaths.instance_layout().data_root.glob("bots/*/*.db"):
+        database.unlink()
 
     created = test_client.post(
         "/api/archives",
@@ -43,7 +46,7 @@ def test_archive_create_is_local_and_visible_in_inventory_and_detail(
     detail = test_client.get(f"/api/archives/{filename}")
     assert detail.status_code == 200
     assert detail.json()["archive"]["filename"] == filename
-    assert detail.json()["manifest"]["format_version"] >= 2
+    assert detail.json()["manifest"]["format_version"] == 3
 
 
 def test_archive_create_rejects_a_running_bot(test_client: TestClient) -> None:
