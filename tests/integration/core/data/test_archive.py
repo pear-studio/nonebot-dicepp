@@ -31,6 +31,7 @@ def test_archive_create_inventory_verify_export_delete(tmp_path: Path) -> None:
 
     summary, manifest = create_archive(layout=layout)
     assert manifest["format_version"] == 3
+    assert manifest["profile"] == "full"
     assert {"checksum", "assets", "catalog", "scope"}.isdisjoint(manifest)
     assert all(set(item) == {"path", "size", "sha256"} for item in manifest["files"])
     assert list_archives(layout=layout)[0]["filename"] == summary["filename"]

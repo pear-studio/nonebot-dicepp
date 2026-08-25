@@ -27,9 +27,9 @@ Dashboard lifespan 持有 controller，并在 lifespan 结束时 shutdown。Bot 
 
 ## 数据边界
 
-Dashboard 管理数据库、session、审计和运行日志独立于业务数据。配置、查询、存档、清空和空实例导入都在 Dashboard 本地调用 `dicepp_data`；业务维护使用一个进程内 `data_maintenance_lock`，并要求 Bot 已停止。导入开始时检查目标为空实例，失败后由用户清空并重试。
+Dashboard 管理数据库、session、审计和运行日志独立于业务数据。配置、查询、手动备份、清空和空实例导入都在 Dashboard 本地调用 `dicepp_data`；业务维护使用一个进程内 `data_maintenance_lock`，并要求 Bot 已停止。导入开始时检查目标为空实例，失败后由用户清空并重试。
 
-存档物理位置为 `data/backups/`，由 data volume 自然持久化。程序不会自动发现、复制或迁移旧目录中的存档；需要时由用户手工搬移。
+存档物理位置为 `data/backups/`，由 data volume 自然持久化。程序不会自动发现、复制或迁移旧目录；Windows 迁移由新 Dashboard 显式接收旧目录路径，ZIP 存档仍通过独立导入恢复。
 
 ## 部署
 

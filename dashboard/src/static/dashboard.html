@@ -899,7 +899,7 @@
 
         <div class="bg-white rounded-lg shadow mb-4">
           <div class="p-4 border-b">
-            <h3 class="font-semibold">存档管理</h3>
+            <h3 class="font-semibold">手动备份</h3>
           </div>
           <div class="p-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -911,7 +911,7 @@
                   maxlength="500"
                   data-testid="archive-description"
                   class="px-3 py-2 border rounded text-sm"
-                  placeholder="例如：更新前存档"
+                  placeholder="例如：周末手动备份"
                 />
               </label>
               <button
@@ -919,7 +919,7 @@
                 :disabled="archiveCreating"
                 data-testid="archive-create-button"
                 class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-              >创建存档</button>
+              >创建备份</button>
               <label class="px-4 py-2 border text-sm rounded cursor-pointer hover:bg-gray-50">
                 导入 ZIP
                 <input
@@ -1509,7 +1509,6 @@ function app() {
     archivesError: '',
     archivesLoading: false,
     archiveDescription: '',
-    archiveProfile: 'regular',
     archiveCreating: false,
     archiveCreateMessage: '',
     archiveCreateError: '',
@@ -2686,7 +2685,6 @@ function app() {
       this.archivesError = '';
       this.archivesLoading = false;
       this.archiveDescription = '';
-      this.archiveProfile = 'regular';
       this.archiveCreating = false;
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
@@ -2731,7 +2729,6 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             description: this.archiveDescription || undefined,
-            profile: this.archiveProfile,
           }),
         });
         const archive = data.archive || null;

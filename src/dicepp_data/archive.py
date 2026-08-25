@@ -209,10 +209,9 @@ def create_archive(
     description: str | None = None,
     *,
     layout: InstanceLayout,
-    profile: str = ARCHIVE_PROFILE_REGULAR,
 ) -> tuple[dict, dict]:
-    """Create a local zip archive and return ``(summary, manifest)``."""
-    profile = _validate_profile(profile)
+    """Create one complete manual backup and return ``(summary, manifest)``."""
+    profile = ARCHIVE_PROFILE_FULL
     target_dir = backups_dir(layout)
     target_dir.mkdir(parents=True, exist_ok=True)
     now = _utc_now()

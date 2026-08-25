@@ -4,18 +4,18 @@ DicePP 当前采用手工更新。Dashboard 只展示当前版本和 GitHub Rele
 
 ## Windows Portable
 
-1. 在 Dashboard 导出重要存档并停止 Bot。
+1. 退出旧目录中的 `DicePP.exe`，停止旧 Bot 并释放 Dashboard 端口；不必从旧 Dashboard 导出存档。
 2. 从 [GitHub Releases](https://github.com/pear-studio/nonebot-dicepp/releases) 下载目标 `win64-Portable.zip`。
-3. 解压到新的空目录，不覆盖正在使用的旧目录。
-4. 按 [Windows 部署](./windows.md) 的导入说明迁移配置或业务数据。
-5. 启动新目录的 `DicePP.exe`，确认 Dashboard 健康和 Bot 状态。
+3. 解压到新的空目录，不覆盖旧目录，并启动新目录的 `DicePP.exe`。
+4. 在新 Dashboard 停止 Bot，然后在存档页输入旧 Portable 根目录路径，按 [Windows 部署](./windows.md) 的导入说明导入配置、业务数据和内容。
+5. 启动 Bot 并确认 Dashboard 和 Bot 状态；需要迁移旧 ZIP 存档时，使用独立的“导入 ZIP”操作。
 
 当前不提供 Windows Setup、Velopack、自动下载、自动安装或自动回滚。
 
 ## Linux 单容器
 
-1. 在 Dashboard 导出重要存档并停止 Bot。
-2. 备份 `config/`、`data/`、`content/` 和 `dashboard/data/`；存档位于 `data/backups/`。
+1. 在 Dashboard 停止 Bot；需要留存时按需创建或导出手动备份。
+2. 保留并复用现有的 `config/`、`data/`、`content/` 和 `dashboard/data/` volumes；存档位于 `data/backups/`。
 3. 更新 `docker-compose.yml` 中的镜像 tag。
 4. 执行 `docker compose down`、`docker compose pull`、`docker compose up -d`。
 5. 检查 `docker compose ps`、`/api/health` 和 Dashboard 中的 Bot 状态。

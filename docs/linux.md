@@ -48,7 +48,7 @@ docker compose run --rm --no-deps dicepp python -m dashboard admin init
 
 然后打开 Dashboard 添加或编辑 Bot 配置，再按页面提示重启 Bot。配置保存只报告 `restart_required`，不会启动隐藏的配置热重载通道。
 
-创建存档、清空业务数据和导入空实例前，必须在 Dashboard 停止 Bot。导入目标必须是业务数据为空的实例。管理数据库、Dashboard session、日志和程序文件不会被清空。
+创建手动备份、清空业务数据和导入空实例前，必须在 Dashboard 停止 Bot。导入目标必须是业务数据为空的实例。管理数据库、Dashboard session、日志和程序文件不会被清空。
 
 ## 手工更新
 
@@ -62,7 +62,7 @@ DICEPP_IMAGE_TAG=<TAG> docker compose pull
 DICEPP_IMAGE_TAG=<TAG> docker compose up -d
 ```
 
-如果新版本需要数据迁移，Dashboard 会在启动或首次访问时执行当前 schema migration。更新前请导出重要存档；不要在 Bot 运行时直接覆盖 `config/`、`data/` 或 `content/`。出现问题时停止容器，保留日志和目录，按目标版本说明手工处理，不依赖自动回滚。
+如果新版本需要数据迁移，Dashboard 会在启动或首次访问时执行当前 schema migration。Linux 更新复用现有的 `config/`、`data/`、`content/` 和 `dashboard/data/` volumes；需要留存时可按需创建或导出手动备份。不在 Bot 运行时直接覆盖这些目录。出现问题时停止容器，保留日志和目录，按目标版本说明手工处理，不依赖自动回滚。
 
 ## 构建本地镜像
 

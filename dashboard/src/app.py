@@ -502,10 +502,9 @@ async def archives_create(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         _err("Request body must be a JSON object", 400)
-    profile = body.get("profile", "regular")
+    if "profile" in body:
+        _err("profile is not supported; archives are always full", 400)
     description = body.get("description")
-    if profile not in {"regular", "full"}:
-        _err("profile must be regular or full", 400)
     if description is not None and not isinstance(description, str):
         _err("description must be a string or null", 400)
     controller = _get_bot_process_controller(request)
@@ -516,7 +515,6 @@ async def archives_create(request: Request):
             raise BotNotStopped("Bot must be stopped before archive creation")
         return create_archive(
             layout=_archive_layout(),
-            profile=profile,
             description=description,
         )
 
