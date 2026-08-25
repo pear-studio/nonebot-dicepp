@@ -26,7 +26,9 @@ from dicepp_data import (
 from dicepp_meta import get_version as get_dicepp_version
 
 ARCHIVE_FORMAT_VERSION = 3
+LEGACY_ARCHIVE_FORMAT_VERSIONS = {1, 2}
 MANIFEST_NAME = "manifest.json"
+CHECKSUM_ALGORITHM = "sha256"
 SUPPORTED_PROFILES = {ARCHIVE_PROFILE_REGULAR, ARCHIVE_PROFILE_FULL}
 MAX_ARCHIVE_BYTES = 16 * 1024**3
 MAX_MEMBER_BYTES = 8 * 1024**3
@@ -345,7 +347,7 @@ def archive_summary(path: Path) -> dict:
                 return summary
             manifest = _read_manifest_from_open_archive(archive)
             profile = _manifest_profile(manifest)
-            files = _manifest_files(manifest)
+            files = _manifest_files(manifest, archive=archive)
     except (OSError, ArchiveError, KeyError, json.JSONDecodeError, zipfile.BadZipFile):
         return summary
 
@@ -365,8 +367,10 @@ def _archive_summary_from_manifest(
     path: Path,
     stat_info: object,
     manifest: dict,
+    *,
+    archive: zipfile.ZipFile,
 ) -> dict:
-    files = _manifest_files(manifest)
+    files = _manifest_files(manifest, archive=archive)
     fallback_created_at = _format_created_at(
         datetime.fromtimestamp(stat_info.st_mtime, timezone.utc)
     )
@@ -418,13 +422,36 @@ def read_archive_detail(
         if structure:
             raise ArchiveInvalidError("; ".join(structure))
         manifest = _read_manifest_from_open_archive(archive)
-        return _archive_summary_from_manifest(path, stat_info, manifest), manifest
+        return (
+            _archive_summary_from_manifest(path, stat_info, manifest, archive=archive),
+            manifest,
+        )
 
 
-def _manifest_files(manifest: dict) -> list[dict]:
-    if manifest.get("format_version") != ARCHIVE_FORMAT_VERSION:
+def _manifest_files(
+    manifest: dict,
+    *,
+    archive: zipfile.ZipFile,
+) -> list[dict]:
+    format_version = manifest.get("format_version")
+    if type(format_version) is not int or format_version not in {
+        *LEGACY_ARCHIVE_FORMAT_VERSIONS,
+        ARCHIVE_FORMAT_VERSION,
+    }:
         raise ArchiveInvalidError("Unsupported archive format version")
     _manifest_profile(manifest)
+
+    if format_version in LEGACY_ARCHIVE_FORMAT_VERSIONS:
+        checksum_files = _manifest_checksum_files(manifest)
+        records: list[dict] = []
+        for path, digest in checksum_files.items():
+            try:
+                size = archive.getinfo(path).file_size
+            except KeyError:
+                size = None
+            records.append({"path": path, "size": size, "sha256": digest})
+        return records
+
     files = manifest.get("files")
     if not isinstance(files, list):
         raise ArchiveInvalidError("Archive manifest files must be an array")
@@ -439,6 +466,25 @@ def _manifest_files(manifest: dict) -> list[dict]:
         raise ArchiveInvalidError("Archive manifest contains an invalid file record")
     if len({item["path"] for item in files}) != len(files):
         raise ArchiveInvalidError("Archive manifest contains duplicate file records")
+    return files
+
+
+def _manifest_checksum_files(manifest: dict) -> dict[str, str]:
+    checksum = manifest.get("checksum")
+    if not isinstance(checksum, dict):
+        raise ArchiveInvalidError("Archive manifest checksum must be an object")
+    if checksum.get("algorithm") != CHECKSUM_ALGORITHM:
+        raise ArchiveInvalidError("Unsupported archive checksum algorithm")
+    files = checksum.get("files")
+    if not isinstance(files, dict):
+        raise ArchiveInvalidError("Archive manifest checksum.files must be an object")
+    if any(
+        not isinstance(path, str) or not isinstance(digest, str)
+        for path, digest in files.items()
+    ):
+        raise ArchiveInvalidError(
+            "Archive manifest checksum.files must map paths to digests"
+        )
     return files
 
 
@@ -461,8 +507,14 @@ def _sha256_zip_member(archive: zipfile.ZipFile, arcname: str) -> str:
 
 
 def _manifest_profile(manifest: dict) -> str:
-    if manifest.get("format_version") != ARCHIVE_FORMAT_VERSION:
+    format_version = manifest.get("format_version")
+    if type(format_version) is not int or format_version not in {
+        *LEGACY_ARCHIVE_FORMAT_VERSIONS,
+        ARCHIVE_FORMAT_VERSION,
+    }:
         raise ArchiveInvalidError("Unsupported archive format version")
+    if format_version == 1:
+        return ARCHIVE_PROFILE_REGULAR
     try:
         return _validate_profile(str(manifest.get("profile", "")))
     except ArchiveError as exc:
@@ -521,7 +573,12 @@ def verify_archive(
         if structure:
             return _structure_failure_verification(path, stat_info, structure)
         manifest = _read_manifest_from_open_archive(archive)
-        archive_summary_data = _archive_summary_from_manifest(path, stat_info, manifest)
+        archive_summary_data = _archive_summary_from_manifest(
+            path,
+            stat_info,
+            manifest,
+            archive=archive,
+        )
         return _verify_open_archive(archive, archive_summary_data, manifest)
 
 
@@ -538,7 +595,12 @@ def verify_archive_path(path: Path, *, expected_filename: str | None = None) -> 
             if structure:
                 return _structure_failure_verification(path, path_stat, structure)
             manifest = _read_manifest_from_open_archive(archive)
-            summary = _archive_summary_from_manifest(path, path_stat, manifest)
+            summary = _archive_summary_from_manifest(
+                path,
+                path_stat,
+                manifest,
+                archive=archive,
+            )
             if expected_filename:
                 summary["filename"] = expected_filename
             return _verify_open_archive(archive, summary, manifest)
@@ -551,7 +613,7 @@ def _verify_open_archive(
     archive_summary_data: dict,
     manifest: dict,
 ) -> dict:
-    files = _manifest_files(manifest)
+    files = _manifest_files(manifest, archive=archive)
     profile = _manifest_profile(manifest)
     problems: list[str] = _validate_zip_structure(archive)
     restorable_files: list[str] = []
@@ -583,7 +645,7 @@ def _verify_open_archive(
         if actual_digest != expected_digest:
             problems.append(f"Checksum mismatch for {arcname}")
             continue
-        if info.file_size != record["size"]:
+        if record["size"] is not None and info.file_size != record["size"]:
             problems.append(f"File record size mismatch for {arcname}")
             continue
         restorable_files.append(arcname)
