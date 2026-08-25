@@ -79,8 +79,26 @@ def test_windows_workflow_builds_and_smokes_the_portable_contract() -> None:
     assert "DicePP-Runtime.exe --version" in smoke
     assert 'Start-Process -FilePath "dist/DicePP/DicePP.exe"' in smoke
     assert 'if ($dashboard.ExitCode -ne 0)' in smoke
+    assert 'DICEPP_DASHBOARD_OPEN_BROWSER = "0"' in smoke
+    assert 'ArgumentList "--background"' in smoke
+    assert 'http://127.0.0.1:4090/api/health' in smoke
+    assert 'http://127.0.0.1:8080/' in smoke
+    assert 'Get-Process -Name "DicePP","DicePP-Runtime"' in smoke
     assert "Compress-Archive" in smoke
     assert len(steps) == 7
+
+
+def test_test_suite_docker_smoke_uses_default_cmd_and_checks_both_ports() -> None:
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
+    smoke = _step(suite["jobs"]["docker-smoke"], "Smoke test Dashboard and Bot entrypoints")["run"]
+
+    assert "docker run -d" in smoke
+    assert "-e DICEPP_ONEBOT_HOST=0.0.0.0" in smoke
+    assert "-p 127.0.0.1:4090:4090 -p 127.0.0.1:8080:8080" in smoke
+    assert "\n  dicepp:ci\n" in smoke
+    assert "api/health" in smoke
+    assert "127.0.0.1:8080/" in smoke
+    assert "docker rm -f dicepp-ci-smoke" in smoke
 
 
 def test_reusable_suite_guards_current_runtime_normal_path() -> None:
@@ -108,5 +126,7 @@ def test_release_updates_latest_only_for_stable_tags() -> None:
 
     assert 'test "$GITHUB_REF_NAME" = "v$expected"' in build
     assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in build
+    assert "-p 127.0.0.1:4090:4090 -p 127.0.0.1:8080:8080" in build
+    assert "127.0.0.1:8080/" in build
     assert 'docker_args+=( -t "$LATEST_IMAGE" )' in build
     assert 'docker push "$LATEST_IMAGE"' in push

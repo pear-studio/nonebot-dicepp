@@ -87,7 +87,7 @@ jobs:
           docker build "${docker_args[@]}" .
           test "$(docker run --rm --network=none "$IMAGE" python -m dashboard --version)" = "DicePP Dashboard v$expected"
           mkdir -p smoke/{config,data,content,dashboard/data,manager/backups}
-          docker run -d --name dicepp-release-smoke -p 127.0.0.1:4090:4090 \
+          docker run -d --name dicepp-release-smoke -p 127.0.0.1:4090:4090 -p 127.0.0.1:8080:8080 \
             -e DICEPP_ONEBOT_HOST=0.0.0.0 \
             -v "$PWD/smoke/config:/app/config" \
             -v "$PWD/smoke/data:/app/data" \
@@ -96,12 +96,16 @@ jobs:
             -v "$PWD/smoke/manager/backups:/app/manager/backups" \
             "$IMAGE"
           trap 'docker rm -f dicepp-release-smoke >/dev/null 2>&1 || true' EXIT
-          ready=false
+          dashboard_ready=false
+          onebot_ready=false
           for i in $(seq 1 45); do
-            if curl --fail --silent http://127.0.0.1:4090/api/health >/dev/null; then ready=true; break; fi
+            if curl --fail --silent --max-time 2 http://127.0.0.1:4090/api/health >/dev/null; then dashboard_ready=true; fi
+            onebot_code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 http://127.0.0.1:8080/ || true)"
+            if [ "$onebot_code" != "000" ]; then onebot_ready=true; fi
+            if [ "$dashboard_ready" = true ] && [ "$onebot_ready" = true ]; then break; fi
             sleep 1
           done
-          if [ "$ready" != true ]; then docker logs dicepp-release-smoke; exit 1; fi
+          if [ "$dashboard_ready" != true ] || [ "$onebot_ready" != true ]; then docker logs dicepp-release-smoke; exit 1; fi
           docker rm -f dicepp-release-smoke >/dev/null
       - name: Prepare release assets
         run: |

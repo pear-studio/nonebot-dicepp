@@ -63,6 +63,22 @@ jobs:
           test "$(docker run --rm --network=none dicepp:ci python -m dashboard --version)" = "DicePP Dashboard v$expected"
           test "$(docker run --rm --network=none dicepp:ci python bot.py --version)" = "DicePP v$expected"
           docker run --rm --network=none dicepp:ci python bot.py --smoke-check
+          docker run -d --name dicepp-ci-smoke \
+            -e DICEPP_ONEBOT_HOST=0.0.0.0 \
+            -p 127.0.0.1:4090:4090 -p 127.0.0.1:8080:8080 \
+            dicepp:ci
+          trap 'docker rm -f dicepp-ci-smoke >/dev/null 2>&1 || true' EXIT
+          dashboard_ready=false
+          onebot_ready=false
+          for i in $(seq 1 45); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:4090/api/health >/dev/null; then dashboard_ready=true; fi
+            onebot_code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 http://127.0.0.1:8080/ || true)"
+            if [ "$onebot_code" != "000" ]; then onebot_ready=true; fi
+            if [ "$dashboard_ready" = true ] && [ "$onebot_ready" = true ]; then break; fi
+            sleep 1
+          done
+          if [ "$dashboard_ready" != true ] || [ "$onebot_ready" != true ]; then docker logs dicepp-ci-smoke; exit 1; fi
+          docker rm -f dicepp-ci-smoke >/dev/null
 
   windows-package:
     name: Windows Portable Package
@@ -92,6 +108,22 @@ jobs:
           & dist/DicePP/DicePP-Runtime.exe --smoke-check
           $dashboard = Start-Process -FilePath "dist/DicePP/DicePP.exe" -ArgumentList "--smoke-check" -Wait -PassThru
           if ($dashboard.ExitCode -ne 0) { throw "Dashboard smoke check failed" }
+          $env:DICEPP_DASHBOARD_OPEN_BROWSER = "0"
+          $background = Start-Process -FilePath "dist/DicePP/DicePP.exe" -ArgumentList "--background" -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              $health = curl.exe --silent --output NUL --write-out "%{http_code}" --max-time 2 "http://127.0.0.1:4090/api/health"
+              $onebot = curl.exe --silent --output NUL --write-out "%{http_code}" --max-time 2 "http://127.0.0.1:8080/"
+              if ($health -eq "200" -and $onebot -ne "000") { $ready = $true; break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw "Portable background runtime did not expose Dashboard and Bot ports" }
+          }
+          finally {
+            if ($background -and -not $background.HasExited) { Stop-Process -Id $background.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process -Name "DicePP","DicePP-Runtime" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
           Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64-Portable.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
