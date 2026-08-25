@@ -125,7 +125,6 @@ def _configure_app_state(
     app.state.dashboard_db = dashboard_support.init_test_db(project_root)
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
-    app.state.status_subscribers = []
     for attribute in (
         "bot_process_controller",
     ):

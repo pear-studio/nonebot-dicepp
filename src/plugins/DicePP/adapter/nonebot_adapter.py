@@ -574,7 +574,6 @@ else:
         all_bots[bot.self_id] = bot_instance
         bot_instance.set_client_proxy(proxy)
         await bot_instance.delay_init_command()
-        # 控制通道在 delay_init_command 完成后自动发送 status，无需额外心跳
         # 通知健康监控：bot 已连接
         bot_instance.health_monitor.on_bot_connect()
         # 设定Bot自己的昵称，供日志使用

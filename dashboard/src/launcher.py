@@ -27,20 +27,9 @@ from .runtime_log import (
     configure_file_logging,
     rotate_runtime_log,
 )
-from .runtime_service import BotRuntimeService, BotStartBlocked
+from .runtime_service import BotRuntimeService
 
 logger = logging.getLogger("dashboard.launcher")
-
-_TRAY_ACTIONS = (
-    "status",
-    "open_dashboard",
-    "start",
-    "stop",
-    "restart",
-    "autostart",
-    "exit",
-)
-
 
 @dataclass
 class ManagedServerHandle:
@@ -101,7 +90,6 @@ class TrayController:
         self._bot_controller = bot_controller
         self._runtime_service = runtime_service or BotRuntimeService(
             bot_controller,
-            layout=DashboardPaths.instance_layout(),
         )
         self._dashboard_url = dashboard_url
         self._log_path = log_path
@@ -222,12 +210,6 @@ class TrayController:
             append_runtime_log_line(f"tray | Bot {action}", path=self._log_path)
             result = self._runtime_service.operate_sync(action)
             return result.to_dict()
-        except BotStartBlocked as exc:
-            append_runtime_log_line(
-                f"tray | {action} blocked: {exc}",
-                path=self._log_path,
-            )
-            return {"ok": False, "message": str(exc)}
         except Exception as exc:
             logger.exception("tray | %s failed", action)
             append_runtime_log_line(
@@ -290,7 +272,6 @@ def run_windows_launcher(*, background: bool = False) -> None:
         )
         runtime_service = BotRuntimeService(
             bot_controller,
-            layout=DashboardPaths.instance_layout(),
         )
         app.state.bot_process_controller = bot_controller
         app.state.bot_runtime_service = runtime_service

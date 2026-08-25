@@ -31,9 +31,6 @@ from dicepp_data.archive import (
 from plugins.DicePP.core.data.schema.lifecycle import SchemaLifecycleError
 
 
-INSTANCE_DATA_MARKER = ".instance-data.inprogress"
-
-
 class InstanceDataError(RuntimeError):
     """Raised when a catalog-scoped instance operation cannot be completed."""
 
@@ -44,15 +41,6 @@ class InstanceDataNotEmptyError(InstanceDataError):
 
 class InstanceDataSourceError(InstanceDataError):
     """Raised when an import source is unavailable or unsafe."""
-
-
-class InstanceDataInProgressError(InstanceDataError):
-    """Raised when an unfinished import marker already exists."""
-
-
-def instance_data_marker_path(layout: InstanceLayout) -> Path:
-    """Return the marker which blocks Bot start during an unfinished import."""
-    return layout.data_root / INSTANCE_DATA_MARKER
 
 
 def instance_data_is_empty(layout: InstanceLayout) -> bool:
@@ -77,11 +65,6 @@ def clear_instance_data(layout: InstanceLayout) -> dict[str, object]:
             for suffix in ("-wal", "-shm"):
                 sidecar = match.path.with_name(match.path.name + suffix)
                 _remove_managed_path(sidecar, f"{match.logical_path}{suffix}", removed)
-    marker = instance_data_marker_path(layout)
-    try:
-        marker.unlink()
-    except FileNotFoundError:
-        pass
     return {"cleared": sorted(removed), "count": len(removed)}
 
 
@@ -102,14 +85,6 @@ def import_instance_data(
         raise InstanceDataNotEmptyError(
             "Business data is not empty; clear the instance before importing"
         )
-    marker = instance_data_marker_path(layout)
-    if marker.exists():
-        raise InstanceDataInProgressError(
-            "An instance-data import is already in progress; clear and retry"
-        )
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text("importing\n", encoding="utf-8")
-
     imported: list[str] = []
     migrated: list[dict[str, object]] = []
     try:
@@ -136,11 +111,7 @@ def import_instance_data(
                 }
             )
     except (ArchiveError, OSError, sqlite3.Error, ValueError, SchemaLifecycleError) as exc:
-        # The marker intentionally remains.  The user must clear and retry;
-        # there is no hidden rollback or automatic restart path.
         raise InstanceDataSourceError(str(exc) or type(exc).__name__) from exc
-    else:
-        marker.unlink(missing_ok=True)
 
     return {"imported": sorted(imported), "count": len(imported), "migrations": migrated}
 
@@ -265,13 +236,10 @@ def _migrate_schema(path: Path, asset: DataAsset):
 
 
 __all__ = [
-    "INSTANCE_DATA_MARKER",
     "InstanceDataError",
     "InstanceDataNotEmptyError",
-    "InstanceDataInProgressError",
     "InstanceDataSourceError",
     "clear_instance_data",
     "import_instance_data",
     "instance_data_is_empty",
-    "instance_data_marker_path",
 ]

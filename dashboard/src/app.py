@@ -42,7 +42,6 @@ from dicepp_data.archive import (
 )
 from dicepp_data.instance_data import (
     InstanceDataError,
-    InstanceDataInProgressError,
     InstanceDataNotEmptyError,
     clear_instance_data,
     import_instance_data,
@@ -77,7 +76,7 @@ from .query_audit import (
     list_query_entries,
     list_query_redirects,
 )
-from .runtime_service import BotNotStopped, BotRuntimeService, BotStartBlocked
+from .runtime_service import BotNotStopped, BotRuntimeService
 
 logger = logging.getLogger("dashboard")
 
@@ -94,10 +93,6 @@ async def lifespan(app: FastAPI):
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
-    # SSE 订阅者列表是进程内结构。
-    # 多 worker 部署 (uvicorn --workers > 1) 时，
-    # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
-    app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
     # Serialize Bot lifecycle changes with in-place data maintenance.
     controller = getattr(app.state, "bot_process_controller", None)
     if controller is None:
@@ -110,16 +105,12 @@ async def lifespan(app: FastAPI):
     if runtime_service is None or runtime_service.controller is not controller:
         runtime_service = BotRuntimeService(
             controller,
-            layout=DashboardPaths.instance_layout(),
         )
         app.state.bot_runtime_service = runtime_service
     auto_start = bool(getattr(app.state, "bot_auto_start", False))
     try:
         if auto_start:
-            try:
-                await runtime_service.operate("start")
-            except BotStartBlocked as exc:
-                logger.error(str(exc))
+            await runtime_service.operate("start")
         yield
     finally:
         await asyncio.to_thread(controller.shutdown)
@@ -505,7 +496,7 @@ def _archive_error_response(exc: ArchiveError) -> JSONResponse:
 
 
 def _instance_data_error_response(exc: InstanceDataError) -> JSONResponse:
-    status = 409 if isinstance(exc, (InstanceDataNotEmptyError, InstanceDataInProgressError)) else 422
+    status = 409 if isinstance(exc, InstanceDataNotEmptyError) else 422
     return JSONResponse(status_code=status, content={"ok": False, "message": str(exc)})
 
 
@@ -1471,7 +1462,6 @@ def _get_bot_runtime_service(request: Request) -> BotRuntimeService:
     if service is None or service.controller is not controller:
         service = BotRuntimeService(
             controller,
-            layout=DashboardPaths.instance_layout(),
         )
         request.app.state.bot_runtime_service = service
     return service
@@ -1490,8 +1480,6 @@ async def bot_process_action(action: str, request: Request):
     runtime_service = _get_bot_runtime_service(request)
     try:
         status = await runtime_service.operate(action)
-    except BotStartBlocked as exc:
-        return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
     except (OSError, RuntimeError) as exc:
         audit_log(
             request.app.state.dashboard_db,
@@ -1534,24 +1522,14 @@ async def bot_process_logs(
 @app.get("/api/events", dependencies=[Depends(require_auth)])
 async def events_stream(request: Request):
     """SSE endpoint: pushes bot status updates to connected dashboard clients."""
-    queue: asyncio.Queue = asyncio.Queue()
-    subscribers: list = []
 
     async def _generate():
-        try:
+        bots = await _local_bot_statuses(request)
+        yield f"data: {json.dumps({'bots': bots})}\n\n"
+        while True:
+            await asyncio.sleep(2)
             bots = await _local_bot_statuses(request)
             yield f"data: {json.dumps({'bots': bots})}\n\n"
-            while True:
-                await asyncio.sleep(2)
-                bots = await _local_bot_statuses(request)
-                yield f"data: {json.dumps({'bots': bots})}\n\n"
-        except (asyncio.CancelledError, GeneratorExit):
-            pass
-        finally:
-            try:
-                subscribers.remove(queue)
-            except ValueError:
-                pass
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
 

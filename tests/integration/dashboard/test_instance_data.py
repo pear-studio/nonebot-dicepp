@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from dashboard.src.bot_process import BotProcessStatus
 from dashboard.src.config import DashboardPaths
-from dicepp_data.archive import create_archive
-from dicepp_data.instance_data import instance_data_marker_path
-from dicepp_data.layout import InstanceLayout
 from tests.support.dashboard.app import setup_auth
 
 
@@ -18,6 +14,9 @@ class StoppedController:
         return BotProcessStatus("stopped", returncode=0)
 
     def shutdown(self) -> BotProcessStatus:
+        return BotProcessStatus("stopped", returncode=0)
+
+    def start(self) -> BotProcessStatus:
         return BotProcessStatus("stopped", returncode=0)
 
 
@@ -66,34 +65,17 @@ def test_import_old_directory_requires_empty_target_and_copies_catalog_files(
     assert DashboardPaths.instance_layout().config_user.read_text(encoding="utf-8") == '{"master": ["old"]}'
 
 
-def test_import_archive_and_marker_block_start(test_client, tmp_path: Path) -> None:
+def test_failed_import_does_not_leave_a_bot_start_gate(test_client) -> None:
     setup_auth(test_client)
     test_client.app.state.bot_process_controller = StoppedController()
-    layout = DashboardPaths.instance_layout()
-    source_layout = InstanceLayout.from_root(tmp_path / "archive-source")
-    source_layout.config_dir.mkdir(parents=True)
-    source_layout.config_user.write_text('{"master": ["archive"]}', encoding="utf-8")
-    summary, _manifest = create_archive(layout=source_layout, profile="regular")
-    target_archive_dir = layout.archive_dir
-    target_archive_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_layout.archive_dir / summary["filename"], target_archive_dir / summary["filename"])
-
     assert test_client.post("/api/instance/clear", json={"confirm": True}).status_code == 200
-    imported = test_client.post(
+    failed = test_client.post(
         "/api/instance/import",
-        json={"confirm": True, "archive": summary["filename"]},
+        json={"confirm": True, "archive": "missing.zip"},
     )
-    assert imported.status_code == 200, imported.text
-    assert layout.config_user.read_text(encoding="utf-8") == '{"master": ["archive"]}'
-
-    marker = instance_data_marker_path(layout)
-    marker.write_text("unfinished", encoding="utf-8")
-    blocked = test_client.post("/api/bot/start")
-    assert blocked.status_code == 409
-    assert "incomplete" in blocked.json()["message"]
-    assert test_client.post("/api/bot/restart").status_code == 409
-    assert test_client.post("/api/instance/clear", json={"confirm": True}).status_code == 200
-    assert not marker.exists()
+    assert failed.status_code == 422, failed.text
+    started = test_client.post("/api/bot/start")
+    assert started.status_code == 200, started.text
 
 
 def test_clear_and_import_reject_running_bot(test_client, tmp_path: Path) -> None:
