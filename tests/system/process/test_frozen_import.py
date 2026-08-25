@@ -1,7 +1,9 @@
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import textwrap
 
 
 def _repository_root() -> Path:
@@ -42,3 +44,75 @@ def test_frozen_bootstrap_does_not_require_a_copied_src_tree():
 
     assert "os.path.join(exe_dir, '_internal', 'src')" not in bot_source
     assert "PyInstaller's importer/embedded PYZ" in bot_source
+
+
+def test_frozen_dashboard_entry_pins_portable_environment(tmp_path: Path):
+    """A frozen launcher must keep Dashboard and inherited Bot paths together."""
+    project_root = _repository_root()
+    portable_root = tmp_path / "portable"
+    portable_root.mkdir()
+    stale_root = tmp_path / "stale"
+    stale_root.mkdir()
+    bootstrap = textwrap.dedent(
+        """
+        import json
+        import os
+        import runpy
+        import sys
+        import types
+
+        sys.frozen = True
+        sys.executable = os.environ["DICEPP_TEST_EXE"]
+        launcher = types.ModuleType("dashboard.src.launcher")
+        launcher.main = lambda: None
+        sys.modules["dashboard.src.launcher"] = launcher
+        runpy.run_path(os.environ["DICEPP_TEST_ENTRY"], run_name="entry_test")
+        print(json.dumps({
+            key: os.environ[key]
+            for key in (
+                "DICEPP_APP_DIR",
+                "DICEPP_PROJECT_ROOT",
+                "DICEPP_DATA_DIR",
+                "DICEPP_RUNTIME_LOG",
+                "DASHBOARD_HOST",
+                "DASHBOARD_PORT",
+            )
+        }))
+        """
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "DICEPP_TEST_ENTRY": str(project_root / "scripts" / "build" / "dashboard_entry.py"),
+            "DICEPP_TEST_EXE": str(portable_root / "DicePP.exe"),
+            "DICEPP_APP_DIR": str(stale_root),
+            "DICEPP_PROJECT_ROOT": str(stale_root),
+            "DICEPP_DATA_DIR": str(stale_root / "wrong-data"),
+            "DICEPP_RUNTIME_LOG": str(stale_root / "wrong.log"),
+            "DASHBOARD_HOST": "0.0.0.0",
+            "DASHBOARD_PORT": "4999",
+        }
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", bootstrap],
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    expected_root = str(portable_root.resolve())
+    assert json.loads(completed.stdout) == {
+        "DICEPP_APP_DIR": expected_root,
+        "DICEPP_PROJECT_ROOT": expected_root,
+        "DICEPP_DATA_DIR": str(portable_root / "data"),
+        "DICEPP_RUNTIME_LOG": str(
+            portable_root / "data" / "logs" / "dicepp-runtime.log"
+        ),
+        "DASHBOARD_HOST": "127.0.0.1",
+        "DASHBOARD_PORT": "4090",
+    }

@@ -16,14 +16,25 @@ def _ensure_windowed_standard_streams() -> None:
 def _configure_launcher_environment(app_dir: str) -> dict[str, str]:
     """Use the Portable directory as both application and instance root."""
     root = os.path.abspath(app_dir)
+    frozen = bool(getattr(sys, "frozen", False))
     defaults = {
         "DICEPP_APP_DIR": root,
         "DICEPP_PROJECT_ROOT": root,
+        "DICEPP_DATA_DIR": os.path.join(root, "data"),
+        "DICEPP_RUNTIME_LOG": os.path.join(
+            root,
+            "data",
+            "logs",
+            "dicepp-runtime.log",
+        ),
         "DASHBOARD_HOST": "127.0.0.1",
         "DASHBOARD_PORT": "4090",
     }
-    for key, value in defaults.items():
-        os.environ.setdefault(key, value)
+    if frozen:
+        os.environ.update(defaults)
+    else:
+        for key, value in defaults.items():
+            os.environ.setdefault(key, value)
     return {key: os.environ[key] for key in defaults}
 
 

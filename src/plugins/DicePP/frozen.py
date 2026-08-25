@@ -37,16 +37,16 @@ def get_app_dir() -> str:
     Returns:
         应用根目录的绝对路径
     """
+    if is_frozen():
+        # sys.executable 指向 DicePP.exe 的完整路径
+        return os.path.dirname(sys.executable)
+
     env_app_dir = os.getenv(APP_DIR_ENV_KEY)
     if env_app_dir:
         return os.path.abspath(env_app_dir)
 
-    if is_frozen():
-        # sys.executable 指向 DicePP.exe 的完整路径
-        return os.path.dirname(sys.executable)
-    else:
-        # frozen.py 位于 DicePP/ 包根，所在目录即 DicePP/
-        return os.path.dirname(os.path.abspath(__file__))
+    # frozen.py 位于 DicePP/ 包根，所在目录即 DicePP/
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 def get_project_root() -> str:
@@ -54,19 +54,18 @@ def get_project_root() -> str:
     获取项目根目录（config/、data/、content/ 所在的目录）。
 
     优先级:
-    - 环境变量 DICEPP_PROJECT_ROOT 优先（Docker/打包环境兜底）
-    - 打包环境: EXE 所在目录
-    - 开发环境: 从 DicePP/ 向上 3 级到达项目根
+    - 打包环境: EXE 所在目录（冻结 Portable 根目录不可被外部环境改写）
+    - 源码环境: 环境变量 DICEPP_PROJECT_ROOT，再从 DicePP/ 向上 3 级到达项目根
 
     Returns:
         项目根目录的绝对路径
     """
+    if is_frozen():
+        return os.path.dirname(sys.executable)
+
     env_root = os.getenv(PROJECT_ROOT_ENV_KEY)
     if env_root:
         return os.path.abspath(env_root)
-
-    if is_frozen():
-        return os.path.dirname(sys.executable)
 
     # 开发: frozen.py 位于 src/plugins/DicePP/ 下
     # DicePP/ -> plugins/ -> src/ -> 项目根
