@@ -903,6 +903,23 @@
           </div>
           <div class="p-4">
             <div class="flex flex-wrap items-end gap-3">
+              <label class="flex flex-col gap-1 text-sm text-gray-600">
+                <span>说明（可选）</span>
+                <input
+                  x-model="archiveDescription"
+                  type="text"
+                  maxlength="500"
+                  data-testid="archive-description"
+                  class="px-3 py-2 border rounded text-sm"
+                  placeholder="例如：更新前存档"
+                />
+              </label>
+              <button
+                @click="createArchive()"
+                :disabled="archiveCreating"
+                data-testid="archive-create-button"
+                class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+              >创建存档</button>
               <label class="px-4 py-2 border text-sm rounded cursor-pointer hover:bg-gray-50">
                 导入 ZIP
                 <input
@@ -922,6 +939,8 @@
               </select>
               <button @click="importArchiveToEmptyInstance()" :disabled="instanceDataLoading || !instanceImportArchive" data-testid="instance-import-button" class="px-4 py-2 border border-amber-200 text-amber-800 text-sm rounded hover:bg-amber-50 disabled:opacity-50">导入到空实例</button>
             </div>
+            <div x-show="archiveCreateError" x-cloak data-testid="archive-create-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archiveCreateError"></div>
+            <div x-show="archiveCreateMessage" x-cloak data-testid="archive-create-message" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-3 rounded text-sm" x-text="archiveCreateMessage"></div>
             <p class="mt-3 text-xs text-gray-500">清空和导入只处理业务数据；Dashboard 登录、存档库存和运行日志不受影响。导入前必须停止 Bot，目标必须为空。</p>
             <div x-show="instanceDataError" x-cloak data-testid="instance-data-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="instanceDataError"></div>
             <div x-show="instanceDataMessage" x-cloak data-testid="instance-data-message" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-3 rounded text-sm" x-text="instanceDataMessage"></div>
@@ -1485,7 +1504,6 @@ function app() {
     archivesLoading: false,
     archiveDescription: '',
     archiveProfile: 'regular',
-    archiveEstimate: null,
     archiveCreating: false,
     archiveCreateMessage: '',
     archiveCreateError: '',
@@ -2662,7 +2680,6 @@ function app() {
       this.archivesLoading = false;
       this.archiveDescription = '';
       this.archiveProfile = 'regular';
-      this.archiveEstimate = null;
       this.archiveCreating = false;
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
@@ -2701,15 +2718,6 @@ function app() {
       this.archiveCreateMessage = '';
       this.archiveCreateError = '';
       try {
-        const estimateData = await this.api('/api/archives/estimate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profile: this.archiveProfile }),
-        });
-        this.archiveEstimate = estimateData.estimate || null;
-        if (this.archiveEstimate && this.archiveEstimate.enough_space === false) {
-          throw new Error('存档目录空间不足');
-        }
         const data = await this.api('/api/archives', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

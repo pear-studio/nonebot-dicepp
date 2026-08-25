@@ -222,6 +222,33 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             browser.close()
 
 
+def test_archive_create_is_visible_in_inventory(dashboard_url: str) -> None:
+    """The archive tab creates a normal archive through the real backend."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            _login(page, dashboard_url)
+            page.get_by_role("button", name="存档", exact=True).click()
+            page.wait_for_selector('[data-testid="archives-tab"]', timeout=10000)
+            page.get_by_test_id("archive-description").fill("浏览器存档")
+            with page.expect_response(
+                lambda response: (
+                    urlparse(response.url).path == "/api/archives"
+                    and response.request.method == "POST"
+                )
+            ) as response_info:
+                page.get_by_test_id("archive-create-button").click()
+            assert response_info.value.status == 200
+            expect(page.get_by_test_id("archive-create-message")).to_contain_text("已创建")
+            expect(page.get_by_test_id("archive-table")).to_be_visible()
+            expect(page.get_by_test_id("archive-row")).to_have_count(1)
+            expect(page.get_by_test_id("archive-row")).to_contain_text("浏览器存档")
+        finally:
+            browser.close()
+
+
 def test_setup_form_inline_validation(dashboard_url: str) -> None:
     """Setup form blocks mismatched and too-short passwords before API calls."""
     with sync_playwright() as p:
