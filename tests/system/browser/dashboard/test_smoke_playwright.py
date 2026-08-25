@@ -249,6 +249,46 @@ def test_archive_create_is_visible_in_inventory(dashboard_url: str) -> None:
             browser.close()
 
 
+def test_old_directory_import_submits_path_and_shows_success(dashboard_url: str) -> None:
+    """The archives tab submits the entered legacy directory path unchanged."""
+    captured: dict[str, object] = {}
+
+    def mock_instance_import(route) -> None:
+        captured.update(route.request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "count": 1}),
+        )
+
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            _login(page, dashboard_url)
+            page.route("**/api/instance/import", mock_instance_import)
+            page.get_by_role("button", name="存档", exact=True).click()
+            page.wait_for_selector('[data-testid="archives-tab"]', timeout=10000)
+            source_path = r"D:\DicePP-old"
+            page.get_by_test_id("instance-import-source-path").fill(source_path)
+            page.once("dialog", lambda dialog: dialog.accept())
+            with page.expect_response(
+                lambda response: (
+                    urlparse(response.url).path == "/api/instance/import"
+                    and response.request.method == "POST"
+                )
+            ):
+                page.get_by_test_id("instance-import-source-button").click()
+
+            expect(page.get_by_test_id("instance-data-message")).to_contain_text(
+                "已导入 1 个业务文件"
+            )
+            assert captured == {"confirm": True, "source_path": source_path}
+        finally:
+            browser.close()
+
+
 def test_setup_form_inline_validation(dashboard_url: str) -> None:
     """Setup form blocks mismatched and too-short passwords before API calls."""
     with sync_playwright() as p:

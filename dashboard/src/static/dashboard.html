@@ -931,13 +931,32 @@
                 />
               </label>
               <button @click="clearInstanceData()" :disabled="instanceDataLoading" data-testid="instance-clear-button" class="px-4 py-2 border border-red-200 text-red-700 text-sm rounded hover:bg-red-50 disabled:opacity-50">清空业务数据</button>
-              <select x-model="instanceImportArchive" data-testid="instance-import-archive-select" class="px-3 py-2 border rounded text-sm">
-                <option value="">选择存档导入空实例</option>
-                <template x-for="archive in archives.filter(item => item.valid)" :key="`instance-${archive.filename}`">
-                  <option :value="archive.filename" x-text="archive.filename"></option>
-                </template>
-              </select>
+              <label class="flex flex-col gap-1 text-sm text-gray-600">
+                <span>从已有存档恢复</span>
+                <select x-model="instanceImportArchive" data-testid="instance-import-archive-select" class="px-3 py-2 border rounded text-sm">
+                  <option value="">选择存档导入空实例</option>
+                  <template x-for="archive in archives.filter(item => item.valid)" :key="`instance-${archive.filename}`">
+                    <option :value="archive.filename" x-text="archive.filename"></option>
+                  </template>
+                </select>
+              </label>
               <button @click="importArchiveToEmptyInstance()" :disabled="instanceDataLoading || !instanceImportArchive" data-testid="instance-import-button" class="px-4 py-2 border border-amber-200 text-amber-800 text-sm rounded hover:bg-amber-50 disabled:opacity-50">导入到空实例</button>
+            </div>
+            <div class="mt-4 border-t pt-4">
+              <div class="flex flex-wrap items-end gap-3">
+                <label class="flex flex-col gap-1 text-sm text-gray-600">
+                  <span>从旧实例目录导入</span>
+                  <input
+                    x-model="instanceImportSourcePath"
+                    type="text"
+                    data-testid="instance-import-source-path"
+                    class="px-3 py-2 border rounded text-sm"
+                    placeholder="例如：D:\DicePP-old"
+                  />
+                </label>
+                <button @click="importSourceDirectoryToEmptyInstance()" :disabled="instanceDataLoading || !instanceImportSourcePath" data-testid="instance-import-source-button" class="px-4 py-2 border border-amber-200 text-amber-800 text-sm rounded hover:bg-amber-50 disabled:opacity-50">从旧目录导入</button>
+              </div>
+              <p class="mt-2 text-xs text-gray-500">Windows 示例：<code>D:\DicePP-old</code>；Linux/Docker 请填写 Dashboard 容器可见的路径。</p>
             </div>
             <div x-show="archiveCreateError" x-cloak data-testid="archive-create-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archiveCreateError"></div>
             <div x-show="archiveCreateMessage" x-cloak data-testid="archive-create-message" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-3 rounded text-sm" x-text="archiveCreateMessage"></div>
@@ -1504,6 +1523,7 @@ function app() {
     archiveVerifyError: '',
     archiveVerifying: false,
     instanceImportArchive: '',
+    instanceImportSourcePath: '',
     instanceDataLoading: false,
     instanceDataError: '',
     instanceDataMessage: '',
@@ -2680,6 +2700,7 @@ function app() {
       this.archiveVerifyError = '';
       this.archiveVerifying = false;
       this.instanceImportArchive = '';
+      this.instanceImportSourcePath = '';
       this.instanceDataLoading = false;
       this.instanceDataError = '';
       this.instanceDataMessage = '';
@@ -2775,6 +2796,26 @@ function app() {
         const data = await this.api('/api/instance/import', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ confirm: true, archive: this.instanceImportArchive }),
+        });
+        this.instanceDataMessage = `已导入 ${data.count || 0} 个业务文件`;
+      } catch (err) {
+        this.instanceDataError = err.message || '导入业务数据失败';
+      } finally {
+        this.instanceDataLoading = false;
+      }
+    },
+
+    async importSourceDirectoryToEmptyInstance() {
+      const sourcePath = this.instanceImportSourcePath;
+      if (!sourcePath.trim()) return;
+      if (!confirm(`将旧目录 ${sourcePath} 导入空实例？`)) return;
+      this.instanceDataLoading = true;
+      this.instanceDataError = '';
+      this.instanceDataMessage = '';
+      try {
+        const data = await this.api('/api/instance/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true, source_path: sourcePath }),
         });
         this.instanceDataMessage = `已导入 ${data.count || 0} 个业务文件`;
       } catch (err) {
