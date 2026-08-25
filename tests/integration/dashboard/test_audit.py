@@ -12,7 +12,7 @@ class TestAuditLogCreated:
         """Config set creates an audit log entry."""
         setup_auth(test_client)
         test_client.post(
-            "/api/config/set", json={"path": "app.name", "value": "new_name"}
+            "/api/config/set", json={"path": "nickname", "value": "new_name"}
         )
 
         resp = test_client.get("/api/audit")
@@ -20,12 +20,12 @@ class TestAuditLogCreated:
         assert len(entries) >= 1
         entry = entries[0]
         assert entry["action"] == "config.set"
-        assert entry["target"] == "app.name"
+        assert entry["target"] == "nickname"
 
     def test_audit_log_created_on_reset(self, test_client, tmp_dashboard_paths):
         """Config reset creates an audit log entry."""
         setup_auth(test_client)
-        test_client.post("/api/config/reset", json={"path": "app.nonexistent"})
+        test_client.post("/api/config/reset", json={"path": "nonexistent.key"})
 
         resp = test_client.get("/api/audit")
         entries = resp.json()["entries"]
@@ -51,10 +51,10 @@ class TestAuditList:
         setup_auth(test_client)
         # Perform a few actions
         test_client.post(
-            "/api/config/set", json={"path": "a", "value": 1}
+            "/api/config/set", json={"path": "chat_interval", "value": 21}
         )
         test_client.post(
-            "/api/config/set", json={"path": "b", "value": 2}
+            "/api/config/set", json={"path": "nickname", "value": "audit"}
         )
 
         resp = test_client.get("/api/audit")
@@ -83,7 +83,7 @@ class TestAuditList:
         # Generate a few entries
         for i in range(5):
             test_client.post(
-                "/api/config/set", json={"path": f"key.{i}", "value": i}
+                "/api/config/set", json={"path": "chat_interval", "value": 20 + i}
             )
 
         resp = test_client.get("/api/audit", params={"limit": 3})
@@ -101,8 +101,8 @@ class TestAuditList:
             ("auth.setup", "auth", "Initial password set"),
             ("auth.login", "auth", "Login"),
             ("auth.change_password", "auth", "Password changed"),
-            ("config.set", "app.name", json.dumps({"value": "DicePP"})),
-            ("config.reset", "app.name", "reset to default"),
+            ("config.set", "nickname", json.dumps({"value": "DicePP"})),
+            ("config.reset", "nickname", "reset to default"),
             ("config.bot.save", "bots/demo", ""),
             ("config.user.save", "user.json", ""),
             ("persona.character.save", "调查员", ""),

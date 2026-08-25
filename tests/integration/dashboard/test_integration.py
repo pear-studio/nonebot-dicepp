@@ -67,7 +67,7 @@ class TestFullFlow:
         assert resp.json()["removed"] is True
 
         # ── 8. Save bot config ───────────────────────────────────────────
-        new_bot_cfg = {"master": ["admin"], "enabled": False}
+        new_bot_cfg = {"master": ["admin"], "nickname": "admin-bot"}
         resp = test_client.post(
             "/api/config/bots/test_bot/save",
             json=new_bot_cfg,
@@ -76,7 +76,7 @@ class TestFullFlow:
 
         saved = DashboardPaths.bot_config_path("test_bot").read_text()
         assert '"admin"' in saved
-        assert '"enabled"' in saved
+        assert '"nickname"' in saved
 
         # ── 9. Read content ──────────────────────────────────────────────
         resp = test_client.get("/api/content/decks")

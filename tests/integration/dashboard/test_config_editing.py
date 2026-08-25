@@ -102,7 +102,7 @@ class TestSetField:
         """``POST /api/config/set`` persists and reports deferred application."""
         setup_auth(test_client)
         resp = test_client.post(
-            "/api/config/set", json={"path": "app.name", "value": "new_name"}
+            "/api/config/set", json={"path": "nickname", "value": "new_name"}
         )
         assert resp.status_code == 200
         assert resp.json() == {
@@ -114,19 +114,19 @@ class TestSetField:
 
         # Verify user.json was written
         user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert user_data["app"]["name"] == "new_name"
+        assert user_data["nickname"] == "new_name"
 
     def test_set_nested_field(self, test_client: TestClient, tmp_dashboard_paths):
         """Deeply nested paths create intermediate dicts."""
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/set",
-            json={"path": "logging.level.console", "value": "DEBUG"},
+            json={"path": "log.web.endpoint", "value": "https://logs.example.test"},
         )
         assert resp.status_code == 200
 
         user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert user_data["logging"]["level"]["console"] == "DEBUG"
+        assert user_data["log"]["web"]["endpoint"] == "https://logs.example.test"
 
     def test_set_field_empty_path(self, test_client: TestClient):
         """An empty path returns 400."""
@@ -139,17 +139,17 @@ class TestResetField:
         """``POST /api/config/reset`` removes a key from user.json."""
         # Pre-populate user.json with a field to reset
         DashboardPaths.CONFIG_USER.write_text(
-            json.dumps({"app": {"name": "override"}})
+            json.dumps({"nickname": "override"})
         )
 
         setup_auth(test_client)
-        resp = test_client.post("/api/config/reset", json={"path": "app.name"})
+        resp = test_client.post("/api/config/reset", json={"path": "nickname"})
         assert resp.status_code == 200
         assert resp.json()["removed"] is True
 
         # Verify the key was removed from user.json
         user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert "name" not in user_data.get("app", {})
+        assert "nickname" not in user_data
 
     def test_reset_nonexistent(self, test_client: TestClient, tmp_dashboard_paths):
         """Resetting a non-existent path returns removed=False (not 404)."""
@@ -169,12 +169,12 @@ class TestBotConfig:
         assert resp.status_code == 200
         data = resp.json()
         assert data["config"]["master"] == ["test_master"]
-        assert data["config"]["enabled"] is True
+        assert data["config"]["nickname"] == "test_bot"
 
     def test_bot_config_save(self, test_client: TestClient, tmp_dashboard_paths):
         """``POST /api/config/bots/{bot_id}/save`` saves config."""
         setup_auth(test_client)
-        new_config = {"master": ["new_master"], "enabled": False, "extra": True}
+        new_config = {"master": ["new_master"], "nickname": "saved_bot"}
         resp = test_client.post(
             "/api/config/bots/test_bot/save", json=new_config
         )
@@ -196,7 +196,7 @@ class TestUserJsonSave:
     def test_save_user_json(self, test_client: TestClient):
         """``POST /api/config/user/save`` writes the body to user.json."""
         setup_auth(test_client)
-        body = {"app": {"name": "modified", "version": "2.0.0"}}
+        body = {"nickname": "modified", "chat_interval": 42}
         resp = test_client.post("/api/config/user/save", json=body)
         assert resp.status_code == 200
         assert resp.json()["ok"] is True

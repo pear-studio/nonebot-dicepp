@@ -367,10 +367,10 @@ def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -
     bots_dir = tmp_path / "config" / "bots"
     bots_dir.mkdir(parents=True, exist_ok=True)
     (bots_dir / "alpha_bot.json").write_text(
-        json.dumps({"app": {"name": "alpha-bot", "version": "1.0.0"}})
+        json.dumps({"master": [], "nickname": "alpha-bot"})
     )
     (bots_dir / "zebra_bot.json").write_text(
-        json.dumps({"app": {"name": "zebra-bot", "version": "2.0.0"}})
+        json.dumps({"master": [], "nickname": "zebra-bot"})
     )
 
     with sync_playwright() as p:
@@ -932,7 +932,7 @@ def test_audit_log_renders_uniform_presentations_across_action_categories(
                             action_label: '修改配置项',
                             summary: '新值：DicePP',
                             tone: 'info',
-                            target: 'app.name',
+                            target: 'nickname',
                             detail: JSON.stringify({value: 'DicePP'}),
                             ip: '127.0.0.1',
                         },
