@@ -133,3 +133,31 @@ def test_release_updates_latest_only_for_stable_tags() -> None:
     assert "127.0.0.1:8080/" in build
     assert 'docker_args+=( -t "$LATEST_IMAGE" )' in build
     assert 'docker push "$LATEST_IMAGE"' in push
+
+
+def test_release_publishes_the_verified_windows_artifact_from_test_suite() -> None:
+    release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
+    publish = release["jobs"]["publish"]
+    download = _step(publish, "Download verified Windows Portable artifact")
+    rename = _step(publish, "Name verified Windows Portable artifact")
+    publish_commands = "\n".join(
+        step.get("run", "") for step in publish["steps"] if "run" in step
+    )
+    windows_upload = next(
+        step for step in suite["jobs"]["windows-package"]["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+
+    assert publish["needs"] == "tests"
+    assert "windows-portable" not in release["jobs"]
+    assert download["with"]["name"] == "dicepp-windows-ci"
+    assert rename["run"] == (
+        'mv "dist/DicePP-ci-win64-Portable.zip" '
+        '"dist/DicePP-${{ github.ref_name }}-win64-Portable.zip"'
+    )
+    assert windows_upload["with"]["name"] == "dicepp-windows-ci"
+    assert "pyinstaller" not in publish_commands
+    assert "verify_windows_package" not in publish_commands
+    assert "pytest" not in publish_commands
+    assert "uv sync" not in publish_commands

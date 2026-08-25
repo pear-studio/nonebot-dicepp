@@ -505,19 +505,16 @@ async def archives_create(request: Request):
     description = body.get("description")
     if description is not None and not isinstance(description, str):
         _err("description must be a string or null", 400)
-    controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
-    def create_when_stopped():
-        if controller.status().state != "stopped":
-            raise BotNotStopped("Bot must be stopped before archive creation")
+    def create_archive_callback():
         return create_archive(
             layout=_archive_layout(),
             description=description,
         )
 
     try:
-        summary, manifest = await runtime_service.run_maintenance(create_when_stopped)
+        summary, manifest = await runtime_service.run_maintenance(create_archive_callback)
     except BotNotStopped as exc:
         return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
     except ArchiveError as exc:
@@ -629,16 +626,13 @@ async def instance_clear(request: Request):
     body = await request.json()
     if not isinstance(body, dict) or body.get("confirm") is not True:
         _err("confirm must be true for clearing business data", 400)
-    controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
-    def clear_when_stopped():
-        if controller.status().state != "stopped":
-            raise BotNotStopped("Bot must be stopped before clearing business data")
+    def clear_instance_data_callback():
         return clear_instance_data(_archive_layout())
 
     try:
-        result = await runtime_service.run_maintenance(clear_when_stopped)
+        result = await runtime_service.run_maintenance(clear_instance_data_callback)
     except BotNotStopped as exc:
         return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
     except InstanceDataError as exc:
@@ -661,18 +655,15 @@ async def instance_import(request: Request):
         not isinstance(source_path, str) or not source_path.strip()
     ):
         _err("source_path must be a non-empty directory path", 400)
-    controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
-    def import_when_stopped():
-        if controller.status().state != "stopped":
-            raise BotNotStopped("Bot must be stopped before importing business data")
+    def import_instance_data_callback():
         if source_path is not None:
             return import_instance_directory(_archive_layout(), source_path)
         return import_instance_data(_archive_layout(), archive=archive)
 
     try:
-        result = await runtime_service.run_maintenance(import_when_stopped)
+        result = await runtime_service.run_maintenance(import_instance_data_callback)
     except BotNotStopped as exc:
         return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
     except InstanceDataError as exc:
@@ -1596,18 +1587,15 @@ async def content_queries_normalize_dry_run(db_name: str, request: Request):
 async def content_queries_normalize(db_name: str, request: Request):
     """Normalize a query database locally while the controlled Bot is stopped."""
     db_path = _query_database_path(db_name)
-    controller = _get_bot_process_controller(request)
     runtime_service = _get_bot_runtime_service(request)
 
-    def normalize_when_stopped():
-        if controller.status().state != "stopped":
-            raise BotNotStopped("Bot must be stopped before query database normalization")
+    def normalize_query_database_callback():
         report = normalization_report(db_path)
         write_normalized_database(db_path, report)
         return report
 
     try:
-        report = await runtime_service.run_maintenance(normalize_when_stopped)
+        report = await runtime_service.run_maintenance(normalize_query_database_callback)
     except BotNotStopped as exc:
         return JSONResponse(status_code=409, content={"ok": False, "message": str(exc)})
     except (OSError, ValueError, sqlite3.DatabaseError) as exc:

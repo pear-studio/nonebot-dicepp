@@ -37,6 +37,8 @@ class BotRuntimeService:
 
     def run_maintenance_sync(self, callback: Callable[[], T]) -> T:
         with self._lock:
+            if self.controller.status().state != "stopped":
+                raise BotNotStopped("Bot must be stopped before maintenance")
             return callback()
 
     async def run_maintenance(self, callback: Callable[[], T]) -> T:

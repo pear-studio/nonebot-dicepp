@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 
-def test_windows_package_verification_is_shared_by_build_and_release():
+def test_windows_package_verification_is_shared_by_build_and_test_suite():
     script = Path("scripts/build/verify_windows_package.ps1")
     assert script.is_file()
     verification = script.read_text(encoding="utf-8")
@@ -18,9 +18,11 @@ def test_windows_package_verification_is_shared_by_build_and_release():
     test_workflow = Path(".github/workflows/test-suite.yml").read_text(encoding="utf-8")
     release_workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     removed_flag = "--" + "smoke-" + "check"
-    for contract in (build, test_workflow, release_workflow):
+    for contract in (build, test_workflow):
         assert "verify_windows_package.ps1" in contract
         assert removed_flag not in contract
+    assert "verify_windows_package.ps1" not in release_workflow
+    assert removed_flag not in release_workflow
 
 
 def test_pyinstaller_spec_analyzes_the_canonical_dicepp_plugin_graph():

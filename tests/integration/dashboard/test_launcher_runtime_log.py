@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from dashboard.src import launcher
-from dashboard.src.runtime_service import BotRuntimeService
+from dashboard.src.bot_process import BotProcessStatus
+from dashboard.src.runtime_service import BotNotStopped, BotRuntimeService
 
 
 def test_frozen_autostart_uses_portable_launcher(tmp_path: Path, monkeypatch) -> None:
@@ -39,3 +42,20 @@ def test_tray_setup_makes_custom_pystray_icon_visible(tmp_path: Path) -> None:
     launcher._setup_tray_icon(icon, tmp_path / "runtime.log")
 
     assert icon.visible is True
+
+
+def test_runtime_service_checks_stopped_before_maintenance_callback() -> None:
+    class RunningBot:
+        def status(self) -> BotProcessStatus:
+            return BotProcessStatus("running", pid=123)
+
+    called = False
+
+    def callback() -> None:
+        nonlocal called
+        called = True
+
+    with pytest.raises(BotNotStopped, match="Bot must be stopped"):
+        BotRuntimeService(RunningBot()).run_maintenance_sync(callback)
+
+    assert called is False

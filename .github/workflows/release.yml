@@ -17,55 +17,19 @@ jobs:
   tests:
     uses: ./.github/workflows/test-suite.yml
 
-  windows-portable:
-    name: Build Windows Portable
-    runs-on: windows-latest
-    needs: tests
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13"
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
-        with:
-          version: "0.11.16"
-      - name: Install dependencies
-        run: uv sync --frozen --group dev
-      - name: Build and verify Portable
-        shell: pwsh
-        run: |
-          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
-          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
-          ./scripts/build/assemble_windows_package.ps1
-          ./scripts/build/verify_windows_package.ps1 -DistDir dist/DicePP
-          Compress-Archive -Path dist/DicePP -DestinationPath "DicePP-${{ github.ref_name }}-win64-Portable.zip"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: windows-portable
-          path: DicePP-${{ github.ref_name }}-win64-Portable.zip
-          if-no-files-found: error
-          retention-days: 7
-
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: windows-portable
+    needs: tests
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Download verified Windows Portable artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: windows-portable
+          name: dicepp-windows-ci
           path: dist
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13"
-      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
-        with:
-          version: "0.11.16"
-      - name: Install dependencies for empty-instance import smoke
-        run: uv sync --frozen --group dev
-      - name: Test empty-instance import fixture
-        run: uv run pytest tests/integration/dashboard/test_instance_data.py -n0 --tb=short -q
+      - name: Name verified Windows Portable artifact
+        run: mv "dist/DicePP-ci-win64-Portable.zip" "dist/DicePP-${{ github.ref_name }}-win64-Portable.zip"
       - name: Build and fresh-start the single DicePP image
         env:
           GH_TOKEN: ${{ github.token }}
