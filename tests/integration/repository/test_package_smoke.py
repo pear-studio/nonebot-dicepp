@@ -1,34 +1,21 @@
-"""Windows package smoke checks.
-
-These tests guard the PyInstaller smoke path that release builds run after
-creating the onedir package.
-"""
+"""Windows package and distribution contract checks."""
 
 import ast
 from pathlib import Path
 
 
-def test_smoke_check_validates_the_managed_plugin_without_reimporting_it(
-    monkeypatch,
-    capsys,
-):
-    from plugins.DicePP import _smoke_check
+def test_windows_package_verification_is_shared_by_build_and_release():
+    script = Path("scripts/build/verify_windows_package.ps1")
+    assert script.is_file()
+    assert "Start-Process" in script.read_text(encoding="utf-8")
 
-    managed_plugin = object()
-    received: list[object] = []
-    monkeypatch.setattr(_smoke_check, "_check_frozen_env", lambda: [])
-    monkeypatch.setattr(_smoke_check, "_check_critical_modules", lambda: [])
-    monkeypatch.setattr(_smoke_check, "_check_version", lambda: [])
-
-    assert _smoke_check.run_smoke_check(
-        managed_plugin,
-        plugin_validator=lambda plugin: received.append(plugin),
-    )
-    assert received == [managed_plugin]
-    assert capsys.readouterr().out == (
-        "\nSMOKE CHECK PASSED: "
-        "plugin=plugins.DicePP.plugin matchers=nonempty registry=nonempty\n"
-    )
+    build = Path("scripts/build/build.bat").read_text(encoding="utf-8")
+    test_workflow = Path(".github/workflows/test-suite.yml").read_text(encoding="utf-8")
+    release_workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    removed_flag = "--" + "smoke-" + "check"
+    for contract in (build, test_workflow, release_workflow):
+        assert "verify_windows_package.ps1" in contract
+        assert removed_flag not in contract
 
 
 def test_pyinstaller_spec_analyzes_the_canonical_dicepp_plugin_graph():

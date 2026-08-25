@@ -1,4 +1,4 @@
-"""Source entrypoint smoke checks."""
+"""Source entrypoint checks."""
 
 from __future__ import annotations
 
@@ -21,49 +21,6 @@ def _isolated_runtime_environment(
     env["DICEPP_PROJECT_ROOT"] = str(runtime_root)
     env["DICEPP_APP_DIR"] = str(runtime_root)
     return runtime_root, env
-
-
-def test_source_entrypoint_smoke_check_uses_managed_plugin_registration(
-    tmp_path: Path,
-    pytestconfig,
-) -> None:
-    """The Docker-style source layout must load and validate DicePP via NoneBot."""
-    project_root = Path(str(pytestconfig.rootpath)).resolve()
-    runtime_root, env = _isolated_runtime_environment(project_root, tmp_path)
-    bootstrap = textwrap.dedent(
-        """
-        import runpy
-        import sys
-        from pathlib import Path
-
-        project_root = Path(sys.argv[1]).resolve()
-        source_root = (project_root / "src").resolve()
-        sys.path[:] = [
-            entry
-            for entry in sys.path
-            if not entry or Path(entry).resolve() != source_root
-        ]
-        sys.argv = ["bot.py", "--smoke-check"]
-        runpy.run_path(str(project_root / "bot.py"), run_name="__main__")
-        """
-    )
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", bootstrap, str(project_root)],
-        cwd=runtime_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-        check=False,
-    )
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert (
-        "SMOKE CHECK PASSED: plugin=plugins.DicePP.plugin "
-        "matchers=nonempty registry=nonempty"
-    ) in output
 
 
 def test_source_version_is_metadata_only(

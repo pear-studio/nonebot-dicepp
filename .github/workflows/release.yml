@@ -31,17 +31,13 @@ jobs:
           version: "0.11.16"
       - name: Install dependencies
         run: uv sync --frozen --group dev
-      - name: Build and smoke test Portable
+      - name: Build and verify Portable
         shell: pwsh
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
           uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
           ./scripts/build/assemble_windows_package.ps1
-          $version = [regex]::Match((Get-Content pyproject.toml | Select-String '^version =').Line, '"([^"\r\n]+)"').Groups[1].Value
-          if ((& dist/DicePP/DicePP-Runtime.exe --version) -ne "DicePP v$version") { throw "Runtime version mismatch" }
-          & dist/DicePP/DicePP-Runtime.exe --smoke-check
-          $dashboard = Start-Process -FilePath "dist/DicePP/DicePP.exe" -ArgumentList "--smoke-check" -Wait -PassThru
-          if ($dashboard.ExitCode -ne 0) { throw "Dashboard smoke check failed" }
+          ./scripts/build/verify_windows_package.ps1 -DistDir dist/DicePP
           Compress-Archive -Path dist/DicePP -DestinationPath "DicePP-${{ github.ref_name }}-win64-Portable.zip"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

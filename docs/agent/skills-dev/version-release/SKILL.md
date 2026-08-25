@@ -49,14 +49,15 @@ uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
 ./scripts/build/assemble_windows_package.ps1
 ```
 
-确认两个 EXE 的 `--version` 和 `--smoke-check` 通过，再压缩 Portable 目录。
+运行 `scripts/build/verify_windows_package.ps1 -DistDir dist/DicePP`，通过正常
+Dashboard + Bot 启动路径验收后再压缩 Portable 目录。
 
 ## GitHub Release
 
 Release workflow 复用普通 CI 后：
 
-1. 构建并 smoke test Windows Portable；
-2. 构建、fresh-start smoke 并推送单一 GHCR 镜像；
+1. 构建并通过 Windows Portable 正常启动验收；
+2. 构建、fresh-start 验收并推送单一 GHCR 镜像；
 3. 用真实临时目录运行空实例导入 fixture；
 4. 上传 `DicePP-vX.Y.Z-win64-Portable.zip`、`docker-compose.yml` 和 `checksums.sha256`。
 

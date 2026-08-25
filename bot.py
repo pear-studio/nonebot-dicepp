@@ -27,7 +27,6 @@ else:
 # ============================================================
 _bootstrap_parser = argparse.ArgumentParser(add_help=False)
 _bootstrap_parser.add_argument('--version', action='store_true')
-_bootstrap_parser.add_argument('--smoke-check', action='store_true')
 _bootstrap_args, _ = _bootstrap_parser.parse_known_args()
 
 if _bootstrap_args.version:
@@ -71,10 +70,8 @@ async def _startup_message():
     logger.info("请确保您的聊天客户端 (如 LLBot) 已正确配置并连接")
     logger.info("=" * 50)
     
-    # 技术细节和测试信息只在 DEBUG 级别显示
+    # 技术细节只在 DEBUG 级别显示
     logger.debug("正在监听 OneBot V11 协议连接...")
-    logger.debug("测试模式: 可使用 uv run pytest 进行验证")
-    logger.debug("测试时的 ApiNotAvailable 警告属于正常现象 (无真实客户端接收响应)")
 
 # 注册适配器
 driver = nonebot.get_driver()
@@ -85,24 +82,10 @@ driver.register_adapter(OneBot_V11_Adapter)
 # otherwise returns None for import failures and would let the server start
 # without DicePP's command handling.
 from plugins.DicePP.runtime_preflight import (
-    DicePPPluginPreflightError,
     load_and_validate_dicepp_plugin,
 )
 
-try:
-    _dicepp_plugin = load_and_validate_dicepp_plugin()
-except DicePPPluginPreflightError as exc:
-    if _bootstrap_args.smoke_check:
-        print("\nSMOKE CHECK FAILED: 1 error(s)")
-        print(f"  FAIL: {exc}")
-        sys.exit(1)
-    raise
-
-if _bootstrap_args.smoke_check:
-    from plugins.DicePP import _smoke_check
-
-    ok = _smoke_check.run_smoke_check(_dicepp_plugin)
-    sys.exit(0 if ok else 1)
+load_and_validate_dicepp_plugin()
 
 app = nonebot.get_asgi()
 

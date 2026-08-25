@@ -67,24 +67,18 @@ def test_release_workflows_pin_actions_and_toolchain_versions() -> None:
                     assert step["with"]["version"] == "0.11.16"
 
 
-def test_windows_workflow_builds_and_smokes_the_portable_contract() -> None:
+def test_windows_workflow_builds_and_verifies_the_portable_contract() -> None:
     suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))
     steps = suite["jobs"]["windows-package"]["steps"]
     build = _step(suite["jobs"]["windows-package"], "Build and assemble Portable")["run"]
-    smoke = _step(suite["jobs"]["windows-package"], "Smoke test Portable executables")["run"]
+    verify = _step(suite["jobs"]["windows-package"], "Verify normal Portable startup")["run"]
 
     assert "scripts/build/dicepp.spec" in build
     assert "scripts/build/dashboard.spec" in build
     assert "assemble_windows_package.ps1" in build
-    assert "DicePP-Runtime.exe --version" in smoke
-    assert 'Start-Process -FilePath "dist/DicePP/DicePP.exe"' in smoke
-    assert 'if ($dashboard.ExitCode -ne 0)' in smoke
-    assert 'DICEPP_DASHBOARD_OPEN_BROWSER = "0"' in smoke
-    assert 'ArgumentList "--background"' in smoke
-    assert 'http://127.0.0.1:4090/api/health' in smoke
-    assert 'http://127.0.0.1:8080/' in smoke
-    assert 'Get-Process -Name "DicePP","DicePP-Runtime"' in smoke
-    assert "Compress-Archive" in smoke
+    assert "verify_windows_package.ps1 -DistDir dist/DicePP" in verify
+    assert "--" + "smoke-" + "check" not in verify
+    assert "Compress-Archive" in verify
     assert len(steps) == 7
 
 

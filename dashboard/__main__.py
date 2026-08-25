@@ -14,8 +14,6 @@ import logging
 import os
 import sys
 from importlib.metadata import version
-from pathlib import Path
-
 import uvicorn
 
 from .src.app import app
@@ -24,29 +22,6 @@ from .src.auth import is_initialized, set_password_db, validate_password
 from .src.config import DashboardPaths, DashboardSettings
 
 logger = logging.getLogger("dashboard")
-
-
-def _run_smoke_check() -> bool:
-    """Validate the packaged Dashboard without starting a server."""
-    static_dir = Path(__file__).parent / "src" / "static"
-    required_files = [
-        static_dir / "dashboard.html",
-        static_dir / "alpine.min.js",
-    ]
-    missing = [str(path) for path in required_files if not path.is_file()]
-    route_paths = {getattr(route, "path", None) for route in app.routes}
-    required_routes = {"/dashboard", "/api/auth/status", "/api/bot/status"}
-    missing_routes = sorted(required_routes - route_paths)
-
-    if missing or missing_routes:
-        if missing:
-            print("Missing Dashboard assets: " + ", ".join(missing))
-        if missing_routes:
-            print("Missing Dashboard routes: " + ", ".join(missing_routes))
-        return False
-
-    print("DicePP Dashboard smoke check passed")
-    return True
 
 
 def ensure_dirs() -> None:
@@ -88,7 +63,6 @@ def main() -> None:
     """Main entry point: ensure dirs, run uvicorn."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true")
-    parser.add_argument("--smoke-check", action="store_true")
     commands = parser.add_subparsers(dest="command")
     admin = commands.add_parser("admin", help="管理员操作")
     admin_commands = admin.add_subparsers(dest="admin_command")
@@ -97,10 +71,6 @@ def main() -> None:
 
     if args.version:
         print(f"DicePP Dashboard v{version('dicepp')}")
-        return
-    if args.smoke_check:
-        if not _run_smoke_check():
-            raise SystemExit(1)
         return
     if args.command == "admin":
         if args.admin_command != "init":

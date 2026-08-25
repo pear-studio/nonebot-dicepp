@@ -90,20 +90,15 @@ REM Clean the build cache directory.
 echo [INFO] Cleaning build cache...
 if exist "build" rmdir /s /q "build"
 
-REM Run smoke tests.
+REM Verify the assembled Portable package through its normal launcher path.
 echo.
-echo [INFO] Running smoke test...
-"%DIST_DIR%\DicePP-Runtime.exe" --smoke-check
+echo [INFO] Verifying Portable package...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\build\verify_windows_package.ps1" -DistDir "%DIST_DIR%"
 if errorlevel 1 (
-    echo [ERROR] Runtime smoke test failed! See output above.
+    echo [ERROR] Portable verification failed! See output above.
     exit /b 1
 )
-"%DIST_DIR%\DicePP.exe" --smoke-check
-if errorlevel 1 (
-    echo [ERROR] Launcher smoke test failed! See output above.
-    exit /b 1
-)
-echo [INFO] Smoke test passed
+echo [INFO] Portable verification passed
 
 set "PORTABLE_ZIP=dist\DicePP-Portable.zip"
 if exist "%PORTABLE_ZIP%" del /q "%PORTABLE_ZIP%"

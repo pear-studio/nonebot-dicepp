@@ -70,9 +70,8 @@ def validate_registered_dicepp_plugin(
 ) -> Any:
     """Validate an already-loaded canonical DicePP plugin.
 
-    This does not import the plugin entrypoint.  It is safe to call from smoke
-    checks after the production loader has established the manager's
-    registration state.
+    This does not import the plugin entrypoint.  It validates the registration
+    state already established by the production loader.
     """
     if plugin is None:
         raise DicePPPluginPreflightError(
