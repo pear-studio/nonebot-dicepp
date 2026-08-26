@@ -58,11 +58,13 @@ def test_repository_global_manifest_resolves_common_skills(agent_sync) -> None:
     assert agent_sync.load_global_skill_names() == [
         "grill-pear",
         "peel-pear",
+        "prune-pear",
         "toolchain-review",
     ]
     assert set(agent_sync.collect_global_skills()) == {
         "grill-pear",
         "peel-pear",
+        "prune-pear",
         "toolchain-review",
     }
 
