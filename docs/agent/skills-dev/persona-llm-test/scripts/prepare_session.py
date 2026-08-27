@@ -334,7 +334,7 @@ def validate_character_assets(
     return character
 
 
-def build_session_user_config(
+def build_session_bot_config(
     default_config: Mapping[str, Any],
     test_overrides: Mapping[str, Any],
     credentials: Mapping[str, str],
@@ -360,7 +360,9 @@ def build_session_user_config(
             "persona_ai": {
                 "character_path": str(character_path.resolve()),
                 "providers": provider_overrides,
-            }
+            },
+            "persona": CHARACTER_NAME,
+            "nickname": CHARACTER_DISPLAY_NAME,
         },
     )
 
@@ -368,11 +370,9 @@ def build_session_user_config(
 def validate_merged_config(
     bot_config_type: Any,
     default_config: Mapping[str, Any],
-    user_config: Mapping[str, Any],
-    account_config: Mapping[str, Any],
+    bot_config: Mapping[str, Any],
 ) -> Any:
-    merged = deep_merge(default_config, user_config)
-    merged = deep_merge(merged, account_config)
+    merged = deep_merge(default_config, bot_config)
     try:
         return bot_config_type.model_validate(merged)
     except Exception as exc:
@@ -385,7 +385,7 @@ def validate_merged_config(
                 for item in errors
             )
         raise PreparationError(
-            f"合并后的 session 配置未通过 BotConfig 校验: {details}"
+            f"合并后的 Bot session 配置未通过 BotConfig 校验: {details}"
         ) from exc
 
 
@@ -564,21 +564,16 @@ def prepare_session(
     name = build_session_name(now=now, token=token)
     session_path = shell_session.get_session_dir(name)
     character_path = session_path / "content" / "characters"
-    user_config = build_session_user_config(
+    bot_config = build_session_bot_config(
         default_config,
         test_overrides,
         credentials,
         character_path,
     )
-    account_config = {
-        "persona": CHARACTER_NAME,
-        "nickname": CHARACTER_DISPLAY_NAME,
-    }
     validated = validate_merged_config(
         bot_config_type,
         default_config,
-        user_config,
-        account_config,
+        bot_config,
     )
 
     if session_path.exists():
@@ -589,13 +584,12 @@ def prepare_session(
             name,
             group_id=TEST_GROUP_ID,
         )
-        write_json(created_path / "config" / "user.json", user_config)
         write_json(
             created_path
             / "config"
             / "bots"
             / f"{shell_session.bot_id_for_session(name)}.json",
-            account_config,
+            bot_config,
         )
         shutil.copytree(
             character_asset_root / CHARACTER_NAME,

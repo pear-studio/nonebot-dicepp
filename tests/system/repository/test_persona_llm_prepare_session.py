@@ -403,30 +403,25 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert all(model.startswith("deepseek/") for model in result.probe_models)
     assert not (result.path / "config" / "global.json").exists()
 
-    user_config = json.loads(
-        (result.path / "config" / "user.json").read_text(encoding="utf-8")
+    assert not (result.path / "config" / "user.json").exists()
+
+    account_path = (
+        result.path
+        / "config"
+        / "bots"
+        / f"{shell_session.bot_id_for_session(result.name)}.json"
     )
-    providers = user_config["persona_ai"]["providers"]
+    account = json.loads(account_path.read_text(encoding="utf-8"))
+    providers = account["persona_ai"]["providers"]
     assert providers["deepseek"] == {"enabled": True, "api_key": secret}
     assert providers["minimax"]["enabled"] is False
     assert providers["minimax_image"]["enabled"] is False
     assert providers["mimo"]["enabled"] is False
-    assert user_config["persona_ai"]["character_path"] == str(
+    assert account["persona_ai"]["character_path"] == str(
         (result.path / "content" / "characters").resolve()
     )
-
-    account = json.loads(
-        (
-            result.path
-            / "config"
-            / "bots"
-            / f"{shell_session.bot_id_for_session(result.name)}.json"
-        ).read_text(encoding="utf-8")
-    )
-    assert account == {
-        "persona": prepare.CHARACTER_NAME,
-        "nickname": prepare.CHARACTER_DISPLAY_NAME,
-    }
+    assert account["persona"] == prepare.CHARACTER_NAME
+    assert account["nickname"] == prepare.CHARACTER_DISPLAY_NAME
     assert (
         result.path
         / "content"

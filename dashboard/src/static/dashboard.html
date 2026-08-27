@@ -1999,7 +1999,7 @@ function app() {
         const data = await this.api('/api/config/set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: path, value: newVal }),
+          body: JSON.stringify({ path: path, value: newVal, bot_id: this.selectedBotId }),
         });
         this.configSaveResult = data;
         // Reload
@@ -2017,7 +2017,7 @@ function app() {
         const data = await this.api('/api/config/reset', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: path }),
+          body: JSON.stringify({ path: path, bot_id: this.selectedBotId }),
         });
         this.configSaveResult = data;
         this._mergedCache = null;

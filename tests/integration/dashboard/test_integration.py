@@ -49,19 +49,19 @@ class TestFullFlow:
         # ── 6. Edit config ───────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/set",
-            json={"path": "chat_interval", "value": 33},
+            json={"path": "chat_interval", "value": 33, "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
 
-        # Verify the change persisted to user.json
-        user_cfg = DashboardPaths.CONFIG_USER.read_text()
-        assert '"chat_interval"' in user_cfg
-        assert "33" in user_cfg
+        # Verify the change persisted to the selected Bot JSON.
+        bot_cfg = DashboardPaths.bot_config_path("test_bot").read_text()
+        assert '"chat_interval"' in bot_cfg
+        assert "33" in bot_cfg
 
         # ── 7. Reset config ──────────────────────────────────────────────
         resp = test_client.post(
             "/api/config/reset",
-            json={"path": "chat_interval"},
+            json={"path": "chat_interval", "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
         assert resp.json()["removed"] is True

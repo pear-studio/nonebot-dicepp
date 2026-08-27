@@ -12,7 +12,8 @@ class TestAuditLogCreated:
         """Config set creates an audit log entry."""
         setup_auth(test_client)
         test_client.post(
-            "/api/config/set", json={"path": "nickname", "value": "new_name"}
+            "/api/config/set",
+            json={"path": "nickname", "value": "new_name", "bot_id": "test_bot"},
         )
 
         resp = test_client.get("/api/audit")
@@ -20,12 +21,34 @@ class TestAuditLogCreated:
         assert len(entries) >= 1
         entry = entries[0]
         assert entry["action"] == "config.set"
-        assert entry["target"] == "nickname"
+        assert entry["target"] == "bots/test_bot/nickname"
+
+    def test_config_token_is_redacted_in_audit_detail(
+        self, test_client, tmp_dashboard_paths
+    ):
+        setup_auth(test_client)
+        secret = "web-log-token-do-not-store"
+        response = test_client.post(
+            "/api/config/set",
+            json={
+                "path": "log.web.token",
+                "value": secret,
+                "bot_id": "test_bot",
+            },
+        )
+        assert response.status_code == 200
+
+        entries = test_client.get("/api/audit").json()["entries"]
+        entry = next(e for e in entries if e["action"] == "config.set")
+        assert secret not in entry["detail"]
+        assert json.loads(entry["detail"]) == {"value": "***"}
 
     def test_audit_log_created_on_reset(self, test_client, tmp_dashboard_paths):
         """Config reset creates an audit log entry."""
         setup_auth(test_client)
-        test_client.post("/api/config/reset", json={"path": "nonexistent.key"})
+        test_client.post(
+            "/api/config/reset", json={"path": "chat_interval", "bot_id": "test_bot"}
+        )
 
         resp = test_client.get("/api/audit")
         entries = resp.json()["entries"]
@@ -51,10 +74,12 @@ class TestAuditList:
         setup_auth(test_client)
         # Perform a few actions
         test_client.post(
-            "/api/config/set", json={"path": "chat_interval", "value": 21}
+            "/api/config/set",
+            json={"path": "chat_interval", "value": 21, "bot_id": "test_bot"},
         )
         test_client.post(
-            "/api/config/set", json={"path": "nickname", "value": "audit"}
+            "/api/config/set",
+            json={"path": "nickname", "value": "audit", "bot_id": "test_bot"},
         )
 
         resp = test_client.get("/api/audit")
@@ -83,7 +108,12 @@ class TestAuditList:
         # Generate a few entries
         for i in range(5):
             test_client.post(
-                "/api/config/set", json={"path": "chat_interval", "value": 20 + i}
+                "/api/config/set",
+                json={
+                    "path": "chat_interval",
+                    "value": 20 + i,
+                    "bot_id": "test_bot",
+                },
             )
 
         resp = test_client.get("/api/audit", params={"limit": 3})
@@ -101,8 +131,8 @@ class TestAuditList:
             ("auth.setup", "auth", "Initial password set"),
             ("auth.login", "auth", "Login"),
             ("auth.change_password", "auth", "Password changed"),
-            ("config.set", "nickname", json.dumps({"value": "DicePP"})),
-            ("config.reset", "nickname", "reset to default"),
+            ("config.set", "bots/demo/nickname", json.dumps({"value": "DicePP"})),
+            ("config.reset", "bots/demo/nickname", "reset to default"),
             ("config.bot.save", "bots/demo", ""),
             ("config.user.save", "user.json", ""),
             ("persona.character.save", "调查员", ""),

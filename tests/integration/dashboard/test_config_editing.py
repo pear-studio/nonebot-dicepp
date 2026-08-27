@@ -35,19 +35,52 @@ class TestMergedView:
         )
         assert config["persona_ai.providers.minimax.base_url"]["source"] == "default"
 
-    def test_merged_with_user_overrides(self, test_client: TestClient, tmp_dashboard_paths):
-        """User overrides show source "user"."""
-        # Pre-populate user.json — when overlay has a matching key the
-        # structure IS flattened to dotted keys.
-        user_cfg = {"chat_interval": 33}
-        DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
+    def test_merged_does_not_treat_user_json_as_bot_overlay(
+        self, test_client: TestClient, tmp_dashboard_paths
+    ):
+        """Bot values come only from the selected Bot file."""
+        DashboardPaths.CONFIG_USER.write_text(json.dumps({}))
+        bot_path = DashboardPaths.bot_config_path("test_bot")
+        bot_path.write_text(json.dumps({"chat_interval": 33}))
 
         setup_auth(test_client)
-        resp = test_client.get("/api/config/merged")
+        resp = test_client.get("/api/config/merged", params={"bot_id": "test_bot"})
         config = resp.json()["config"]
 
         assert config["chat_interval"]["value"] == 33
-        assert config["chat_interval"]["source"] == "user"
+        assert config["chat_interval"]["source"] == "bot"
+
+    def test_merged_preserves_dynamic_provider_mapping_keys(
+        self, test_client: TestClient, tmp_dashboard_paths
+    ):
+        """Legal provider names absent from the built-in catalog remain visible."""
+        bot_path = DashboardPaths.bot_config_path("test_bot")
+        bot_path.write_text(json.dumps({
+            "persona_ai": {
+                "providers": {
+                    "custom": {
+                        "api_key": "",
+                        "base_url": "https://custom.example.test/v1",
+                        "models": [{
+                            "name": "custom-model",
+                            "category": "llm",
+                            "capabilities": ["text"],
+                        }],
+                    }
+                }
+            }
+        }))
+
+        setup_auth(test_client)
+        response = test_client.get(
+            "/api/config/merged", params={"bot_id": "test_bot"}
+        )
+        assert response.status_code == 200
+        entry = response.json()["config"]["persona_ai.providers.custom.base_url"]
+        assert entry["value"] == "https://custom.example.test/v1"
+        assert entry["source"] == "bot"
+        assert entry["tab"] == "persona"
+        assert entry["section"] == "providers"
 
     def test_merged_includes_tab_and_section(self, test_client: TestClient, tmp_dashboard_paths):
         """Each config field in merged output includes tab and section keys."""
@@ -98,11 +131,22 @@ class TestMergedView:
 
 
 class TestSetField:
+    @pytest.mark.parametrize("endpoint", ["set", "reset"])
+    def test_bot_field_requires_bot_id(self, test_client: TestClient, endpoint: str):
+        setup_auth(test_client)
+        body = {"path": "nickname"}
+        if endpoint == "set":
+            body["value"] = "missing-id"
+        response = test_client.post(f"/api/config/{endpoint}", json=body)
+        assert response.status_code == 400
+        assert "bot_id" in response.json()["message"]
+
     def test_set_field(self, test_client: TestClient, tmp_dashboard_paths):
         """``POST /api/config/set`` persists and reports deferred application."""
         setup_auth(test_client)
         resp = test_client.post(
-            "/api/config/set", json={"path": "nickname", "value": "new_name"}
+            "/api/config/set",
+            json={"path": "nickname", "value": "new_name", "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
         assert resp.json() == {
@@ -112,21 +156,24 @@ class TestSetField:
             "restart_required": True,
         }
 
-        # Verify user.json was written
-        user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert user_data["nickname"] == "new_name"
+        bot_data = json.loads(DashboardPaths.bot_config_path("test_bot").read_text())
+        assert bot_data["nickname"] == "new_name"
 
     def test_set_nested_field(self, test_client: TestClient, tmp_dashboard_paths):
         """Deeply nested paths create intermediate dicts."""
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/set",
-            json={"path": "log.web.endpoint", "value": "https://logs.example.test"},
+            json={
+                "path": "log.web.endpoint",
+                "value": "https://logs.example.test",
+                "bot_id": "test_bot",
+            },
         )
         assert resp.status_code == 200
 
-        user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert user_data["log"]["web"]["endpoint"] == "https://logs.example.test"
+        bot_data = json.loads(DashboardPaths.bot_config_path("test_bot").read_text())
+        assert bot_data["log"]["web"]["endpoint"] == "https://logs.example.test"
 
     def test_set_field_empty_path(self, test_client: TestClient):
         """An empty path returns 400."""
@@ -136,26 +183,29 @@ class TestSetField:
 
 class TestResetField:
     def test_reset_field(self, test_client: TestClient, tmp_dashboard_paths):
-        """``POST /api/config/reset`` removes a key from user.json."""
-        # Pre-populate user.json with a field to reset
-        DashboardPaths.CONFIG_USER.write_text(
-            json.dumps({"nickname": "override"})
-        )
+        """``POST /api/config/reset`` removes a key from a Bot JSON."""
+        bot_path = DashboardPaths.bot_config_path("test_bot")
+        bot_path.write_text(json.dumps({"nickname": "override"}))
 
         setup_auth(test_client)
-        resp = test_client.post("/api/config/reset", json={"path": "nickname"})
+        resp = test_client.post(
+            "/api/config/reset", json={"path": "nickname", "bot_id": "test_bot"}
+        )
         assert resp.status_code == 200
         assert resp.json()["removed"] is True
 
-        # Verify the key was removed from user.json
-        user_data = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert "nickname" not in user_data
+        bot_data = json.loads(bot_path.read_text())
+        assert "nickname" not in bot_data
+        effective = test_client.get("/api/config/bots/test_bot")
+        assert effective.status_code == 200
+        assert effective.json()["config"]["nickname"] == ""
 
     def test_reset_nonexistent(self, test_client: TestClient, tmp_dashboard_paths):
         """Resetting a non-existent path returns removed=False (not 404)."""
         setup_auth(test_client)
         resp = test_client.post(
-            "/api/config/reset", json={"path": "nonexistent.key"}
+            "/api/config/reset",
+            json={"path": "chat_interval", "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
         assert resp.json()["removed"] is False
@@ -185,18 +235,34 @@ class TestBotConfig:
         saved = json.loads(DashboardPaths.bot_config_path("test_bot").read_text())
         assert saved == new_config
 
-    def test_bot_config_read_nonexistent(self, test_client: TestClient):
-        """Reading a non-existent bot config returns the local 404 contract."""
+    def test_saving_complete_default_bot_is_sparse_empty_object(
+        self, test_client: TestClient, tmp_dashboard_paths
+    ):
+        from plugins.DicePP.core.config.pydantic_models import BotConfig
+
+        path = DashboardPaths.bot_config_path("new_bot")
+        setup_auth(test_client)
+        response = test_client.post(
+            "/api/config/bots/new_bot/save",
+            json=BotConfig().model_dump(mode="json"),
+        )
+        assert response.status_code == 200
+        assert json.loads(path.read_text(encoding="utf-8")) == {}
+
+    def test_bot_config_read_nonexistent(self, test_client: TestClient, tmp_dashboard_paths):
+        """Reading a missing Bot config returns editable defaults."""
         setup_auth(test_client)
         resp = test_client.get("/api/config/bots/nonexistent_bot")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.json()["config"]["nickname"] == ""
+        assert not DashboardPaths.bot_config_path("nonexistent_bot").exists()
 
 
 class TestUserJsonSave:
-    def test_save_user_json(self, test_client: TestClient):
-        """``POST /api/config/user/save`` writes the body to user.json."""
+    def test_save_empty_user_json(self, test_client: TestClient):
+        """The first-batch UserConfig is strict and currently empty."""
         setup_auth(test_client)
-        body = {"nickname": "modified", "chat_interval": 42}
+        body = {}
         resp = test_client.post("/api/config/user/save", json=body)
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -204,6 +270,13 @@ class TestUserJsonSave:
         from dashboard.src.config import DashboardPaths
         saved = json.loads(DashboardPaths.CONFIG_USER.read_text())
         assert saved == body
+
+    def test_save_user_bot_field_rejected(self, test_client: TestClient):
+        setup_auth(test_client)
+        resp = test_client.post(
+            "/api/config/user/save", json={"nickname": "not-global"}
+        )
+        assert resp.status_code == 422
 
     def test_save_user_json_non_dict_body_rejected(self, test_client: TestClient):
         """``POST /api/config/user/save`` with a list body returns 400."""

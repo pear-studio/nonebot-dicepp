@@ -1,9 +1,9 @@
-"""
-Pydantic models for DicePP configuration.
+"""Typed configuration schemas for DicePP.
 
-All bot configuration is represented as typed fields here.
-Config is loaded hierarchically by ConfigLoader:
-  model defaults < user overrides < account overrides < env vars
+``UserConfig`` and ``BotConfig`` are deliberately separate schemas.  The
+former contains instance-wide service policy while the latter contains one
+QQ account's runtime settings.  Their JSON files are independent sparse
+overlays; one is never treated as an overlay of the other.
 """
 from typing import List, Literal, Optional, Dict
 
@@ -42,11 +42,35 @@ DASHBOARD_LAYOUT = {
 }
 
 
+# ── Instance-wide user configuration ────────────────────────────────────────
+
+
+class UserConfig(BaseModel):
+    """Configuration shared by all Bots in one DicePP instance.
+
+    The first configuration-foundation batch intentionally keeps this schema
+    empty.  Future instance-wide fields will be added here without allowing
+    Bot identity or behaviour into ``config/user.json``.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        json_schema_extra={
+            "dashboard_tab": "config",
+            "dashboard_section": "user",
+        },
+    )
+
+
+
 # ── Sub-config models ─────────────────────────────────────────────────────────
 
 
 class CircuitBreakerConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={"dashboard_section": "providers"}
     )
 
@@ -56,6 +80,8 @@ class CircuitBreakerConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={"dashboard_section": "providers"}
     )
 
@@ -91,6 +117,8 @@ class ModelConfig(BaseModel):
 
 class ProviderConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={"dashboard_section": "providers"}
     )
 
@@ -111,7 +139,12 @@ def _builtin_provider_catalog() -> Dict[str, ProviderConfig]:
 
 class PersonaConfig(BaseModel):
     model_config = ConfigDict(
+        # Runtime callers still construct PersonaConfig with a handful of
+        # legacy-only values.  Config files are independently canonicalized
+        # against ``model_fields`` by the loader, so this does not relax the
+        # strict persistence boundary.
         extra="ignore",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "persona",
             "dashboard_section": "basic",
@@ -604,6 +637,8 @@ class HealthMonitorConfig(BaseModel):
     """Bot 健康监控配置"""
 
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "advanced",
@@ -617,6 +652,8 @@ class HealthMonitorConfig(BaseModel):
 
 class DiceHubConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "advanced",
@@ -631,6 +668,8 @@ class DiceHubConfig(BaseModel):
 
 class RollConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "modules",
@@ -645,6 +684,8 @@ class RollConfig(BaseModel):
 
 class DeckConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "modules",
@@ -657,6 +698,8 @@ class DeckConfig(BaseModel):
 
 class RandomGenConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "modules",
@@ -669,6 +712,8 @@ class RandomGenConfig(BaseModel):
 
 class QueryConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "modules",
@@ -681,6 +726,8 @@ class QueryConfig(BaseModel):
 
 
 class LogWebConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     provider: str = Field(default="dice_log_v105", title="Web 日志服务")
     endpoint: str = Field(default="", title="Web 日志地址")
     token: str = Field(default="", title="Web 日志 Token")
@@ -694,6 +741,8 @@ class LogWebConfig(BaseModel):
 
 class LogConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "advanced",
@@ -707,6 +756,8 @@ class LogConfig(BaseModel):
 
 class ModeConfig(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "modules",
@@ -725,6 +776,8 @@ class BotConfig(BaseModel):
     """Top-level configuration model for a single Bot instance."""
 
     model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
         json_schema_extra={
             "dashboard_tab": "config",
             "dashboard_section": "account",

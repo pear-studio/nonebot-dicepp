@@ -81,7 +81,9 @@ def test_bot_runner_subprocess_writes_only_inside_session_workspace(
 
     # Session workspace was populated
     assert (session_dir / "data" / "bots" / "shell_workspace" / "bot_data.db").is_file()
-    assert (session_dir / "config" / "bots" / "shell_workspace.json").is_file()
+    # Missing Bot config is a valid default-backed state; starting a shell
+    # runtime must not materialise a JSON file.
+    assert not (session_dir / "config" / "bots" / "shell_workspace.json").exists()
 
     # Parent state MUST be unchanged — BotRunner is process-terminal
     assert Paths.PROJECT_ROOT == original_root, (

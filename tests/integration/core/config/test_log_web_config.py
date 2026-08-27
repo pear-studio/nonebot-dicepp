@@ -12,7 +12,7 @@ def _write(path: Path, data: dict) -> None:
 
 
 def test_current_log_web_config_loads_and_persists(tmp_path: Path):
-    path = tmp_path / "user.json"
+    path = tmp_path / "bots" / "bot1.json"
     _write(
         path,
         {

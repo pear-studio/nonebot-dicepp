@@ -63,10 +63,13 @@ from .audit import log as audit_log
 from .bot_process import BotProcessController, create_bot_process_controller
 from .config import DashboardPaths
 from .config_store import (
+    BotConfig,
     ConfigurationValidationError,
+    effective_bot_config,
     read_config_object,
     validate_bot_candidate,
     validate_user_candidate,
+    UserConfig,
     write_config_object,
 )
 from .query_database import normalization_report, report_detail, write_normalized_database
@@ -676,13 +679,13 @@ async def instance_import(request: Request):
 
 @app.get("/api/bots", dependencies=[Depends(require_auth)])
 async def list_bots(request: Request):
-    """Scan config/bots/*.json, exclude _template.json, return bot_id list."""
-    bots_dir = DashboardPaths.CONFIG_BOTS_DIR
+    """Discover connected Bot identities from ``data/bots/<id>/``."""
+    bots_dir = DashboardPaths.instance_layout().data_bots_dir
     ids = []
     if bots_dir.exists():
-        for f in sorted(bots_dir.iterdir()):
-            if f.suffix == ".json" and f.stem != "_template":
-                ids.append(f.stem)
+        for path in sorted(bots_dir.iterdir()):
+            if path.is_dir() and not path.name.startswith("."):
+                ids.append(path.name)
 
     return _ok({"bots": ids})
 
@@ -832,7 +835,7 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
 
 
 def _get_config_field_metadata() -> dict:
-    """Extract field titles, descriptions, tab and section from BotConfig Pydantic model.
+    """Extract field metadata from both independent configuration schemas.
 
     Returns a flat dict mapping dotted keys to {title, description, tab, section}.
     Model-level json_schema_extra (ConfigDict) provides default tab/section;
@@ -841,10 +844,13 @@ def _get_config_field_metadata() -> dict:
     mod = _load_pydantic_models_module()
 
     try:
-        BotConfig = mod.BotConfig
-        schema = BotConfig.model_json_schema()
-        defs = schema.get("$defs", {})
-        return _flatten_json_schema(schema, defs)
+        result = {}
+        for model_name in ("UserConfig", "BotConfig"):
+            model = getattr(mod, model_name)
+            schema = model.model_json_schema()
+            defs = schema.get("$defs", {})
+            result.update(_flatten_json_schema(schema, defs))
+        return result
     except Exception:
         import logging
         logging.getLogger("dashboard").exception(
@@ -856,6 +862,13 @@ def _get_config_field_metadata() -> dict:
 # Cache metadata at module level (computed once on first use)
 _config_field_metadata_cache: Optional[dict] = None
 _config_layout_cache: Optional[dict] = None
+_SENSITIVE_CONFIG_LEAFS = frozenset({"api_key", "token"})
+
+
+def _is_sensitive_config_path(path: str) -> bool:
+    """Return whether a config leaf contains a credential value."""
+
+    return path.rsplit(".", 1)[-1] in _SENSITIVE_CONFIG_LEAFS
 
 
 def _cached_config_field_metadata() -> dict:
@@ -889,71 +902,56 @@ def _find_meta(dotted: str, meta: dict) -> dict:
 
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
 async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
-    """Merge code defaults + user.json + bots/{bot_id}.json with source annotation."""
+    """Return effective defaults with independent user/Bot source labels."""
     models = _load_pydantic_models_module()
-    default_cfg = models.BotConfig().model_dump(mode="json", by_alias=True)
     try:
         user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
     except ConfigurationValidationError:
-        _err("Stored configuration is unreadable", 500)
+        _err("Stored configuration is unreadable or invalid", 500)
 
-    # Annotate merged config: global=default, user overlays=user, bot overlays=bot
-    result_annotated = {}
-
-    def _annotate_deep(base: dict, overlay: dict, source: str, prefix: str = ""):
-        for key, value in base.items():
-            if key.startswith("_comment"):
-                continue
-            dotted = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict):
-                # Recurse into nested dicts — if overlay has a dict for this key, pass it
-                overlay_child = overlay.get(key, {}) if isinstance(overlay.get(key), dict) else {}
-                _annotate_deep(value, overlay_child, source, dotted)
-            else:
-                if key in overlay:
-                    result_annotated[dotted] = {"value": overlay[key], "source": source}
-                else:
-                    result_annotated[dotted] = {"value": value, "source": "default"}
-
-        # Extra keys from overlay not in base
-        for key, value in overlay.items():
-            if key.startswith("_comment"):
-                continue
-            dotted = f"{prefix}.{key}" if prefix else key
-            if key not in base:
-                if isinstance(value, dict):
-                    _annotate_deep(value, {}, source, dotted)
-                else:
-                    result_annotated[dotted] = {"value": value, "source": source}
-
-    # Merge user over default
-    _annotate_deep(default_cfg, user_cfg, "user")
-
-    # Merge bot over user+default
+    bot_cfg: dict = {}
     if bot_id:
         _validate_identifier(bot_id, "bot_id")
         try:
             bot_cfg = read_config_object(DashboardPaths.bot_config_path(bot_id))
+            validate_bot_candidate(DashboardPaths.instance_layout(), bot_id, bot_cfg)
         except ConfigurationValidationError:
-            _err("Stored configuration is unreadable", 500)
-        # Re-annotate: start from the previous result, update with bot overrides
-        # For each key in bot_cfg, overwrite source to "bot"
-        def _flatten_and_annotate(d: dict, prefix: str = ""):
-            """Flatten dict to dotted keys, return {dotted: value}."""
-            items = {}
-            for key, value in d.items():
-                if key.startswith("_comment"):
-                    continue
-                dotted = f"{prefix}.{key}" if prefix else key
-                if isinstance(value, dict):
-                    items.update(_flatten_and_annotate(value, dotted))
-                else:
-                    items[dotted] = value
-            return items
+            _err("Stored configuration is unreadable or invalid", 500)
 
-        bot_flat = _flatten_and_annotate(bot_cfg)
-        for dotted, value in bot_flat.items():
-            result_annotated[dotted] = {"value": value, "source": "bot"}
+    result_annotated = {}
+
+    def _annotate_deep(base: dict, overlay: dict, source: str, prefix: str = ""):
+        for key, value in base.items():
+            dotted = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                overlay_child = overlay.get(key, {}) if isinstance(overlay.get(key), dict) else {}
+                _annotate_deep(value, overlay_child, source, dotted)
+            else:
+                result_annotated[dotted] = {
+                    "value": overlay[key] if key in overlay else value,
+                    "source": source if key in overlay else "default",
+                }
+
+        # ``providers`` is a legal open mapping: a user may add a provider
+        # name that is absent from the built-in catalog.  Keep those dynamic
+        # keys visible in the merged view instead of silently dropping them.
+        for key, value in overlay.items():
+            if key in base:
+                continue
+            dotted = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                _annotate_deep({}, value, source, dotted)
+            else:
+                result_annotated[dotted] = {
+                    "value": value,
+                    "source": source,
+                }
+
+    # These two calls are intentionally independent.  User fields and Bot
+    # fields may have similarly named concepts but never share an overlay.
+    _annotate_deep(models.UserConfig().model_dump(mode="json"), user_cfg, "user")
+    _annotate_deep(models.BotConfig().model_dump(mode="json"), bot_cfg, "bot")
 
     # Load field metadata from Pydantic models (title=label, description=tooltip, tab, section)
     field_meta = _cached_config_field_metadata()
@@ -977,7 +975,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.post("/api/config/set", dependencies=[Depends(require_auth)])
 async def config_set(request: Request):
-    """Deep merge a value into user.json and persist it locally."""
+    """Set one field in its owning UserConfig or BotConfig file."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
@@ -987,21 +985,40 @@ async def config_set(request: Request):
     if not path:
         _err("path is required")
 
-    try:
-        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
-    except ConfigurationValidationError:
-        _err("Stored configuration is unreadable", 500)
+    owner = path.split(".", 1)[0]
+    if owner in UserConfig.model_fields:
+        config_path = DashboardPaths.CONFIG_USER
+        model_type = UserConfig
+        validator = lambda candidate: validate_user_candidate(
+            DashboardPaths.instance_layout(), candidate
+        )
+        audit_target = path
+    else:
+        bot_id = body.get("bot_id")
+        if not isinstance(bot_id, str):
+            _err("bot_id is required for Bot configuration fields")
+        _validate_identifier(bot_id, "bot_id")
+        config_path = DashboardPaths.bot_config_path(bot_id)
+        model_type = BotConfig
+        validator = lambda candidate: validate_bot_candidate(
+            DashboardPaths.instance_layout(), bot_id, candidate
+        )
+        audit_target = f"bots/{bot_id}/{path}"
 
-    _apply_deep(user_cfg, path, value)
     try:
-        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
-        write_config_object(DashboardPaths.CONFIG_USER, user_cfg)
+        target_cfg = read_config_object(config_path)
+        _apply_deep(target_cfg, path, value)
+        candidate = validator(target_cfg)
+        write_config_object(config_path, candidate, model_type=model_type)
     except ConfigurationValidationError as exc:
         return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
-    audit_detail = json.dumps({"value": "***"}, ensure_ascii=False) if re.search(r'\.api_key$', path) else json.dumps({"value": value}, ensure_ascii=False)
-    audit_log(db_path, "config.set", path, audit_detail,
+    audit_detail = json.dumps(
+        {"value": "***" if _is_sensitive_config_path(path) else value},
+        ensure_ascii=False,
+    )
+    audit_log(db_path, "config.set", audit_target, audit_detail,
               ip=request.client.host if request.client else "")
 
     return _config_save_result({})
@@ -1009,7 +1026,7 @@ async def config_set(request: Request):
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
 async def config_reset(request: Request):
-    """Remove a key from user.json, then persist it locally."""
+    """Reset one field in its owning UserConfig or BotConfig file."""
     body = await request.json()
     if not isinstance(body, dict):
         _err("Body must be a JSON object")
@@ -1018,20 +1035,38 @@ async def config_reset(request: Request):
     if not path:
         _err("path is required")
 
-    try:
-        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
-    except ConfigurationValidationError:
-        _err("Stored configuration is unreadable", 500)
+    owner = path.split(".", 1)[0]
+    if owner in UserConfig.model_fields:
+        config_path = DashboardPaths.CONFIG_USER
+        model_type = UserConfig
+        validator = lambda candidate: validate_user_candidate(
+            DashboardPaths.instance_layout(), candidate
+        )
+        audit_target = path
+    else:
+        bot_id = body.get("bot_id")
+        if not isinstance(bot_id, str):
+            _err("bot_id is required for Bot configuration fields")
+        _validate_identifier(bot_id, "bot_id")
+        config_path = DashboardPaths.bot_config_path(bot_id)
+        model_type = BotConfig
+        validator = lambda candidate: validate_bot_candidate(
+            DashboardPaths.instance_layout(), bot_id, candidate
+        )
+        audit_target = f"bots/{bot_id}/{path}"
 
-    removed = _remove_deep(user_cfg, path)
     try:
-        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
-        write_config_object(DashboardPaths.CONFIG_USER, user_cfg)
+        had_config_file = config_path.exists()
+        target_cfg = read_config_object(config_path)
+        removed = _remove_deep(target_cfg, path)
+        candidate = validator(target_cfg)
+        if had_config_file or removed:
+            write_config_object(config_path, candidate, model_type=model_type)
     except ConfigurationValidationError as exc:
         return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
     db_path = request.app.state.dashboard_db
-    audit_log(db_path, "config.reset", path, "reset to default",
+    audit_log(db_path, "config.reset", audit_target, "reset to default",
               ip=request.client.host if request.client else "")
 
     return _config_save_result({}, removed=removed)
@@ -1039,14 +1074,13 @@ async def config_reset(request: Request):
 
 @app.get("/api/config/bots/{bot_id}", dependencies=[Depends(require_auth)])
 async def config_bot_get(bot_id: str, request: Request):
-    """Read bot config file content."""
+    """Read effective Bot state, including defaults when no file exists."""
     _validate_identifier(bot_id, "bot_id")
     try:
-        cfg = read_config_object(DashboardPaths.bot_config_path(bot_id), missing_is_empty=False)
-    except FileNotFoundError:
-        _err("Bot configuration not found", 404)
+        raw = read_config_object(DashboardPaths.bot_config_path(bot_id))
+        cfg = effective_bot_config(bot_id, raw).model_dump(mode="json")
     except ConfigurationValidationError:
-        _err("Stored configuration is unreadable", 500)
+        _err("Stored configuration is unreadable or invalid", 500)
     return _ok({"config": cfg})
 
 
@@ -1059,8 +1093,10 @@ async def config_bot_save(bot_id: str, request: Request):
         _err("Body must be a JSON object")
 
     try:
-        validate_bot_candidate(DashboardPaths.instance_layout(), bot_id, body)
-        write_config_object(DashboardPaths.bot_config_path(bot_id), body)
+        candidate = validate_bot_candidate(DashboardPaths.instance_layout(), bot_id, body)
+        write_config_object(
+            DashboardPaths.bot_config_path(bot_id), candidate, model_type=BotConfig
+        )
     except ConfigurationValidationError as exc:
         return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
@@ -1076,8 +1112,9 @@ async def config_user_get(request: Request):
     """Return raw user.json content for JSON view editing."""
     try:
         user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
+        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
     except ConfigurationValidationError:
-        _err("Stored configuration is unreadable", 500)
+        _err("Stored configuration is unreadable or invalid", 500)
     return _ok({"config": user_cfg})
 
 
@@ -1089,8 +1126,10 @@ async def config_user_save(request: Request):
         _err("Body must be a JSON object")
 
     try:
-        validate_user_candidate(DashboardPaths.instance_layout(), body)
-        write_config_object(DashboardPaths.CONFIG_USER, body)
+        candidate = validate_user_candidate(DashboardPaths.instance_layout(), body)
+        write_config_object(
+            DashboardPaths.CONFIG_USER, candidate, model_type=UserConfig
+        )
     except ConfigurationValidationError as exc:
         return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
 
@@ -1360,18 +1399,17 @@ async def overview(request: Request, bot_id: Optional[str] = Query(None)):
 
 @app.get("/api/bots/status", dependencies=[Depends(require_auth)])
 async def bot_status(request: Request):
-    """Return local config identities and the single Bot process state."""
+    """Return local data identities and the single Bot process state."""
     return _ok({"bots": await _local_bot_statuses(request)})
 
 
 async def _local_bot_statuses(request: Request) -> list[dict]:
     bots = []
-    config_dir = DashboardPaths.instance_layout().config_bots_dir
-    if config_dir.exists():
-        for path in sorted(config_dir.glob("*.json")):
-            if path.name == "_template.json":
-                continue
-            bots.append({"bot_id": path.stem})
+    data_dir = DashboardPaths.instance_layout().data_bots_dir
+    if data_dir.exists():
+        for path in sorted(data_dir.iterdir()):
+            if path.is_dir() and not path.name.startswith("."):
+                bots.append({"bot_id": path.name})
     status = await asyncio.to_thread(_get_bot_process_controller(request).status)
     for bot in bots:
         bot["online"] = status.running

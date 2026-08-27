@@ -307,9 +307,7 @@ def test_config_edit_saves_without_runtime_operation(
     tmp_path: Path,
 ) -> None:
     """Config save is local to Dashboard; Bot lifecycle is separate."""
-    bots_dir = tmp_path / "config" / "bots"
-    bots_dir.mkdir(parents=True, exist_ok=True)
-    (bots_dir / "test_bot.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "data" / "bots" / "test_bot").mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
@@ -328,7 +326,9 @@ def test_config_edit_saves_without_runtime_operation(
             json_view.click()
             textarea = page.locator("textarea").first
             expect(textarea).to_be_enabled(timeout=10000)
-            textarea.fill('{"nickname": "modified"}')
+            # UserConfig is intentionally empty in this batch; JSON view can
+            # still save the valid empty object without touching Bot config.
+            textarea.fill('{}')
             with page.expect_response(
                 lambda response: (
                     urlparse(response.url).path == "/api/config/user/save"
@@ -342,7 +342,7 @@ def test_config_edit_saves_without_runtime_operation(
             )
             _wait_for_json_value(
                 tmp_path / "config" / "user.json",
-                {"nickname": "modified"},
+                {},
             )
         finally:
             browser.close()
@@ -351,9 +351,7 @@ def test_config_read_failure_is_visible_and_retryable(
     tmp_path: Path,
 ) -> None:
     """A failed initial config read leaves a visible path to retry safely."""
-    bots_dir = tmp_path / "config" / "bots"
-    bots_dir.mkdir(parents=True, exist_ok=True)
-    (bots_dir / "test_bot.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "data" / "bots" / "test_bot").mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)
@@ -404,14 +402,8 @@ def test_config_read_failure_is_visible_and_retryable(
 
 def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -> None:
     """After login, the first bot is auto-selected and data tab loads without manual selection."""
-    bots_dir = tmp_path / "config" / "bots"
-    bots_dir.mkdir(parents=True, exist_ok=True)
-    (bots_dir / "alpha_bot.json").write_text(
-        json.dumps({"master": [], "nickname": "alpha-bot"})
-    )
-    (bots_dir / "zebra_bot.json").write_text(
-        json.dumps({"master": [], "nickname": "zebra-bot"})
-    )
+    (tmp_path / "data" / "bots" / "alpha_bot").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "data" / "bots" / "zebra_bot").mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
         browser = launch_browser(p.chromium)

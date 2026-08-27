@@ -12,7 +12,7 @@ from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get
 from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from plugins.DicePP.core.config import Paths
 from plugins.DicePP.core.config.loader import ConfigLoader
-from plugins.DicePP.core.config.pydantic_models import BotConfig
+from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
 from plugins.DicePP.core.bot.task_scheduler import TaskScheduler
 from plugins.DicePP.core.persona import PersonaLoader
 from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
@@ -97,6 +97,9 @@ class Bot:
         # New config system: ConfigLoader + PersonaLoader
         self._cfg_loader = ConfigLoader(account=account)
         self.config: BotConfig = self._cfg_loader.load()
+        # Instance-wide policy is a separate schema/file.  Keep it available
+        # to later service integrations without folding it into BotConfig.
+        self.user_config: UserConfig = self._cfg_loader.user_config
         configure_log_level(self.config.log.level)
         self._persona_loader = PersonaLoader(self.config.persona_ai.character_path)
 

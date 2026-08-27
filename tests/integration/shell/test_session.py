@@ -100,10 +100,8 @@ class TestSessionWorkspace:
         session_dir = create_session("isolated")
 
         assert not (session_dir / "config" / "global.json").exists()
-        assert json.loads(
-            (session_dir / "config" / "user.json").read_text(encoding="utf-8")
-        ) == {}
-        assert (session_dir / "config" / "bots" / "_template.json").is_file()
+        assert not (session_dir / "config" / "user.json").exists()
+        assert not (session_dir / "config" / "bots" / "_template.json").exists()
         assert (session_dir / "data" / "bots").is_dir()
         assert (session_dir / "content" / "characters").is_dir()
         assert (session_dir / "content" / "queries").is_dir()

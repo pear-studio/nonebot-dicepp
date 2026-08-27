@@ -344,16 +344,6 @@ def read_runtime_info(session_dir: Path) -> RuntimeInfo | None:
 def _ensure_workspace(session_dir: Path) -> None:
     for relative in _WORKSPACE_DIRS:
         (session_dir / relative).mkdir(parents=True, exist_ok=True)
-    defaults = {
-        session_dir / "config" / "user.json": {},
-        session_dir / "config" / "bots" / "_template.json": {},
-    }
-    for path, payload in defaults.items():
-        if not path.exists():
-            path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
 
 
 def _same_process(pid: int, created_at: float) -> bool:
