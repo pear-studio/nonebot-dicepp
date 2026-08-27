@@ -37,4 +37,9 @@ BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议�
                 "8.本协议内容可能改动，请注意查看最新协议。\n" \
                 "9.本服务最终解释权归服务提供方所有。"
 
+# Bot messages use two literal backslashes as the fixed multi-command
+# separator.  Keep this outside BotConfig so neither message dispatch nor
+# log classification can acquire an independent runtime setting.
+BOT_COMMAND_SEPARATOR = "\\\\"
+
 BOT_GIT_LINK = f"DicePP说明手册：{PROJECT_DOCS_URL}\n源码：{PROJECT_SOURCE_URL}"

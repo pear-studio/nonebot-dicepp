@@ -101,6 +101,14 @@ class TestHelpCommandIntegration(_BotTestBase):
         self.assertIn("cannot find help info for", result.lower(),
                       f"未知查询词应返回未找到提示，实际输出：{result}")
 
+    async def test_help_agreement_uses_fixed_core_declaration(self):
+        from plugins.DicePP.core.config import BOT_AGREEMENT
+
+        cmds = await self._send_group(".help 协议")
+        result = "\n".join(str(c) for c in cmds)
+
+        self.assertIn(BOT_AGREEMENT, result)
+
 
 class TestWelcomeCommandIntegration(_BotTestBase):
     """WelcomeCommand (.welcome) 集成测试"""
@@ -185,6 +193,40 @@ class TestWelcomeCommandIntegration(_BotTestBase):
 # ── Bot administration coverage ─────────────────────────────────────────
 
 class TestBotActivate:
+    async def test_group_without_activation_record_is_enabled_by_default(self, h):
+        group_id = "group_default_enabled"
+
+        assert await h.bot.db.group_activate.get(group_id) is None
+        await h.send_group(
+            ".r",
+            group_id=group_id,
+            checker=lambda result: "测试用户 的掷骰结果为" in result,
+        )
+        assert await h.bot.db.group_activate.get(group_id) is None
+
+        await h.send_group(
+            ".bot off",
+            group_id=group_id,
+            to_me=True,
+            checker=lambda result: "DicePP现已关闭。" in result,
+        )
+        await h.send_group(
+            ".r",
+            group_id=group_id,
+            checker=lambda result: not result,
+        )
+        await h.send_group(
+            ".bot on",
+            group_id=group_id,
+            to_me=True,
+            checker=lambda result: "DicePP现已开启。" in result,
+        )
+        await h.send_group(
+            ".r",
+            group_id=group_id,
+            checker=lambda result: "测试用户 的掷骰结果为" in result,
+        )
+
     async def test_bot_info(self, h):
         expected = f"DicePP v{package_version('dicepp')}"
         await h.send_group(

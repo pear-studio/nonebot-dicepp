@@ -16,6 +16,7 @@ from plugins.DicePP.core.communication import (
     MessageSender,
     PostSendEvent,
 )
+from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR
 from plugins.DicePP.core.data import LogRepository
 from plugins.DicePP.core.data.schema import ensure_bot_log_schema
 from plugins.DicePP.module.common.log import (
@@ -42,7 +43,7 @@ async def log_runtime_parts(tmp_path: Path):
         clock=lambda: NOW,
         log_id_factory=lambda: f"log-{next(ids)}",
     )
-    recorder = LogRecorder(repository, command_split="\n", clock=lambda: NOW)
+    recorder = LogRecorder(repository, clock=lambda: NOW)
     try:
         yield db, repository, service, recorder
     finally:
@@ -125,9 +126,9 @@ async def test_user_record_preserves_platform_fields_and_canonical_segments(
         (".stat logarithm", "command"),
         (".stat hp", "command"),
         (".r 1d20", "command"),
-        (".log list\n.log export 旅团", "log_control"),
-        (".log off\n.r 1d20", "command"),
-        (".log list\n补充说明", "command"),
+        (f".log list{BOT_COMMAND_SEPARATOR}.log export 旅团", "log_control"),
+        (f".log off{BOT_COMMAND_SEPARATOR}.r 1d20", "command"),
+        (f".log list{BOT_COMMAND_SEPARATOR}补充说明", "command"),
     ],
 )
 async def test_platform_level_classification_preserves_mixed_game_content(

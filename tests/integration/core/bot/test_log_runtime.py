@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from plugins.DicePP.core.bot import Bot
-from plugins.DicePP.core.config import Paths
+from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR, Paths
 from plugins.DicePP.core.communication import (
     MessageMetaData,
     MessageRecallEvent,
@@ -30,7 +30,6 @@ async def uninitialized_log_bot():
             f"test_log_runtime_{uuid4().hex[:12]}",
             no_tick=True,
         )
-        bot.config.command_split = "\n"
         yield bot
     finally:
         try:
@@ -90,8 +89,8 @@ async def test_real_bot_routes_platform_send_and_recall_once(log_bot: Bot):
     sender = MessageSender("user-1", "玩家")
     sender.card = "调查员"
     meta = MessageMetaData(
-        "第一段\n第二段",
-        "第一段\n第二段",
+        f"第一段{BOT_COMMAND_SEPARATOR}第二段",
+        f"第一段{BOT_COMMAND_SEPARATOR}第二段",
         sender,
         group_id="group-1",
     )
@@ -125,7 +124,7 @@ async def test_real_bot_routes_platform_send_and_recall_once(log_bot: Bot):
         ("user", "user-message-1"),
         ("bot", "bot-message-1"),
     ]
-    assert records[0].plain_content == "第一段\n第二段"
+    assert records[0].plain_content == f"第一段{BOT_COMMAND_SEPARATOR}第二段"
     assert records[0].recalled_at is None
     assert records[1].recalled_at == recalled_at
 

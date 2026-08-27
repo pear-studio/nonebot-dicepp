@@ -12,24 +12,15 @@ from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotLe
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE
 from plugins.DicePP.core.config import get_bot_version, BOT_DESCRIBE
-from plugins.DicePP.utils.time import get_current_date_str
 
 LOC_BOT_SHOW = "bot_show"
 LOC_BOT_ON = "bot_on"
 LOC_BOT_OFF = "bot_off"
 LOC_BOT_DISMISS = "bot_dismiss"
 
-CFG_BOT_DEF_ENABLE = "bot_default_enable"
-
 DC_ACTIVATE = "activate"
 
 BOT_SHOW_APPEND = f"{BOT_DESCRIBE} {get_bot_version()}"
-
-
-def get_default_activate_data(default_enable: bool) -> List:
-    activate_data = [default_enable, get_current_date_str()]
-    # 是否开启, 最后更改的时间
-    return activate_data
 
 
 @custom_user_command(readable_name="激活指令",
@@ -54,9 +45,7 @@ class ActivateCommand(UserCommandBase):
             if _row:
                 activate_data = [bool(int(_row.active))] if isinstance(_row.active, str) else [_row.active]
             else:
-                default_enable: bool = self.bot.config.bot_default_enable
-                activate_data = [default_enable]
-                await self.bot.db.group_activate.upsert(GroupActivate(group_id=meta.group_id, active=str(int(default_enable))))
+                activate_data = [True]
         else:
             activate_data = None
         should_pass: bool = False

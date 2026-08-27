@@ -8,6 +8,7 @@ from enum import Enum
 
 from plugins.DicePP.core.command.cq_extractor import extract_segments
 from plugins.DicePP.core.communication import MessageMetaData, MessageRecallEvent, PostSendEvent
+from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR
 from plugins.DicePP.core.data.log_repository import LogRepository
 from plugins.DicePP.core.data.models import LogRecord
 from plugins.DicePP.utils.logger import logger
@@ -41,11 +42,9 @@ class LogRecorder:
         self,
         repository: LogRepository,
         *,
-        command_split: str = "\n",
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
-        self._command_split = command_split
         self._clock = clock or datetime.now
 
     async def record_user_message(self, meta: MessageMetaData) -> LogRecordResult:
@@ -156,12 +155,7 @@ class LogRecorder:
             return LogRecordResult(True, record_id=record_id, log_id=session.id)
 
     def _classify_user_message(self, plain_content: str) -> str:
-        separator = self._command_split
-        parts = (
-            plain_content.split(separator)
-            if separator
-            else [plain_content]
-        )
+        parts = plain_content.split(BOT_COMMAND_SEPARATOR)
         normalized = [part.strip().casefold() for part in parts if part.strip()]
         if normalized and all(_is_log_command(part) for part in normalized):
             return "log_control"

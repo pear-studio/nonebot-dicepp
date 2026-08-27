@@ -34,6 +34,8 @@ DicePP 使用 JSON 配置。常用文件是：
 | `accept_group_invites` | 是否接受加群和群邀请请求 |
 | `persona` | 默认文字人设 |
 
+多条 Bot 指令使用固定的两个反斜杠（`\\`）分隔，不属于配置项，也没有环境变量覆盖。
+
 ## API Key 与环境变量
 
 API Key 放在未提交的 `config/user.json`，例如：

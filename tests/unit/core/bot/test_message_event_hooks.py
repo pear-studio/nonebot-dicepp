@@ -6,6 +6,7 @@ import pytest
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender, PostSendEvent
+from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR
 from plugins.DicePP.core.message_types import MessageType
 
 
@@ -18,7 +19,6 @@ async def test_platform_hook_runs_once_while_persona_inbound_hook_keeps_split_gr
     bot._safe_update_group_stat = AsyncMock()
     bot.config = MagicMock()
     bot.config.master = ""
-    bot.config.command_split = "\n"
     bot.proxy = None
 
     failing_platform_hook = AsyncMock(side_effect=RuntimeError("hook failed"))
@@ -44,8 +44,8 @@ async def test_platform_hook_runs_once_while_persona_inbound_hook_keeps_split_gr
     bot.command_dict = {"test": command}
 
     meta = MessageMetaData(
-        "第一段\n第二段",
-        "第一段\n第二段",
+        f"第一段{BOT_COMMAND_SEPARATOR}第二段",
+        f"第一段{BOT_COMMAND_SEPARATOR}第二段",
         MessageSender("u1", "玩家"),
         group_id="g1",
     )

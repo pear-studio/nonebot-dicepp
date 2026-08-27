@@ -1,5 +1,12 @@
 from plugins.DicePP.core.config.basic import Paths
-from plugins.DicePP.core.config.declare import get_bot_version, BOT_ABOUT, BOT_DESCRIBE, BOT_GIT_LINK
+from plugins.DicePP.core.config.declare import (
+    BOT_ABOUT,
+    BOT_AGREEMENT,
+    BOT_COMMAND_SEPARATOR,
+    BOT_DESCRIBE,
+    BOT_GIT_LINK,
+    get_bot_version,
+)
 from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
 from plugins.DicePP.core.config.loader import (
     ConfigLoader,
@@ -15,6 +22,12 @@ from plugins.DicePP.core.config.loader import (
 
 __all__ = [
     "Paths",
+    "get_bot_version",
+    "BOT_ABOUT",
+    "BOT_AGREEMENT",
+    "BOT_COMMAND_SEPARATOR",
+    "BOT_DESCRIBE",
+    "BOT_GIT_LINK",
     "BotConfig",
     "UserConfig",
     "ConfigLoader",

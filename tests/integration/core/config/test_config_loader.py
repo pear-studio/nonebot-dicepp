@@ -79,6 +79,9 @@ def test_user_json_is_independent_and_empty_for_this_batch(dd):
         ("bot", {"friend_token": "old-token"}),
         ("bot", {"group_invite": False}),
         ("bot", {"nickname": "old-name"}),
+        ("bot", {"agreement": "old-agreement"}),
+        ("bot", {"command_split": "\n"}),
+        ("bot", {"bot_default_enable": False}),
     ],
 )
 def test_each_config_file_rejects_unknown_fields_and_wrong_types(
@@ -157,6 +160,14 @@ def test_environment_master_override_does_not_populate_master(dd):
         cfg = dd.loader("bot1").load()
 
     assert cfg.master == ""
+
+
+def test_command_split_environment_override_is_ignored(dd):
+    with patch.dict(os.environ, {"DICE_COMMAND_SPLIT": "\n"}):
+        cfg = dd.loader("bot1").load()
+
+    assert "command_split" not in BotConfig.model_fields
+    assert cfg == BotConfig()
 
 
 def test_malformed_json_is_rejected_without_rewriting(dd):

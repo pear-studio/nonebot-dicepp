@@ -10,7 +10,7 @@ from random import choice
 from plugins.DicePP.utils.logger import logger, get_exception_info, configure_log_level
 from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
-from plugins.DicePP.core.config import Paths
+from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR, Paths
 from plugins.DicePP.core.config.loader import ConfigLoader
 from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
 from plugins.DicePP.core.bot.task_scheduler import TaskScheduler
@@ -130,7 +130,7 @@ class Bot:
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
         self._post_send_hooks: List[PostSendHook] = []
 
-        # 原始平台消息 hook；与逐 command_split 触发的 Persona inbound hook 分离。
+        # 原始平台消息 hook；与按固定多指令分隔符触发的 Persona inbound hook 分离。
         self._platform_message_hooks: List[PlatformMessageHook] = []
 
         # 消息撤回 hook；由适配器提供平台 message_id，不依赖当前日志。
@@ -477,7 +477,6 @@ class Bot:
                 self.log_runtime = LogRuntime(
                     self,
                     self.db.log,
-                    command_split=self.config.command_split,
                 )
             self.log_runtime.start()
 
@@ -552,7 +551,7 @@ class Bot:
         if not self._delay_init_done:
             await self.delay_init_command()
 
-        # 一条平台事件只在 preprocess 和 command_split 之前通知一次。Persona 的
+        # 一条平台事件只在 preprocess 和多指令拆分之前通知一次。Persona 的
         # _inbound_message_hooks 仍在后续逐 msg_cur 触发，二者承担不同粒度的职责。
         for hook in tuple(getattr(self, "_platform_message_hooks", ())):
             try:
@@ -585,8 +584,7 @@ class Bot:
                     meta.permission = 0
 
         # 处理分行指令
-        command_split: str = self.config.command_split
-        msg_list = msg.split(command_split)
+        msg_list = msg.split(BOT_COMMAND_SEPARATOR)
         msg_list = [m.strip() for m in msg_list]
         is_multi_command = len(msg_list) > 1
 

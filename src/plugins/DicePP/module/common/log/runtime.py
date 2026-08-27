@@ -48,7 +48,6 @@ class LogRuntime:
         bot: LogHookHost,
         repository: LogRepository,
         *,
-        command_split: str = "\n",
         clock: Callable[[], datetime] | None = None,
         publication_provider: LogPublicationProvider | None = None,
     ) -> None:
@@ -58,7 +57,6 @@ class LogRuntime:
         self.service = LogService(repository, clock=clock)
         self.recorder = LogRecorder(
             repository,
-            command_split=command_split,
             clock=clock,
         )
         bot_data_root = Path(bot.data_path)

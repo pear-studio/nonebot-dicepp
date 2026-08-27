@@ -43,7 +43,6 @@ async def test_process_msg_stat_write_failure():
     )
     bot.config = MagicMock(spec=BotConfig)
     bot.config.master = ""
-    bot.config.command_split = "\n"
     bot.command_dict = {}
     bot.proxy = MagicMock()
     bot.proxy.process_bot_command_list = AsyncMock()

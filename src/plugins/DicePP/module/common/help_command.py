@@ -6,13 +6,12 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.config import get_bot_version, BOT_ABOUT, BOT_DESCRIBE
+from plugins.DicePP.core.config import BOT_ABOUT, BOT_AGREEMENT, BOT_DESCRIBE, get_bot_version
 
 _HELP_PARSER = CommandTextParser(command_prefix="help")
 
 LOC_HELP_INFO = "help_info"
 LOC_HELP_COMMAND = "help_command"
-LOC_HELP_AGREEMENT = "help_agreement"
 LOC_HELP_NOT_FOUND = "help_command_not_found"
 
 MAX_NICKNAME_LENGTH = 30  # 昵称长度上限
@@ -88,7 +87,7 @@ class HelpCommand(UserCommandBase):
         elif keyword in {"关于", "链接"}:
             return BOT_ABOUT
         elif keyword == "协议":
-            return self.bot.config.agreement
+            return BOT_AGREEMENT
         elif keyword == "更新":  # ToDo: 更新内容
             return "暂无信息"
 

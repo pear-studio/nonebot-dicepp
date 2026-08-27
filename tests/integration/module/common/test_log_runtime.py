@@ -84,7 +84,6 @@ async def runtime_parts(tmp_path: Path):
     runtime = LogRuntime(
         bot,
         repository,
-        command_split="\n",
         clock=lambda: NOW,
     )
     try:

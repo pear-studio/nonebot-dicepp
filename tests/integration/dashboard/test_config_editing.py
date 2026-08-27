@@ -329,9 +329,9 @@ class TestFieldMetadata:
             "dashboard_tab": "config",
             "dashboard_section": "account",
             "properties": {
-                "agreement": {
-                    "title": "用户协议",
-                    "type": "string",
+                "data_expire": {
+                    "title": "数据过期",
+                    "type": "boolean",
                     "dashboard_section": "runtime",
                 },
                 "persona_ai": {
@@ -355,10 +355,10 @@ class TestFieldMetadata:
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
 
-        # Field with override: agreement has dashboard_section="runtime" (not "account")
-        assert result["agreement"]["section"] == "runtime", \
-            f"agreement section should be 'runtime', got {result.get('agreement', {}).get('section')}"
-        assert result["agreement"]["tab"] == "config"
+        # Field with override: data_expire has dashboard_section="runtime" (not "account")
+        assert result["data_expire"]["section"] == "runtime", \
+            f"data_expire section should be 'runtime', got {result.get('data_expire', {}).get('section')}"
+        assert result["data_expire"]["tab"] == "config"
 
         # Field with override: persona_ai.max_messages has section="chat_reply" (not "basic")
         assert result["persona_ai.max_messages"]["section"] == "chat_reply", \
@@ -472,8 +472,11 @@ class TestFieldMetadata:
         assert meta["persona_ai.enabled"]["tab"] == "persona"
         assert meta["persona_ai.enabled"]["section"] == "basic"
 
-        assert meta["agreement"]["tab"] == "config"
-        assert meta["agreement"]["section"] == "runtime"
+        assert meta["data_expire"]["tab"] == "config"
+        assert meta["data_expire"]["section"] == "runtime"
+        assert "agreement" not in meta
+        assert "command_split" not in meta
+        assert "bot_default_enable" not in meta
 
         # Layout must contain expected tabs and sections
         assert "config" in layout.get("tabs", {})
