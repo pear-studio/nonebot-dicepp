@@ -11,7 +11,7 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from plugins.DicePP.core.config.basic import Paths
-from plugins.DicePP.core.localization import LocalizationManager, LOC_FUNC_DISABLE
+from plugins.DicePP.core.localization import LocalizationManager
 from plugins.DicePP.utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from plugins.DicePP.utils.string import match_substring
 from plugins.DicePP.utils.logger import logger
@@ -30,10 +30,6 @@ LOC_DRAW_ERR_EMPTY_DECK = "draw_error_empty_deck"
 LOC_DRAW_ERR_TIME = "draw_error_time"
 LOC_DRAW_ERR_NO_DECK = "draw_error_no_deck"
 LOC_DRAW_ERR_VAGUE_DECK = "draw_error_vague_deck"
-
-CFG_DECK_ENABLE = "deck_enable"
-CFG_DECK_DATA_PATH = "deck_data_path"
-
 
 DRAW_LIMIT = 10  # 指令抽卡的上限
 HLDL_DRAW_LIMIT = 50  # 高级抽卡语言中抽卡的上限
@@ -270,10 +266,6 @@ class DeckCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 判断功能开关
-        if not self.bot.config.deck.enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         arg_str = hint
         feedback: str = ""

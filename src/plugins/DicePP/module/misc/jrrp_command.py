@@ -7,7 +7,6 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 from plugins.DicePP.utils.time import get_current_date_raw
 
 from .jrrp_utils import compute_jrrp, format_jrrp_text

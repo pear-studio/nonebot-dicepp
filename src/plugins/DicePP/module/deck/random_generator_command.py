@@ -8,7 +8,6 @@ import openpyxl
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.config.basic import Paths
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 from plugins.DicePP.core.command.const import *
 from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
@@ -22,8 +21,6 @@ LOC_RAND_GEN_LIST = "rand_gen_list"
 LOC_RAND_GEN_MISS = "rand_gen_miss"
 LOC_RAND_GEN_VAGUE = "rand_gen_vague"
 
-CFG_RAND_GEN_ENABLE = "random_gen_enable"
-CFG_RAND_GEN_DATA_PATH = "random_gen_data_path"
 META_FILE_NAME = "rule.xlsx"
 
 
@@ -70,10 +67,6 @@ class RandomGeneratorCommand(UserCommandBase):
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         admin = bool(self.bot.config.master) and meta.user_id == self.bot.config.master
-        # 判断功能开关
-        if not self.bot.config.random_gen.enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         arg_str: str = hint
         feedback: str = ""

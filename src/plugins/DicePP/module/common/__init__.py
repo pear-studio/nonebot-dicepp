@@ -1,5 +1,4 @@
 from .activate_command import ActivateCommand, DC_ACTIVATE
-from .groupconfig_command import GroupconfigCommand, DC_GROUPCONFIG
 from .mode_command import ModeCommand
 from .help_command import HelpCommand
 from .nickname_command import NicknameCommand

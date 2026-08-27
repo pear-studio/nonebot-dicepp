@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List, Tuple, Any
+from typing import Dict, List, Tuple, Any
 import openpyxl
 import os
 import re
@@ -10,7 +10,7 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser, CommandContextResolver
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
+from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE
 
 # Task 3.3: 统一解析器（替代内嵌前缀判断与参数切分）
 _MODE_PARSER_ZH = CommandTextParser(command_prefix="模式", strip_prefix_len=3)
@@ -24,9 +24,6 @@ LOC_MODE_LIKELY = "mode_likely"
 LOC_MODE_CURRENT = "mode_current"
 LOC_MODE_DB_MATCH = "mode_db_match"
 LOC_MODE_DB_MULTI_MATCH = "mode_db_multi_match"
-
-CFG_MODE_ENABLE = "mode_enable"
-CFG_MODE_DEFAULT = "mode_default"
 
 MODE_FILE_PATH = "Config/mode_setting.xlsx"
 
@@ -49,7 +46,7 @@ DEFAULT_TABLE = [
                      )
 class ModeCommand(UserCommandBase):
     """
-    .mode 模式设置指令（批量群设置修改/模板调用指令）
+    .mode 模式设置指令
     """
 
     def __init__(self, bot: Bot):
@@ -141,10 +138,6 @@ class ModeCommand(UserCommandBase):
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(
             meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 判断功能开关
-        if not self.bot.config.mode.enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 判断权限：群内需要权限>=0才能执行；私聊允许用户修改自己的私聊模式
         if meta.group_id and meta.permission < 0:
             feedback = self.bot.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
@@ -324,7 +317,7 @@ class ModeCommand(UserCommandBase):
         return feedback
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        if keyword == "config" or keyword == "mode":  # help后的接着的内容
+        if keyword == "mode":  # help后的接着的内容
             feedback: str = ".mode dnd/coc/ygo" \
                             "套用模式设置"
             return feedback

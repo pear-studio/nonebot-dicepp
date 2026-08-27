@@ -6,7 +6,7 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE, LOC_PERMISSION_DENIED_NOTICE
+from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE
 
 _NN_PARSER = CommandTextParser(command_prefix="nn")
 

@@ -10,12 +10,9 @@ from plugins.DicePP.core.command.const import *
 from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core import localization
 
 LOC_DND_RES = "dnd_result"
 LOC_DND_RES_NOREASON = "dnd_result_noreason"
-
-CFG_ROLL_DND_ENABLE = "roll_dnd_enable"
 
 MAX_DND_TIMES = 10
 MAX_DND_RESULT_LEN = 50
@@ -49,12 +46,6 @@ class UtilsDNDCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 判断功能开关（有群内config作为代替）
-        #try:
-            #assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_DND_ENABLE)[0]) != 0)
-        #except AssertionError:
-            #feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
-            #return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         times: int
         reason: str

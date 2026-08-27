@@ -8,7 +8,6 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-#from core.localization import LOC_FUNC_DISABLE
 
 _CHOOSE_PARSER = CommandTextParser(command_prefix="c")
 

@@ -8,7 +8,6 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser  # Task 3.4
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 _ROLL_POOL_PARSER = CommandTextParser(command_prefix="w", private_flags={"s"})
 
@@ -21,13 +20,10 @@ LOC_ROLL_POOL_RESULT_WIN_ADDON = "roll_pool_result_win_addon"
 LOC_ROLL_POOL_FAILED_TOO_MUCH = "roll_pool_failed_too_much"
 LOC_ROLL_POOL_FAILED_ILLEGAL = "roll_pool_failed_illegal"
 
-#CFG_ROLL_ENABLE = "roll_enable"
-#CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
-#CFG_ROLL_EXP_COST = "roll_exp_cost"
-
 MULTI_ROLL_LIMIT = 300  # 多轮掷骰上限次数
 ROLL_ADDON_LIMIT = 7  # 最低骰池追加点
 ROLL_WIN = 8  # 成功所需的点数
+
 
 @custom_user_command(readable_name="骰池指令",
                      priority=0,
@@ -59,9 +55,6 @@ class RollPoolCommand(UserCommandBase):
                                          "当掷骰表达式中含有#来多次掷骰时, 用这个格式组成上文的{roll_pool_result_final}")
         bot.loc_helper.register_loc_text(LOC_ROLL_POOL_FAILED_TOO_MUCH,"过多骰目",".w指令接收到过多骰池指令时的结果")
         bot.loc_helper.register_loc_text(LOC_ROLL_POOL_FAILED_ILLEGAL,"非法参数",".w指令接收到不合规的参数时的结果")
-
-        #bot.cfg_helper.register_config(CFG_ROLL_ENABLE, "1", "掷骰指令开关")
-        #bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         parse = _ROLL_POOL_PARSER.parse(msg_str)

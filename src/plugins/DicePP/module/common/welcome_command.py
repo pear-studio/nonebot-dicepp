@@ -8,7 +8,6 @@ from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 _WELCOME_PARSER = CommandTextParser(command_prefix="welcome")
 

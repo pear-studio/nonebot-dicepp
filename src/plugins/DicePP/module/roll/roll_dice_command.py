@@ -9,7 +9,6 @@ from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser
 from plugins.DicePP.core.command.parse_result import CommandParseResult
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 # roll 命令统一解析器实例（私有 flags 在命令适配层声明）
 _ROLL_PARSER = CommandTextParser(
@@ -51,10 +50,6 @@ LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
 LOC_ROLL_EXP_START = "roll_exp_start"
 LOC_ROLL_EXP = "roll_exp"
-
-CFG_ROLL_ENABLE = "roll_enable"
-CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
-# MULTI_ROLL_LIMIT 统一定义于 module.roll.roll_const，已在文件顶部导入
 
 
 @custom_user_command(readable_name="掷骰指令",
@@ -112,12 +107,6 @@ class RollDiceCommand(UserCommandBase):
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 判断功能开关
-        if not self.bot.config.roll.enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
-            port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-
         # 使用统一解析层结果（hint 由 can_process_msg 传入），解析 roll 参数
         # 防御性检查：正常流程 hint 不应为 None，但防止框架异常路径静默失败
         if hint is None:
@@ -132,12 +121,6 @@ class RollDiceCommand(UserCommandBase):
         compute_exp = roll_args.compute_exp
         exp_str = roll_args.exp_str
         reason_str = roll_args.reason_str
-
-        # 判断暗骰开关
-        if is_hidden and not self.bot.config.roll.hide_enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func="暗骰指令")
-            port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         # 解析表达式并生成结果 (默认路径：AST 引擎)
         try:

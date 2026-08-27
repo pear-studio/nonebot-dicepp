@@ -7,7 +7,6 @@ from plugins.DicePP.core.command.const import *
 from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from plugins.DicePP.core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 from plugins.DicePP.core.config.basic import Paths
 from plugins.DicePP.core.data.query_store import (
     QueryStoreError,
@@ -30,10 +29,6 @@ LOC_QUERY_CELL_REDIRECT = "query_cell_redirect"
 LOC_QUERY_READ_ONLY = "query_read_only"
 LOC_QUERY_INVALID_FORMAT = "query_invalid_format"
 LOC_QUERY_OUTDATED_CONTENT = "query_outdated_content"
-
-CFG_QUERY_ENABLE = "query_enable"
-CFG_QUERY_DATA_PATH = "query_data_path"
-CFG_QUERY_PRIVATE_DATABASE = "query_private_database"
 
 QUERY_ITEM_FIELD_DESC_DEFAULT_LEN = 20  # 默认用前多少个字符作为默认Description
 QUERY_SPLIT_LINE_LEN = 20  # 默认如何分割过长查询文本
@@ -303,11 +298,6 @@ class QueryCommand(UserCommandBase):
         mode: Literal["query", "search", "select", "flip_page", "read_only"] = hint[0]
         arg_str: str = hint[1]
         feedback: str = ""
-
-        # 判断功能开关
-        if not self.bot.config.query.enable:
-            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         if mode in ("select", "flip_page"):
             record = self.record_dict.get(source_port)

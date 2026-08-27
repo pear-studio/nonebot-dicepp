@@ -666,22 +666,6 @@ class DiceHubConfig(BaseModel):
     name: str = Field(default="未命名", title="Hub 名称")
 
 
-class RollConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "modules",
-        }
-    )
-
-    enable: bool = Field(default=True, title="掷骰")
-    hide_enable: bool = Field(default=True, title="暗骰")
-    dnd_enable: bool = Field(default=True, title="D&D 掷骰")
-    coc_enable: bool = Field(default=True, title="CoC 掷骰")
-
-
 class DeckConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -692,7 +676,6 @@ class DeckConfig(BaseModel):
         }
     )
 
-    enable: bool = Field(default=True, title="卡组")
     data_path: str = Field(default="./decks", title="卡组路径")
 
 
@@ -706,7 +689,6 @@ class RandomGenConfig(BaseModel):
         }
     )
 
-    enable: bool = Field(default=True, title="随机生成")
     data_path: str = Field(default="./random", title="随机生成路径")
 
 
@@ -720,7 +702,6 @@ class QueryConfig(BaseModel):
         }
     )
 
-    enable: bool = Field(default=True, title="查询")
     data_path: str = Field(default="./queries", title="查询路径")
     private_database: str = Field(default="DND5E2014", title="默认查询库")
 
@@ -764,7 +745,6 @@ class ModeConfig(BaseModel):
         }
     )
 
-    enable: bool = Field(default=True, title="模式系统")
     default: str = Field(default="DND5E2024", title="默认模式")
 
 
@@ -796,7 +776,6 @@ class BotConfig(BaseModel):
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
     health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig, title="健康监控")
     dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig, title="DiceHub")
-    roll: RollConfig = Field(default_factory=RollConfig, title="掷骰模块")
     deck: DeckConfig = Field(default_factory=DeckConfig, title="卡组模块")
     random_gen: RandomGenConfig = Field(default_factory=RandomGenConfig, title="随机生成模块")
     query: QueryConfig = Field(default_factory=QueryConfig, title="查询模块")

@@ -13,7 +13,6 @@ from plugins.DicePP.module.roll.default_dice import (
 )
 from plugins.DicePP.module.roll.roll_config import DICE_TYPE_MAX
 from plugins.DicePP.module.roll.roll_utils import RollDiceError
-from plugins.DicePP.core.localization import LOC_FUNC_DISABLE
 
 _DSET_PARSER = CommandTextParser(command_prefix="dset")
 
