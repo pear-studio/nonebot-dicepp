@@ -28,8 +28,8 @@ class TestMergedView:
 
         # The endpoint flattens nested objects into dotted keys.
         # Keys from BotConfig with no user override have source "default".
-        assert config["chat_interval"]["value"] == 20
-        assert config["chat_interval"]["source"] == "default"
+        assert config["friend_request_token"]["value"] == ""
+        assert config["friend_request_token"]["source"] == "default"
         assert config["persona_ai.providers.minimax.base_url"]["value"] == (
             "https://api.minimaxi.com/v1"
         )
@@ -41,14 +41,14 @@ class TestMergedView:
         """Bot values come only from the selected Bot file."""
         DashboardPaths.CONFIG_USER.write_text(json.dumps({}))
         bot_path = DashboardPaths.bot_config_path("test_bot")
-        bot_path.write_text(json.dumps({"chat_interval": 33}))
+        bot_path.write_text(json.dumps({"master": "bot-master"}))
 
         setup_auth(test_client)
         resp = test_client.get("/api/config/merged", params={"bot_id": "test_bot"})
         config = resp.json()["config"]
 
-        assert config["chat_interval"]["value"] == 33
-        assert config["chat_interval"]["source"] == "bot"
+        assert config["master"]["value"] == "bot-master"
+        assert config["master"]["source"] == "bot"
 
     def test_merged_preserves_dynamic_provider_mapping_keys(
         self, test_client: TestClient, tmp_dashboard_paths
@@ -120,7 +120,6 @@ class TestMergedView:
         config = resp.json()["config"]
 
         # Should include normal keys
-        assert config["chat_interval"]["value"] == 20
         assert config["persona_ai.enabled"]["value"] is True
 
         # Should NOT include comment keys at any level
@@ -205,7 +204,7 @@ class TestResetField:
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/reset",
-            json={"path": "chat_interval", "bot_id": "test_bot"},
+            json={"path": "not_a_real_config", "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
         assert resp.json()["removed"] is False
@@ -329,11 +328,6 @@ class TestFieldMetadata:
             "dashboard_tab": "config",
             "dashboard_section": "account",
             "properties": {
-                "chat_interval": {
-                    "title": "聊天间隔",
-                    "type": "integer",
-                    "dashboard_section": "runtime",
-                },
                 "persona_ai": {
                     "title": "Persona AI",
                     "$ref": "#/$defs/PersonaConfig",
@@ -354,11 +348,6 @@ class TestFieldMetadata:
         schema = self._make_mock_defs()
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
-
-        # Field with override: chat_interval has dashboard_section="runtime" (not "account")
-        assert result["chat_interval"]["section"] == "runtime", \
-            f"chat_interval section should be 'runtime', got {result.get('chat_interval', {}).get('section')}"
-        assert result["chat_interval"]["tab"] == "config"
 
         # Field with override: persona_ai.max_messages has section="chat_reply" (not "basic")
         assert result["persona_ai.max_messages"]["section"] == "chat_reply", \
@@ -472,8 +461,6 @@ class TestFieldMetadata:
         assert meta["persona_ai.enabled"]["tab"] == "persona"
         assert meta["persona_ai.enabled"]["section"] == "basic"
 
-        assert meta["chat_interval"]["tab"] == "config"
-        assert meta["chat_interval"]["section"] == "runtime"
         assert "agreement" not in meta
         assert "command_split" not in meta
         assert "bot_default_enable" not in meta

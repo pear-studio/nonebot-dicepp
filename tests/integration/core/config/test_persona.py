@@ -43,7 +43,6 @@ def test_loader_loads_default_persona(chars_dir):
     _write_skin(chars_dir, "default", {
         "name": "default",
         "localization": {"hello": "你好"},
-        "chat": {"^hi$": "嗨"},
     })
     loader = PersonaLoader(str(chars_dir))
     p = loader.get("default")
@@ -59,17 +58,6 @@ def test_loader_loads_multiple_personas(chars_dir):
     loader = PersonaLoader(str(chars_dir))
     assert "default" in loader.available_names()
     assert "kawaii" in loader.available_names()
-
-
-def test_loader_get_existing_persona(chars_dir):
-    _write_skin(chars_dir, "default", {"name": "default"})
-    _write_skin(chars_dir, "cool", {
-        "name": "cool",
-        "chat": {"^hi$": ["Yo!"]},
-    })
-    loader = PersonaLoader(str(chars_dir))
-    p = loader.get("cool")
-    assert p.get_chat_responses("^hi$") == ["Yo!"]
 
 
 # ── PersonaLoader: fallback ───────────────────────────────────────────────────

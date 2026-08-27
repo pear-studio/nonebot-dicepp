@@ -533,7 +533,6 @@ async def test_bot_database_connect_repository_smoke_uses_temp_project_root():
         assert saved is not None
         assert saved.value == 7
         assert await db.log.get_records("__missing_session__") == []
-        assert await db.user_config.list_all() == []
     finally:
         await db.close()
 @pytest.mark.asyncio

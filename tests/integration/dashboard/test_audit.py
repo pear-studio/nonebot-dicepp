@@ -67,7 +67,7 @@ class TestAuditLogCreated:
         """Config reset creates an audit log entry."""
         setup_auth(test_client)
         test_client.post(
-            "/api/config/reset", json={"path": "chat_interval", "bot_id": "test_bot"}
+            "/api/config/reset", json={"path": "master", "bot_id": "test_bot"}
         )
 
         resp = test_client.get("/api/audit")
@@ -95,7 +95,7 @@ class TestAuditList:
         # Perform a few actions
         test_client.post(
             "/api/config/set",
-            json={"path": "chat_interval", "value": 21, "bot_id": "test_bot"},
+            json={"path": "master", "value": "audit-1", "bot_id": "test_bot"},
         )
         test_client.post(
             "/api/config/set",
@@ -130,8 +130,8 @@ class TestAuditList:
             test_client.post(
                 "/api/config/set",
                 json={
-                    "path": "chat_interval",
-                    "value": 20 + i,
+                    "path": "master",
+                    "value": f"audit-{i}",
                     "bot_id": "test_bot",
                 },
             )

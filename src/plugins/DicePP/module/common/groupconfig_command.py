@@ -13,8 +13,6 @@ from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePor
 LOC_GROUP_CONFIG_SET = "group_config_set"
 LOC_GROUP_CONFIG_GET = "group_config_get"
 LOC_GROUP_DICE_SET = "group_dice_set"
-LOC_GROUP_CHAT_ON = "group_chat_on"
-LOC_GROUP_CHAT_OFF = "group_chat_off"
 
 DC_GROUPCONFIG = "group_config"
 
@@ -33,7 +31,6 @@ DEFAULT_GROUP_CONFIG = {
     "query_database": "DND5E",
     # 娱乐内容
     "cool_jrrp": True,
-    "chat": True,
     "april_fool": False,
 }
 
@@ -75,8 +72,6 @@ class GroupconfigCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_GROUP_CONFIG_SET, "已将本群 {var_name} 的值改为 {var}。", "群配置指令（需要骰管理），将一项群配置设定为特定值时的回复，var_name：变量名，var：具体值")
         bot.loc_helper.register_loc_text(LOC_GROUP_CONFIG_GET, "本群 {var_name} 的值是 {var}。", "群配置指令，将一项群配置设定为特定值时的回复，var_name：变量名，var：具体值")
         bot.loc_helper.register_loc_text(LOC_GROUP_DICE_SET, "本群的默认掷骰面数已改为{var}面。", "修改群内默认掷骰骰面的回复，var：具体骰面")
-        bot.loc_helper.register_loc_text(LOC_GROUP_CHAT_ON, "本群的自定义聊天功能已开启。", "开启聊天功能的回复")
-        bot.loc_helper.register_loc_text(LOC_GROUP_CHAT_OFF, "本群的自定义聊天功能已关闭。", "关闭聊天功能的回复")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = True
@@ -88,12 +83,6 @@ class GroupconfigCommand(UserCommandBase):
             arg_str = meta.plain_msg[3:].strip()
         elif msg_str.startswith(".config"):
             arg_str = meta.plain_msg[7:].strip()
-        elif msg_str.startswith(".聊天"):
-            arg_str = "set chat " + msg_str[3:].strip()
-            show_mode = "chat"
-        elif msg_str.startswith(".chat"):
-            arg_str = "set chat " + msg_str[5:].strip()
-            show_mode = "chat"
         elif msg_str.startswith(".骰面"):
             arg_str = "set default_dice " + msg_str[3:].strip()
             show_mode = "dice"
@@ -188,8 +177,6 @@ class GroupconfigCommand(UserCommandBase):
             return feedback
         elif keyword == "dice":
             return ".dice [骰面] 设置群内默认投掷的骰子面数"
-        elif keyword == "chat":
-            return ".chat on/off 开启/关闭群内骰娘个性化对话功能"
         return ""
 
     def get_description(self) -> str:

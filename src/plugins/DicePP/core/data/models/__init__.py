@@ -28,13 +28,11 @@ from .extended import (
     GroupConfig,
     GroupActivate,
     GroupWelcome,
-    ChatRecord,
     BotControl,
     UserStat,
     GroupStat,
     MetaStat,
     NPCHealth,
-    UserConfig,
 )
 from .hub_config import HubConfig
 
@@ -60,13 +58,11 @@ __all__ = [
     "GroupConfig",
     "GroupActivate",
     "GroupWelcome",
-    "ChatRecord",
     "BotControl",
     "UserStat",
     "GroupStat",
     "MetaStat",
     "NPCHealth",
-    "UserConfig",
     "HubConfig",
     # 角色常量
     "CHAR_INFO_KEY_HP",

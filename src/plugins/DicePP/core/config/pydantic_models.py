@@ -791,12 +791,6 @@ class BotConfig(BaseModel):
     accept_group_invites: bool = Field(default=True, title="接受群邀请")
     persona: str = Field(default="default", title="当前角色")
 
-    # ── 运行参数 ─────────────────────────────────────────────────────────────
-
-    chat_interval: int = Field(
-        default=20, title="聊天间隔",
-        json_schema_extra={"dashboard_section": "runtime"},
-    )
     # ── Subsystem configs ────────────────────────────────────────────────────
 
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")

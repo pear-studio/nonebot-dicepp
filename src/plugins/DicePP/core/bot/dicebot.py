@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List, Optional, Dict, Callable, Awaitable, Pro
 from random import choice
 
 from plugins.DicePP.utils.logger import logger, get_exception_info, configure_log_level
-from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw
+from plugins.DicePP.utils.time import get_current_date_raw
 from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE
 from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR, Paths
 from plugins.DicePP.core.config.loader import ConfigLoader
@@ -87,7 +87,6 @@ class Bot:
         self.data_path = str(Paths.bot_data_dir(account))
 
         Paths.ensure_dirs()
-        self.fix_data()
         self.db = BotDatabase(self.account)
         self.stat_manager = StatManager(self.db)
         self.hub_manager = HubManager(self)
@@ -825,6 +824,3 @@ class Bot:
             )
 
         return group_info_list
-
-    def fix_data(self):
-        pass

@@ -67,16 +67,6 @@ BOT_CORE_SCHEMA_SQL = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS chat_record (
-        group_id TEXT,
-        user_id TEXT,
-        time TEXT,
-        data TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (group_id, user_id, time)
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS bot_control (
         key TEXT,
         data TEXT NOT NULL,
@@ -122,14 +112,6 @@ BOT_CORE_SCHEMA_SQL = [
         key TEXT PRIMARY KEY,
         data TEXT NOT NULL,
         updated_at TEXT NOT NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS user_config (
-        user_id TEXT,
-        data TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (user_id)
     )
     """,
 ]

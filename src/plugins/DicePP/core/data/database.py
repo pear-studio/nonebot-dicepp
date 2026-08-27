@@ -23,13 +23,11 @@ from .models import (
     GroupConfig,
     GroupActivate,
     GroupWelcome,
-    ChatRecord,
     BotControl,
     UserStat,
     GroupStat,
     MetaStat,
     NPCHealth,
-    UserConfig,
 )
 
 
@@ -52,13 +50,11 @@ class BotDatabase:
         self._group_config: Optional[Repository[GroupConfig]] = None
         self._group_activate: Optional[Repository[GroupActivate]] = None
         self._group_welcome: Optional[Repository[GroupWelcome]] = None
-        self._chat_record: Optional[Repository[ChatRecord]] = None
         self._bot_control: Optional[Repository[BotControl]] = None
         self._user_stat: Optional[Repository[UserStat]] = None
         self._group_stat: Optional[Repository[GroupStat]] = None
         self._meta_stat: Optional[Repository[MetaStat]] = None
         self._npc_health: Optional[Repository[NPCHealth]] = None
-        self._user_config: Optional[Repository[UserConfig]] = None
         self.query: QueryStore = QueryStore()
 
     @property
@@ -98,12 +94,6 @@ class BotDatabase:
         return self._group_config
 
     @property
-    def user_config(self) -> Repository[UserConfig]:
-        if self._user_config is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._user_config
-
-    @property
     def group_activate(self) -> Repository[GroupActivate]:
         if self._group_activate is None:
             raise RuntimeError("Database not connected. Call connect() first.")
@@ -114,12 +104,6 @@ class BotDatabase:
         if self._group_welcome is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._group_welcome
-
-    @property
-    def chat_record(self) -> Repository[ChatRecord]:
-        if self._chat_record is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._chat_record
 
     @property
     def bot_control(self) -> Repository[BotControl]:
@@ -186,10 +170,8 @@ class BotDatabase:
         self._log = None
         self._nickname = None
         self._group_config = None
-        self._user_config = None
         self._group_activate = None
         self._group_welcome = None
-        self._chat_record = None
         self._bot_control = None
         self._user_stat = None
         self._group_stat = None
@@ -263,20 +245,12 @@ class BotDatabase:
             self._db, GroupConfig, "group_config", ["group_id"]
         )
 
-        self._user_config = Repository[UserConfig](
-            self._db, UserConfig, "user_config", ["user_id"]
-        )
-
         self._group_activate = Repository[GroupActivate](
             self._db, GroupActivate, "group_activate", ["group_id"]
         )
 
         self._group_welcome = Repository[GroupWelcome](
             self._db, GroupWelcome, "group_welcome", ["group_id"]
-        )
-
-        self._chat_record = Repository[ChatRecord](
-            self._db, ChatRecord, "chat_record", ["group_id", "user_id", "time"]
         )
 
         self._bot_control = Repository[BotControl](
