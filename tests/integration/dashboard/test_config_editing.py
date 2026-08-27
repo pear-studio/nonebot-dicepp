@@ -329,9 +329,9 @@ class TestFieldMetadata:
             "dashboard_tab": "config",
             "dashboard_section": "account",
             "properties": {
-                "data_expire": {
-                    "title": "数据过期",
-                    "type": "boolean",
+                "chat_interval": {
+                    "title": "聊天间隔",
+                    "type": "integer",
                     "dashboard_section": "runtime",
                 },
                 "persona_ai": {
@@ -355,10 +355,10 @@ class TestFieldMetadata:
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
 
-        # Field with override: data_expire has dashboard_section="runtime" (not "account")
-        assert result["data_expire"]["section"] == "runtime", \
-            f"data_expire section should be 'runtime', got {result.get('data_expire', {}).get('section')}"
-        assert result["data_expire"]["tab"] == "config"
+        # Field with override: chat_interval has dashboard_section="runtime" (not "account")
+        assert result["chat_interval"]["section"] == "runtime", \
+            f"chat_interval section should be 'runtime', got {result.get('chat_interval', {}).get('section')}"
+        assert result["chat_interval"]["tab"] == "config"
 
         # Field with override: persona_ai.max_messages has section="chat_reply" (not "basic")
         assert result["persona_ai.max_messages"]["section"] == "chat_reply", \
@@ -472,8 +472,8 @@ class TestFieldMetadata:
         assert meta["persona_ai.enabled"]["tab"] == "persona"
         assert meta["persona_ai.enabled"]["section"] == "basic"
 
-        assert meta["data_expire"]["tab"] == "config"
-        assert meta["data_expire"]["section"] == "runtime"
+        assert meta["chat_interval"]["tab"] == "config"
+        assert meta["chat_interval"]["section"] == "runtime"
         assert "agreement" not in meta
         assert "command_split" not in meta
         assert "bot_default_enable" not in meta

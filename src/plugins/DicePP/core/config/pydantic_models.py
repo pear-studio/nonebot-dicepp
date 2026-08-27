@@ -790,27 +790,9 @@ class BotConfig(BaseModel):
     friend_request_token: str = Field(default="", title="好友请求口令")
     accept_group_invites: bool = Field(default=True, title="接受群邀请")
     persona: str = Field(default="default", title="当前角色")
-    white_list_group: List[str] = Field(default_factory=list, title="群白名单")
-    white_list_user: List[str] = Field(default_factory=list, title="用户白名单")
 
     # ── 运行参数 ─────────────────────────────────────────────────────────────
 
-    data_expire: bool = Field(
-        default=False, title="数据过期",
-        json_schema_extra={"dashboard_section": "runtime"},
-    )
-    user_expire_day: int = Field(
-        default=60, title="用户过期天数",
-        json_schema_extra={"dashboard_section": "runtime"},
-    )
-    group_expire_day: int = Field(
-        default=14, title="群过期天数",
-        json_schema_extra={"dashboard_section": "runtime"},
-    )
-    group_expire_warning_time: int = Field(
-        default=1, title="过期预警天数",
-        json_schema_extra={"dashboard_section": "runtime"},
-    )
     chat_interval: int = Field(
         default=20, title="聊天间隔",
         json_schema_extra={"dashboard_section": "runtime"},

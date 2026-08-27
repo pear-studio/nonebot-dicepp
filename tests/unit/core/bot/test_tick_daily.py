@@ -33,7 +33,6 @@ def _make_mock_bot():
     bot.db.group_stat.list_all = AsyncMock(return_value=[])
     bot.db.group_stat.upsert_many = AsyncMock()
     bot.scheduler = MagicMock()
-    bot.clear_expired_data = AsyncMock(return_value=[])
     bot.loc_helper.format_loc_text = MagicMock(return_value="")
     bot.send_msg_to_master = AsyncMock()
     bot.handle_exception = MagicMock(return_value=[])

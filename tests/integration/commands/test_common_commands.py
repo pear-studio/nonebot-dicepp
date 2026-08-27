@@ -459,6 +459,13 @@ class TestMaster:
         await h.send_group(".m send USER:1234:ABC", user_id="test_master",
                            checker=lambda s: "|Private: 1234|" in s and "发送消息: abc 至 1234 (类型:user)" in s)
 
+    async def test_retired_clean_command_returns_master_help(self, h):
+        await h.send_group(
+            ".m clean",
+            user_id="test_master",
+            checker=lambda s: ".m log-clean 清空日志目录" in s and "清理开始..." not in s,
+        )
+
 
 # ── Nickname command coverage ───────────────────────────────────────────
 

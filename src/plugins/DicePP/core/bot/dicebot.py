@@ -1,15 +1,13 @@
 import os
 import asyncio
-import datetime
 import inspect
-import random
 import traceback
-from typing import TYPE_CHECKING, List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, List, Optional, Dict, Callable, Awaitable, Protocol, runtime_checkable
 from random import choice
 
 from plugins.DicePP.utils.logger import logger, get_exception_info, configure_log_level
-from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
-from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
+from plugins.DicePP.utils.time import str_to_datetime, get_current_date_str, get_current_date_raw
+from plugins.DicePP.core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE
 from plugins.DicePP.core.config import BOT_COMMAND_SEPARATOR, Paths
 from plugins.DicePP.core.config.loader import ConfigLoader
 from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
@@ -21,8 +19,8 @@ from plugins.DicePP.core.communication import RequestData, FriendRequestData, Jo
 from plugins.DicePP.core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from plugins.DicePP.core.communication import GroupInfo
 from plugins.DicePP.core.data import BotDatabase
-from plugins.DicePP.core.data.models import UserStat, GroupStat, MetaStat, UserNickname
-from plugins.DicePP.core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
+from plugins.DicePP.core.data.models import MetaStat, UserNickname
+from plugins.DicePP.core.statistics import MetaStatInfo, StatManager
 
 import shutil
 
@@ -340,13 +338,6 @@ class Bot:
                 logger.warning(
                     f"[TickDaily] group {group_stat_row.group_id} daily_update 失败: {_exc}"
                 )
-
-        # 尝试清理过期群聊和过期用户信息
-        async def clear_expired_data():
-            res = await self.clear_expired_data()
-            return res
-
-        self.scheduler.schedule(clear_expired_data, timeout=3600)
 
         # 调用每个command的tick_daily方法
         for command in self.command_dict.values():
@@ -837,95 +828,3 @@ class Bot:
 
     def fix_data(self):
         pass
-
-    async def clear_expired_data(self) -> List:
-        from plugins.DicePP.core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
-        from plugins.DicePP.module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
-
-        cur_date = get_current_date_raw()
-        is_data_expire = self.config.data_expire
-        user_expire_day = self.config.user_expire_day
-        group_expire_day = self.config.group_expire_day
-        group_expire_time = self.config.group_expire_warning_time
-        group_expire_warn = self.loc_helper.format_loc_text(LOC_GROUP_EXPIRE_WARNING)
-        if not is_data_expire:
-            return []
-        result_commands: List[BotCommandBase] = []
-        index = 0
-
-        white_list_group: List[str] = self.config.white_list_group
-        white_list_user: List[str] = self.config.white_list_user
-
-        # 清理过期用户信息
-        user_stat_rows = await self.db.user_stat.list_all()
-        all_user_id: Set[str] = set(row.user_id for row in user_stat_rows)
-        invalid_user_id = []
-        for user_id in all_user_id:
-            is_valid = False
-            if user_id in white_list_user:
-                continue
-            # 锁内读取最新 user_stat（消除直接 DB 读的 TOCTOU 窗口）
-            user_stat = await self.stat_manager.read_user_stat(user_id)
-            if user_stat.roll.times.total_val > 200:
-                is_valid = True
-            for flag in user_stat.cmd.flag_dict.keys():
-                flag_date = int_to_datetime(user_stat.cmd.flag_dict[flag].update_time)
-                if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
-                    is_valid = True
-                    break
-            if not is_valid:
-                invalid_user_id.append(user_id)
-            index += 1
-            if index % 500 == 0:
-                await asyncio.sleep(0)
-        for user_id in invalid_user_id:
-            await self.db.user_stat.delete(user_id)
-
-        # 清理过期群聊消息
-        group_stat_rows = await self.db.group_stat.list_all()
-        all_group_id: Set[str] = set(row.group_id for row in group_stat_rows)
-        invalid_group_id = []
-        warning_group_id = []
-        for group_id in all_group_id:
-            is_valid = False
-            if group_id in white_list_group:
-                continue
-            # 锁内读取最新 group_stat（消除直接 DB 读的 TOCTOU 窗口）
-            group_stat = await self.stat_manager.read_group_stat(group_id)
-            for flag in group_stat.cmd.flag_dict.keys():
-                flag_date = int_to_datetime(group_stat.cmd.flag_dict[flag].update_time)
-                if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
-                    is_valid = True
-                    break
-            if not is_valid and group_stat.meta.warn_time < group_expire_time:
-                is_valid = True
-                # 原子递增 warn_time（锁内读取最新值再递增，防止覆盖并发写入）
-                await self.stat_manager.update_group_stat(
-                    group_id,
-                    lambda s: setattr(s.meta, "warn_time", s.meta.warn_time + 1),
-                )
-                if group_stat.meta.member_count > 0:
-                    result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-                    result_commands.append(BotSendMsgCommand(self.account, group_expire_warn, [GroupMessagePort(group_id)]))
-                    warning_group_id.append(group_id)
-            if not is_valid:
-                invalid_group_id.append(group_id)
-            index += 1
-            if index % 500 == 0:
-                await asyncio.sleep(0)
-        for group_id in invalid_group_id:
-            result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-            result_commands.append(BotLeaveGroupCommand(self.account, group_id))
-            await self.db.group_stat.delete(group_id)
-
-        # 给Master汇报清理情况
-        if self.config.master:
-            master_id = self.config.master
-            result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-            feedback = f"检查{len(all_user_id)}个用户数据, {len(all_group_id)}个群聊数据.\n" \
-                       f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊({invalid_group_id}).\n" \
-                       f"对{len(warning_group_id)}个即将失效的群聊发送提示消息."
-            # 太长了别发给master了
-            # result_commands.append(BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_id)]))
-        result_commands = list(reversed(result_commands))
-        return result_commands

@@ -88,13 +88,6 @@ class MasterCommand(UserCommandBase):
 
             self.bot.scheduler.schedule(async_task, timeout=60, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "更新超时!", [port])])
             feedback = "更新开始..."
-        elif arg_str == "clean":
-            async def clear_expired_data():
-                res = await self.bot.clear_expired_data()
-                return res
-
-            self.bot.scheduler.schedule(clear_expired_data, timeout=3600)
-            feedback = "清理开始..."
         elif arg_str == "debug-tick":
             feedback = f"异步任务状态: {self.bot.tick_task.get_name()} Done:{self.bot.tick_task.done()} Cancelled:{self.bot.tick_task.cancelled()}\n" \
                        f"{self.bot.tick_task}"

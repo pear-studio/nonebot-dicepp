@@ -82,6 +82,12 @@ def test_user_json_is_independent_and_empty_for_this_batch(dd):
         ("bot", {"agreement": "old-agreement"}),
         ("bot", {"command_split": "\n"}),
         ("bot", {"bot_default_enable": False}),
+        ("bot", {"white_list_user": []}),
+        ("bot", {"white_list_group": []}),
+        ("bot", {"data_expire": False}),
+        ("bot", {"user_expire_day": 60}),
+        ("bot", {"group_expire_day": 14}),
+        ("bot", {"group_expire_warning_time": 1}),
     ],
 )
 def test_each_config_file_rejects_unknown_fields_and_wrong_types(
