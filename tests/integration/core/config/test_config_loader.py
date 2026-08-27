@@ -37,9 +37,6 @@ class _DataDir:
     def account_cfg(self, account: str) -> Path:
         return self.root / "bots" / f"{account}.json"
 
-    def template(self) -> Path:
-        return self.root / "bots" / "_template.json"
-
     def loader(self, account: str = "test_account") -> ConfigLoader:
         return ConfigLoader(str(self.root), account)
 
@@ -50,12 +47,12 @@ def dd(tmp_path):
 
 
 def test_load_empty_dir_uses_defaults_without_creating_config_files(dd):
-    _write(dd.template(), {"nickname": "must-not-be-copied"})
-
     loader = dd.loader()
     cfg = loader.load()
 
-    assert cfg.nickname == BotConfig().nickname
+    assert cfg.master == BotConfig().master
+    assert cfg.friend_request_token == BotConfig().friend_request_token
+    assert cfg.accept_group_invites is BotConfig().accept_group_invites
     assert loader.user_config == UserConfig()
     assert not dd.user_config.exists()
     assert not dd.account_cfg("test_account").exists()
@@ -63,11 +60,11 @@ def test_load_empty_dir_uses_defaults_without_creating_config_files(dd):
 
 def test_user_json_is_independent_and_empty_for_this_batch(dd):
     _write(dd.user_config, {})
-    _write(dd.account_cfg("bot1"), {"nickname": "account"})
+    _write(dd.account_cfg("bot1"), {"master": "account"})
 
     loader = dd.loader("bot1")
 
-    assert loader.load().nickname == "account"
+    assert loader.load().master == "account"
     assert loader.user_config == UserConfig()
 
 
@@ -77,7 +74,11 @@ def test_user_json_is_independent_and_empty_for_this_batch(dd):
         ("user", {"nickname": "bot field"}),
         ("user", {"persona_ai": {"enabled": True}}),
         ("bot", {"unknown": True}),
-        ("bot", {"nickname": 123}),
+        ("bot", {"master": ["old-master"]}),
+        ("bot", {"admin": ["old-admin"]}),
+        ("bot", {"friend_token": "old-token"}),
+        ("bot", {"group_invite": False}),
+        ("bot", {"nickname": "old-name"}),
     ],
 )
 def test_each_config_file_rejects_unknown_fields_and_wrong_types(
@@ -134,21 +135,28 @@ def test_saving_default_values_removes_nested_overrides(dd):
     assert _read(path) == {}
 
 
-def test_environment_overrides_remain_temporary_bot_runtime_behavior(dd):
-    _write(dd.account_cfg("bot1"), {"master": ["file-master"]})
+def test_identity_environment_overrides_are_ignored(dd):
+    _write(dd.account_cfg("bot1"), {"master": "file-master"})
 
-    with patch.dict(os.environ, {"DICE_MASTER": "env-master"}):
+    with patch.dict(
+        os.environ,
+        {
+            "DICE_MASTER": "env-master",
+            "DICE_ADMIN": "env-admin",
+            "DICE_NICKNAME": "env-name",
+        },
+    ):
         cfg = dd.loader("bot1").load()
 
-    assert cfg.master == ["env-master"]
-    assert _read(dd.account_cfg("bot1")) == {"master": ["file-master"]}
+    assert cfg.master == "file-master"
+    assert _read(dd.account_cfg("bot1")) == {"master": "file-master"}
 
 
-def test_environment_master_override_keeps_comma_list_behavior(dd):
+def test_environment_master_override_does_not_populate_master(dd):
     with patch.dict(os.environ, {"DICE_MASTER": "one,two"}):
         cfg = dd.loader("bot1").load()
 
-    assert cfg.master == ["one", "two"]
+    assert cfg.master == ""
 
 
 def test_malformed_json_is_rejected_without_rewriting(dd):
@@ -161,13 +169,13 @@ def test_malformed_json_is_rejected_without_rewriting(dd):
 
 
 def test_config_property_lazy_loads(dd):
-    _write(dd.account_cfg("bot1"), {"nickname": "lazy"})
+    _write(dd.account_cfg("bot1"), {"master": "lazy"})
     loader = dd.loader("bot1")
 
     assert loader._config is None
     cfg = loader.config
 
-    assert cfg.nickname == "lazy"
+    assert cfg.master == "lazy"
     assert loader.config is cfg
 
 

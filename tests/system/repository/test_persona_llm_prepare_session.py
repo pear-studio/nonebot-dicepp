@@ -421,7 +421,6 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
         (result.path / "content" / "characters").resolve()
     )
     assert account["persona"] == prepare.CHARACTER_NAME
-    assert account["nickname"] == prepare.CHARACTER_DISPLAY_NAME
     assert (
         result.path
         / "content"

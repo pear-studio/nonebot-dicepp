@@ -15,7 +15,7 @@ class _BotTestBase(IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from plugins.DicePP.core.bot import Bot
         self.bot = Bot(self.BOT_NAME, no_tick=True)
-        self.bot.config.master = ["test_master"]
+        self.bot.config.master = "test_master"
         await self.bot.delay_init_command()
 
     async def asyncTearDown(self):

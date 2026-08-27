@@ -36,8 +36,6 @@ if (Test-Path -LiteralPath $LauncherSource -PathType Leaf) {
     }
 }
 
-Copy-RequiredFile -Source "config/bots/_template.json" -Destination (Join-Path $DistDir "config/bots/_template.json")
-
 $forbiddenGlobal = Join-Path $DistDir "config/global.json"
 if (Test-Path -LiteralPath $forbiddenGlobal) {
     throw "Windows distribution must not contain config/global.json"

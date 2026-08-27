@@ -33,7 +33,7 @@ def _cleanup_bot(bot):
 async def dnd_bot():
     from plugins.DicePP.core.bot import Bot
     bot = Bot("test_dnd_misc_bot")
-    bot.config.master = ["test_master"]
+    bot.config.master = "test_master"
     await bot.delay_init_command()
     yield bot
     await bot.shutdown_async()
@@ -44,7 +44,7 @@ async def dnd_bot():
 async def coc_bot():
     from plugins.DicePP.core.bot import Bot
     bot = Bot("test_coc_misc_bot")
-    bot.config.master = ["test_master"]
+    bot.config.master = "test_master"
     await bot.delay_init_command()
     yield bot
     await bot.shutdown_async()

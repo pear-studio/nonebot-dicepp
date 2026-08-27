@@ -42,8 +42,7 @@ async def test_process_msg_stat_write_failure():
         side_effect=OSError("simulated db failure")
     )
     bot.config = MagicMock(spec=BotConfig)
-    bot.config.master = []
-    bot.config.admin = []
+    bot.config.master = ""
     bot.config.command_split = "\n"
     bot.command_dict = {}
     bot.proxy = MagicMock()

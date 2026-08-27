@@ -46,9 +46,6 @@ def _workspace() -> Path:
     user_config = WORKSPACE / "config" / "user.json"
     if not user_config.exists():
         user_config.write_text("{}\n", encoding="utf-8")
-    template = WORKSPACE / "config" / "bots" / "_template.json"
-    if not template.exists():
-        template.write_text("{}\n", encoding="utf-8")
     bot_source = ROOT / "bot.py"
     bot_target = WORKSPACE / "bot.py"
     shutil.copy2(bot_source, bot_target)

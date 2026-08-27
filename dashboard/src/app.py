@@ -868,7 +868,8 @@ _SENSITIVE_CONFIG_LEAFS = frozenset({"api_key", "token"})
 def _is_sensitive_config_path(path: str) -> bool:
     """Return whether a config leaf contains a credential value."""
 
-    return path.rsplit(".", 1)[-1] in _SENSITIVE_CONFIG_LEAFS
+    leaf = path.rsplit(".", 1)[-1]
+    return leaf in _SENSITIVE_CONFIG_LEAFS or leaf.endswith("_token")
 
 
 def _cached_config_field_metadata() -> dict:

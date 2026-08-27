@@ -50,7 +50,7 @@ class TestHubManagerConfigSetters:
         b.db = MagicMock()
         b.db.hub_set = AsyncMock()
         b.config = MagicMock(spec=BotConfig)
-        b.config.master = ["master_001"]
+        b.config.master = "master_001"
         return b
 
     @pytest.mark.asyncio
@@ -112,7 +112,7 @@ class TestHubManagerConfigSetters:
     async def test_set_master_id_empty_falls_back(self, bot):
         mgr = HubManager(bot)
         await mgr.set_master_id("")
-        # 缓存为空，回退到 config.master[0]
+        # 缓存为空，回退到 config.master
         assert mgr.get_master_id() == "master_001"
 
     @pytest.mark.asyncio
@@ -136,7 +136,7 @@ class TestHubManagerRegister:
         b.db.hub_set = AsyncMock()
         b.db.hub_get = AsyncMock(return_value=None)
         b.config = MagicMock(spec=BotConfig)
-        b.config.master = ["master_001"]
+        b.config.master = "master_001"
         return b
 
     @pytest.mark.asyncio
@@ -190,7 +190,7 @@ class TestGetOnlineRobotsCache:
         b.db.hub_get = AsyncMock(return_value=None)
         b.db.hub_set = AsyncMock()
         b.config = MagicMock(spec=BotConfig)
-        b.config.master = ["master_001"]
+        b.config.master = "master_001"
         return b
 
     @pytest.fixture

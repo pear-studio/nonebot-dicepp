@@ -43,8 +43,7 @@ class TestInboundRecorderWiring:
         bot._safe_update_user_stat = AsyncMock()
         bot._safe_update_group_stat = AsyncMock()
         bot.config = MagicMock()
-        bot.config.master = []
-        bot.config.admin = []
+        bot.config.master = ""
         bot.config.command_split = "\n"
         bot.proxy = None
 

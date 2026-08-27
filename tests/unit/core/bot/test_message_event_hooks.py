@@ -17,8 +17,7 @@ async def test_platform_hook_runs_once_while_persona_inbound_hook_keeps_split_gr
     bot._safe_update_user_stat = AsyncMock()
     bot._safe_update_group_stat = AsyncMock()
     bot.config = MagicMock()
-    bot.config.master = []
-    bot.config.admin = []
+    bot.config.master = ""
     bot.config.command_split = "\n"
     bot.proxy = None
 

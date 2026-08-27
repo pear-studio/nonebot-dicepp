@@ -21,7 +21,6 @@ def test_catalog_enumerates_complete_managed_files_without_crossing_scope(
     layout = InstanceLayout.from_root(tmp_path)
     _write(layout.config_user, "secret")
     _write(layout.config_bots_dir / "123.json", "{}")
-    _write(layout.config_bots_dir / "_template.json", "template")
     _write(layout.data_root / "dicepp.db")
     _write(layout.data_bots_dir / "123" / "bot_data.db")
     _write(layout.data_bots_dir / "123" / "log.db")

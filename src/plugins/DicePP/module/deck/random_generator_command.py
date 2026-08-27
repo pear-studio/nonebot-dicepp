@@ -69,7 +69,7 @@ class RandomGeneratorCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        admin = (meta.user_id in self.bot.config.master) or (meta.user_id in self.bot.config.admin)
+        admin = bool(self.bot.config.master) and meta.user_id == self.bot.config.master
         # 判断功能开关
         if not self.bot.config.random_gen.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)

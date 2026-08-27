@@ -61,7 +61,7 @@ def new_test_account(prefix: str) -> str:
 
 async def async_make_test_bot(prefix: str = "test_bot") -> tuple[Bot, TestProxy]:
     test_bot = Bot(new_test_account(prefix), no_tick=True)
-    test_bot.config.master = ["test_master"]
+    test_bot.config.master = "test_master"
     proxy = TestProxy()
     test_bot.set_client_proxy(proxy)
     await test_bot.delay_init_command()

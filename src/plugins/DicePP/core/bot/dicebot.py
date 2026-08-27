@@ -523,8 +523,12 @@ class Bot:
                     if is_silent:
                         logger.info("[Bot] 静默模式已开启，跳过发送启动通知")
                     else:
-                        for master in self.config.master:
-                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
+                        if self.config.master:
+                            command = BotSendMsgCommand(
+                                self.account,
+                                feedback,
+                                [PrivateMessagePort(self.config.master)],
+                            )
                             await self.proxy.process_bot_command(command)
                 else:
                     logger.info(init_info)
@@ -569,10 +573,8 @@ class Bot:
 
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
-        if meta.user_id in self.config.master:
+        if self.config.master and meta.user_id == self.config.master:
             meta.permission = 4
-        elif meta.user_id in self.config.admin:
-            meta.permission = 3
         else:
             if meta.sender.role is not None:
                 if meta.sender.role == "owner": # 群主 权限2
@@ -712,13 +714,12 @@ class Bot:
     def process_request(self, data: RequestData) -> Optional[bool]:
         """处理请求"""
         if isinstance(data, FriendRequestData):
-            passwords = [t.strip() for t in self.config.friend_token if t.strip()]
-            comment: str = data.comment.strip()
-            return not passwords or comment in passwords
+            comment: str = data.comment
+            return not self.config.friend_request_token or comment == self.config.friend_request_token
         elif isinstance(data, JoinGroupRequestData):
-            return self.config.group_invite
+            return self.config.accept_group_invites
         elif isinstance(data, InviteGroupRequestData):
-            return self.config.group_invite
+            return self.config.accept_group_invites
         return False
 
     async def process_notice(self, data: NoticeData) -> List:
@@ -762,21 +763,22 @@ class Bot:
         exception_info = "\n".join(exception_info[-8:]) if len(exception_info) > 8 else "\n".join(exception_info)
         additional_info = f"\n{info}" if info else ""
         feedback = f"未处理的错误:\n{exception_info}{additional_info}"
-        master_list = self.config.master
-        if master_list:
-            return [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_list[0])])]
+        if self.config.master:
+            return [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(self.config.master)])]
         else:
             return []
-
-    def get_master_ids(self) -> List[str]:
-        return self.config.master
 
     async def send_msg_to_master(self, msg: str) -> None:
         """发送信息给主Master"""
         from plugins.DicePP.core.command import BotSendMsgCommand
-        master_list = self.get_master_ids()
-        if master_list:
-            await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
+        if self.config.master:
+            await self.proxy.process_bot_command(
+                BotSendMsgCommand(
+                    self.account,
+                    msg,
+                    [PrivateMessagePort(self.config.master)],
+                )
+            )
 
     async def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """
@@ -919,8 +921,8 @@ class Bot:
             await self.db.group_stat.delete(group_id)
 
         # 给Master汇报清理情况
-        if self.get_master_ids():
-            master_id = self.get_master_ids()[0]
+        if self.config.master:
+            master_id = self.config.master
             result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
             feedback = f"检查{len(all_user_id)}个用户数据, {len(all_group_id)}个群聊数据.\n" \
                        f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊({invalid_group_id}).\n" \

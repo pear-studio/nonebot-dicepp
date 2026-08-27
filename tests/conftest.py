@@ -6,7 +6,6 @@ import asyncio
 import atexit
 import os
 from pathlib import Path
-import shutil
 import sys
 import tempfile
 
@@ -45,15 +44,6 @@ os.environ["DICEPP_APP_DIR"] = _TEST_APP_DIR
 os.environ["DICEPP_PROJECT_ROOT"] = _TEST_APP_DIR
 
 _REAL_PROJECT = find_repository_root(Path(__file__))
-_TEST_PROJECT = Path(_TEST_APP_DIR)
-for relative_path in (Path("config/bots/_template.json"),):
-    source = _REAL_PROJECT / relative_path
-    if not source.exists():
-        raise RuntimeError(f"测试模板不存在: {source}")
-    target = _TEST_PROJECT / relative_path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(source, target)
-
 # Production imports must happen only after the isolated app root is active.
 from tests.support.persona_llm import MockCoordinator
 

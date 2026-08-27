@@ -601,8 +601,8 @@ async def _startup_summary(
     for line in lines:
         logger.info(line)
 
-    master_ids: List[str] = bot.config.master
-    if not master_ids:
+    master_id = bot.config.master
+    if not master_id:
         return
 
     available_llm = [f"{p}/{m.name}" for p, m, s in llm_entries if s is _StartupStatus.OK]
@@ -628,7 +628,7 @@ async def _startup_summary(
 
     try:
         await infra.port.send(
-            master_ids[0], "", "\n".join(msg_lines),
+            master_id, "", "\n".join(msg_lines),
             message_type=MessageType.SYSTEM_LOG,
         )
     except Exception:

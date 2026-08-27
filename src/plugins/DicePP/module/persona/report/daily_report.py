@@ -419,10 +419,10 @@ class DailyReportGenerator:
     # ── 辅助 ───────────────────────────────────────────────────
 
     def _get_master_id(self) -> Optional[str]:
-        masters = self._bot.config.master
-        if not masters:
+        master_id = self._bot.config.master
+        if not master_id:
             return None
-        return masters[0]
+        return master_id
 
     async def send_master_notification(self, msg: str) -> None:
         """发送简短通知给 Master"""

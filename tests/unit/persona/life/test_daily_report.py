@@ -27,7 +27,7 @@ def _make_mock_bot(with_master=True):
     """创建最小 mock Bot，包含 config、db 属性。"""
     bot = MagicMock()
     bot.account = "test_bot"
-    bot.config.master = ["master_123"] if with_master else []
+    bot.config.master = "master_123" if with_master else ""
     bot.config.persona_ai = PersonaConfig(
         daily_report_voice_enabled=False,
     )

@@ -309,7 +309,7 @@ class PersonaCommand(UserCommandBase):
     def _is_admin(self, user_id: str) -> bool:
         """检查用户是否是管理员"""
         # 使用 DicePP 的 is_admin 检查
-        return user_id in self.bot.config.admin or user_id in self.bot.config.master
+        return bool(self.bot.config.master) and user_id == self.bot.config.master
 
     async def _check_whitelist(self, user_id: str, group_id: str, is_private: bool) -> bool:
         """

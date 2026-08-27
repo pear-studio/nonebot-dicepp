@@ -42,7 +42,7 @@ class _TestProxy(ClientProxy):
 
 async def make_test_bot(prefix: str):
     bot = Bot(f"{prefix}_{os.getpid()}_{uuid.uuid4().hex[:8]}", no_tick=True)
-    bot.config.master = ["test_master"]
+    bot.config.master = "test_master"
     proxy = _TestProxy()
     bot.set_client_proxy(proxy)
     await bot.delay_init_command()

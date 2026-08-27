@@ -130,7 +130,7 @@ class HubCommand(UserCommandBase):
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        if meta.user_id not in self.bot.config.master:
+        if not self.bot.config.master or meta.user_id != self.bot.config.master:
             return []
 
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)

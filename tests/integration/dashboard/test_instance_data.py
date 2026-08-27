@@ -28,7 +28,7 @@ class RunningController(StoppedController):
         return BotProcessStatus("running", pid=123)
 
 
-def test_clear_preserves_dashboard_state_and_template(test_client) -> None:
+def test_clear_preserves_dashboard_state(test_client) -> None:
     setup_auth(test_client)
     test_client.app.state.bot_process_controller = StoppedController()
     layout = DashboardPaths.instance_layout()
@@ -37,7 +37,6 @@ def test_clear_preserves_dashboard_state_and_template(test_client) -> None:
     response = test_client.post("/api/instance/clear", json={"confirm": True})
     assert response.status_code == 200, response.text
     assert not layout.bot_config_path("test_bot").exists()
-    assert layout.bot_config_path("_template").exists()
     assert layout.dashboard_db.exists()
     assert layout.runtime_log.read_text(encoding="utf-8") == "keep runtime log"
 
@@ -67,13 +66,13 @@ def test_import_directory_copies_catalog_data_and_ignores_runtime_state(
     source = InstanceLayout.from_root(tmp_path / "old-dicepp")
     source.config_user.parent.mkdir(parents=True, exist_ok=True)
     source.config_user.write_text(
-        json.dumps({"nickname": "old-user", "removed_field": "kept verbatim"}),
+        json.dumps({"removed_field": "kept verbatim"}),
         encoding="utf-8",
     )
     source_bot = source.bot_config_path("12345")
     source_bot.parent.mkdir(parents=True, exist_ok=True)
     source_bot.write_text(
-        json.dumps({"master": ["10001"], "nickname": "old-bot"}),
+        json.dumps({"master": "10001"}),
         encoding="utf-8",
     )
     source_db = source.data_root / "dicepp.db"
@@ -115,7 +114,7 @@ def test_import_directory_copies_catalog_data_and_ignores_runtime_state(
     assert target.bot_config_path("12345").read_bytes() == source_bot.read_bytes()
     assert json.loads(target.bot_config_path("12345").read_text(encoding="utf-8"))[
         "master"
-    ] == ["10001"]
+    ] == "10001"
     assert response.json()["migrations"][0]["path"] == "data/dicepp.db"
     with sqlite3.connect(target.data_root / "dicepp.db") as connection:
         assert connection.execute("SELECT value FROM wal_entries").fetchone() == (

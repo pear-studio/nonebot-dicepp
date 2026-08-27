@@ -159,9 +159,8 @@ hiddenimports += collect_submodules('lark')
 datas = [
     (os.path.join(PROJECT_ROOT, 'pyproject.toml'), '.'),
 
-    # config/ 目录：仅打包 bot 账号模板；内置默认值由 Pydantic 模型提供
+    # config/ 目录不打包 Bot 配置；内置默认值由 Pydantic 模型提供
     # 运行时数据（data/）和用户内容（content/）由用户自行挂载，不打包
-    (os.path.join(PROJECT_ROOT, 'config', 'bots', '_template.json'), os.path.join('config', 'bots')),
     (os.path.join(PROJECT_ROOT, 'templates'), os.path.join('templates')),
 ]
 

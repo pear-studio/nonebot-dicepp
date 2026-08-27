@@ -125,17 +125,8 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
             current = current.setdefault(key, {})
         current[keys[-1]] = value
 
-    for env_key, json_path in (
-        ("DICE_MASTER", ["master"]),
-        ("DICE_ADMIN", ["admin"]),
-    ):
-        value = os.environ.get(env_key)
-        if value is not None:
-            set_nested(json_path, [part.strip() for part in value.split(",") if part.strip()])
-
     mappings: dict[str, tuple[list[str], Any]] = {
         "DICE_PERSONA": (["persona"], str),
-        "DICE_NICKNAME": (["nickname"], str),
         "DICE_COMMAND_SPLIT": (["command_split"], str),
         "DICE_DICEHUB_API_URL": (["dicehub", "api_url"], str),
         "DICE_DICEHUB_API_KEY": (["dicehub", "api_key"], str),

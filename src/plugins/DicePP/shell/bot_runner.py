@@ -200,7 +200,7 @@ class BotRunner:
             self.proxy.bind_bot(self.bot)
 
             # 配置
-            self.bot.config.master = ["shell_master"]
+            self.bot.config.master = "shell_master"
             self.bot.set_client_proxy(self.proxy)
 
             # 初始化

@@ -32,15 +32,11 @@ def build_dashboard_project(
         (project_root / directory).mkdir(parents=True, exist_ok=True)
 
     (project_root / "config" / "bots" / "test_bot.json").write_text(
-        json.dumps({"master": ["test_master"], "nickname": "test_bot"})
+        json.dumps({"master": "test_master"})
     )
     (project_root / "config" / "bots" / "another_bot.json").write_text(
-        json.dumps({"master": ["another_master"], "nickname": "another_bot"})
+        json.dumps({"master": "another_master"})
     )
-    (project_root / "config" / "bots" / "_template.json").write_text(
-        json.dumps({})
-    )
-
     connection = sqlite3.connect(
         str(project_root / "data" / "bots" / "test_bot" / "bot_data.db")
     )

@@ -65,8 +65,7 @@ class HubManager:
         master_id = self._config_cache.get(HUB_KEY_MASTER_ID, "")
         if master_id:
             return master_id
-        masters = self.bot.config.master
-        return masters[0] if masters else ""
+        return self.bot.config.master
 
     def is_configured(self) -> bool:
         return bool(self.get_api_url())

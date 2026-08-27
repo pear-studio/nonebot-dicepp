@@ -9,40 +9,19 @@ DicePP 使用 JSON 配置。常用文件是：
 - `dashboard/data/`：Dashboard 管理员和 session 数据；
 - `data/backups/`：Dashboard 存档库存。不要提交包含密码或 API Key 的 JSON。
 
-## 配置优先级
-
-从高到低：
-
-1. 环境变量，例如 `DICE_MASTER`；
-2. `config/bots/{QQ号}.json`；
-3. `config/user.json`；
-4. 程序内置默认值。
-
-配置会深度合并。`config/user.json` 只需要填写要覆盖的字段。
-
 ## 创建 Bot 配置
 
-Linux/macOS：
-
-```bash
-cp config/bots/_template.json config/bots/你的QQ号.json
-```
-
-Windows PowerShell：
-
-```powershell
-Copy-Item config\bots\_template.json config\bots\你的QQ号.json
-```
+直接创建 `config/bots/{QQ号}.json`。缺失文件时 Bot 使用代码默认值，Dashboard
+首次保存时才创建配置文件；不要复制模板文件。
 
 最小示例：
 
 ```json
 {
-  "master": ["你的QQ号"],
-  "admin": [],
-  "friend_token": ["添加好友口令"],
-  "persona": "default",
-  "nickname": "骰娘"
+  "master": "你的QQ号",
+  "friend_request_token": "添加好友口令",
+  "accept_group_invites": true,
+  "persona": "default"
 }
 ```
 
@@ -50,11 +29,10 @@ Copy-Item config\bots\_template.json config\bots\你的QQ号.json
 
 | 字段 | 说明 |
 |---|---|
-| `master` | 最高权限用户 QQ 列表 |
-| `admin` | 管理员 QQ 列表 |
-| `friend_token` | 添加好友口令 |
+| `master` | 唯一 Master QQ号，拥有全部管理权限 |
+| `friend_request_token` | 添加好友口令；留空接受全部好友请求 |
+| `accept_group_invites` | 是否接受加群和群邀请请求 |
 | `persona` | 默认文字人设 |
-| `nickname` | 机器人昵称 |
 
 ## API Key 与环境变量
 
@@ -74,9 +52,6 @@ API Key 放在未提交的 `config/user.json`，例如：
 
 | 变量 | 作用 | 默认值 |
 |---|---|---|
-| `DICE_MASTER` | 覆盖 master，逗号分隔 | |
-| `DICE_ADMIN` | 覆盖 admin，逗号分隔 | |
-| `DICE_NICKNAME` | 覆盖昵称 | |
 | `DICE_PERSONA` | 覆盖默认人设 | |
 | `DICEPP_PROJECT_ROOT` | 覆盖实例根目录 | 当前目录 |
 | `DICEPP_DATA_DIR` | 覆盖运行时 data 目录 | |

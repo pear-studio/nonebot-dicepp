@@ -164,8 +164,7 @@ class TestCreatePersonaSuccess:
         bot.account = "test_bot_smoke"
         bot.config.persona_ai = _make_persona_config()
         bot.config.persona = "test_char"
-        bot.config.master = []          # 避免发送启动报告
-        bot.config.admin = []
+        bot.config.master = ""          # 避免发送启动报告
         bot.config.timezone = "Asia/Shanghai"
 
         # ── 4. 真实数据库连接 ────────────────────────────
@@ -226,8 +225,7 @@ class TestCreatePersonaSuccess:
         bot.account = "test_bot_smoke2"
         bot.config.persona_ai = _make_persona_config()
         bot.config.persona = "test_char"
-        bot.config.master = []
-        bot.config.admin = []
+        bot.config.master = ""
         bot.config.timezone = "Asia/Shanghai"
 
         core_db = await _make_core_db()

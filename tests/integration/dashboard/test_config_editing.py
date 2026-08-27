@@ -134,7 +134,7 @@ class TestSetField:
     @pytest.mark.parametrize("endpoint", ["set", "reset"])
     def test_bot_field_requires_bot_id(self, test_client: TestClient, endpoint: str):
         setup_auth(test_client)
-        body = {"path": "nickname"}
+        body = {"path": "master"}
         if endpoint == "set":
             body["value"] = "missing-id"
         response = test_client.post(f"/api/config/{endpoint}", json=body)
@@ -146,7 +146,7 @@ class TestSetField:
         setup_auth(test_client)
         resp = test_client.post(
             "/api/config/set",
-            json={"path": "nickname", "value": "new_name", "bot_id": "test_bot"},
+            json={"path": "master", "value": "new_master", "bot_id": "test_bot"},
         )
         assert resp.status_code == 200
         assert resp.json() == {
@@ -157,7 +157,7 @@ class TestSetField:
         }
 
         bot_data = json.loads(DashboardPaths.bot_config_path("test_bot").read_text())
-        assert bot_data["nickname"] == "new_name"
+        assert bot_data["master"] == "new_master"
 
     def test_set_nested_field(self, test_client: TestClient, tmp_dashboard_paths):
         """Deeply nested paths create intermediate dicts."""
@@ -185,20 +185,20 @@ class TestResetField:
     def test_reset_field(self, test_client: TestClient, tmp_dashboard_paths):
         """``POST /api/config/reset`` removes a key from a Bot JSON."""
         bot_path = DashboardPaths.bot_config_path("test_bot")
-        bot_path.write_text(json.dumps({"nickname": "override"}))
+        bot_path.write_text(json.dumps({"master": "override"}))
 
         setup_auth(test_client)
         resp = test_client.post(
-            "/api/config/reset", json={"path": "nickname", "bot_id": "test_bot"}
+            "/api/config/reset", json={"path": "master", "bot_id": "test_bot"}
         )
         assert resp.status_code == 200
         assert resp.json()["removed"] is True
 
         bot_data = json.loads(bot_path.read_text())
-        assert "nickname" not in bot_data
+        assert "master" not in bot_data
         effective = test_client.get("/api/config/bots/test_bot")
         assert effective.status_code == 200
-        assert effective.json()["config"]["nickname"] == ""
+        assert effective.json()["config"]["master"] == ""
 
     def test_reset_nonexistent(self, test_client: TestClient, tmp_dashboard_paths):
         """Resetting a non-existent path returns removed=False (not 404)."""
@@ -218,13 +218,12 @@ class TestBotConfig:
         resp = test_client.get("/api/config/bots/test_bot")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["config"]["master"] == ["test_master"]
-        assert data["config"]["nickname"] == "test_bot"
+        assert data["config"]["master"] == "test_master"
 
     def test_bot_config_save(self, test_client: TestClient, tmp_dashboard_paths):
         """``POST /api/config/bots/{bot_id}/save`` saves config."""
         setup_auth(test_client)
-        new_config = {"master": ["new_master"], "nickname": "saved_bot"}
+        new_config = {"master": "new_master"}
         resp = test_client.post(
             "/api/config/bots/test_bot/save", json=new_config
         )
@@ -254,7 +253,7 @@ class TestBotConfig:
         setup_auth(test_client)
         resp = test_client.get("/api/config/bots/nonexistent_bot")
         assert resp.status_code == 200
-        assert resp.json()["config"]["nickname"] == ""
+        assert resp.json()["config"]["master"] == ""
         assert not DashboardPaths.bot_config_path("nonexistent_bot").exists()
 
 
@@ -488,7 +487,7 @@ class TestDeferredConfigApplication:
         """A successful save never claims that a running Bot was updated."""
         setup_auth(test_client)
         resp = test_client.post(
-            "/api/config/bots/test_bot/save", json={"master": ["m"]}
+            "/api/config/bots/test_bot/save", json={"master": "m"}
         )
         data = resp.json()
         assert data["application"] == "deferred"

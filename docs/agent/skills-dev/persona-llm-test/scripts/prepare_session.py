@@ -21,7 +21,6 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 CHARACTER_NAME = "persona-llm-test-dnd"
-CHARACTER_DISPLAY_NAME = "艾琳娜·银枝"
 TEST_GROUP_ID = "llm_test_group"
 SCENARIO_ORDER = ("warp", "private", "group")
 PRIVATE_CHAT_RUNS = 7
@@ -362,7 +361,6 @@ def build_session_bot_config(
                 "providers": provider_overrides,
             },
             "persona": CHARACTER_NAME,
-            "nickname": CHARACTER_DISPLAY_NAME,
         },
     )
 

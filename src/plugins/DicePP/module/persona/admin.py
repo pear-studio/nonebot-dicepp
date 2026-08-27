@@ -37,7 +37,7 @@ class AdminDispatcher:
         self._report_generator = report_generator
 
     def _is_admin(self, user_id: str) -> bool:
-        return user_id in self.bot.config.admin or user_id in self.bot.config.master
+        return bool(self.bot.config.master) and user_id == self.bot.config.master
 
     # ── 公开 API ──────────────────────────────────────────────
 

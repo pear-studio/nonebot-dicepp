@@ -66,7 +66,7 @@ class StatisticsCommand(UserCommandBase):
             # 统计掷骰情况
             feedback += stat_roll_info(group_stat.roll)
         elif arg_str == "所有用户":
-            if meta.user_id not in self.bot.get_master_ids():
+            if not self.bot.config.master or meta.user_id != self.bot.config.master:
                 feedback = "权限不足"
             else:
                 merge_user_stat = UserStatInfo()
@@ -86,8 +86,8 @@ class StatisticsCommand(UserCommandBase):
                             f" 昨日:{merge_user_stat.msg.last_day_val}," \
                             f" 总计:{merge_user_stat.msg.total_val}\n"
                 feedback += stat_cmd_info(merge_user_stat.cmd)
-        elif meta.user_id in self.bot.get_master_ids() and arg_str == "所有群聊":
-            if meta.user_id not in self.bot.get_master_ids():
+        elif self.bot.config.master and meta.user_id == self.bot.config.master and arg_str == "所有群聊":
+            if not self.bot.config.master or meta.user_id != self.bot.config.master:
                 feedback = "权限不足"
             else:
                 group_info_list: List[List[str, int, str]] = []  # id, sort_key, info_str

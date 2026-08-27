@@ -786,11 +786,9 @@ class BotConfig(BaseModel):
 
     # ── 账号与权限 (section=account, default from model_config) ──────────────
 
-    master: List[str] = Field(default_factory=list, title="Master 账号")
-    admin: List[str] = Field(default_factory=list, title="管理员账号")
-    friend_token: List[str] = Field(default_factory=list, title="好友令牌")
-    group_invite: bool = Field(default=True, title="群邀请")
-    nickname: str = Field(default="", title="Bot 昵称")
+    master: str = Field(default="", title="Master 账号")
+    friend_request_token: str = Field(default="", title="好友请求口令")
+    accept_group_invites: bool = Field(default=True, title="接受群邀请")
     persona: str = Field(default="default", title="当前角色")
     white_list_group: List[str] = Field(default_factory=list, title="群白名单")
     white_list_user: List[str] = Field(default_factory=list, title="用户白名单")

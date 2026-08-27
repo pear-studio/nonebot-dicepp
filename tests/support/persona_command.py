@@ -68,8 +68,7 @@ def make_mock_bot(persona_config=None):
     bot.get_nickname = AsyncMock(return_value="测试用户")
     bot.config.persona_ai = persona_config or default_persona_config()
     bot.config.persona = "test_char"
-    bot.config.admin = []
-    bot.config.master = ["master_user"]
+    bot.config.master = "master_user"
     bot.account = "test_bot"
     return bot
 
