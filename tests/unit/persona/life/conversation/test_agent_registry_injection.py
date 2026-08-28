@@ -360,8 +360,6 @@ class TestFactoryRegistryInjection:
         config.background_llm_max_rounds = 10
         config.timezone = "Asia/Shanghai"
         config.character_life_diary_time = "22:00"
-        decay_calculator = MagicMock()
-
         character_life = MagicMock()
         character_life.load_persistent_state = AsyncMock()
 
@@ -376,7 +374,7 @@ class TestFactoryRegistryInjection:
             MockLS.return_value = "life-simulator"
 
             result = await _build_life(
-                store, character, config, decay_calculator,
+                store, character, config,
                 character_life=character_life,
                 dm_agent=dm_agent,
                 character_agent=character_agent,

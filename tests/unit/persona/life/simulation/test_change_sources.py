@@ -2,18 +2,15 @@
 单元测试: ChangeSource 实现（chat 路径）
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from datetime import timedelta
 
 from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.life.change_sources import (
     DateChangeSource,
-    RelationChangeSource,
-    ProfileFactsChangeSource,
     DailyEventChangeSource,
 )
-from plugins.DicePP.module.persona.data.models import UserProfile
 
 
 class TestDateChangeSource:
@@ -33,91 +30,6 @@ class TestDateChangeSource:
         notifs, cursor2 = await source.update(cursor1)
         assert len(notifs) == 0
         assert cursor2 == cursor1
-
-
-class TestRelationChangeSource:
-
-    @pytest.mark.asyncio
-    async def test_first_call_no_notification_sets_baseline(self):
-        store = MagicMock()
-        store.get_relationship = AsyncMock(return_value=None)
-        with patch(
-            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
-            return_value=(2, "朋友"),
-        ):
-            source = RelationChangeSource(
-                store=store, user_id="u1",
-                relation_labels=["陌生人", "熟人", "朋友", "挚友"],
-            )
-            notifs, cursor = await source.update(None)
-        assert len(notifs) == 0
-        assert cursor == "朋友"
-
-    @pytest.mark.asyncio
-    async def test_label_changed_returns_notification(self):
-        store = MagicMock()
-        store.get_relationship = AsyncMock(return_value=None)
-        with patch(
-            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
-            return_value=(3, "挚友"),
-        ):
-            source = RelationChangeSource(
-                store=store, user_id="u1",
-                relation_labels=["陌生人", "熟人", "朋友", "挚友"],
-            )
-            notifs, _ = await source.update("朋友")
-        assert len(notifs) == 1
-        assert "现在是挚友" in notifs[0].content
-
-    @pytest.mark.asyncio
-    async def test_same_label_no_notification(self):
-        store = MagicMock()
-        store.get_relationship = AsyncMock(return_value=None)
-        with patch(
-            'plugins.DicePP.module.persona.data.models.RelationshipState.get_relation_level',
-            return_value=(2, "朋友"),
-        ):
-            source = RelationChangeSource(
-                store=store, user_id="u1",
-                relation_labels=["陌生人", "熟人", "朋友", "挚友"],
-            )
-            notifs, cursor = await source.update("朋友")
-        assert len(notifs) == 0
-        assert cursor == "朋友"
-
-
-class TestProfileFactsChangeSource:
-
-    @pytest.mark.asyncio
-    async def test_first_call_sets_baseline(self):
-        profile = UserProfile(user_id="u1", facts={"爱好": "种花"})
-        store = MagicMock()
-        store.get_user_profile = AsyncMock(return_value=profile)
-        source = ProfileFactsChangeSource(store=store, user_id="u1")
-        notifs, cursor = await source.update(None)
-        assert len(notifs) == 0
-        assert len(cursor) == 32
-
-    @pytest.mark.asyncio
-    async def test_facts_changed_returns_notification(self):
-        store = MagicMock()
-        profile1 = UserProfile(user_id="u1", facts={"爱好": "种花"})
-        store.get_user_profile = AsyncMock(return_value=profile1)
-        source = ProfileFactsChangeSource(store=store, user_id="u1")
-        _, cursor1 = await source.update(None)
-        profile2 = UserProfile(user_id="u1", facts={"爱好": "养猫", "年龄": "25"})
-        store.get_user_profile = AsyncMock(return_value=profile2)
-        notifs, _ = await source.update(cursor1)
-        assert len(notifs) == 1
-        assert "新的了解" in notifs[0].content
-
-    @pytest.mark.asyncio
-    async def test_no_profile_no_break(self):
-        store = MagicMock()
-        store.get_user_profile = AsyncMock(return_value=None)
-        source = ProfileFactsChangeSource(store=store, user_id="u1")
-        notifs, cursor = await source.update(None)
-        assert len(notifs) == 0
 
 
 class TestDailyEventChangeSource:

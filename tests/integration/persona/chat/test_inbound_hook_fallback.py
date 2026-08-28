@@ -25,7 +25,6 @@ from plugins.DicePP.module.persona.life.conversation_scope import ConversationSc
 def _make_config() -> ChatConfig:
     return ChatConfig(
         timezone="Asia/Shanghai",
-        relationship_enabled=False,
         max_history_turns=20,
         max_history_tokens=8000,
         lore_token_budget=1000,
@@ -36,9 +35,7 @@ def _make_char():
     char = MagicMock()
     char.character_id = "test"
     char.name = "TestBot"
-    char.get_relation_labels.return_value = ["陌生人", "熟人", "朋友"]
     char.extensions.sleep_messages = None
-    char.extensions.refuse_messages = None
     char.extensions.image_gen_style = ""
     char.extensions.image_gen_appearance = ""
     return char
@@ -50,8 +47,6 @@ def _make_store():
     db.execute = AsyncMock()
     db.commit = AsyncMock()
     store._persona_db = db
-    store.get_relationship = AsyncMock(return_value=None)
-    store.get_user_profile = AsyncMock(return_value=None)
     store.add_message_stream = AsyncMock(return_value=1)
     store.read_message_stream_batch = AsyncMock(return_value={})
     return store
@@ -98,7 +93,8 @@ class TestR2InboundHookFallback:
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=lambda: None,
-            after_response=AsyncMock(),
+            action_evaluator=MagicMock(),
+            character_life=MagicMock(),
         )
 
     @pytest.mark.asyncio

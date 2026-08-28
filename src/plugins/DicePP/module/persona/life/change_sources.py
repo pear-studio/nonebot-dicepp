@@ -2,13 +2,10 @@
 ChangeSource 实现 — 供 Conversation 订阅的变更来源
 
 life 路径：CharacterStateChangeSource — 监听角色全维度状态变化
-chat 路径：DateChangeSource、RelationChangeSource、ProfileFactsChangeSource、
-          DailyEventChangeSource
+chat 路径：DateChangeSource、DailyEventChangeSource
 """
 from __future__ import annotations
 
-import hashlib
-import json as _json
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
@@ -16,7 +13,6 @@ from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time, DEFAULT_EPOCH
 
 from ..data.store import PersonaDataStore
-from ..data.models import RelationshipState
 from .conversation import ChangeSource, Notification
 
 
@@ -50,7 +46,6 @@ class CharacterStateChangeSource(ChangeSource):
             dim: getattr(state, dim, None)
             for dim in _DIMENSIONS
         }
-
         # 首次调用 — 返回各维度初始化通知
         if cursor is None:
             notifications = []
@@ -127,87 +122,6 @@ class DateChangeSource(ChangeSource):
         ts = format_timestamp(now, now)
         content = f"[{ts}] 现在是{now.year}年{now.month}月{now.day}日，{wd}。"
         return [Notification(source_id=self.source_id, content=content, name=self.name)], today_str
-
-
-class RelationChangeSource(ChangeSource):
-    """关系标签变化检测。
-
-    cursor: label string（如 "朋友"）。
-    """
-
-    source_id: str = "chat.relation"
-    priority: int = 5
-    name: str = "关系变化"
-
-    def __init__(
-        self, store: PersonaDataStore, user_id: str,
-        relation_labels: list[str],
-        decay_calculator: Any = None,
-    ) -> None:
-        self._store = store
-        self._user_id = user_id
-        self._labels = relation_labels
-        self._decay = decay_calculator
-
-    async def update(self, cursor: Any) -> tuple[list[Notification], Any]:
-        rel = await self._store.get_relationship(self._user_id)
-        if rel is None:
-            rel = RelationshipState(user_id=self._user_id, familiarity=0.0, intimacy=0.0)
-
-        if self._decay is not None:
-            try:
-                rel = self._decay.effective_relationship(rel)
-            except Exception:
-                pass
-
-        _, current_label = rel.get_relation_level(self._labels)
-
-        if cursor is None:
-            return [], current_label
-
-        if cursor == current_label:
-            return [], cursor
-
-        return [Notification(
-            source_id=self.source_id,
-            content=f"通知: 你和当前玩家的关系现在是{current_label}。",
-            name=self.name,
-        )], current_label
-
-
-class ProfileFactsChangeSource(ChangeSource):
-    """用户 profile facts 变化检测。
-
-    cursor: facts dict 的 MD5 hash string。
-    """
-
-    source_id: str = "chat.profile"
-    priority: int = 5
-    name: str = "了解更新"
-
-    def __init__(self, store: PersonaDataStore, user_id: str) -> None:
-        self._store = store
-        self._user_id = user_id
-
-    async def update(self, cursor: Any) -> tuple[list[Notification], Any]:
-        profile = await self._store.get_user_profile(self._user_id)
-        if profile is None or not profile.facts:
-            return [], cursor or ""
-
-        current_hash = _hash_facts(profile.facts)
-
-        if cursor is None:
-            return [], current_hash
-
-        if cursor == current_hash:
-            return [], cursor
-
-        facts_lines = "\n".join([f"- {k}: {v}" for k, v in profile.facts.items()])
-        return [Notification(
-            source_id=self.source_id,
-            content=f"你对当前玩家有了新的了解：\n{facts_lines}",
-            name=self.name,
-        )], current_hash
 
 
 class DailyEventChangeSource(ChangeSource):
@@ -288,8 +202,3 @@ class DailyEventChangeSource(ChangeSource):
             "event_ids": list(event_ids),
             "context_since": now.isoformat(),
         }
-
-
-def _hash_facts(facts: dict) -> str:
-    raw = _json.dumps(facts, sort_keys=True, ensure_ascii=False)
-    return hashlib.md5(raw.encode()).hexdigest()

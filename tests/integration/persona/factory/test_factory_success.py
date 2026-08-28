@@ -3,7 +3,7 @@ create_persona 全路径冒烟测试
 
 验证 `create_persona()` 成功路径上所有组件可正确组装：
 - CharacterLoader, PersonaDataStore, DeepSeekTextModelClient, MessagePort, ChatOrchestrator, LifeSimulator
-- SessionManager, LLMCallCoordinator, DecayCalculator
+- SessionManager, LLMCallCoordinator
 
 使用真实 PersonaConfig（Pydantic 模型）替代 MagicMock，
 以确保所有 from_persona() 配置映射路径都覆盖到——这才是 rc6 缺字段崩溃的入口。
@@ -48,7 +48,6 @@ class FakeCharacterLoader:
         char.character_book = None
 
         ext = MagicMock()
-        ext.relation_labels = []
         ext.world = ""
         ext.daily_events_count = 5
         ext.event_day_start_hour = 8
@@ -56,15 +55,11 @@ class FakeCharacterLoader:
         ext.event_jitter_minutes = 60
         ext.event_day_start_jitter_minutes = 30
         ext.event_day_end_jitter_minutes = 30
-        ext.refuse_messages = None
         ext.sleep_messages = None
         ext.image_gen_style = ""
         ext.image_gen_appearance = ""
         char.extensions = ext
 
-        char.get_relation_labels.return_value = [
-            "好感不足", "初见", "友人", "亲密", "恋人",
-        ]
         return char
 
 
@@ -73,7 +68,7 @@ class FakeCharacterLoader:
 # ============================================================
 
 
-def _make_persona_config(*, relationship_enabled: bool = False) -> PersonaConfig:
+def _make_persona_config() -> PersonaConfig:
     """最小可成功初始化 Persona 模块的 PersonaConfig。
 
     关闭所有可选子系统以减小依赖范围，只保留必需配置。
@@ -86,7 +81,6 @@ def _make_persona_config(*, relationship_enabled: bool = False) -> PersonaConfig
         trace_enabled=False,
         quota_check_enabled=False,
         whitelist_enabled=False,
-        relationship_enabled=relationship_enabled,
         character_life_enabled=False,
         daily_limit=9999,
     )
@@ -183,9 +177,94 @@ class TestCreatePersonaSuccess:
         await core_db.close()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("relationship_enabled", [False, True])
+    async def test_create_persona_wires_suggest_action_into_chat_tools(
+        self, monkeypatch,
+    ):
+        """生产装配后的 ChatAgent 工具集能异步评估并注入行动。"""
+        import asyncio
+
+        from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+        from plugins.DicePP.module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+
+        monkeypatch.setattr(
+            'plugins.DicePP.module.persona.factory.CharacterLoader',
+            FakeCharacterLoader,
+        )
+
+        bot = MagicMock()
+        bot.account = "test_bot_suggest_action"
+        bot.user_config = UserConfig(deepseek_api_key="sk-test")
+        bot.config.persona_ai = _make_persona_config()
+        bot.config.master = ""
+        bot.config.timezone = "Asia/Shanghai"
+
+        core_db = await _make_core_db()
+        bot.db = MagicMock()
+        bot.db._db = core_db
+        bot.db.query = MagicMock()
+        bot.db.group_config = MagicMock()
+        bot.db.group_config.get = AsyncMock(
+            return_value=MagicMock(data={"query_database": "DND5E2024"}),
+        )
+        bot.db.user_stat = MagicMock()
+        bot.db.user_stat.get = AsyncMock(return_value=None)
+        bot.proxy = MagicMock()
+        bot.proxy.process_bot_command = AsyncMock()
+
+        app = await create_persona(bot)
+        assert app is not None
+        assert app.chat._action_evaluator is not None
+        assert app.chat._character_life is not None
+
+        evaluated = []
+        injected = []
+        injected_event = asyncio.Event()
+
+        class _Evaluator:
+            async def evaluate(self, action_idea, ongoing_descriptions, *, user_id):
+                evaluated.append((action_idea, ongoing_descriptions, user_id))
+                return "approved", "符合当前状态"
+
+        class _Life:
+            def get_ongoing_activities(self):
+                return []
+
+            async def inject_spontaneous_event(self, action_idea):
+                injected.append(action_idea)
+                injected_event.set()
+                return True
+
+        app.chat._action_evaluator = _Evaluator()
+        app.chat._character_life = _Life()
+
+        agent = app.chat._ensure_agent(
+            ConversationScope.for_private("u1"), Conversation(),
+        )
+        toolkit, _ = agent._build_chat_toolkit(
+            delivery=None,
+            interaction_id="i1",
+            user_id="u1",
+            group_id="",
+            char_name="test_char",
+        )
+        tool = toolkit.tools["suggest_action"]
+        result = await tool.handler(
+            tool.args_schema(action_idea="去公园散步"),
+            MagicMock(spec=ToolExecutionContext),
+        )
+
+        assert result.observation == "action noted"
+        await asyncio.wait_for(injected_event.wait(), timeout=1)
+        assert evaluated == [("去公园散步", [], "u1")]
+        assert injected == ["去公园散步"]
+
+        await app.store.close()
+        await core_db.close()
+
+    @pytest.mark.asyncio
     async def test_persona_app_handles_and_methods(
-        self, monkeypatch, relationship_enabled,
+        self, monkeypatch,
     ):
         """验证 PersonaApp 的四个句柄类型及公有方法可安全调用。"""
         monkeypatch.setattr(
@@ -194,11 +273,9 @@ class TestCreatePersonaSuccess:
         )
 
         bot = MagicMock()
-        bot.account = f"test_bot_smoke2_{relationship_enabled}"
+        bot.account = "test_bot_smoke2"
         bot.user_config = UserConfig(deepseek_api_key="sk-test")
-        bot.config.persona_ai = _make_persona_config(
-            relationship_enabled=relationship_enabled,
-        )
+        bot.config.persona_ai = _make_persona_config()
         bot.config.master = ""
         bot.config.timezone = "Asia/Shanghai"
 
@@ -227,13 +304,6 @@ class TestCreatePersonaSuccess:
         client = app.get_client()
         assert client is not None
 
-        decay_calc = app.get_decay_calculator()
-        assert (decay_calc is not None) is relationship_enabled
-        assert (app.chat._scoring_trigger is not None) is relationship_enabled
-
-        rel_labels = app.get_relation_labels()
-        assert isinstance(rel_labels, list)
-
         # 清理
         await app.store.close()
         await core_db.close()
@@ -252,13 +322,9 @@ class TestCreatePersonaFromPersonaMappings:
         config = _make_persona_config()
         config.timezone = "UTC"
         config.search_max_chars = 321
-        config.relationship_enabled = True
         cc = ChatConfig.from_persona(config)
         assert cc.timezone == "UTC"
         assert cc.search_max_chars == 321
-        assert cc.relationship_enabled is True
-        assert cc.reputation_refuse_threshold == 30.0
-        assert cc.scoring_interval == 5
         assert cc.max_history_turns == 10
 
     def test_character_life_config_from_persona(self):
@@ -276,12 +342,3 @@ class TestCreatePersonaFromPersonaMappings:
         config = _make_persona_config()
         lc = LifeConfig.from_persona(config)
         assert lc.timezone == config.timezone
-
-    def test_decay_config_defaults(self):
-        """DecayConfig 直接使用关系系统的内部默认值。"""
-        from plugins.DicePP.module.persona.game.decay import DecayConfig
-        dc = DecayConfig()
-        assert dc.enabled is True
-        assert dc.grace_period_hours == 8
-        assert dc.familiarity_half_life_days == 35
-        assert dc.intimacy_half_life_days == 21

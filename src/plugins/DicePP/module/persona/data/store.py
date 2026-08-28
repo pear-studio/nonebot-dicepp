@@ -18,10 +18,9 @@ from pydantic import ValidationError
 from dicepp_data import PERSONA_DB_ASSET
 
 from .models import (
-    WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
-    RelationshipState, DailyEvent,
+    WhitelistEntry, DailyUsage, DailyEvent,
     LLMTraceRecord, CharacterState, DMState, SAState,
-    ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
+    UnifiedMessage, MessageType,
     DEFAULT_SESSION_TOKEN_BUDGET,
     StoryDeckEntry, VALID_ENTRY_TYPES,
 )
@@ -415,34 +414,6 @@ class PersonaDataStore:
             (image_meta_json, message_id, user_id, group_id),
         )
         await self.db.commit()
-
-    async def get_earliest_message_time(self, user_id: str, group_id: str = "") -> Optional[datetime]:
-        """获取用户最早消息时间（ORDER BY created_at ASC LIMIT 1）
-
-        group_id 非空时查群聊，为空时查私聊。
-        """
-        async with self.db.execute(
-            f"""
-            SELECT created_at FROM message_stream
-            WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._PERSONA_SCOPE}
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (user_id, group_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row.get("created_at"):
-                return datetime.fromisoformat(row["created_at"])
-            return None
-
-    async def count_messages(self, user_id: str, group_id: str = "") -> int:
-        """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
-        async with self.db.execute(
-            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._PERSONA_SCOPE}",
-            (user_id, group_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row["cnt"] if row else 0
 
     async def get_group_messages(
         self,
@@ -891,38 +862,6 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [(row["status"], row["count"]) for row in rows]
 
-    async def get_recent_score_events(self, user_id: str, limit: int = 2) -> List[ScoreEvent]:
-        """获取最近评分事件，用于趋势计算"""
-        async with self.db.execute(
-            """
-            SELECT user_id, group_id, intimacy_delta, reputation_delta, familiarity_delta,
-                   composite_before, composite_after, reason, conversation_digest, created_at
-            FROM persona_score_history
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (user_id, limit)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            events = []
-            for row in reversed(list(rows)):  # Reverse to get chronological order
-                events.append(ScoreEvent(
-                    user_id=row["user_id"],
-                    group_id=row["group_id"],
-                    deltas=ScoreDeltas(
-                        intimacy=row["intimacy_delta"] if row.get("intimacy_delta") is not None else 0.0,
-                        reputation_delta=row["reputation_delta"] if row.get("reputation_delta") is not None else 0.0,
-                    ),
-                    familiarity_delta=row["familiarity_delta"] if row.get("familiarity_delta") is not None else 0.0,
-                    composite_before=row["composite_before"],
-                    composite_after=row["composite_after"],
-                    reason=row["reason"],
-                    conversation_digest=row["conversation_digest"] or "",
-                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None
-                ))
-            return events
-
     # ========== 白名单相关（core_db 侧） ==========
 
     async def is_user_whitelisted(self, user_id: str) -> bool:
@@ -1077,95 +1016,6 @@ class PersonaDataStore:
             (user_id, date)
         )
         await self.db.commit()
-
-    # ========== 评分历史 ==========
-
-    async def add_score_event(self, event: ScoreEvent) -> None:
-        """添加评分事件"""
-        await self.db.execute(
-            """
-            INSERT INTO persona_score_history
-            (user_id, group_id, intimacy_delta, reputation_delta, familiarity_delta,
-             composite_before, composite_after, reason, conversation_digest, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                event.user_id,
-                event.group_id,
-                event.deltas.intimacy,
-                event.deltas.reputation_delta,
-                event.familiarity_delta,
-                event.composite_before,
-                event.composite_after,
-                event.reason,
-                event.conversation_digest,
-                event.created_at.isoformat() if event.created_at else self._wall_now().isoformat(),
-            )
-        )
-        await self.db.commit()
-
-    async def record_scoring_failure(self, failure: ScoringFailure) -> None:
-        """记录评分失败"""
-        await self.db.execute(
-            """
-            INSERT INTO persona_scoring_failures
-            (user_id, group_id, messages_count, error, raw_response, conversation_digest, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                failure.user_id,
-                failure.group_id,
-                failure.messages_count,
-                failure.error,
-                failure.raw_response,
-                failure.conversation_digest,
-                failure.created_at.isoformat() if failure.created_at else self._wall_now().isoformat(),
-            )
-        )
-        await self.db.commit()
-
-    async def get_recent_scoring_failures(
-        self,
-        user_id: str,
-        group_id: Optional[str] = None,
-        limit: int = 10,
-    ) -> List[ScoringFailure]:
-        """获取最近评分失败记录"""
-        limit = max(1, limit)
-        async with self.db.execute(
-            """
-            SELECT id, user_id, group_id, messages_count, error, raw_response, conversation_digest, created_at
-            FROM persona_scoring_failures
-            WHERE user_id = ? AND (? IS NULL OR group_id = ?)
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (user_id, group_id, group_id, limit),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                ScoringFailure(
-                    id=row["id"],
-                    user_id=row["user_id"],
-                    group_id=row["group_id"],
-                    messages_count=row["messages_count"] or 0,
-                    error=row["error"] or "",
-                    raw_response=row["raw_response"] or "",
-                    conversation_digest=row["conversation_digest"] or "",
-                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
-                )
-                for row in rows
-            ]
-
-    async def prune_scoring_failures(self, max_age_days: int) -> int:
-        """清理超过 max_age_days 的评分失败记录"""
-        cutoff = (self._wall_now() - timedelta(days=max_age_days)).isoformat()
-        cursor = await self.db.execute(
-            "DELETE FROM persona_scoring_failures WHERE datetime(created_at) < datetime(?)",
-            (cutoff,),
-        )
-        await self.db.commit()
-        return cursor.rowcount
 
     # ========== 日记相关 ==========
 
@@ -1729,281 +1579,6 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
-    async def get_user_profile(self, user_id: str) -> Optional[UserProfile]:
-        async with self.db.execute(
-            "SELECT facts, updated_at FROM persona_user_profiles WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                return None
-            return UserProfile(
-                user_id=user_id,
-                facts=json.loads(row["facts"]) if row.get("facts") else {},
-                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
-            )
-
-    async def save_user_profile(self, profile: UserProfile) -> None:
-        await self.db.execute(
-            """
-            INSERT INTO persona_user_profiles (user_id, facts, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                facts = excluded.facts,
-                updated_at = excluded.updated_at
-            """,
-            (profile.user_id, json.dumps(profile.facts), self._wall_now().isoformat())
-        )
-        await self.db.commit()
-
-    async def get_relationship(self, user_id: str) -> Optional[RelationshipState]:
-        async with self.db.execute(
-            """
-            SELECT COALESCE(familiarity, 0.0) AS familiarity,
-                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
-                   COALESCE(intimacy, 0.0) AS intimacy,
-                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
-                   COALESCE(reputation, 100.0) AS reputation,
-                   last_interaction_at, last_reputation_recovery_date,
-                   last_relationship_decay_applied_at,
-                   last_miss_sent_at, updated_at
-            FROM persona_user_relationships
-            WHERE user_id = ?
-            """,
-            (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                return None
-            return RelationshipState(
-                user_id=user_id,
-                familiarity=row["familiarity"],
-                peak_familiarity=row["peak_familiarity"],
-                intimacy=row["intimacy"],
-                peak_intimacy=row["peak_intimacy"],
-                reputation=row["reputation"],
-                last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
-                last_reputation_recovery_date=(
-                    datetime.fromisoformat(row["last_reputation_recovery_date"])
-                    if row.get("last_reputation_recovery_date")
-                    else None
-                ),
-                last_relationship_decay_applied_at=(
-                    datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
-                ),
-                last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
-            )
-
-    async def init_relationship(self, user_id: str) -> RelationshipState:
-        await self.db.execute(
-            """
-            INSERT OR IGNORE INTO persona_user_relationships
-            (user_id, familiarity, peak_familiarity, intimacy, peak_intimacy, reputation,
-             last_interaction_at, last_reputation_recovery_date,
-             last_relationship_decay_applied_at,
-             last_miss_sent_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                0.0,   # familiarity
-                0.0,   # peak_familiarity
-                0.0,   # intimacy
-                0.0,   # peak_intimacy
-                100.0, # reputation
-                self._wall_now().isoformat(),
-                None,
-                None,
-                None,
-                self._wall_now().isoformat(),
-            )
-        )
-        await self.db.commit()
-        rel = await self.get_relationship(user_id)
-        if rel is None:
-            return RelationshipState(user_id=user_id)
-        return rel
-
-    async def update_relationship(self, rel: RelationshipState) -> None:
-        decay_at = (
-            rel.last_relationship_decay_applied_at.isoformat()
-            if rel.last_relationship_decay_applied_at
-            else None
-        )
-        miss_at = (
-            rel.last_miss_sent_at.isoformat()
-            if rel.last_miss_sent_at
-            else None
-        )
-        recovery_at = (
-            rel.last_reputation_recovery_date.isoformat()
-            if rel.last_reputation_recovery_date
-            else None
-        )
-        await self.db.execute(
-            """
-            INSERT INTO persona_user_relationships
-            (user_id, familiarity, peak_familiarity, intimacy, peak_intimacy, reputation,
-             last_interaction_at, last_reputation_recovery_date,
-             last_relationship_decay_applied_at,
-             last_miss_sent_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                familiarity = excluded.familiarity,
-                peak_familiarity = excluded.peak_familiarity,
-                intimacy = excluded.intimacy,
-                peak_intimacy = excluded.peak_intimacy,
-                reputation = excluded.reputation,
-                last_interaction_at = excluded.last_interaction_at,
-                last_reputation_recovery_date = excluded.last_reputation_recovery_date,
-                last_relationship_decay_applied_at = excluded.last_relationship_decay_applied_at,
-                last_miss_sent_at = excluded.last_miss_sent_at,
-                updated_at = excluded.updated_at
-            """,
-            (
-                rel.user_id,
-                rel.familiarity,
-                rel.peak_familiarity,
-                rel.intimacy,
-                rel.peak_intimacy,
-                rel.reputation,
-                rel.last_interaction_at.isoformat()
-                if rel.last_interaction_at
-                else self._wall_now().isoformat(),
-                recovery_at,
-                decay_at,
-                miss_at,
-                self._wall_now().isoformat(),
-            )
-        )
-        await self.db.commit()
-
-    async def try_daily_reputation_recovery(
-        self, rel: RelationshipState, now: datetime,
-        *, persist: bool = True,
-    ) -> bool:
-        """执行 reputation 每日恢复。返回是否发生了恢复。
-
-        persist=True（默认）时立即持久化。
-        等恢复后方法即返回的场景。
-        persist=False 时仅修改内存，由调用方在后续统一 update_relationship 时持久化，
-        适用于 on_interaction 等已有后续持久化的路径。
-        """
-        if rel.reputation >= 100.0:
-            return False
-        today = now.strftime("%Y-%m-%d")
-        last_recovery = rel.last_reputation_recovery_date
-        last_date = (
-            last_recovery.strftime("%Y-%m-%d") if last_recovery else None
-        )
-        if last_date == today:
-            return False
-        rel.reputation = min(100.0, rel.reputation + 2.0)
-        rel.last_reputation_recovery_date = now
-        if persist:
-            await self.update_relationship(rel)
-        return True
-
-    async def get_familiarity_daily(self, user_id: str, date: str) -> float:
-        """获取用户指定日期的 familiarity 累计值。"""
-        async with self.db.execute(
-            "SELECT total FROM persona_familiarity_daily WHERE user_id = ? AND date = ?",
-            (user_id, date),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row["total"] if row and row.get("total") is not None else 0.0
-
-    async def add_familiarity_daily(
-        self, user_id: str, date: str, delta: float, cap: float = 15.0
-    ) -> float:
-        """原子递增 familiarity 日累计，返回递增后的 total（不超过 cap）。
-        若增量会超过 cap，则截断到 cap。
-        """
-        await self.db.execute(
-            """
-            INSERT INTO persona_familiarity_daily (user_id, date, total)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, date) DO UPDATE SET
-                total = MIN(?, total + excluded.total)
-            """,
-            (user_id, date, delta, cap),
-        )
-        await self.db.commit()
-        return await self.get_familiarity_daily(user_id, date)
-
-    async def get_top_relationships(self, limit: int = 10) -> List[RelationshipState]:
-        async with self.db.execute(
-            """
-            SELECT user_id,
-                   COALESCE(familiarity, 0.0) AS familiarity,
-                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
-                   COALESCE(intimacy, 0.0) AS intimacy,
-                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
-                   COALESCE(reputation, 100.0) AS reputation,
-                   last_interaction_at, last_reputation_recovery_date,
-                   last_relationship_decay_applied_at,
-                   last_miss_sent_at, updated_at
-            FROM persona_user_relationships
-            ORDER BY (familiarity * 0.6 + intimacy * 0.4) DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                RelationshipState(
-                    user_id=row["user_id"],
-                    familiarity=row["familiarity"],
-                    peak_familiarity=row["peak_familiarity"],
-                    intimacy=row["intimacy"],
-                    peak_intimacy=row["peak_intimacy"],
-                    reputation=row["reputation"],
-                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
-                    last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
-                    ),
-                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
-                )
-                for row in rows
-            ]
-
-    async def list_all_relationships_raw(self) -> List[RelationshipState]:
-        """列出所有关系行，无过滤（用于每日衰减批处理等）。"""
-        async with self.db.execute(
-            """
-            SELECT user_id,
-                   COALESCE(familiarity, 0.0) AS familiarity,
-                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
-                   COALESCE(intimacy, 0.0) AS intimacy,
-                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
-                   COALESCE(reputation, 100.0) AS reputation,
-                   last_interaction_at, last_relationship_decay_applied_at,
-                   last_miss_sent_at, updated_at
-            FROM persona_user_relationships
-            ORDER BY user_id
-            """
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                RelationshipState(
-                    user_id=row["user_id"],
-                    familiarity=row["familiarity"],
-                    peak_familiarity=row["peak_familiarity"],
-                    intimacy=row["intimacy"],
-                    peak_intimacy=row["peak_intimacy"],
-                    reputation=row["reputation"],
-                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
-                    last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
-                    ),
-                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
-                )
-                for row in rows
-            ]
-
     async def prune_diaries(self, keep_days: int) -> int:
         """清理旧日记，只保留最近 N 天的日记
 
@@ -2022,30 +1597,17 @@ class PersonaDataStore:
         await self.db.commit()
         return cursor.rowcount
 
-    async def prune_score_history(self, max_age_days: int) -> int:
-        cutoff = (self._wall_now() - timedelta(days=max_age_days)).isoformat()
-        cursor = await self.db.execute(
-            "DELETE FROM persona_score_history WHERE datetime(created_at) < datetime(?)",
-            (cutoff,),
-        )
-        await self.db.commit()
-        return cursor.rowcount
-
     async def run_cleanup(
         self,
         llm_traces_max_age_days: int,
-        score_history_max_age_days: int,
         daily_events_keep_days: int,
         diary_keep_days: int,
-        scoring_failures_max_age_days: int,
     ) -> dict:
         """统一清理入口，返回各表删除行数。"""
         results = {}
         results["llm_traces"] = await self.prune_llm_traces(llm_traces_max_age_days)
-        results["score_history"] = await self.prune_score_history(score_history_max_age_days)
         results["daily_events"] = await self.prune_daily_events(daily_events_keep_days)
         results["diary"] = await self.prune_diaries(diary_keep_days)
-        results["scoring_failures"] = await self.prune_scoring_failures(scoring_failures_max_age_days)
         total = sum(v for v in results.values() if isinstance(v, int))
         if total:
             logger.info(f"Persona 数据清理完成: 共清理 {total} 条记录, 明细={results}")

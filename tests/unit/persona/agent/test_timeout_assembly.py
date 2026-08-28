@@ -104,6 +104,8 @@ async def test_chat_runtime_uses_the_client():
         client=client,
         character=character,
         config=ChatConfig.from_persona(PersonaConfig()),
+        action_evaluator=MagicMock(),
+        character_life=MagicMock(),
     )
 
     await _run_minimal(chat._make_runtime(), tag="chat")
@@ -129,7 +131,6 @@ async def test_factory_life_registry_uses_background_task_profile():
         store=store,
         character=character,
         config=config,
-        decay_calculator=MagicMock(),
         character_life=character_life,
         dm_agent=dm_agent,
         character_agent=character_agent,

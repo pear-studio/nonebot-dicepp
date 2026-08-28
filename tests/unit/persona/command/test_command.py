@@ -17,13 +17,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.data.models import (
-    RelationshipState,
-    UserProfile,
-    WhitelistEntry,
-    DiaryEntry,
-    DailyEvent,
-)
+from plugins.DicePP.module.persona.data.models import WhitelistEntry, DiaryEntry, DailyEvent
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 
 
@@ -89,7 +83,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
 
     async def test_tool_commands_exempt_whitelist(self):
         cmd = self.make_cmd()
-        for sub in ["clear", "status", "profile"]:
+        for sub in ["clear", "status"]:
             meta = self.make_private_meta(f".ai {sub}")
             ok, _, _ = await cmd.can_process_msg(f".ai {sub}", meta)
             assert ok is True, f"failed for {sub}"
@@ -171,9 +165,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
         self.cmd.app.chat.character.extensions = MagicMock()
-        self.cmd.app.chat.character.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
-        self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.current_character_name = "test_char"
 
         # AdminDispatcher 在 make_cmd 中初始化时 app/data_store 为 None，
@@ -181,9 +173,6 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.admin_dispatcher.app = self.cmd.app
         self.cmd.admin_dispatcher.data_store = self.store
 
-        # _get_relationship_for_display 已移至 AdminDispatcher，两边都 mock
-        self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
-        self.cmd.admin_dispatcher._get_relationship_for_display = AsyncMock(return_value=None)
         self.cmd.app.update_character = AsyncMock()
 
         self.user_id = "master_user"
@@ -225,25 +214,9 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         assert "超时" in self.get_sent_content(self.cmd)
 
     async def test_admin_debug(self):
-        self.store.get_user_profile = AsyncMock(return_value=UserProfile(user_id=self.user_id))
         meta = self.make_private_meta(".ai admin debug", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin debug", meta, "admin")
         assert "调试信息" in self.get_sent_content(self.cmd)
-
-    async def test_admin_rel(self):
-        rel = RelationshipState(user_id="u1", intimacy=30, passion=30, trust=30, secureness=30)
-        self.cmd.admin_dispatcher._get_relationship_for_display = AsyncMock(return_value=rel)
-        self.store.get_user_profile = AsyncMock(return_value=None)
-        meta = self.make_private_meta(".ai admin rel u1", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin rel u1", meta, "admin")
-        assert "关系详情" in self.get_sent_content(self.cmd)
-
-    async def test_admin_setrel(self):
-        self.store.get_relationship = AsyncMock(return_value=None)
-        self.store.init_relationship = AsyncMock(return_value=RelationshipState(user_id="u1"))
-        meta = self.make_private_meta(".ai admin setrel u1 50", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin setrel u1 50", meta, "admin")
-        assert "已设置用户 u1 的好感度为 50.00" in self.get_sent_content(self.cmd)
 
     async def test_admin_reload(self):
         fake_char = MagicMock()
@@ -323,11 +296,7 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character = MagicMock()
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
-        self.cmd.app.chat.character.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
-        self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
-
-        self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
         self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
     async def test_clear_removed(self):
@@ -340,17 +309,6 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         meta = self.make_private_meta(".ai status")
         await self.cmd.process_msg(".ai status", meta, None)
         assert "已启用" in self.get_sent_content(self.cmd)
-
-    async def test_profile(self):
-        rel = RelationshipState(user_id="user", intimacy=30, passion=30, trust=30, secureness=30)
-        self.store.get_relationship = AsyncMock(return_value=rel)
-        self.store.get_user_profile = AsyncMock(return_value=UserProfile(user_id="user", facts={"name": "Xiao"}))
-        self.store.get_recent_score_events = AsyncMock(return_value=[])
-        self.store.get_recent_messages = AsyncMock(return_value=[])
-        self.cmd.app.get_decay_calculator = MagicMock(return_value=None)
-        meta = self.make_private_meta(".ai profile")
-        await self.cmd.process_msg(".ai profile", meta, None)
-        assert "你的档案" in self.get_sent_content(self.cmd)
 
     async def test_join(self):
         self.store.get_global_setting = AsyncMock(return_value="secret")

@@ -314,10 +314,7 @@ class TestChangeSourceFactory:
             seen_scopes.append(scope)
             if scope.is_group:
                 return [FakeSource("date"), FakeSource("daily_event")]
-            return [
-                FakeSource("date"), FakeSource("daily_event"),
-                FakeSource("relation"), FakeSource("profile"),
-            ]
+            return [FakeSource("date"), FakeSource("daily_event")]
 
         reg = _make_registry(temp_db, change_source_factory=factory)
         group_conv = await reg.get_or_create(ConversationScope.for_group("g1"))
@@ -326,10 +323,9 @@ class TestChangeSourceFactory:
         # 工厂按 scope 被调用
         assert ConversationScope.for_group("g1") in seen_scopes
         assert ConversationScope.for_private("u1") in seen_scopes
-        # 群 scope 只注册 2 个（D8 退化：无 per-user Relation/ProfileFacts）
+        # 两种 scope 都注册当前的角色级来源
         assert len(group_conv._change_sources) == 2
-        # 私聊 scope 注册全部 4 个
-        assert len(private_conv._change_sources) == 4
+        assert len(private_conv._change_sources) == 2
 
 
 # ── 阶段 3b：静默轮换与摘要继承 ──────────────────────────

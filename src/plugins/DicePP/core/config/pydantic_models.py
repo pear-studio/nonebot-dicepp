@@ -126,12 +126,6 @@ class PersonaConfig(BaseModel):
 
     # ── 生活模拟 ─────────────────────────────────────────────────────────────
 
-    relationship_enabled: bool = Field(
-        default=False, title="关系系统",
-        description="启用关系评分、衰减、信誉门控和相关上下文信息",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
     # Phase 2: 角色生活模拟
     character_life_enabled: bool = Field(
         default=True, title="角色生活模拟",
@@ -202,11 +196,6 @@ class PersonaConfig(BaseModel):
     )
 
     # chat → life 行动建议
-    suggest_action_min_relationship: int = Field(
-        default=40, ge=0, le=100, title="建议最低关系分数",
-        description="suggest_action 工具的最低关系分数阈值，低于此值的用户调用不会被评估",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
     suggest_action_evaluation_timeout: int = Field(
         default=30, ge=5, le=120, title="建议评估超时",
         description="suggest_action 评估 LLM 的超时时间（秒）",
@@ -239,14 +228,6 @@ class PersonaConfig(BaseModel):
     )
 
     # 数据清理 TTL
-    score_history_max_age_days: int = Field(
-        default=90, title="评分历史保留天数",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    scoring_failures_max_age_days: int = Field(
-        default=30, title="评分失败保留天数",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
     daily_events_keep_days: int = Field(
         default=30, title="每日事件保留天数",
         json_schema_extra={"dashboard_section": "group_limits"},

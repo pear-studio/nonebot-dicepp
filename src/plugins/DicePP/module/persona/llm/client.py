@@ -121,7 +121,7 @@ class DeepSeekTextModelClient:
     def _profile_for(cls, task: str) -> _RequestProfile:
         """按内部任务类型选择请求参数；用户不需要理解这些参数。"""
         return cls._BACKGROUND_PROFILE if task in {
-            "background", "scoring", "event", "diary", "summary",
+            "background", "event", "diary", "summary", "action_evaluation",
         } else cls._CHAT_PROFILE
 
 

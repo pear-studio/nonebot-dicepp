@@ -1,6 +1,6 @@
 r"""LLM 响应 JSON 解析的统一容错实现
 
-设计目的：消除 chat/scoring.py 与 life/observation.py 中重复的 3 级
+设计目的：消除 life/observation.py 中重复的 3 级
 容错代码，统一使用此模块以降低维护成本。
 
 3 级容错策略

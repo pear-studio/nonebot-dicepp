@@ -1,9 +1,6 @@
 """Life 域收集型工具 — 无副作用，仅收集 LLM 结构化输出"""
 from __future__ import annotations
 
-from typing import Any, Dict
-
-from plugins.DicePP.utils.logger import logger
 from pydantic import BaseModel, Field
 
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
@@ -41,24 +38,6 @@ class SayArgs(BaseModel):
 class RecordDiaryEntryArgs(BaseModel):
     """记录日记内容"""
     diary: str = Field(..., min_length=100, max_length=200, description="日记内容，100-200字，第一人称")
-
-
-class RecordShareMessageArgs(BaseModel):
-    """待提交的角色分享消息。"""
-    message: str = Field(
-        ..., min_length=20, max_length=60,
-        description="20-60字的第一人称口语消息，禁止出现角色名和第三人称描写",
-    )
-
-
-class RecordScoreArgs(BaseModel):
-    """记录评分结果：亲密度变化、信誉标记和玩家事实提取。"""
-    intimacy: float = Field(default=0.0, ge=-5.0, le=5.0, description="亲密度变化，范围 -5.0 到 +5.0")
-    reputation_delta: float = Field(default=0.0, ge=-30.0, le=0.0, description="信誉扣分标记，范围 -30 到 0")
-    warning_issued: bool = Field(default=False, description="本次是否对玩家发出了警告（扣分前的前置信号）")
-    facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的玩家事实，key-value 形式")
-
-
 
 
 # ── Handler ────────────────────────────────────────────

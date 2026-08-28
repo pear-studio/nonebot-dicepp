@@ -27,25 +27,14 @@ class TestCharacter:
 
     def test_with_extensions(self):
         """测试带扩展的角色"""
-        ext = PersonaExtensions(
-            relation_labels=["陌生", "熟悉", "朋友", "好友", "挚友", "知己"]
-        )
+        ext = PersonaExtensions(world="现代都市")
         char = Character(
             name="苏晓",
             description="一个温柔的AI伴侣",
             extensions=ext
         )
 
-        assert char.get_relation_labels()[0] == "陌生"
-
-    def test_get_relation_labels_default(self):
-        """测试默认温暖度标签（5元素）"""
-        char = Character(name="测试")
-        labels = char.get_relation_labels()
-
-        assert len(labels) == 5
-        assert labels[0] == "冷淡"
-        assert labels[4] == "亲密"
+        assert char.extensions.world == "现代都市"
 
     def test_format_mes_example(self):
         """测试示例对话格式化"""
@@ -273,13 +262,7 @@ mes_example: |
   {{char}}: 你好呀~
 extensions:
   persona:
-    relation_labels:
-      - 陌生
-      - 熟悉
-      - 朋友
-      - 好友
-      - 挚友
-      - 知己
+    {}
 """
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -328,17 +311,11 @@ extensions:
             assert chars == ["alice", "bob"]
 
     def test_load_all_extensions_fields(self):
-        """测试 PersonaExtensions 全部 14 个字段均从 YAML 正确加载"""
+        """测试 PersonaExtensions 生活模拟与图片字段从 YAML 正确加载"""
         yaml_content = """
 name: 全字段角色
 extensions:
   persona:
-    relation_labels:
-      - 冷淡
-      - 普通
-      - 友好
-      - 亲密
-      - 挚友
     world: 现代都市
     daily_events_count: 8
     event_day_start_hour: 7
@@ -346,9 +323,6 @@ extensions:
     event_jitter_minutes: 45
     event_day_start_jitter_minutes: 15
     event_day_end_jitter_minutes: 20
-    refuse_messages:
-      - 我不想理你
-      - 走开
     sleep_messages:
       - zzz
     image_gen_style: 水彩画风
@@ -367,7 +341,6 @@ extensions:
 
             assert char.name == "全字段角色"
             ext = char.extensions
-            assert ext.relation_labels == ["冷淡", "普通", "友好", "亲密", "挚友"]
             assert ext.world == "现代都市"
             assert ext.daily_events_count == 8
             assert ext.event_day_start_hour == 7
@@ -375,7 +348,6 @@ extensions:
             assert ext.event_jitter_minutes == 45
             assert ext.event_day_start_jitter_minutes == 15
             assert ext.event_day_end_jitter_minutes == 20
-            assert ext.refuse_messages == ["我不想理你", "走开"]
             assert ext.sleep_messages == ["zzz"]
             assert ext.image_gen_style == "水彩画风"
             assert ext.image_gen_appearance == "黑发、高挑、戴眼镜"

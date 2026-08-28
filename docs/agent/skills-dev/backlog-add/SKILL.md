@@ -98,18 +98,17 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 
 ```
 Module: persona
-Title: 评分失败持久化记录
+Title: Persona 生活事件记录
 Priority: P1
 Type: bug
 Effort: M
 Symptom:
-  - persona_score_history 4月19日后停止写入
-  - 评分失败仅 logger.warning，无任何持久化记录
-  - scoring_interval * 2 = 10，多用户场景刚好卡边缘
+  - 生活事件完成后未稳定写入 daily events
+  - 日终摘要缺少当天已完成事件
 Plan:
-  - 新增 persona_scoring_failures 表
-  - 评估时间窗口触发 / 下调 scoring_interval
-  - 影响面: chat/session.py、data/store.py
+  - 补齐生活事件与日终摘要的持久化检查
+  - 复核事件写入与摘要读取的边界
+  - 影响面: persona/life、data/store.py
 <<<END>>>
 Module: persona
 Title: ...

@@ -50,24 +50,7 @@ class CharacterLoader:
         extensions_data = data.get("extensions", {})
         persona_data = extensions_data.get("persona", {})
 
-        # 兼容旧字段：warmth_labels -> relation_labels
-        relation_labels = persona_data.get("relation_labels", [])
-        warmth_labels = persona_data.get("warmth_labels", [])
-        if warmth_labels and not relation_labels:
-            logger.warning(
-                "角色卡 [{}] 使用已废弃的 warmth_labels 键名，请更新为 relation_labels",
-                character_name or data.get("name", "未知"),
-            )
-            relation_labels = warmth_labels
-        # initial_relationship 已废弃，忽略
-        if "initial_relationship" in persona_data:
-            logger.warning(
-                "角色卡 [{}] 使用已废弃的 initial_relationship 字段，已忽略",
-                character_name or data.get("name", "未知"),
-            )
-
         extensions = PersonaExtensions(
-            relation_labels=relation_labels,
             world=persona_data.get("world", ""),
             daily_events_count=persona_data.get("daily_events_count", 5),
             event_day_start_hour=persona_data.get("event_day_start_hour", 8),
@@ -75,7 +58,6 @@ class CharacterLoader:
             event_jitter_minutes=persona_data.get("event_jitter_minutes", 60),
             event_day_start_jitter_minutes=persona_data.get("event_day_start_jitter_minutes", 30),
             event_day_end_jitter_minutes=persona_data.get("event_day_end_jitter_minutes", 30),
-            refuse_messages=persona_data.get("refuse_messages"),
             sleep_messages=persona_data.get("sleep_messages"),
             image_gen_style=persona_data.get("image_gen_style", ""),
             image_gen_appearance=persona_data.get("image_gen_appearance", ""),

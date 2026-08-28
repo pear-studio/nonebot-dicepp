@@ -48,7 +48,7 @@ def compute_jrrp(user_id: str, date: datetime.datetime) -> JrrpResult:
     jrrp: int = jrrp_rng.randint(1, 100)
 
     # 注意：使用独立的 Random 实例而非全局 random.seed()，
-    # 避免影响模块级 random 的其他调用方（如 sleep_messages、refuse_messages 的 random.choice）。
+    # 避免影响模块级 random 的其他调用方。
 
     # 计算 delta 和 delta_percent
     # zrrp 由 randint(1, 100) 保证 ≥ 1，无需零值保护

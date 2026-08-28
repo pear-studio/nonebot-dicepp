@@ -11,9 +11,7 @@ from dataclasses import dataclass
 import random
 from plugins.DicePP.utils.logger import logger
 from ..data.store import PersonaDataStore
-from ..data.models import RelationshipState, ScoreEvent
 from ..character.models import Character
-from ..game.decay import DecayCalculator
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
 from .types import DailyTickResult
@@ -31,8 +29,6 @@ class LifeConfig:
 
     trace_enabled: bool = False
     trace_max_age_days: int = 7
-    score_history_max_age_days: int = 90
-    scoring_failures_max_age_days: int = 30
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30
     timezone: str = "Asia/Shanghai"
@@ -42,8 +38,6 @@ class LifeConfig:
         return cls(
             trace_enabled=persona.trace_enabled,
             trace_max_age_days=persona.trace_max_age_days,
-            score_history_max_age_days=persona.score_history_max_age_days,
-            scoring_failures_max_age_days=persona.scoring_failures_max_age_days,
             daily_events_keep_days=persona.daily_events_keep_days,
             diary_keep_days=persona.diary_keep_days,
             timezone=persona.timezone,
@@ -63,7 +57,6 @@ class LifeSimulator:
         dm_agent: Optional["DMAgent"] = None,
         character_agent: Optional["CharacterAgent"] = None,
         sa_agent: Optional["SAAgent"] = None,
-        decay_calculator: Optional[DecayCalculator] = None,
     ):
         self.store = store
         self.character_life = character_life
@@ -73,7 +66,6 @@ class LifeSimulator:
         self.dm_agent = dm_agent
         self.character_agent = character_agent
         self.sa_agent = sa_agent
-        self.decay_calculator = decay_calculator
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用到所有子组件"""
@@ -107,14 +99,13 @@ class LifeSimulator:
                 logger.exception("tick: 角色生活事件生成失败")
 
     async def tick_daily(self) -> DailyTickResult:
-        """每日调用 — 清理 trace、关系衰减、生成日记、Conversation compact。
+        """每日调用 — 清理 trace、生成日记、Conversation compact。
 
         R9: DM/Character 的 compact_conversation 放在 finally 块，确保即使 cleanup、
-        衰减或日记生成异常，日界 close 也会执行，避免 Conversation 跨虚构日泄漏。
+        日记生成异常，日界 close 也会执行，避免 Conversation 跨虚构日泄漏。
         """
         try:
             await self._run_cleanup()
-            await self.apply_relationship_decay_batch()
             result = await self.diary_generator.generate_diary()
 
             if result.diary:
@@ -171,48 +162,6 @@ class LifeSimulator:
         else:
             logger.warning(f"SA 叙事规划失败: {result.error}")
 
-    async def apply_relationship_decay_batch(self) -> int:
-        """每日批处理"""
-        if not self.decay_calculator or not self.character:
-            return 0
-        n = 0
-        from plugins.DicePP.utils.time import get_clock
-        now = get_clock().now()
-        try:
-            for rel in await self.store.list_all_relationships_raw():
-                if not self.decay_calculator.should_apply_decay(rel, now):
-                    continue
-                deltas, familiarity_delta, reason = self.decay_calculator.calculate_decay(rel, now=now)
-                rel.last_relationship_decay_applied_at = now
-                has_intimacy_decay = abs(deltas.intimacy) > 0.01
-                has_fam_decay = abs(familiarity_delta) > 0.01
-                if not has_intimacy_decay and not has_fam_decay:
-                    continue
-                composite_before = rel.composite_score
-                if has_intimacy_decay:
-                    rel.apply_deltas(deltas, updated_at=now)
-                if has_fam_decay:
-                    rel.apply_familiarity_delta(familiarity_delta, updated_at=now)
-                await self.store.update_relationship(rel)
-                await self.store.add_score_event(
-                    ScoreEvent(
-                        user_id=rel.user_id,
-                        group_id="",
-                        deltas=deltas,
-                        familiarity_delta=familiarity_delta,
-                        composite_before=composite_before,
-                        composite_after=rel.composite_score,
-                        reason=f"time_decay_batch: {reason}",
-                        conversation_digest="",
-                    )
-                )
-                n += 1
-            if n:
-                logger.info(f"每日衰减批处理: 更新 {n} 条关系")
-        except Exception as e:
-            logger.warning(f"每日衰减批处理失败: {e}", exc_info=True)
-        return n
-
     async def generate_daily_event(self) -> List[Dict[str, Any]]:
         """手动触发生活事件生成（用于调试）"""
         if not self.character_life:
@@ -227,8 +176,6 @@ class LifeSimulator:
         try:
             await self.store.run_cleanup(
                 llm_traces_max_age_days=self.config.trace_max_age_days,
-                score_history_max_age_days=self.config.score_history_max_age_days,
-                scoring_failures_max_age_days=self.config.scoring_failures_max_age_days,
                 daily_events_keep_days=self.config.daily_events_keep_days,
                 diary_keep_days=self.config.diary_keep_days,
             )

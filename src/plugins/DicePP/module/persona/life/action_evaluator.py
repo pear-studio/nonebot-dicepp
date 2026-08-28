@@ -158,7 +158,7 @@ class ActionEvaluator:
                     description="提交行动可行性评估结果。",
                     args_schema=RecordEvaluationArgs,
                 ),
-                task="scoring",
+                task="action_evaluation",
                 limits=LoopLimits(max_rounds=1),
                 metadata=RunMetadata(agent_name="ActionEvaluator", run_tag="evaluation"),
             ))

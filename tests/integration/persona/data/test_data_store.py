@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from plugins.DicePP.utils.time import wall_now
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState, LLMTraceRecord, ScoreEvent, ScoreDeltas
+from plugins.DicePP.module.persona.data.models import LLMTraceRecord
 
 class TestMessageCRUD:
     """测试统一消息表 CRUD"""
@@ -193,18 +193,6 @@ class TestMessageCRUD:
         results = await store.search_messages('g1', type=MessageType.COMMAND, limit=10)
         assert len(results) == 1
         assert results[0].content == '.r 1d20'
-
-    @pytest.mark.asyncio
-    async def test_count_messages(self, temp_db):
-        store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
-        assert await store.count_messages('u1', '') == 0
-        assert await store.count_messages('u1', 'g1') == 0
-        await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'private')
-        await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'group1')
-        await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'group2')
-        assert await store.count_messages('u1', '') == 1
-        assert await store.count_messages('u1', 'g1') == 2
 
     @pytest.mark.asyncio
     async def test_get_recent_messages_excludes_system_log(self, temp_db):
@@ -784,69 +772,6 @@ class TestLLMTraceCRUD:
         assert len(errors) == 1
         assert errors[0] == ('failed', 2)
 
-class TestRelationshipCRUD:
-    """测试关系状态 CRUD"""
-
-    @pytest.mark.asyncio
-    async def test_init_and_get_relationship(self, temp_db):
-        store = temp_db
-        rel = await store.init_relationship('u1')
-        assert rel.user_id == 'u1'
-        assert rel.intimacy == 0.0
-        assert rel.familiarity == 0.0
-
-    @pytest.mark.asyncio
-    async def test_update_relationship(self, temp_db):
-        store = temp_db
-        rel = await store.init_relationship('u1')
-        rel.intimacy = 50.0
-        rel.familiarity = 45.0
-        await store.update_relationship(rel)
-        rel2 = await store.get_relationship('u1')
-        assert rel2.intimacy == 50.0
-        assert rel2.familiarity == 45.0
-
-    @pytest.mark.asyncio
-    async def test_list_all_relationships_raw(self, temp_db):
-        store = temp_db
-        await store.init_relationship('u1')
-        await store.init_relationship('u2')
-        rels = await store.list_all_relationships_raw()
-        assert len(rels) == 2
-        user_ids = {r.user_id for r in rels}
-        assert user_ids == {'u1', 'u2'}
-
-class TestScoreEventCRUD:
-    """测试评分事件 CRUD"""
-
-    @pytest.mark.asyncio
-    async def test_add_and_get_recent_score_events(self, temp_db):
-        store = temp_db
-        event = ScoreEvent(user_id='u1', group_id='g1', deltas=ScoreDeltas(intimacy=2.0, passion=1.0, trust=0.0, secureness=0.0), composite_before=30.0, composite_after=33.0, reason='test', conversation_digest='u: hello; a: hi')
-        await store.add_score_event(event)
-        events = await store.get_recent_score_events('u1', limit=5)
-        assert len(events) == 1
-        assert events[0].reason == 'test'
-        assert events[0].deltas.intimacy == 2.0
-        assert events[0].conversation_digest == 'u: hello; a: hi'
-
-class TestUserProfileCRUD:
-    """测试用户档案 CRUD"""
-
-    @pytest.mark.asyncio
-    async def test_save_and_get_user_profile(self, temp_db):
-        store = temp_db
-        profile = UserProfile(user_id='u1', facts={'name': 'Xiao Ming', 'pet': 'cat'})
-        await store.save_user_profile(profile)
-        fetched = await store.get_user_profile('u1')
-        assert fetched.facts['name'] == 'Xiao Ming'
-        assert fetched.facts['pet'] == 'cat'
-
-    @pytest.mark.asyncio
-    async def test_get_nonexistent_profile(self, temp_db):
-        store = temp_db
-        assert await store.get_user_profile('u_unknown') is None
-
 class TestSwitchPersonaDb:
     """switch_persona_db 测试"""
 
@@ -1047,30 +972,6 @@ class TestPersonaScopeFilter:
         assert msgs[0].type == MessageType.CHAT
 
     @pytest.mark.asyncio
-    async def test_ambient_included_in_earliest_message_time(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
-        t_early = '2026-01-01T10:00:00'
-        t_late = '2026-06-01T10:00:00'
-        await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'noise')
-        await temp_db.db.execute('UPDATE message_stream SET created_at = ?', (t_early,))
-        await temp_db.db.commit()
-        await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
-        await temp_db.db.execute("UPDATE message_stream SET created_at = ? WHERE type = 'chat'", (t_late,))
-        await temp_db.db.commit()
-        earliest = await temp_db.get_earliest_message_time('u1', '')
-        assert earliest is not None
-        assert earliest.strftime('%Y-%m-%d') == '2026-01-01'
-
-    @pytest.mark.asyncio
-    async def test_ambient_included_in_count_messages(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
-        await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'a')
-        await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'b')
-        await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
-        cnt = await temp_db.count_messages('u1', '')
-        assert cnt == 3
-
-    @pytest.mark.asyncio
     async def test_ambient_included_in_read_messages(self, temp_db):
         from plugins.DicePP.core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'noise')
@@ -1096,40 +997,6 @@ class TestPersonaScopeFilter:
         results = await temp_db.search_messages('', user_id='u1', type=MessageType.CHAT)
         assert len(results) == 1
         assert results[0].content == 'hello'
-
-class TestScoringFailureCRUD:
-    """ScoringFailure 创建、查询、裁剪契约"""
-
-    @pytest.mark.asyncio
-    async def test_record_and_get_scoring_failure(self, temp_db):
-        from plugins.DicePP.module.persona.data.models import ScoringFailure
-        store = temp_db
-        failure = ScoringFailure(user_id='u1', group_id='g1', messages_count=5, error='LLM returned invalid JSON', raw_response='{"bad": json}', conversation_digest='u: hello')
-        await store.record_scoring_failure(failure)
-        results = await store.get_recent_scoring_failures('u1', limit=5)
-        assert len(results) == 1
-        assert results[0].error == 'LLM returned invalid JSON'
-        assert results[0].raw_response == '{"bad": json}'
-        assert results[0].messages_count == 5
-
-    @pytest.mark.asyncio
-    async def test_get_scoring_failure_not_found(self, temp_db):
-        store = temp_db
-        results = await store.get_recent_scoring_failures('u_unknown', limit=5)
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_prune_scoring_failures(self, temp_db, monkeypatch):
-        from datetime import datetime
-        from plugins.DicePP.module.persona.data.models import ScoringFailure
-        store = temp_db
-        monkeypatch.setattr(store, '_wall_now', lambda: datetime(2026, 6, 10, 12, 0, 0))
-        failure = ScoringFailure(user_id='u1', error='old error', created_at=datetime(2026, 5, 1, 0, 0, 0))
-        await store.record_scoring_failure(failure)
-        deleted = await store.prune_scoring_failures(max_age_days=30)
-        assert deleted == 1
-        results = await store.get_recent_scoring_failures('u1', limit=5)
-        assert results == []
 
 class TestAgentRunCRUD:
     """AgentRun / AgentEvent CRUD"""
@@ -1200,29 +1067,8 @@ class TestTokenUsage:
         assert row['tokens_in'] == 30
         assert row['tokens_out'] == 15
 
-class TestTopRelationships:
-    """get_top_relationships"""
-
-    @pytest.mark.asyncio
-    async def test_top_relationships_empty(self, temp_db):
-        store = temp_db
-        top = await store.get_top_relationships(limit=5)
-        assert top == []
-
-    @pytest.mark.asyncio
-    async def test_top_relationships_returns_ordered(self, temp_db):
-        store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-        rels = [RelationshipState(user_id='u_a', familiarity=80, intimacy=80), RelationshipState(user_id='u_b', familiarity=60, intimacy=60), RelationshipState(user_id='u_c', familiarity=40, intimacy=40)]
-        for r in rels:
-            await store.update_relationship(r)
-        top = await store.get_top_relationships(limit=2)
-        assert len(top) == 2
-        assert top[0].user_id == 'u_a'
-        assert top[1].user_id == 'u_b'
-
 class TestPruneMethods:
-    """prune_daily_events / prune_score_history / prune_scoring_failures"""
+    """prune_daily_events"""
 
     @pytest.mark.asyncio
     async def test_prune_daily_events(self, temp_db, monkeypatch):
@@ -1237,22 +1083,6 @@ class TestPruneMethods:
         assert len(remaining) == 0
         remaining2 = await store.get_daily_events('2026-06-09')
         assert len(remaining2) == 1
-
-    @pytest.mark.asyncio
-    async def test_prune_score_history(self, temp_db, monkeypatch):
-        from datetime import datetime
-        from plugins.DicePP.module.persona.data.models import ScoreEvent, ScoreDeltas
-        store = temp_db
-        monkeypatch.setattr(store, '_wall_now', lambda: datetime(2026, 6, 10, 12, 0, 0))
-        old = ScoreEvent(user_id='u1', deltas=ScoreDeltas(intimacy=1.0), composite_before=0, composite_after=1, reason='old', created_at=datetime(2026, 1, 1))
-        recent = ScoreEvent(user_id='u1', deltas=ScoreDeltas(intimacy=1.0), composite_before=1, composite_after=2, reason='recent', created_at=datetime(2026, 6, 9))
-        await store.add_score_event(old)
-        await store.add_score_event(recent)
-        deleted = await store.prune_score_history(max_age_days=30)
-        assert deleted == 1
-        events = await store.get_recent_score_events('u1', limit=5)
-        assert len(events) == 1
-        assert events[0].reason == 'recent'
 
 class TestSessionCRUD:
     """测试 PersonaSession 的完整 CRUD 操作"""
@@ -1435,102 +1265,6 @@ class TestSessionCRUD:
         session = await store.create_session(user_id='u1', character_id='char1', static_prompt='test', static_hash='h1', token_budget=64000, status='active', last_active_at=datetime(2026, 6, 1, 12, 0, 0))
         msgs = await store.get_session_messages(session.session_id)
         assert msgs == []
-
-class TestFamiliarityDaily:
-    """测试 add_familiarity_daily / get_familiarity_daily"""
-
-    @pytest.mark.asyncio
-    async def test_add_familiarity_daily_basic(self, temp_db):
-        """基本累计和读取"""
-        store = temp_db
-        total = await store.add_familiarity_daily('u1', '2026-06-01', 2.0)
-        assert total == 2.0
-        total2 = await store.add_familiarity_daily('u1', '2026-06-01', 3.0)
-        assert total2 == 5.0
-        result = await store.get_familiarity_daily('u1', '2026-06-01')
-        assert result == 5.0
-
-    @pytest.mark.asyncio
-    async def test_add_familiarity_daily_cap(self, temp_db):
-        """累计不超过 cap (默认15.0)"""
-        store = temp_db
-        await store.add_familiarity_daily('u1', '2026-06-01', 10.0, cap=15.0)
-        total = await store.add_familiarity_daily('u1', '2026-06-01', 10.0, cap=15.0)
-        assert total == 15.0
-
-    @pytest.mark.asyncio
-    async def test_get_familiarity_daily_nonexistent(self, temp_db):
-        """不存在的用户返回 0.0"""
-        store = temp_db
-        result = await store.get_familiarity_daily('no_such_user', '2026-06-01')
-        assert result == 0.0
-
-    @pytest.mark.asyncio
-    async def test_add_familiarity_daily_different_dates(self, temp_db):
-        """不同日期的累计相互独立"""
-        store = temp_db
-        await store.add_familiarity_daily('u1', '2026-06-01', 5.0)
-        await store.add_familiarity_daily('u1', '2026-06-02', 3.0)
-        assert await store.get_familiarity_daily('u1', '2026-06-01') == 5.0
-        assert await store.get_familiarity_daily('u1', '2026-06-02') == 3.0
-
-class TestReputationRecovery:
-    """测试 try_daily_reputation_recovery"""
-
-    @pytest.mark.asyncio
-    async def test_reputation_recovery_basic(self, temp_db):
-        """reputation 每日恢复 +2"""
-        store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-        rel = RelationshipState(user_id='u1', familiarity=10.0, intimacy=5.0, reputation=80.0)
-        await store.update_relationship(rel)
-        now = datetime(2026, 6, 2, 12, 0, 0)
-        recovered = await store.try_daily_reputation_recovery(rel, now)
-        assert recovered is True
-        assert rel.reputation == 82.0
-        db_rel = await store.get_relationship('u1')
-        assert db_rel is not None
-        assert db_rel.reputation == 82.0
-
-    @pytest.mark.asyncio
-    async def test_reputation_recovery_already_full(self, temp_db):
-        """reputation 已达 100 不恢复"""
-        store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-        rel = RelationshipState(user_id='u1', reputation=100.0)
-        await store.update_relationship(rel)
-        now = datetime(2026, 6, 2, 12, 0, 0)
-        recovered = await store.try_daily_reputation_recovery(rel, now)
-        assert recovered is False
-        assert rel.reputation == 100.0
-
-    @pytest.mark.asyncio
-    async def test_reputation_recovery_same_day_skipped(self, temp_db):
-        """同一天已恢复过不再重复恢复"""
-        store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-        now = datetime(2026, 6, 2, 12, 0, 0)
-        rel = RelationshipState(user_id='u1', reputation=80.0)
-        rel.last_reputation_recovery_date = now
-        await store.update_relationship(rel)
-        recovered = await store.try_daily_reputation_recovery(rel, now)
-        assert recovered is False
-        assert rel.reputation == 80.0
-
-    @pytest.mark.asyncio
-    async def test_reputation_recovery_without_persist(self, temp_db):
-        """persist=False 时只改内存不写库"""
-        store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-        rel = RelationshipState(user_id='u1', reputation=80.0)
-        await store.update_relationship(rel)
-        now = datetime(2026, 6, 2, 12, 0, 0)
-        recovered = await store.try_daily_reputation_recovery(rel, now, persist=False)
-        assert recovered is True
-        assert rel.reputation == 82.0
-        db_rel = await store.get_relationship('u1')
-        assert db_rel is not None
-        assert db_rel.reputation == 80.0
 
 
 class TestAmbientRefResolution:

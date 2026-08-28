@@ -344,9 +344,7 @@ class TestHandleJrrp:
 
         char = MagicMock()
         char.character_id = "test_e2e"
-        char.get_relation_labels.return_value = ["陌生人"]
         char.extensions.sleep_messages = None
-        char.extensions.refuse_messages = None
         char.personality = ""
         char.scenario = ""
         char.name = "TestBot"
@@ -368,6 +366,7 @@ class TestHandleJrrp:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=char,
             config=config, context_builder=cb,
+            action_evaluator=MagicMock(), character_life=MagicMock(),
         )
 
         # 短路真实 LLM turn，但保留 chat_command() 真实签名与 ctx 传递路径

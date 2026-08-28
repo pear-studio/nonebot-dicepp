@@ -17,8 +17,6 @@ from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
 from plugins.DicePP.module.persona.data.models import (
-    RelationshipState,
-    UserProfile,
     WhitelistEntry,
     DiaryEntry,
     DailyEvent,

@@ -25,8 +25,6 @@ TEST_GROUP_ID = "llm_test_group"
 SCENARIO_ORDER = ("warp", "private", "group")
 PRIVATE_CHAT_RUNS = 7
 GROUP_CHAT_RUNS = 10
-PRIVATE_INTERACTIONS_BY_USER = (7,)
-GROUP_INTERACTIONS_BY_USER = (1, 2, 7)
 LEGACY_RUNTIME_IMPORT_ROOTS = frozenset(
     {"core", "module", "utils", "adapter", "shell", "frozen", "DicePP"}
 )
@@ -344,15 +342,6 @@ def estimate_agent_runs(
     config: Any,
     character: Any,
 ) -> tuple[AgentRunEstimate, ...]:
-    relationship_enabled = config.persona_ai.relationship_enabled
-    # 与 ChatConfig 的关系评分批次默认保持一致；该参数不再属于 PersonaConfig。
-    scoring_interval = 5
-
-    def scoring_runs(interactions_by_user: Sequence[int]) -> int:
-        if not relationship_enabled:
-            return 0
-        return sum(count // scoring_interval for count in interactions_by_user)
-
     results: list[AgentRunEstimate] = []
     for scenario in scenarios:
         if scenario == "warp":
@@ -382,10 +371,6 @@ def estimate_agent_runs(
                     scenario="私聊跑团多轮",
                     entries=(
                         ("Chat", PRIVATE_CHAT_RUNS),
-                        (
-                            "Scoring",
-                            scoring_runs(PRIVATE_INTERACTIONS_BY_USER),
-                        ),
                     ),
                     notes=(
                         "包含一次真实 roll_dice 验收、warp 事件查询和私聊秘密写入。",
@@ -398,10 +383,6 @@ def estimate_agent_runs(
                     scenario="群聊跑团多人上下文",
                     entries=(
                         ("Chat", GROUP_CHAT_RUNS),
-                        (
-                            "Scoring",
-                            scoring_runs(GROUP_INTERACTIONS_BY_USER),
-                        ),
                     ),
                     notes=(
                         "三条普通群消息只进入上下文，不触发 Persona 回复。",

@@ -4,7 +4,7 @@ LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 
 1. tick() 调用 character_life.tick 驱动生活事件
 2. tick() 内部异常不向上抛
-3. tick_daily() 依次 prune_traces → decay_batch → diary，返回原子的正文/日期结果
+3. tick_daily() 依次 cleanup → diary，返回原子的正文/日期结果
 4. tick_daily() 内部异常返回空结果
 """
 import pytest
@@ -15,9 +15,6 @@ from plugins.DicePP.module.persona.life.types import DailyTickResult
 def _make_simulator(*, event_chain=None, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
     store = AsyncMock()
-    store.list_all_relationships_raw = AsyncMock(return_value=[])
-    store.update_relationship = AsyncMock()
-    store.add_score_event = AsyncMock()
     store.prune_llm_traces = AsyncMock(return_value=0)
     character_life = MagicMock()
     character_life.tick = AsyncMock(return_value=event_chain)
@@ -29,7 +26,7 @@ def _make_simulator(*, event_chain=None, diary: str='今天很好'):
     character = MagicMock()
     character.extensions = MagicMock()
     config = LifeConfig(trace_enabled=False)
-    sim = LifeSimulator(store=store, character_life=character_life, diary_generator=diary_generator, character=character, config=config, decay_calculator=None)
+    sim = LifeSimulator(store=store, character_life=character_life, diary_generator=diary_generator, character=character, config=config)
     return sim
 
 @pytest.mark.asyncio
@@ -77,23 +74,6 @@ async def test_tick_daily_calls_run_cleanup():
     sim = _make_simulator()
     await sim.tick_daily()
     sim.store.run_cleanup.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_tick_daily_applies_relationship_decay():
-    """decay_calculator 非 None 时 tick_daily 应用关系衰减并写库"""
-    from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
-    sim = _make_simulator()
-    decay_calc = MagicMock()
-    decay_calc.should_apply_decay = MagicMock(return_value=True)
-    decay_calc.calculate_decay = MagicMock(return_value=(ScoreDeltas(intimacy=-5.0), 0.0, '超过3天未互动'))
-    sim.decay_calculator = decay_calc
-    rel = RelationshipState(user_id='u1')
-    sim.store.list_all_relationships_raw = AsyncMock(return_value=[rel])
-    await sim.tick_daily()
-    decay_calc.should_apply_decay.assert_called_once()
-    decay_calc.calculate_decay.assert_called_once()
-    sim.store.update_relationship.assert_awaited_once()
-    sim.store.add_score_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio

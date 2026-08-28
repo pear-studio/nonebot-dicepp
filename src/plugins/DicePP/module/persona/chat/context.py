@@ -5,12 +5,11 @@
 """
 from dataclasses import dataclass
 from plugins.DicePP.utils.logger import logger
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 
 from plugins.DicePP.utils.string import estimate_tokens
 
 from ..character.models import Character
-from ..data.models import UserProfile
 from ..image_cache import ImageCache
 from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time
 from ..chat.compression import estimate_image_token
@@ -95,7 +94,7 @@ class ContextBuilder:
     def _render_character_base(self) -> List[str]:
         """渲染角色卡静态段落（描述/性格/名称/示例对话/尾部指令）。
 
-        build_static_prompt 和 _build_system_prompt 共用此方法。
+        build_static_prompt 使用此方法。
         """
         parts = []
         if self.character.system_prompt:
@@ -139,185 +138,20 @@ class ContextBuilder:
 
     def build(
         self,
-        messages: List[Any] = None,
+        messages: List[Any],
         *,
         static_prompt: str = "",
         notifications: Optional[List[str]] = None,
-        # ── Legacy parameters (deprecated, kept for backward compat in debug paths) ──
-        formatted_history: Optional[List[Dict[str, str]]] = None,
-        history_dicts: Optional[List[Dict[str, str]]] = None,
-        user_profile: Optional[UserProfile] = None,
-        diary_context: str = "",
-        relation_label: str = "",
     ) -> List[Dict[str, str]]:
-        """构建 LLM 消息列表（支持新旧两种调用方式）。
-
-        **新方式（session 模式）**：
-        - messages: 已格式化的 session 消息（PersonaSessionMessage 或 dict 列表）
-        - static_prompt: 预构建的静态基座
-        - notifications: 待注入的动态通知
-
-        **旧方式（legacy，保留给 debug_info）**：
-        - formatted_history + history_dicts + user_profile + diary_context + relation_label
-        """
-        # 新路径：session 模式
-        if messages is not None:
-            result: List[Dict[str, str]] = []
-
-            # System 消息：静态基座 + 动态关系
-            system_content = static_prompt
-            if relation_label:
-                system_content += f"\n\n当前你和玩家的关系: {relation_label}"
-            result.append({"role": "system", "content": system_content})
-
-            # 注入通知（独立 user role 消息，在历史消息之前）
-            for note in (notifications or []):
-                result.append({"role": "user", "content": note})
-
-            # 追加 session 历史消息
-            for msg in messages:
-                if isinstance(msg, dict):
-                    result.append({"role": msg["role"], "content": msg["content"]})
-                else:
-                    result.append({"role": msg.role, "content": msg.content})
-
-            return result
-
-        # 旧路径：legacy（保留给 build_debug_info 等场景）
-        result_legacy = []
-        lore_sections = self.build_lore_text(history_dicts or [])
-        system_parts = []
-        system_prompt = self._build_system_prompt(user_profile, diary_context, relation_label, lore_sections)
-        system_parts.append(system_prompt)
-        if self.character.mes_example:
-            example = self.character.format_mes_example()
-            system_parts.append(f"示例对话:\n{example}")
-        result_legacy.append({"role": "system", "content": "\n\n".join(system_parts)})
-        for msg in (formatted_history or []):
-            result_legacy.append({"role": msg["role"], "content": msg["content"]})
-        return result_legacy
-
-    def build_lore_text(
-        self,
-        history_dicts: List[Dict[str, str]],
-    ) -> Dict[str, List[str]]:
-        """扫描文本并返回按位置分类的世界书内容
-
-        history_dicts 的 content 字段应为原始内容（无格式化前缀），
-        世界书关键词扫描依赖纯净文本。末尾条目即为当前用户消息。
-        扫描是顺序无关的（集合语义，命中关键词即止）。
-
-        返回结构为 {"before_char": [...], "after_char": [...]}，
-        即使目前 LoreEntry 没有 position 字段，也为后续扩展留接口。
-        默认所有条目归入 "after_char"（与当前硬编码位置一致）。
-        """
-        sections: Dict[str, List[str]] = {"before_char": [], "after_char": []}
-        if not self.character or not self.character.character_book:
-            return sections
-
-        texts_to_scan = []
-        for msg in history_dicts:
-            texts_to_scan.append(msg.get("content", ""))
-
-        matched = self.character.search_lore_entries(texts_to_scan)
-
-        if not matched:
-            return sections
-
-        # 按优先级降序排列，数值越高越优先注入
-        matched.sort(key=lambda e: e.order, reverse=True)
-
-        # Token 预算控制（基于字符统计的估算值，不引入真实 tokenizer）
-        budget = self.lore_token_budget
-        total_tokens = 0.0
-        selected = []
-        for entry in matched:
-            cost = estimate_tokens(entry.content)
-            if total_tokens + cost > budget:
-                break
-            total_tokens += cost
-            selected.append(entry)
-
-        if not selected:
-            return sections
-
-        # 收集命中的 keys 用于日志（取第一条命中的 key 作为代表）
-        scanned = "\n".join(texts_to_scan)
-        hit_keys = []
-        for e in selected:
-            for k in e.keys:
-                if k in scanned:
-                    hit_keys.append(k)
-                    break
-        logger.debug(
-            "世界书命中: keys=%s, estimated_tokens=%.1f",
-            hit_keys,
-            total_tokens,
-        )
-
-        for entry in selected:
-            # 默认位置为 after_char；后续可读取 entry.position 扩展
-            position = getattr(entry, "position", None) or "after_char"
-            if position not in sections:
-                position = "after_char"
-            sections[position].append(entry.content)
-
-        return sections
-
-    def _build_system_prompt(
-        self,
-        user_profile: Optional[UserProfile],
-        diary_context: str,
-        relation_label: str = "",
-        lore_sections: Optional[Dict[str, List[str]]] = None,
-    ) -> str:
-        parts = []
-        lore_sections = lore_sections or {}
-
-        # before_char 位置的世界书放在角色设定之前
-        before_lore = lore_sections.get("before_char", [])
-        if before_lore:
-            bullets = "\n".join([f"- {c}" for c in before_lore])
-            parts.append(f"【世界书】\n{bullets}")
-
-        # 添加当前时间（使用中文星期）
-        now = wall_now(self.timezone)
-        weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-        weekday = weekdays[now.weekday()]
-        time_str = now.strftime(f"%Y年%m月%d日 %H:%M {weekday}")
-        parts.append(f"当前时间: {time_str}")
-
-        # 角色卡基座（描述/性格/场景/名称/示例对话/尾部指令）
-        parts.extend(self._render_character_base())
-
-        # 关系标签 — 插入到尾部指令之前
-        if relation_label:
-            parts.insert(-1, f"当前你和玩家的关系: {relation_label}")
-
-        # ── 回复长度约束（仅 chat 路径注入）──
-        if self.segment_guide and self.segment_guide.enabled:
-            sg = self.segment_guide
-            guide = (
-                f"【回复长度】\n"
-                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字"
-            )
-            parts.insert(-1, guide)
-
-        if user_profile and user_profile.facts:
-            facts_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
-            parts.insert(-1, f"【你对玩家的了解】\n{facts_text}")
-
-        # after_char 位置的世界书（当前默认位置）放在用户了解之后
-        after_lore = lore_sections.get("after_char", [])
-        if after_lore:
-            bullets = "\n".join([f"- {c}" for c in after_lore])
-            parts.insert(-1, f"【世界书】\n{bullets}")
-
-        if diary_context:
-            parts.insert(-1, f"【今天发生的事】\n{diary_context}")
-
-        return "\n\n".join(parts)
-
+        """将静态 prompt、通知和 session 消息组装成 LLM 输入。"""
+        result: List[Dict[str, str]] = [{"role": "system", "content": static_prompt}]
+        result.extend({"role": "user", "content": note} for note in (notifications or []))
+        for msg in messages:
+            if isinstance(msg, dict):
+                result.append({"role": msg["role"], "content": msg["content"]})
+            else:
+                result.append({"role": msg.role, "content": msg.content})
+        return result
     def _format_private_history(self, history: List[Dict]) -> List[Dict[str, str]]:
         """私聊历史格式化：连续非 assistant 消息合并为单条 user
 
@@ -538,30 +372,3 @@ class ContextBuilder:
             result.append(orphan)
 
         return result
-
-    def build_debug_info(
-        self,
-        short_term_history: List[Dict[str, str]],
-        user_profile: Optional[UserProfile] = None,
-        diary_context: str = "",
-        relation_label: str = "",
-        lore_sections: Optional[Dict[str, List[str]]] = None,
-    ) -> Dict[str, Any]:
-        system_prompt = self._build_system_prompt(
-            user_profile=user_profile,
-            diary_context=diary_context,
-            relation_label=relation_label,
-            lore_sections=lore_sections or self.build_lore_text(short_term_history),
-        )
-        # short_term_history 已由调用方格式化并截断（truncated），直接统计即可
-        formatted_chars = sum(len(msg.get("content", "")) for msg in short_term_history)
-        profile_text = ""
-        if user_profile and user_profile.facts:
-            profile_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
-        return {
-            "system_prompt_chars": len(system_prompt),
-            "short_term_chars": formatted_chars,
-            "profile_chars": len(profile_text),
-            "diary_chars": len(diary_context),
-            "returned_message_count": 1 + len(short_term_history),
-        }

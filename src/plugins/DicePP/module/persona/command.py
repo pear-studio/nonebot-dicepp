@@ -12,8 +12,6 @@ import uuid
 from plugins.DicePP.utils.logger import logger, _request_id_var
 from plugins.DicePP.utils.time import get_clock
 
-from datetime import timedelta
-
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command.user_cmd import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command.bot_cmd import BotCommandBase
@@ -86,8 +84,6 @@ class PersonaCommand(UserCommandBase):
     """Persona AI 命令处理器"""
 
     message_type: MessageType = MessageType.CHAT
-    _format_relationship_base = staticmethod(AdminDispatcher._format_relationship_base)
-
     MAX_IMAGES_PER_MESSAGE = 5
 
     def __init__(self, bot: Bot):
@@ -415,7 +411,7 @@ class PersonaCommand(UserCommandBase):
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
-        if cmd in ("clear", "status", "profile"):
+        if cmd in ("clear", "status"):
             return True, False, None
         # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
         if meta.to_me and not msg.startswith(".ai"):
@@ -476,12 +472,6 @@ class PersonaCommand(UserCommandBase):
                     response = await self._handle_admin(user_id, group_id, args)
                     if response:
                         await self._send(user_id, group_id, response)
-                    return []
-
-                # 处理 profile 命令
-                if cmd == "profile":
-                    response = await self._handle_profile(user_id, group_id)
-                    await self._send(user_id, group_id, response)
                     return []
 
                 # .jrrp 路由
@@ -763,74 +753,6 @@ class PersonaCommand(UserCommandBase):
             daily_pending=daily_p,
         )
 
-    async def _handle_profile(self, user_id: str, group_id: str) -> str:
-        if not self.data_store:
-            return "模块未初始化"
-
-        profile = await self.data_store.get_user_profile(user_id)
-        rel = await self.data_store.get_relationship(user_id)
-        if rel and self.app and self.app.get_decay_calculator() and self.app.get_character():
-            rel = self.app.effective_relationship(rel)
-
-        lines = ["你的档案"]
-
-        if rel:
-            relation_label = "未知"
-            if self.app and self.app.get_character():
-                relation_level, relation_label = rel.get_relation_level(self.app.get_relation_labels())
-
-            lines.append(f"\n好感度: {relation_label} (区间 {relation_level}/5)")
-            base_lines = self._format_relationship_base(rel, precision=1)
-            lines.extend(base_lines[1:])  # 去掉 [好感度] 标题
-
-            try:
-                recent_events = await self.data_store.get_recent_score_events(user_id, limit=2)
-                if len(recent_events) >= 2:
-                    latest = recent_events[-1]
-                    previous = recent_events[-2]
-                    score_change = latest.composite_after - previous.composite_after
-
-                    if score_change > 0.5:
-                        trend_symbol, trend_desc = "↑", "最近上升"
-                    elif score_change < -0.5:
-                        trend_symbol, trend_desc = "↓", "最近下降"
-                    else:
-                        trend_symbol, trend_desc = "→", "基本持平"
-                    lines.append(f"  趋势: {trend_symbol} ({trend_desc})")
-                else:
-                    lines.append(f"  趋势: → (暂无变化)")
-            except Exception:
-                lines.append(f"  趋势: → (计算失败)")
-
-            try:
-                earliest_time = await self.data_store.get_earliest_message_time(user_id, group_id)
-                if earliest_time:
-                    from plugins.DicePP.utils.time import wall_now
-                    now = wall_now(self.config.timezone)
-                    days_known = max(1, (now - earliest_time).days)
-                    lines.append(f"  认识: {days_known} 天")
-                else:
-                    lines.append(f"  认识: 1 天")
-            except Exception:
-                lines.append(f"  认识: 1 天")
-
-            try:
-                message_count = await self.data_store.count_messages(user_id, group_id)
-                lines.append(f"  互动: {message_count} 次")
-            except Exception:
-                lines.append(f"  互动: 0 次")
-        else:
-            lines.append("\n好感度: 暂无记录")
-
-        if profile and profile.facts:
-            lines.append(f"\n已知信息:")
-            for key, value in profile.facts.items():
-                lines.append(f"  {key}: {value}")
-        else:
-            lines.append("\n已知信息: 暂无")
-
-        return "\n".join(lines)
-
     def _get_introduction(self) -> str:
         if not self.app or not self.app.get_character():
             char_name = self.bot.config.persona_ai.character_name or "未知"
@@ -890,15 +812,12 @@ class PersonaCommand(UserCommandBase):
                 ".ai - 自我介绍",
                 "@bot <消息> - 与 AI 对话",
                 ".ai status - 查看状态",
-                ".ai profile - 查看你的档案",
                 ".ai join <口令> - 加入白名单（私聊）",
             ]
             if self._is_admin(meta.user_id):
                 lines.append("")
                 lines.append("[管理员调试]")
                 lines.append(".ai admin debug - 运行诊断（错误摘要）")
-                lines.append(".ai admin rel <用户ID> - 查看关系")
-                lines.append(".ai admin setrel <用户ID> <分数> - 修改好感度")
                 lines.append(".ai admin reload - 热重载角色卡")
                 lines.append(".ai admin events - 事件配置")
                 lines.append(".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）")

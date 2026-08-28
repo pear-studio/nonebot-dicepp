@@ -26,7 +26,6 @@ character_book:
       enabled: true
 extensions:
   persona:
-    relation_labels: ["戒备", "生疏", "熟识", "信赖", "生死之交"]
     world: "DND 风格的北境奇幻世界；城镇、荒野、遗迹、商队和冒险者共同构成日常生活。"
     daily_events_count: 2
     event_day_start_hour: 8

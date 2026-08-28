@@ -333,16 +333,16 @@ def test_confirmation_summary_prioritizes_single_scenario_total() -> None:
     prepared = _prepared_for_confirmation(
         prepare.AgentRunEstimate(
             scenario="群聊跑团多人上下文",
-            entries=(("Chat", 10), ("Scoring", 1), ("Unused", 0)),
+            entries=(("Chat", 10), ("Unused", 0)),
         )
     )
 
     assert prepare.format_confirmation(prepared) == (
         "启动真实 LLM 测试前请确认：\n\n"
         "- 场景：群聊跑团多人上下文\n"
-        "- Agent Run：共 11 次\n"
+        "- Agent Run：共 10 次\n"
         "  - Chat：10 次\n"
-        "  - Scoring：1 次\n\n"
+        "\n"
         "确认开始？"
     )
 
@@ -356,16 +356,16 @@ def test_confirmation_summary_groups_scenarios_and_marks_upper_bound() -> None:
         ),
         prepare.AgentRunEstimate(
             scenario="私聊跑团多轮",
-            entries=(("Chat", 7), ("Scoring", 1)),
+            entries=(("Chat", 7),),
         ),
     )
 
     assert prepare.format_confirmation(prepared) == (
         "启动真实 LLM 测试前请确认：\n\n"
         "- 场景：一天连续 warp、私聊跑团多轮\n"
-        "- Agent Run：预计最多 21 次\n"
+        "- Agent Run：预计最多 20 次\n"
         "  - 一天连续 warp：最多 13 次（DM 12、Diary 1）\n"
-        "  - 私聊跑团多轮：8 次（Chat 7、Scoring 1）\n\n"
+        "  - 私聊跑团多轮：7 次（Chat 7）\n\n"
         "确认开始？"
     )
 
@@ -440,7 +440,6 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert "群聊跑团多人上下文" in summary
     assert "Chat: 7" in summary
     assert "Chat: 10" in summary
-    assert summary.count("Scoring: 0") == 2
 
 
 def test_prepare_rejects_drifted_override_and_unignored_credentials(

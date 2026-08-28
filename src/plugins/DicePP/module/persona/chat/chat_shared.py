@@ -40,7 +40,6 @@ class ChatOutcome:
     status: Literal["sent", "skipped", "empty", "failed", "partial_sent"]
     sent_count: int = 0
     reason: str = ""
-    counts_as_interaction: bool = False
 
     @property
     def skipped(self) -> bool:

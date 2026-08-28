@@ -25,23 +25,6 @@ CREATE TABLE IF NOT EXISTS persona_settings (
 );
 """
 
-# 评分历史表
-CREATE_SCORE_HISTORY_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_score_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    group_id TEXT DEFAULT '',
-    intimacy_delta REAL DEFAULT 0,
-    reputation_delta REAL DEFAULT 0,
-    familiarity_delta REAL DEFAULT 0,
-    composite_before REAL,
-    composite_after REAL,
-    reason TEXT DEFAULT '',
-    conversation_digest TEXT DEFAULT '',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
 # 每日用量表
 CREATE_USAGE_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_usage (
@@ -86,62 +69,6 @@ CREATE TABLE IF NOT EXISTS persona_character_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     text TEXT DEFAULT '',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-CREATE_USER_PROFILES_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_user_profiles (
-    user_id TEXT PRIMARY KEY,
-    facts TEXT DEFAULT '{}',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-CREATE_USER_RELATIONSHIPS_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_user_relationships (
-    user_id TEXT PRIMARY KEY,
-    familiarity REAL DEFAULT 0.0,
-    peak_familiarity REAL DEFAULT 0.0,
-    intimacy REAL DEFAULT 0.0,
-    peak_intimacy REAL DEFAULT 0.0,
-    reputation REAL DEFAULT 100.0,
-    last_interaction_at TIMESTAMP,
-    last_reputation_recovery_date TIMESTAMP,
-    last_relationship_decay_applied_at TIMESTAMP,
-    last_miss_sent_at TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-# 评分失败记录表
-CREATE_SCORING_FAILURES_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_scoring_failures (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    group_id TEXT DEFAULT '',
-    messages_count INTEGER DEFAULT 0,
-    error TEXT DEFAULT '',
-    raw_response TEXT DEFAULT '',
-    conversation_digest TEXT DEFAULT '',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-CREATE_SCORING_FAILURES_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_persona_scoring_failures_user ON persona_scoring_failures(user_id, group_id, created_at DESC);
-"""
-
-CREATE_SCORING_FAILURES_INDEX_CREATED_AT = """
-CREATE INDEX IF NOT EXISTS idx_persona_scoring_failures_created_at ON persona_scoring_failures(created_at);
-"""
-
-# familiarity 每日累计表（持久化日上限，防重启丢失）
-CREATE_FAMILIARITY_DAILY_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_familiarity_daily (
-    user_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    total REAL DEFAULT 0.0,
-    PRIMARY KEY (user_id, date)
 );
 """
 
@@ -224,11 +151,6 @@ CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_user ON persona_llm_traces(use
 
 CREATE_LLM_TRACES_INDEX_CREATED_AT = """
 CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_created_at ON persona_llm_traces(created_at);
-"""
-
-CREATE_SCORE_HISTORY_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_score_history_user_time
-ON persona_score_history(user_id, created_at DESC);
 """
 
 CREATE_DAILY_EVENTS_INDEX = """
@@ -407,22 +329,14 @@ PERSONA_SCHEMA_SQL = [
     CREATE_MESSAGE_STREAM_USER_INDEX,
     CREATE_MESSAGE_STREAM_GROUP_INDEX,
     CREATE_SETTINGS_TABLE,
-    CREATE_SCORE_HISTORY_TABLE,
     CREATE_USAGE_TABLE,
     CREATE_DIARY_TABLE,
     CREATE_DAILY_EVENTS_TABLE,
     CREATE_CHARACTER_STATE_TABLE,
-    CREATE_USER_PROFILES_TABLE,
-    CREATE_USER_RELATIONSHIPS_TABLE,
-    CREATE_FAMILIARITY_DAILY_TABLE,
     CREATE_LLM_TRACES_TABLE,
     CREATE_LLM_TRACES_INDEX_INTERACTION,
     CREATE_LLM_TRACES_INDEX_USER,
     CREATE_LLM_TRACES_INDEX_CREATED_AT,
-    CREATE_SCORING_FAILURES_TABLE,
-    CREATE_SCORING_FAILURES_INDEX,
-    CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
-    CREATE_SCORE_HISTORY_INDEX,
     CREATE_DAILY_EVENTS_INDEX,
     # Phase M1: Agent Runtime
     CREATE_AGENT_RUNS_TABLE,

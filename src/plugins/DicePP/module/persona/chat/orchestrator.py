@@ -6,16 +6,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import random
 import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from plugins.DicePP.utils.logger import logger
-from plugins.DicePP.utils.time import wall_now
 
 from ..data.store import PersonaDataStore
-from ..data.models import MessageType, RelationshipState
+from ..data.models import MessageType
 from ..llm.client import TextModelClient
 from ..llm.errors import QuotaExceeded
 from ..llm.coordinator import LLMCallCoordinator
@@ -28,8 +26,6 @@ from ..life.conversation_registry import ConversationRegistry
 from ..life.conversation_summary import ProviderSummarizer
 from ..life.change_sources import (
     DateChangeSource,
-    RelationChangeSource,
-    ProfileFactsChangeSource,
     DailyEventChangeSource,
 )
 # ChatOutcome 下沉到 chat_shared（供 orchestrator 与 chat_agent
@@ -38,8 +34,9 @@ from ..life.change_sources import (
 from .chat_shared import ChatCallContext, ChatOutcome
 from .chat_agent import ChatAgent
 if TYPE_CHECKING:
-    from .scoring_trigger import ScoringTrigger
     from .response_handler import ResponseHandler
+    from ..life.action_evaluator import ActionEvaluator
+    from ..life.character_life import CharacterLife
 
 
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
@@ -49,7 +46,7 @@ class ChatOrchestrator:
     """聊天编排层 — 替代 ChatSession 的编排逻辑。
 
     持有 Conversation（消息 + 通知 + 持久化）、Coordinator（多轮缓冲）、
-    Gate（睡眠/信誉/去重），不负责 LLM 调用或工具执行（由 ToolLoop 处理）。
+    Gate（睡眠/去重），不负责 LLM 调用或工具执行（由 ToolLoop 处理）。
     """
 
     def __init__(
@@ -58,18 +55,17 @@ class ChatOrchestrator:
         client: TextModelClient,
         character: Character,
         config: ChatConfig,
-        scoring_trigger: Optional["ScoringTrigger"] = None,
+        action_evaluator: ActionEvaluator,
+        character_life: CharacterLife,
         response_handler: Optional["ResponseHandler"] = None,
         context_builder: Optional[ContextBuilder] = None,
         sleep_gate: Optional[Any] = None,
-        decay_calculator: Optional[Any] = None,
         registry: Optional[ConversationRegistry] = None,
     ) -> None:
         self._store = store
         self._client = client
         self._character = character
         self._chat_config = config
-        self._scoring_trigger = scoring_trigger
         self._response_handler = response_handler
         self._context_builder = context_builder or ContextBuilder(
             character=character,
@@ -79,7 +75,8 @@ class ChatOrchestrator:
             lore_token_budget=config.lore_token_budget,
         )
         self._sleep_gate = sleep_gate
-        self.decay_calculator = decay_calculator  # 供 PersonaApp.get_decay_calculator 委托
+        self._action_evaluator = action_evaluator
+        self._character_life = character_life
 
         # Coordinator 实例（按 target_key 串行）
         self._coordinator = LLMCallCoordinator()
@@ -173,36 +170,7 @@ class ChatOrchestrator:
                     return await self._send_delivery_text(
                         user_id, group_id, random.choice(msgs),
                         reason="sleep_gate",
-                        counts_as_interaction=False,
                     )
-
-        # Gate: 信誉拒绝
-        if self._chat_config.relationship_enabled:
-            if group_id:
-                history = await self._store.get_group_messages(group_id, limit=1)
-            else:
-                history = await self._store.get_recent_messages(
-                    user_id, group_id="", limit=1,
-                )
-            is_first = len(history) == 0
-            if not is_first:
-                rel = await self._store.get_relationship(user_id)
-                if rel:
-                    await self._store.try_daily_reputation_recovery(
-                        rel, wall_now(self._chat_config.timezone),
-                    )
-                threshold = self._chat_config.reputation_refuse_threshold
-                if rel and rel.reputation < threshold:
-                    char_refuse = self._character.extensions.refuse_messages
-                    default = ["...（对方似乎没有兴趣理你）", "...（已读不回）", "嗯。"]
-                    refuse = char_refuse if char_refuse is not None else default
-                    if refuse:
-                        return await self._send_delivery_text(
-                            user_id, group_id, random.choice(refuse),
-                            reason="reputation_refused",
-                            counts_as_interaction=False,
-                        )
-                    return ChatOutcome("skipped", reason="reputation_refused_empty")
 
         # Quota check handled by ChatOrchestrator before calling Runtime
 
@@ -220,7 +188,6 @@ class ChatOrchestrator:
                     agent = self._ensure_agent(scope, conv)
                     result = await agent.execute_turn(
                         user_id, group_id, merged,
-                        run_after_response=True,
                         message_type=MessageType.CHAT,
                         image_data_urls=image_data_urls,
                         transient_message=transient_message,
@@ -256,7 +223,6 @@ class ChatOrchestrator:
         return await self._send_delivery_text(
             user_id, group_id, fallback,
             reason=reason,
-            counts_as_interaction=False,
         )
 
     async def chat_command(
@@ -265,7 +231,7 @@ class ChatOrchestrator:
     ) -> ChatOutcome:
         """处理命令触发的角色评语。
 
-        不走普通聊天 gate/评分，但经 _coordinator.submit 串行化：命令路径与普通
+        不走普通聊天 gate，但经 _coordinator.submit 串行化：命令路径与普通
         chat 共享同一 target_key 串行边界，防止两个并发 chat_command 或
         chat+chat_command 同时操作同一个 scope 的 Conversation/Agent。
 
@@ -296,7 +262,6 @@ class ChatOrchestrator:
                         agent = self._ensure_agent(scope, conv)
                         result = await agent.execute_turn(
                             user_id, group_id, merged,
-                            run_after_response=False,
                             message_type=MessageType.CHAT,
                             image_data_urls=ctx.image_data_urls,
                             transient_message=ctx.transient_message,
@@ -365,13 +330,9 @@ class ChatOrchestrator:
         )
 
     def _chat_change_sources(self, scope: ConversationScope) -> List[Any]:
-        """按 scope 装配 ChangeSource（D6/D8）。
+        """按 scope 装配 ChangeSource（D6）。
 
         - 角色级来源（Date / DailyEvent）：群/私聊都注册。
-        - per-user 来源（Relation / ProfileFacts）：仅私聊 scope 注册；关系来源受
-          relationship_enabled 控制，画像来源始终保留。
-          群聊 scope 共享，绑定单一 user 会形成"首-user 锚定"，阶段 1 退化不注册，
-          阶段 2 以"当前说话者 turn_only 状态"按轮补回。
         """
         sources: List[Any] = [
             DateChangeSource(timezone=self._chat_config.timezone),
@@ -379,17 +340,6 @@ class ChatOrchestrator:
                 store=self._store, timezone=self._chat_config.timezone,
             ),
         ]
-        if scope.is_private and self._chat_config.relationship_enabled:
-            user_id = scope.key
-            sources.append(RelationChangeSource(
-                store=self._store, user_id=user_id,
-                relation_labels=self._character.get_relation_labels(),
-            ))
-        if scope.is_private:
-            user_id = scope.key
-            sources.append(ProfileFactsChangeSource(
-                store=self._store, user_id=user_id,
-            ))
         return sources
 
     async def _ensure_conversation(self, scope: ConversationScope) -> Conversation:
@@ -422,19 +372,11 @@ class ChatOrchestrator:
                 config=self._chat_config,
                 context_builder=self._context_builder,
                 make_delivery=self._make_delivery,
-                after_response=self._after_response,
+                action_evaluator=self._action_evaluator,
+                character_life=self._character_life,
             )
             self._agents[scope] = agent
         return agent
-
-    async def _after_response(
-        self, user_id: str, group_id: str, user_msg: str, assistant_msg: str,
-    ) -> None:
-        """回复后处理。"""
-        if self._scoring_trigger:
-            await self._scoring_trigger.on_interaction(
-                user_id, group_id, user_msg, assistant_msg,
-            )
 
     def _make_delivery(self):
         from .delivery_queue import DeliveryQueue
@@ -451,7 +393,6 @@ class ChatOrchestrator:
         content: str,
         *,
         reason: str,
-        counts_as_interaction: bool,
         message_type: MessageType = MessageType.CHAT,
     ) -> ChatOutcome:
         """通过 chat delivery 发送一条非 LLM-turn 文本。"""
@@ -473,7 +414,7 @@ class ChatOrchestrator:
             user_id=user_id,
             group_id=group_id,
             message_type=message_type,
-            # 管理消息（睡眠/信誉拒绝/配额兜底）本质仍是该角色在说话，说话者归属
+            # 管理消息（睡眠/配额兜底）本质仍是该角色在说话，说话者归属
             # 与 LLM 轮次统一用角色名，避免 read_history/search_history 直查 message_stream
             # 时同一 bot 历史出现"角色名 vs 我"的分裂。
             display_name=self._character.name or "我",
@@ -484,6 +425,5 @@ class ChatOrchestrator:
                 "sent",
                 sent_count=delivery.sent_count,
                 reason=reason,
-                counts_as_interaction=counts_as_interaction,
             )
         return ChatOutcome("failed", reason=reason)

@@ -48,7 +48,6 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 - `.jrrp` 由 Persona 处理，私聊和群聊都支持。
 - 群聊中的正常 `@机器人` / `.ai` 对话路径始终可用。
 - 对话始终注入内置的分段回复引导和长度策略。
-- `relationship_enabled` 默认关闭；启用后统一开启关系评分、衰减、信誉门控和关系上下文。
 
 含义：
 
@@ -56,7 +55,6 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 |------|------|
 | `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
 | `character_name` | 角色卡目录名，在 `persona_ai` 段中设置 |
-| `relationship_enabled` | 是否启用关系系统；默认关闭 |
 | `character_path` | 角色目录根路径，通常不用改 |
 | `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |

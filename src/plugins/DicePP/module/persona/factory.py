@@ -16,19 +16,15 @@ from .character.models import Character
 from ..common.mode_defs import query_database_for_mode
 from .chat.orchestrator import ChatOrchestrator, ChatOutcome
 from .chat.chat_config import ChatConfig
-from .chat.scoring import ScoringAgent
 from .chat.context import ContextBuilder
 from .chat.response_handler import ResponseHandler
-from .chat.scoring_trigger import ScoringTrigger
 from .data.store import PersonaDataStore
 from .data.models import MessageType
-from .data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from .exceptions import (
     PersonaCharacterLoadError,
     PersonaConfigError,
     PersonaStorageError,
 )
-from .game.decay import DecayCalculator, DecayConfig
 from .gateway.pipeline import MessagePipeline, TruncateStage
 from .gateway.port import MessagePort
 from .life.action_evaluator import ActionEvaluator
@@ -76,10 +72,6 @@ class PersonaApp:
     def get_character(self) -> Optional[Character]:
         return self.chat.character
 
-    def get_relation_labels(self) -> List[str]:
-        char = self.chat.character
-        return char.get_relation_labels() if char else []
-
     # ── 对话 ──
 
     async def chat_with_user(
@@ -120,15 +112,6 @@ class PersonaApp:
         """返回 LifeSimulator 持有的 CharacterAgent（日报/外部模块使用）"""
         return getattr(self.life, 'character_agent', None)
 
-    # ── 衰减计算 ──
-
-    def get_decay_calculator(self) -> Optional[DecayCalculator]:
-        return self.chat.decay_calculator
-
-    def effective_relationship(self, rel) -> Any:
-        calc = self.chat.decay_calculator
-        return calc.effective_relationship(rel) if calc else rel
-
     # ── 生命周期驱动 ──
 
     async def is_awake(self) -> bool:
@@ -157,15 +140,12 @@ class _Infra:
 class ChatDeps:
     """_build_chat 的依赖参数集合 — 替代 16 个独立 keyword 参数"""
     store: PersonaDataStore
-    message_store: MessageStore
-    rel_store: RelationshipStore
-    profile_store: ProfileStore
-    event_store: EventStore
     client: TextModelClient
     character: Character
     config: Any
-    decay_calculator: Optional[DecayCalculator]
     port: MessagePort
+    action_evaluator: ActionEvaluator
+    character_life: CharacterLife
     query_store: Any = None
     resolve_db: Any = None
     sleep_gate: Optional[SleepGate] = None
@@ -329,14 +309,6 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     # ChatConfig owns all chat-only policy defaults and receives only the
     # Persona settings that remain part of the public configuration.
     chat_config = ChatConfig.from_persona(deps.config)
-    scoring_agent = None
-    if chat_config.relationship_enabled:
-        scoring_agent = ScoringAgent(
-            deps.client,
-            timezone=deps.config.timezone,
-            max_rounds=deps.config.background_llm_max_rounds,
-            store=deps.store,
-        )
     from .chat.context import SegmentGuide
 
     segment_guide = SegmentGuide(
@@ -357,25 +329,16 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     )
 
     response_handler = ResponseHandler(store=deps.store, port=deps.port)
-    scoring_trigger = None
-    if chat_config.relationship_enabled:
-        scoring_trigger = ScoringTrigger(
-            store=deps.store,
-            scoring_agent=scoring_agent,
-            decay_calculator=deps.decay_calculator,
-            character=deps.character,
-            config=chat_config,
-        )
     return ChatOrchestrator(
         store=deps.store,
         client=deps.client,
         character=deps.character,
         config=chat_config,
-        scoring_trigger=scoring_trigger,
         response_handler=response_handler,
         context_builder=context_builder,
         sleep_gate=deps.sleep_gate,
-        decay_calculator=deps.decay_calculator,
+        action_evaluator=deps.action_evaluator,
+        character_life=deps.character_life,
     )
 
 
@@ -383,7 +346,6 @@ async def _build_life(
     store: PersonaDataStore,
     character: Character,
     config,
-    decay_calculator: Optional[DecayCalculator],
     character_life: CharacterLife,
     dm_agent: DMAgent,
     character_agent: CharacterAgent,
@@ -448,7 +410,6 @@ async def _build_life(
         dm_agent=dm_agent,
         character_agent=character_agent,
         sa_agent=sa_agent,
-        decay_calculator=decay_calculator,
     )
 
 async def create_persona(bot: Bot) -> Optional[PersonaApp]:
@@ -474,36 +435,25 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
             "未配置 DeepSeek API Key，请在 config/user.json 中设置 deepseek_api_key"
         )
     infra = await _build_infra(bot, config, character_name)
-    dm_agent, character_agent, sa_agent, character_life, _ = _build_agents(
+    dm_agent, character_agent, sa_agent, character_life, action_evaluator = _build_agents(
         infra.store, infra.client, config, character,
     )
 
-    decay_calculator: Optional[DecayCalculator] = None
-    if config.relationship_enabled:
-        decay_calculator = DecayCalculator(
-            DecayConfig(),
-            timezone_name=config.timezone,
-        )
-        logger.info("衰减计算器已初始化")
-
     chat = _build_chat(ChatDeps(
         store=infra.store,
-        message_store=infra.store,
-        rel_store=infra.store,
-        profile_store=infra.store,
-        event_store=infra.store,
         client=infra.client,
         character=character,
         config=config,
-        decay_calculator=decay_calculator,
         port=infra.port,
         query_store=bot.db.query,
         resolve_db=_make_resolve_query_db(bot),
         sleep_gate=character_life,
+        action_evaluator=action_evaluator,
+        character_life=character_life,
     ))
 
     life = await _build_life(
-        infra.store, character, config, decay_calculator,
+        infra.store, character, config,
         character_life=character_life,
         dm_agent=dm_agent,
         character_agent=character_agent,

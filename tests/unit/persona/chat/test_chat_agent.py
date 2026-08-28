@@ -22,7 +22,7 @@ from plugins.DicePP.module.persona.life.conversation_scope import ConversationSc
 
 def _make_config():
     return ChatConfig(
-        timezone="Asia/Shanghai", relationship_enabled=False,
+        timezone="Asia/Shanghai",
         max_history_turns=20,
         max_history_tokens=8000, lore_token_budget=1000,
     )
@@ -32,9 +32,7 @@ def _make_char():
     char = MagicMock()
     char.character_id = "test"
     char.name = "TestBot"
-    char.get_relation_labels.return_value = ["陌生人", "熟人", "朋友"]
     char.extensions.sleep_messages = None
-    char.extensions.refuse_messages = None
     char.extensions.image_gen_style = ""
     char.extensions.image_gen_appearance = ""
     return char
@@ -49,11 +47,16 @@ def _make_store():
     # 生产 async 方法预置 AsyncMock：MagicMock(spec=...) 生成的是同步 mock，
     # execute_turn 若 await store.xxx() 会以 `TypeError: object MagicMock can't be
     # used in 'await' expression` 炸测试而非清晰失败。
-    store.get_relationship = AsyncMock(return_value=None)
-    store.get_user_profile = AsyncMock(return_value=None)
     store.add_message_stream = AsyncMock(return_value=1)
     store.read_message_stream_batch = AsyncMock(return_value={})
     return store
+
+
+def _make_action_deps():
+    return {
+        "action_evaluator": MagicMock(),
+        "character_life": MagicMock(),
+    }
 
 
 def _make_orch():
@@ -62,6 +65,7 @@ def _make_orch():
     orch = ChatOrchestrator(
         store=_make_store(), client=MagicMock(), character=_make_char(),
         config=_make_config(), context_builder=cb,
+        **_make_action_deps(),
     )
     return orch
 
@@ -114,7 +118,7 @@ class TestExecuteTurn:
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=lambda: None,  # 无 port：跳过实际发送
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
     @pytest.mark.asyncio
@@ -164,16 +168,14 @@ class _CapDelivery:
 
 
 class TestSpeakerPropagation:
-    def _agent(self, scope, conv, *, store=None, delivery=None, relationship_enabled=False):
-        config = _make_config()
-        config.relationship_enabled = relationship_enabled
+    def _agent(self, scope, conv, *, store=None, delivery=None):
         return ChatAgent(
             scope=scope, conversation=conv,
             store=store or _make_store(), client=MagicMock(), character=_make_char(),
-            config=config,
+            config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
     def _completed_conv(self):
@@ -194,60 +196,11 @@ class TestSpeakerPropagation:
         assert cap.items[-1].display_name == "TestBot"
 
     @pytest.mark.asyncio
-    async def test_group_scope_injects_speaker_status_turn_only(self):
-        store = _make_store()
-        rel = MagicMock()
-        rel.get_relation_level.return_value = (2, "朋友")
-        store.get_relationship = AsyncMock(return_value=rel)
-        profile = MagicMock()
-        profile.facts = {"爱好": "下棋"}
-        store.get_user_profile = AsyncMock(return_value=profile)
-
+    async def test_group_scope_keeps_speaker_identity_in_image_context(self):
         conv = self._completed_conv()
-        agent = self._agent(
-            ConversationScope.for_group("g1"), conv, store=store,
-            relationship_enabled=True,
-        )
+        agent = self._agent(ConversationScope.for_group("g1"), conv)
         await agent.execute_turn("u1", "g1", "hi", speaker_name="小周")
-
-        transient = conv.run.call_args.kwargs["transient_context_messages"]
-        blob = "\n".join(m["content"] for m in (transient or []))
-        assert "当前说话者（小周）" in blob
-        assert "关系是朋友" in blob
-        assert "下棋" in blob
         assert conv.run.call_args.kwargs["group_transcript_in_content"] is True
-
-    @pytest.mark.asyncio
-    async def test_group_scope_omits_relation_but_keeps_profile_when_disabled(self):
-        store = _make_store()
-        rel = MagicMock()
-        rel.get_relation_level.return_value = (2, "朋友")
-        store.get_relationship = AsyncMock(return_value=rel)
-        profile = MagicMock()
-        profile.facts = {"爱好": "下棋"}
-        store.get_user_profile = AsyncMock(return_value=profile)
-
-        conv = self._completed_conv()
-        agent = self._agent(ConversationScope.for_group("g1"), conv, store=store)
-        await agent.execute_turn("u1", "g1", "hi", speaker_name="小周")
-
-        transient = conv.run.call_args.kwargs["transient_context_messages"]
-        blob = "\n".join(m["content"] for m in (transient or []))
-        assert "当前说话者（小周）" in blob
-        assert "下棋" in blob
-        assert "关系是朋友" not in blob
-        store.get_relationship.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_private_scope_no_group_speaker_status(self):
-        store = _make_store()
-        store.get_relationship = AsyncMock()
-        conv = self._completed_conv()
-        agent = self._agent(ConversationScope.for_private("u1"), conv, store=store)
-        await agent.execute_turn("u1", "", "hi")
-        # 私聊不注入群说话者状态（私聊有持久 ChangeSource）
-        store.get_relationship.assert_not_awaited()
-        assert conv.run.call_args.kwargs["group_transcript_in_content"] is False
 
 
 class TestAssistantRefRecording:
@@ -258,7 +211,7 @@ class TestAssistantRefRecording:
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
     def _conv(self):
@@ -310,7 +263,7 @@ class TestExecuteTurnBranches:
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
     def _conv(self, **result_kwargs):
@@ -321,8 +274,7 @@ class TestExecuteTurnBranches:
 
     @pytest.mark.asyncio
     async def test_delivery_none_offline_path_still_sent(self):
-        # make_delivery 返回 None（无 port）：正文仍算已产出，走 after_response
-        after = AsyncMock()
+        # make_delivery 返回 None（无 port）：正文仍算已产出
         conv = self._conv(final_text="ok", final_reason="stop",
                           completion_kind="completed", output_arguments={"content": "ok"})
         agent = ChatAgent(
@@ -330,11 +282,11 @@ class TestExecuteTurnBranches:
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=(lambda: None), after_response=after,
+            make_delivery=(lambda: None),
+            **_make_action_deps(),
         )
         outcome = await agent.execute_turn("u1", "", "hi")
         assert outcome.status == "sent" and outcome.sent_count == 1
-        after.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_empty_outcome_when_no_output(self):
@@ -427,7 +379,7 @@ class TestExecuteTurnBranches:
                 build_static_prompt=MagicMock(return_value="sys")
             ),
             make_delivery=lambda: None,
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
         toolkit, _ = agent._build_chat_toolkit(
@@ -451,7 +403,7 @@ class TestExecuteTurnBranches:
                 build_static_prompt=MagicMock(return_value="sys")
             ),
             make_delivery=lambda: delivery,
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
 
         toolkit, _ = agent._build_chat_toolkit(
@@ -505,18 +457,6 @@ class TestExecuteTurnBranches:
         assert conv.run.call_args.kwargs["task"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_group_speaker_status_query_failure_is_best_effort(self):
-        # 群 scope：关系/画像查询抛异常 → 不阻断本轮（best-effort），仍完成回复
-        store = _make_store()
-        store.get_relationship = AsyncMock(side_effect=RuntimeError("db down"))
-        store.get_user_profile = AsyncMock(side_effect=RuntimeError("db down"))
-        conv = self._conv(final_text="回复", final_reason="output_collected",
-                          completion_kind="completed", output_arguments={"content": "回复"})
-        agent = self._agent(ConversationScope.for_group("g1"), conv, store=store, delivery=None)
-        outcome = await agent.execute_turn("u1", "g1", "hi")
-        assert outcome.status == "sent"
-
-    @pytest.mark.asyncio
     async def test_token_rotation_real_path(self):
         """P1-4 real path: 真实 Conversation + mock runtime + 超预算消息,
         经 execute_turn→conv.run 验证 rotation_needed,_runtime.run 未被调用。"""
@@ -538,7 +478,7 @@ class TestExecuteTurnBranches:
             config=config,
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=lambda: None,
-            after_response=AsyncMock(),
+            **_make_action_deps(),
         )
         outcome = await agent.execute_turn("u1", "", "hi")
         assert outcome.status == "skipped"

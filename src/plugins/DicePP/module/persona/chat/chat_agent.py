@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.utils.time import get_clock
@@ -24,7 +24,6 @@ from ..life.conversation_scope import ConversationScope
 from ..transcript import (
     format_player_message,
     provider_user_name,
-    sanitize_speaker_label,
 )
 from .chat_shared import ChatOutcome, _client_has_quota
 
@@ -35,6 +34,8 @@ if TYPE_CHECKING:
     from .chat_config import ChatConfig
     from .context import ContextBuilder
     from .delivery_queue import DeliveryQueue
+    from ..life.action_evaluator import ActionEvaluator
+    from ..life.character_life import CharacterLife
 
 
 class ChatAgent:
@@ -50,8 +51,9 @@ class ChatAgent:
         character: Character,
         config: ChatConfig,
         context_builder: ContextBuilder,
+        action_evaluator: ActionEvaluator,
+        character_life: CharacterLife,
         make_delivery: Callable[[], Optional[DeliveryQueue]],
-        after_response: Callable[..., Awaitable[None]],
     ) -> None:
         self._scope = scope
         self._conversation = conversation
@@ -61,7 +63,8 @@ class ChatAgent:
         self._config = config
         self._context_builder = context_builder
         self._make_delivery = make_delivery
-        self._after_response = after_response
+        self._action_evaluator = action_evaluator
+        self._character_life = character_life
 
     @property
     def scope(self) -> ConversationScope:
@@ -70,40 +73,6 @@ class ChatAgent:
     @property
     def conversation(self) -> Conversation:
         return self._conversation
-
-    async def _group_speaker_status(
-        self, user_id: str, speaker_name: str = "",
-    ) -> List[dict]:
-        """群聊：当前说话者的关系/画像作为 turn_only 状态注入（不持久、不锚定）。
-
-        关系提示由 relationship_enabled 控制，画像提示始终保留。
-
-        群 scope 共享 Conversation，注册绑定单一 user 的持久 ChangeSource 会形成
-        "首-user 锚定"（阶段 1 D8 退化不注册）。阶段 2 改为每轮按当前说话者查询、
-        以 transient 注入，只在本轮可见。best-effort：查询失败不阻断本轮。
-        """
-        notes: List[str] = []
-        label_name = sanitize_speaker_label(speaker_name)
-        subject = f"当前说话者（{label_name}）" if label_name else "当前说话者"
-        if self._config.relationship_enabled:
-            try:
-                rel = await self._store.get_relationship(user_id)
-                labels = self._character.get_relation_labels()
-                if rel is not None and labels:
-                    _, label = rel.get_relation_level(labels)
-                    notes.append(f"你和{subject}的关系是{label}。")
-            except Exception:
-                logger.debug("group_speaker_status: 关系查询失败，跳过", exc_info=True)
-        try:
-            profile = await self._store.get_user_profile(user_id)
-            if profile is not None and getattr(profile, "facts", None):
-                facts_lines = "\n".join(f"- {k}: {v}" for k, v in profile.facts.items())
-                notes.append(f"你对{subject}的了解：\n{facts_lines}")
-        except Exception:
-            logger.debug("group_speaker_status: 画像查询失败，跳过", exc_info=True)
-        if not notes:
-            return []
-        return [{"role": "user", "name": "系统", "content": "[通知] " + "\n".join(notes)}]
 
     def _build_chat_toolkit(
         self,
@@ -146,22 +115,26 @@ class ChatAgent:
         from ..tools.roll_dice import build_roll_dice_tool
         from ..tools.read_history import build_read_history_tool
         from ..tools.search_history import build_search_history_tool
-        from ..tools.read_profile import build_read_profile_tool
         from ..tools.read_diary import build_read_diary_tool
         from ..tools.search_diary import build_search_diary_tool
         from ..tools.read_events import build_read_events_tool
         from ..tools.search_events import build_search_events_tool
         from ..tools.get_jrrp import build_get_jrrp_tool
+        from ..tools.suggest_action import build_suggest_action_tool
 
         tools["roll_dice"] = build_roll_dice_tool()
         tools["read_history"] = build_read_history_tool(self._store, user_id, group_id, search_max_chars)
         tools["search_history"] = build_search_history_tool(self._store, user_id, group_id, search_max_chars)
-        tools["read_profile"] = build_read_profile_tool(self._store, user_id, group_id)
         tools["read_diary"] = build_read_diary_tool(self._store, user_id)
         tools["search_diary"] = build_search_diary_tool(self._store, user_id)
         tools["read_events"] = build_read_events_tool(self._store, tz)
         tools["search_events"] = build_search_events_tool(self._store)
         tools["get_jrrp"] = build_get_jrrp_tool(user_id_default=user_id, timezone=tz)
+        tools["suggest_action"] = build_suggest_action_tool(
+            action_evaluator=self._action_evaluator,
+            character_life=self._character_life,
+            user_id=user_id,
+        )
 
         try:
             from ..tools.look_at_past_image import build_look_at_past_image_tool
@@ -189,10 +162,8 @@ class ChatAgent:
         char_name: str,
         final_text: str,
         result,
-        run_after_response: bool = True,
-        user_input: str = "",
     ) -> ChatOutcome:
-        """消费 result 输出、入队 DeliveryItem、等待 delivery 完成、追加 ref、回复后处理。"""
+        """消费 result 输出、入队 DeliveryItem、等待 delivery 完成并追加 ref。"""
         from .delivery_queue import DeliveryItem
 
         # DeliveryItem enqueue（output_arguments 或 final_text 路径）
@@ -234,18 +205,10 @@ class ChatAgent:
 
         # 回复后处理
         if final_text:
-            visible_text = (
-                "\n".join(delivery.sent_contents)
-                if delivery is not None and delivery.sent_contents
-                else final_text
-            )
-            if run_after_response and sent_count > 0:
-                await self._after_response(user_id, group_id, user_input, visible_text)
             return ChatOutcome(
                 "sent",
                 sent_count=sent_count,
                 reason=result.final_reason or "output_collected",
-                counts_as_interaction=run_after_response and sent_count > 0,
             )
 
         if delivery is not None and delivery.sent_count > 0:
@@ -253,7 +216,6 @@ class ChatAgent:
                 "partial_sent",
                 sent_count=delivery.sent_count,
                 reason=result.final_reason or result.completion_kind,
-                counts_as_interaction=False,
             )
         if result.completion_kind == "failed":
             return ChatOutcome("failed", reason=result.final_reason)
@@ -265,7 +227,6 @@ class ChatAgent:
         group_id: str,
         user_input: str,
         *,
-        run_after_response: bool = True,
         message_type: MessageType = MessageType.CHAT,
         image_data_urls: Optional[List[str]] = None,
         transient_message: Optional[str] = None,
@@ -312,12 +273,8 @@ class ChatAgent:
         has_images = bool(image_data_urls)
         current_turn_at = get_clock().now()
         transient_list: List[dict] = []
-        # 群聊：当前说话者关系/画像按轮 turn_only 注入（私聊已有持久 ChangeSource）
+        # 群聊当前说话者只影响本轮消息格式。
         resolved_nickname = speaker_name or user_id
-        if self._scope.is_group:
-            transient_list.extend(
-                await self._group_speaker_status(user_id, resolved_nickname)
-            )
         if transient_message:
             transient_list.append(
                 {"role": "user", "name": "系统", "content": transient_message}
@@ -421,6 +378,4 @@ class ChatAgent:
             char_name=char_name,
             final_text=final_text,
             result=result,
-            run_after_response=run_after_response,
-            user_input=user_input,
         )

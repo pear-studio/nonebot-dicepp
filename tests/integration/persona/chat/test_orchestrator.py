@@ -20,7 +20,6 @@ from plugins.DicePP.core.message_types import MessageType
 def _make_config():
     config = ChatConfig(
         timezone="Asia/Shanghai",
-        relationship_enabled=False,
         max_history_turns=20,
         max_history_tokens=8000,
         lore_token_budget=1000,
@@ -37,9 +36,7 @@ def _make_context_builder():
 def _make_char():
     char = MagicMock()
     char.character_id = "test"
-    char.get_relation_labels.return_value = ["陌生人", "熟人", "朋友"]
     char.extensions.sleep_messages = None
-    char.extensions.refuse_messages = None
     # _render_character_base needs these
     char.personality = ""
     char.scenario = ""
@@ -58,11 +55,6 @@ def _make_store():
     db.commit = AsyncMock()
     store._persona_db = db
     store.add_message_stream = AsyncMock(return_value=1)
-    # 群 scope 的 chat 会走 ChatAgent._group_speaker_status，按当前说话者查关系/画像；
-    # 预置返回 None（无数据）使该 best-effort 路径干净短路，避免落到 spec 自动 mock 的
-    # MagicMock profile 上迭代 .facts。需要注入 speaker 状态的用例自行覆盖返回值。
-    store.get_relationship = AsyncMock(return_value=None)
-    store.get_user_profile = AsyncMock(return_value=None)
     return store
 
 
@@ -73,6 +65,13 @@ def _make_response_handler():
     return handler
 
 
+def _make_action_deps():
+    return {
+        "action_evaluator": MagicMock(),
+        "character_life": MagicMock(),
+    }
+
+
 class TestChatOrchestratorInit:
     """ChatOrchestrator 基本构造"""
 
@@ -80,36 +79,18 @@ class TestChatOrchestratorInit:
         orch = ChatOrchestrator(
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
         )
         assert orch.client is not None
         assert orch.character is not None
-        assert orch.decay_calculator is None
-
-    def test_relationship_switch_controls_private_relation_source(self):
-        orch = ChatOrchestrator(
-            store=_make_store(), client=MagicMock(), character=_make_char(),
-            config=_make_config(), context_builder=_make_context_builder(),
-        )
-
-        source_ids = [
-            source.source_id
-            for source in orch._chat_change_sources(ConversationScope.for_private("u1"))
-        ]
-        assert "chat.relation" not in source_ids
-        assert "chat.profile" in source_ids
-
-        orch._chat_config.relationship_enabled = True
-        source_ids = [
-            source.source_id
-            for source in orch._chat_change_sources(ConversationScope.for_private("u1"))
-        ]
-        assert "chat.relation" in source_ids
+        assert orch._chat_change_sources(ConversationScope.for_private("u1"))
 
     @pytest.mark.asyncio
     async def test_is_awake_no_sleep_gate(self):
         orch = ChatOrchestrator(
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
         )
         assert await orch.is_awake() is True
 
@@ -118,6 +99,7 @@ class TestChatOrchestratorInit:
         orch = ChatOrchestrator(
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
         )
         orch._registry = MagicMock()
         orch._registry.acquire_lease = AsyncMock()
@@ -136,7 +118,6 @@ class TestChatOrchestratorGate:
     async def test_sleep_gate_blocks_chat(self):
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
         char = _make_char()
         char.extensions.sleep_messages = ["Zzz..."]
         sleep_gate = MagicMock()
@@ -146,11 +127,11 @@ class TestChatOrchestratorGate:
             store=store, client=MagicMock(), character=char,
             config=_make_config(), sleep_gate=sleep_gate,
             response_handler=_make_response_handler(),
+            **_make_action_deps(),
         )
         result = await orch.chat("u1", "", "hello")
         assert result.status == "sent"
         assert result.sent_count == 1
-        assert result.counts_as_interaction is False
 
     @pytest.mark.asyncio
     async def test_management_message_uses_character_name(self):
@@ -158,7 +139,6 @@ class TestChatOrchestratorGate:
         # 避免 read_history/search_history 直查 message_stream 时同一 bot 归属分裂。
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
         char = _make_char()
         char.extensions.sleep_messages = ["Zzz..."]
         sleep_gate = MagicMock()
@@ -168,6 +148,7 @@ class TestChatOrchestratorGate:
             store=store, client=MagicMock(), character=char,
             config=_make_config(), sleep_gate=sleep_gate,
             response_handler=_make_response_handler(),
+            **_make_action_deps(),
         )
 
         captured = []
@@ -197,7 +178,6 @@ class TestChatOrchestratorChat:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         # conv.run() 返回 ConversationRunResult
@@ -211,6 +191,7 @@ class TestChatOrchestratorChat:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._ensure_conversation = AsyncMock(return_value=mock_conv)
@@ -231,7 +212,6 @@ class TestChatOrchestratorChat:
         result = await orch.chat("u1", "", "hello")
         assert result.status == "sent"
         assert result.sent_count == 1
-        assert result.counts_as_interaction is True
 
     @pytest.mark.asyncio
     async def test_chat_transient_injection(self, orch_with_mocks):
@@ -275,23 +255,6 @@ class TestChatOrchestratorChat:
         assert result2.reason == "dedup"
 
     @pytest.mark.asyncio
-    async def test_chat_reputation_refused(self, orch_with_mocks):
-        """低信誉时返回拒绝消息"""
-        from plugins.DicePP.module.persona.data.models import RelationshipState
-
-        orch, mock_conv, store = orch_with_mocks
-        orch._chat_config.relationship_enabled = True
-
-        rel = RelationshipState(user_id="u1", reputation=-50)
-        store.get_relationship = AsyncMock(return_value=rel)
-
-        result = await orch.chat("u1", "", "hello")
-        # 信誉低于阈值（默认 30），应返回拒绝消息
-        assert result.status == "sent"
-        assert result.reason == "reputation_refused"
-        assert result.counts_as_interaction is False
-
-    @pytest.mark.asyncio
     async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
         """QuotaExceeded 时调用 on_exhausted 回调返回 fallback 文案"""
         from plugins.DicePP.module.persona.llm.errors import QuotaExceeded
@@ -307,28 +270,6 @@ class TestChatOrchestratorChat:
         result = await orch.chat("u1", "", "hello")
         assert result.status == "sent"
         assert result.reason == "quota_exceeded"
-        assert result.counts_as_interaction is False
-
-    @pytest.mark.asyncio
-    async def test_chat_calls_scoring_trigger(self, orch_with_mocks):
-        """回复后处理调用 scoring_trigger.on_interaction"""
-        orch, mock_conv, store = orch_with_mocks
-
-        mock_scoring_trigger = MagicMock()
-        mock_scoring_trigger.on_interaction = AsyncMock()
-        orch._scoring_trigger = mock_scoring_trigger
-
-        # 模拟 coordinator.submit 内部调用 chat_call_fn → after_response
-        async def mock_submit(target_key, message, chat_call_fn):
-            result = await chat_call_fn([message])
-            return MagicMock(status="success", value=result)
-
-        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
-
-        result = await orch.chat("u1", "", "hello")
-        assert result.status == "sent"
-        # 验证 scoring_trigger.on_interaction 被调用
-        mock_scoring_trigger.on_interaction.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_chat_accepts_ctx(self, orch_with_mocks):
@@ -380,7 +321,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(side_effect=[
@@ -395,6 +335,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -424,7 +365,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(return_value=ConversationRunResult(
@@ -435,6 +375,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -480,7 +421,6 @@ class TestStageBRetry:
         """真实路径: conv.run 实际执行 token 检查返回 rotation_needed → rotate → retry 成功。"""
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         # Real Conversation 1: 超预算 → rotation_needed
         runtime1 = MagicMock()
@@ -501,6 +441,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
 
@@ -541,7 +482,6 @@ class TestStageBRetry:
         """真实路径: 两次 conv.run 都触发 token 检查返回 rotation_needed → retry_limit_exceeded。"""
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         # 两个 conv 都超预算
         runtime1 = MagicMock()
@@ -562,6 +502,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
 
@@ -601,7 +542,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(side_effect=[
@@ -616,6 +556,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -639,7 +580,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(return_value=ConversationRunResult(
@@ -650,6 +590,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -673,7 +614,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(return_value=ConversationRunResult(
@@ -685,6 +625,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -708,7 +649,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
         mock_conv.run = AsyncMock(side_effect=RuntimeError("LLM crash"))
@@ -717,6 +657,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -748,7 +689,6 @@ class TestStageBRetry:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         _call_args: list[dict] = []
         _enter_barrier = asyncio.Event()
@@ -774,6 +714,7 @@ class TestStageBRetry:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -831,6 +772,7 @@ class TestChatOrchestratorScope:
         orch = ChatOrchestrator(
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
         )
         orch._registry = MagicMock()
         orch._registry.acquire_lease = AsyncMock()
@@ -882,6 +824,7 @@ class TestChatOrchestratorScope:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -951,7 +894,6 @@ class TestF2RealRegistryIntegration:
         # 构造 orchestrator，注入真实 registry
         config = ChatConfig(
             timezone="Asia/Shanghai",
-            relationship_enabled=False,
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,
@@ -961,6 +903,7 @@ class TestF2RealRegistryIntegration:
         orch = ChatOrchestrator(
             store=temp_db, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
+            **_make_action_deps(),
             registry=reg,
         )
 
@@ -1022,7 +965,6 @@ class TestF2RealRegistryIntegration:
 
         config = ChatConfig(
             timezone="Asia/Shanghai",
-            relationship_enabled=False,
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,
@@ -1033,6 +975,7 @@ class TestF2RealRegistryIntegration:
         orch = ChatOrchestrator(
             store=temp_db, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
+            **_make_action_deps(),
             registry=reg,
         )
 
@@ -1071,7 +1014,6 @@ class TestChatCommandSerialization:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         # conv.run() 级别的并发追踪器
         _concurrent_count = 0
@@ -1099,6 +1041,7 @@ class TestChatCommandSerialization:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -1142,7 +1085,6 @@ class TestChatCommandSerialization:
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
-        store.get_relationship = AsyncMock()
 
         _concurrent_count = 0
         _max_concurrent = 0
@@ -1168,6 +1110,7 @@ class TestChatCommandSerialization:
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._registry = MagicMock()
@@ -1214,15 +1157,17 @@ class TestChatCommandSerialization:
             if len(calls) == 1:
                 first_entered.set()
                 await release_first.wait()
-            if kwargs["run_after_response"]:
-                return ChatOutcome("sent", reason="chat_delivered")
-            return ChatOutcome("failed", reason="command_runtime_failed")
+            return ChatOutcome(
+                "sent" if len(calls) == 1 else "failed",
+                reason="chat_delivered" if len(calls) == 1 else "command_runtime_failed",
+            )
 
         agent = MagicMock()
         agent.execute_turn = AsyncMock(side_effect=_execute_turn)
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._ensure_conversation = AsyncMock(return_value=MagicMock())
@@ -1258,9 +1203,7 @@ class TestChatCommandSerialization:
             ("chat-user", "chat-body"),
             ("command-user", "command-body"),
         ]
-        assert calls[0][3]["run_after_response"] is True
         assert calls[0][3]["transient_message"] == "chat-ctx"
-        assert calls[1][3]["run_after_response"] is False
         assert calls[1][3]["transient_message"] == "command-ctx"
         assert calls[1][3]["image_data_urls"] == ["data:image/png;base64,command"]
 
@@ -1280,6 +1223,7 @@ class TestChatCommandSerialization:
         orch = ChatOrchestrator(
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            **_make_action_deps(),
             response_handler=_make_response_handler(),
         )
         orch._ensure_conversation = AsyncMock(return_value=MagicMock())
@@ -1355,6 +1299,7 @@ class TestAgentCacheInvalidationOnSilentRotation:
             character=MagicMock(),
             config=ChatConfig(timezone="Asia/Shanghai"),
             context_builder=MagicMock(),
+            **_make_action_deps(),
             registry=reg,
         )
         # 确认 orchestrator 已将 on_scope_closed 回调注册到 registry

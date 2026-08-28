@@ -131,43 +131,27 @@ character_book:
 
 ## Persona 扩展
 
-`extensions.persona` 控制关系标签和生活模拟。
+`extensions.persona` 控制生活模拟。
 
 ```yaml
 extensions:
   persona:
-    relation_labels: ["漠然", "疏冷", "普通", "友好", "心意相通"]
     world: "现代都市出版社，同事关系融洽，偶尔有作者拖稿。"
     daily_events_count: 5
     event_day_start_hour: 8
     event_day_end_hour: 22
     event_jitter_minutes: 60
-    scheduled_events:
-      - type: "morning_greeting"
-        time_range: "08:00-08:30"
-        share: "required"
-      - type: "night_reading"
-        time_range: "21:00-22:00"
-        share: "never"
 ```
 
 常用字段：
 
 | 字段 | 作用 |
 |------|------|
-| `relation_labels` | 5 个关系等级标签 |
 | `world` | 生成生活事件时使用的世界观 |
 | `daily_events_count` | 每天生活事件数量，建议 3 到 6 |
 | `event_day_start_hour` | 生活事件开始时间 |
 | `event_day_end_hour` | 生活事件结束时间 |
 | `event_jitter_minutes` | 事件时间随机偏移 |
-| `scheduled_events` | 固定日常事件 |
-
-`scheduled_events.share` 可选：
-
-- `required`：必须分享
-- `optional`：按分享欲望判断
-- `never`：不分享
 
 ## 验证角色卡
 
@@ -201,4 +185,4 @@ description: |
 daily_events_count: 3
 ```
 
-或把部分 `scheduled_events.share` 改成 `optional` / `never`。
+生活事件数量由 `daily_events_count` 控制；如仍然过多，可继续调低该值。

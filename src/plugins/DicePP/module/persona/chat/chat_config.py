@@ -22,9 +22,6 @@ class ChatConfig:
     timezone: str = "Asia/Shanghai"
     lore_token_budget: int = 300
     tools_max_rounds: int = 10
-    relationship_enabled: bool = False
-    scoring_interval: int = 5
-    reputation_refuse_threshold: float = 30.0
     search_max_chars: int = 180
     # ── 分段回复配置
     segment_target_chars: int = 30
@@ -44,5 +41,4 @@ class ChatConfig:
         return cls(
             timezone=persona.timezone,
             search_max_chars=persona.search_max_chars,
-            relationship_enabled=persona.relationship_enabled,
         )

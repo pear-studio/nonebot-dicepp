@@ -8,7 +8,7 @@ from plugins.DicePP.module.persona.life.conversation import (
     Conversation, Snapshot, Notification,
 )
 from plugins.DicePP.module.persona.life.change_sources import (
-    DateChangeSource, ProfileFactsChangeSource,
+    DateChangeSource,
 )
 from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult as NewAgentRunResult,
@@ -157,21 +157,3 @@ class TestFullRunPipeline:
         assert conv2.length == 4
         assert conv2._cursors["keep"] == "this"
         assert conv2._messages[0]["content"].startswith("[通知]")
-
-    @pytest.mark.asyncio
-    async def test_profile_source_detects_change(self):
-        """ProfileFactsChangeSource 检测 facts 变化"""
-        from plugins.DicePP.module.persona.data.models import UserProfile
-
-        store_mock = MagicMock()
-        profile1 = UserProfile(user_id="u1", facts={"爱好": "种花"})
-        store_mock.get_user_profile = AsyncMock(return_value=profile1)
-
-        source = ProfileFactsChangeSource(store=store_mock, user_id="u1")
-        _, cursor1 = await source.update(None)
-
-        profile2 = UserProfile(user_id="u1", facts={"爱好": "养猫"})
-        store_mock.get_user_profile = AsyncMock(return_value=profile2)
-        notifs, _ = await source.update(cursor1)
-        assert len(notifs) == 1
-        assert "新的了解" in notifs[0].content

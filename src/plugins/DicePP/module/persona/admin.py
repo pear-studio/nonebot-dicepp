@@ -2,8 +2,7 @@
 
 处理所有 .ai admin 子命令，从 command.py 拆出以瘦身命令入口。
 """
-from typing import List, Dict, Any, Optional
-import json
+from typing import List, Dict, Optional
 import time
 from plugins.DicePP.utils.logger import logger
 from datetime import timedelta
@@ -13,8 +12,6 @@ from plugins.DicePP.core.bot import Bot
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .report.daily_report import DailyReportGenerator
-from plugins.DicePP.utils.time import wall_now
-from .data.models import STAGE_FLOORS
 
 
 class AdminDispatcher:
@@ -93,8 +90,6 @@ class AdminDispatcher:
             ".ai admin whitelist remove group <group_id> - 移除群\n"
             ".ai admin whitelist clear - 清空白名单\n"
             ".ai admin debug - 运行诊断（LLM统计、错误摘要）\n"
-            ".ai admin rel <用户ID> - 查看指定用户关系\n"
-            ".ai admin setrel <用户ID> <分数> - 修改好感度\n"
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
             ".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）"
@@ -187,24 +182,9 @@ class AdminDispatcher:
         if not self.app:
             lines.append("\n[状态] 模块未初始化")
             return "\n".join(lines)
-        profile = await self.data_store.get_user_profile(user_id)
-        rel = await self._get_relationship_for_display(user_id)
         lines.append(f"\n当前用户: {user_id}")
         if group_id:
             lines.append(f"当前群组: {group_id}")
-        if rel:
-            lines.extend(self._format_relationship_base(rel))
-        else:
-            lines.append(f"\n[好感度] 暂无记录")
-        if profile and profile.facts:
-            lines.append(f"\n[用户画像]")
-            for k, v in list(profile.facts.items())[:5]:
-                lines.append(f"  {k}: {v}")
-            if len(profile.facts) > 5:
-                lines.append(f"  ... 还有 {len(profile.facts) - 5} 条")
-        else:
-            lines.append(f"\n[用户画像] 暂无")
-
         # 24h 错误摘要
         lines.append(f"\n[24h 错误摘要]")
         if self.data_store:
@@ -223,52 +203,6 @@ class AdminDispatcher:
 
         lines.append(f"  tick_daily 进行中: {'是' if daily_pending else '否'}")
         return "\n".join(lines)
-
-    async def _admin_rel(self, user_id: str, group_id: str, args: List[str]) -> str:
-        rel_args = args[1:]
-        if not rel_args:
-            return "用法: .ai admin rel <用户ID>"
-        target_user = rel_args[0]
-        rel = await self._get_relationship_for_display(target_user)
-        profile = await self.data_store.get_user_profile(target_user)
-        lines = [f"=== 用户 {target_user} 的关系详情 ==="]
-        if rel:
-            lines.extend(self._format_relationship_base(rel))
-            if self.app and self.app.get_character():
-                level, label = rel.get_relation_level(self.app.get_relation_labels())
-                lines.append(f"  等级: {level} ({label})")
-        else:
-            lines.append("\n暂无关系记录")
-        if profile:
-            lines.append(f"\n[画像]")
-            lines.append(f"  更新时间: {profile.updated_at.strftime('%Y-%m-%d') if profile.updated_at else '未知'}")
-            if profile.facts:
-                lines.append(f"  已知信息 ({len(profile.facts)}条):")
-                for k, v in list(profile.facts.items())[:5]:
-                    lines.append(f"    {k}: {v}")
-        return "\n".join(lines)
-
-    async def _admin_setrel(self, user_id: str, group_id: str, args: List[str]) -> str:
-        setrel_args = args[1:]
-        if len(setrel_args) < 2:
-            return "用法: .ai admin setrel <用户ID> <综合分数>"
-        target_user = setrel_args[0]
-        try:
-            new_score = float(setrel_args[1])
-        except ValueError:
-            return "分数必须是数字"
-        if new_score < 0 or new_score > 100:
-            return "分数必须在 0-100 之间"
-        rel = await self.data_store.get_relationship(target_user)
-        if not rel:
-            rel = await self.data_store.init_relationship(target_user)
-        rel.familiarity = new_score
-        rel.intimacy = new_score
-        rel.peak_familiarity = max(rel.peak_familiarity, new_score)
-        rel.peak_intimacy = max(rel.peak_intimacy, new_score)
-        await self.data_store.update_relationship(rel)
-        return f"已设置用户 {target_user} 的好感度为 {new_score:.2f}"
-
     async def _admin_reload(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self.app:
             return "模块未初始化"
@@ -305,13 +239,7 @@ class AdminDispatcher:
         if ext.world:
             lines.append(f"\n[世界观]")
             lines.append(f"  {ext.world}")
-        labels = char.get_relation_labels()
-        lines.append(f"\n[好感度等级]")
-        floors = list(zip(STAGE_FLOORS, STAGE_FLOORS[1:] + [100.0]))
-        for (low, high), label in zip(floors, labels):
-            lines.append(f"  {low}-{high}: {label}")
         return "\n".join(lines)
-
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
         from plugins.DicePP.utils.time import wall_now
         wall = wall_now(self.config.timezone)
@@ -344,28 +272,3 @@ class AdminDispatcher:
         else:
             lines.append(f"\n[事件] 暂无")
         return "\n".join(lines)
-
-    # ── 辅助方法 ──────────────────────────────────────────────
-
-    @staticmethod
-    def _format_relationship_base(rel, precision: int = 2) -> List[str]:
-        """格式化好感度基础信息，返回字符串列表"""
-        fmt = f"  {{}}: {{:.{precision}f}}"
-        lines = ["\n[好感度]"]
-        lines.append(fmt.format("熟悉度", rel.familiarity))
-        lines.append(fmt.format("亲密度", rel.intimacy))
-        lines.append(fmt.format("信誉", rel.reputation))
-        lines.append(fmt.format("综合", rel.composite_score))
-        lines.append(f"  最后互动: {rel.last_interaction_at.strftime('%Y-%m-%d %H:%M') if rel.last_interaction_at else '无'}")
-        return lines
-
-    async def _get_relationship_for_display(
-        self, user_id: str
-    ) -> Optional[Any]:
-        """读取关系并应用惰性时间衰减（展示用，不写库）"""
-        if not self.data_store:
-            return None
-        rel = await self.data_store.get_relationship(user_id)
-        if not rel or not self.app or not self.app.get_decay_calculator() or not self.app.get_character():
-            return rel
-        return self.app.effective_relationship(rel)
