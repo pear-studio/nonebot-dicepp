@@ -56,8 +56,6 @@ class FakeCharacterLoader:
         ext.event_day_start_jitter_minutes = 30
         ext.event_day_end_jitter_minutes = 30
         ext.sleep_messages = None
-        ext.image_gen_style = ""
-        ext.image_gen_appearance = ""
         char.extensions = ext
 
         return char

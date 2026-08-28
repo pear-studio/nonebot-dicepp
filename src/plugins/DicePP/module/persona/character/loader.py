@@ -59,8 +59,6 @@ class CharacterLoader:
             event_day_start_jitter_minutes=persona_data.get("event_day_start_jitter_minutes", 30),
             event_day_end_jitter_minutes=persona_data.get("event_day_end_jitter_minutes", 30),
             sleep_messages=persona_data.get("sleep_messages"),
-            image_gen_style=persona_data.get("image_gen_style", ""),
-            image_gen_appearance=persona_data.get("image_gen_appearance", ""),
         )
         
         # 解析 character_book

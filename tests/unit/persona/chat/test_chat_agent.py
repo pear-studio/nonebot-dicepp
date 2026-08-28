@@ -33,8 +33,6 @@ def _make_char():
     char.character_id = "test"
     char.name = "TestBot"
     char.extensions.sleep_messages = None
-    char.extensions.image_gen_style = ""
-    char.extensions.image_gen_appearance = ""
     return char
 
 

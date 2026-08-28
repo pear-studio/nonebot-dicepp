@@ -311,7 +311,7 @@ extensions:
             assert chars == ["alice", "bob"]
 
     def test_load_all_extensions_fields(self):
-        """测试 PersonaExtensions 生活模拟与图片字段从 YAML 正确加载"""
+        """测试 PersonaExtensions 生活模拟与睡眠字段从 YAML 正确加载"""
         yaml_content = """
 name: 全字段角色
 extensions:
@@ -325,8 +325,6 @@ extensions:
     event_day_end_jitter_minutes: 20
     sleep_messages:
       - zzz
-    image_gen_style: 水彩画风
-    image_gen_appearance: 黑发、高挑、戴眼镜
 """
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -349,8 +347,6 @@ extensions:
             assert ext.event_day_start_jitter_minutes == 15
             assert ext.event_day_end_jitter_minutes == 20
             assert ext.sleep_messages == ["zzz"]
-            assert ext.image_gen_style == "水彩画风"
-            assert ext.image_gen_appearance == "黑发、高挑、戴眼镜"
 
     def test_list_characters_skips_invalid_dirs(self):
         """测试跳过无 character.yaml 的目录"""
