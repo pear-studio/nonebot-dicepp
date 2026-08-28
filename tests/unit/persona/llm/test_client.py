@@ -23,7 +23,7 @@ async def test_generate_uses_internal_task_request_profile(task, timeout, thinki
     provider = SimpleNamespace(generate=AsyncMock(return_value=response))
 
     with patch(
-        "plugins.DicePP.module.persona.llm.client.OpenAIProvider",
+        "plugins.DicePP.module.persona.llm.client.DeepSeekTransport",
         return_value=provider,
     ):
         client = DeepSeekTextModelClient(

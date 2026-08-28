@@ -1,5 +1,5 @@
 """
-OpenAI Provider — 实现 LLMProvider 协议，封装 OpenAI API 调用。
+DeepSeek transport — 封装通过 AsyncOpenAI SDK 发起的 DeepSeek API 调用。
 
 指数退避重试、供应商特定错误分类、缓存 token 提取。
 """
@@ -23,8 +23,8 @@ _NON_RETRYABLE_AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
 _NON_RETRYABLE_CONTENT_KEYWORDS = ("content_filter", "moderation", "content policy")
 
 
-class OpenAIProvider:
-    """基于 AsyncOpenAI 的 LLM 供应商实现"""
+class DeepSeekTransport:
+    """基于 AsyncOpenAI SDK 的 DeepSeek 请求传输实现。"""
 
     retryable_errors: frozenset[str] = frozenset({
         "rate_limit", "timeout", "connection", "server_error"
@@ -75,7 +75,7 @@ class OpenAIProvider:
                 raise
             except asyncio.TimeoutError as e:
                 if attempt < 3:
-                    logger.warning(f"OpenAI 调用超时，{retry_delay}s 后重试 ({attempt + 1}/3)")
+                    logger.warning(f"DeepSeek 调用超时，{retry_delay}s 后重试 ({attempt + 1}/3)")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                     continue
@@ -91,14 +91,14 @@ class OpenAIProvider:
                 retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
                 if retryable and attempt < 3:
                     logger.warning(
-                        f"OpenAI 调用失败({error_msg[:80]})，{retry_delay}s 后重试 ({attempt + 1}/3)"
+                        f"DeepSeek 调用失败({error_msg[:80]})，{retry_delay}s 后重试 ({attempt + 1}/3)"
                     )
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                     continue
                 raise
 
-        raise RuntimeError("OpenAIProvider.generate: unreachable")
+        raise RuntimeError("DeepSeekTransport.generate: unreachable")
 
     async def _call(
         self,
@@ -154,7 +154,7 @@ class OpenAIProvider:
                 ),
             }
             logger.error(
-                f"[DEBUG_API_ERROR] LLM API 调用异常: "
+                f"[DEBUG_API_ERROR] DeepSeek API 调用异常: "
                 f"{json.dumps(debug_info, ensure_ascii=False)}"
             )
             raise
@@ -165,7 +165,7 @@ class OpenAIProvider:
 
         reasoning = self._extract_reasoning(message)
 
-        # content 直接使用；OpenAI-compatible API 的正文与思考链分开返回
+        # content 直接使用；DeepSeek API 的正文与思考链分开返回
         content = message.content or ""
 
         # 检查：如果 tool_calls 出现在 reasoning_content 里，记录警告
@@ -191,7 +191,7 @@ class OpenAIProvider:
         model = getattr(response, "model", self.model) or self.model
 
         logger.debug(
-            f"OpenAI 调用完成: model={model} finish={finish_reason} "
+            f"DeepSeek 调用完成: model={model} finish={finish_reason} "
             f"tokens_in={usage.input} tokens_out={usage.output} "
             f"cache_read={usage.cache_read} latency={latency:.1f}s"
         )
@@ -240,7 +240,7 @@ class OpenAIProvider:
                 if details and hasattr(details, "reasoning_tokens"):
                     reasoning_tokens = details.reasoning_tokens or 0
 
-            # 缓存字段（兼容三家 API，优先级：OpenAI > Anthropic > DeepSeek）
+            # 按兼容 SDK 的响应结构读取缓存字段
             cache_read = 0
             cache_creation = 0
             if hasattr(response.usage, "prompt_tokens_details"):

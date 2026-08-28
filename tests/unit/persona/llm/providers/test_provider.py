@@ -1,20 +1,20 @@
 """
-Provider 单元测试 — OpenAIProvider 纯文本/工具调用/退避重试, CollectProvider 拦截
+DeepSeekTransport 单元测试 — 纯文本/工具调用/退避重试
 """
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 
-from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider, NonRetryableError
+from plugins.DicePP.module.persona.llm.providers.deepseek import DeepSeekTransport, NonRetryableError
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
 
-class TestOpenAIProvider:
-    """OpenAIProvider 基本功能"""
+class TestDeepSeekTransport:
+    """DeepSeekTransport 基本功能"""
 
     @pytest.fixture
     def provider(self):
-        return OpenAIProvider(api_key="sk-test", base_url="https://api.test.com/v1", model="gpt-4o")
+        return DeepSeekTransport(api_key="sk-test", base_url="https://api.test.com/v1", model="gpt-4o")
 
     class _Usage:
         def __init__(self, prompt_tokens=0, completion_tokens=0, cached=0):
@@ -301,7 +301,6 @@ class TestOpenAIProvider:
 
     def test_usage_status_missing(self, provider):
         """无 usage 时 usage_status='missing'"""
-        from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider
         resp_mock = Mock()
         resp_mock.usage = None
         resp_mock.choices = [Mock()]

@@ -1,1 +1,1 @@
-"""OpenAI-compatible response parsing used by the DeepSeek text client."""
+"""DeepSeek response parsing used by the text client."""

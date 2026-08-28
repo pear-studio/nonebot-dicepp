@@ -2,7 +2,6 @@
 
 Persona 当前只连接 DeepSeek。这个模块只保留一个很小的调用边界：上层
 提供消息和工具，客户端负责 DeepSeek 请求与并发。
-新增模型时直接实现同一协议即可，不需要恢复 provider registry 或候选路由。
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, List, Optional, Protocol
 
-from .providers.openai import OpenAIProvider
+from .providers.deepseek import DeepSeekTransport
 from .providers.protocol import LLMResponse
 
 
@@ -34,8 +33,7 @@ class TextModelClient(Protocol):
 class DeepSeekTextModelClient:
     """DeepSeek 的直接文本客户端。
 
-    ``OpenAIProvider`` 仅作为 OpenAI-compatible 请求解析实现复用；这里不
-    暴露 provider 注册或模型候选概念。
+    请求通过 AsyncOpenAI SDK 发送，但只暴露 DeepSeek 的单一文本调用边界。
     """
 
     provider_name = "deepseek"
@@ -67,7 +65,7 @@ class DeepSeekTextModelClient:
         self.model = model
         self.data_store = data_store
         self.llm_debug_enabled = llm_debug_enabled
-        self._provider = OpenAIProvider(
+        self._transport = DeepSeekTransport(
             api_key=api_key,
             base_url=base_url,
             model=model,
@@ -82,7 +80,7 @@ class DeepSeekTextModelClient:
     ) -> LLMResponse:
         profile = self._profile_for(task)
         async with self._semaphore:
-            return await self._provider.generate(
+            return await self._transport.generate(
                 messages=messages,
                 tools=tools,
                 temperature=profile.temperature,

@@ -1,6 +1,4 @@
-"""
-LLMProvider 协议与标准化数据结构
-"""
+"""LLM 调用的标准化数据结构与图片生成协议。"""
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable, List, Optional
 
@@ -48,20 +46,6 @@ class LLMResponse:
     latency_ms: Optional[float] = None       # 调用耗时（毫秒）
 
 
-@runtime_checkable
-class LLMProvider(Protocol):
-    """OpenAI-compatible 文本请求解析协议。"""
-
-    async def generate(
-        self,
-        messages: List[dict],
-        tools: Optional[List[dict]] = None,
-        temperature: Optional[float] = None,
-        timeout: int = 60,
-        tool_choice: Optional[str] = None,
-        thinking: bool = False,
-    ) -> LLMResponse:
-        ...
 @runtime_checkable
 class ImageGenProvider(Protocol):
     """图片生成供应商协议"""
