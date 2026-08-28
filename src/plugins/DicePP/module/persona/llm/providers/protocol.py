@@ -35,7 +35,7 @@ class TokenUsage:
     cache_creation: int = 0 # 缓存写入的 token
     reasoning: int = 0      # 推理 token
     # 注意：output 与 reasoning 互斥。
-    # DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需做减法；
+    # DeepSeek 的 completion_tokens 包含 reasoning_tokens，需做减法；
     # OpenAI 的 completion_tokens 只算非推理 tokens，直接赋值。
     # 因此 output = 纯文本输出，reasoning = 推理 tokens，两者互斥。
     usage_status: str = ""      # "ok" / "missing" / "malformed"
@@ -45,7 +45,7 @@ class TokenUsage:
 
 @dataclass
 class LLMResponse:
-    content: Optional[str]           # API 返回的文本。契约：provider 层保证 content 不含 <think> 标签（MiniMax 通过 reasoning_split=True 强制分离）
+    content: Optional[str]           # API 返回的文本。契约：provider 层保证 content 不含 <think> 标签
     tool_calls: List[ToolCall] = field(default_factory=list)
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str = "stop"

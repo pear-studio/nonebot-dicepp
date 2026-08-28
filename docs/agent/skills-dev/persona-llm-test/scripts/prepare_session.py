@@ -341,17 +341,12 @@ def build_session_bot_config(
 ) -> dict[str, Any]:
     builtin_providers = default_config["persona_ai"]["providers"]
     provider_overrides: dict[str, dict[str, Any]] = {}
-    for provider_name, provider_config in builtin_providers.items():
-        has_key = provider_name in credentials
+    for provider_name, api_key in credentials.items():
+        provider_config = builtin_providers[provider_name]
         provider_overrides[provider_name] = {
-            "enabled": bool(
-                has_key and provider_config.get("enabled", True)
-            )
+            "enabled": bool(provider_config.get("enabled", True)),
+            "api_key": api_key,
         }
-        if has_key:
-            provider_overrides[provider_name]["api_key"] = credentials[
-                provider_name
-            ]
 
     return deep_merge(
         test_overrides,

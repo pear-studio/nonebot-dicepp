@@ -2,8 +2,8 @@
 
 DicePP 使用 JSON 配置。常用文件是：
 
-- `config/bots/{QQ号}.json`：单个 Bot 账号配置；
-- `config/user.json`：实例级稀疏覆盖和 API Key；
+- `config/bots/{QQ号}.json`：单个 Bot 账号配置，包括 Persona AI 和 API Key；
+- `config/user.json`：当前保留为空，暂不需要填写；
 - `content/`：角色卡、牌组、随机表和查询库；
 - `data/`：Bot 运行数据库、日志和存档 `data/backups/`；
 - `dashboard/data/`：Dashboard 管理员和 session 数据；
@@ -38,13 +38,13 @@ DicePP 使用 JSON 配置。常用文件是：
 
 ## API Key 与环境变量
 
-API Key 放在未提交的 `config/user.json`，例如：
+API Key 放在未提交的 `config/bots/{QQ号}.json`，例如：
 
 ```json
 {
   "persona_ai": {
     "providers": {
-      "minimax": {"api_key": "your-api-key-here"}
+      "deepseek": {"api_key": "your-api-key-here"}
     }
   }
 }

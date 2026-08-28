@@ -41,12 +41,7 @@ def test_schema_loader_uses_frozen_asset_without_source_tree(
         schema = app_module._load_pydantic_models_module()
 
         assert schema is not None
-        assert set(schema.BotConfig().persona_ai.providers) == {
-            "minimax",
-            "deepseek",
-            "minimax_image",
-            "mimo",
-        }
+        assert set(schema.BotConfig().persona_ai.providers) == {"deepseek"}
         assert all(
             type(provider) is schema.ProviderConfig
             for provider in schema.BotConfig().persona_ai.providers.values()

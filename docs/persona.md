@@ -6,17 +6,17 @@ Persona AI 可以让 DicePP 扮演一个有角色设定、记忆和主动消息�
 
 ## 准备 API Key
 
-先准备一个 LLM API Key。推荐先使用 MiniMax，也可以使用兼容 OpenAI 格式的接口。
+先准备一个 DeepSeek API Key。
 
-API Key 只写到 `config/user.json`。程序内置的 provider/model 目录不含密钥。
+API Key 只写到 `config/bots/{QQ号}.json`。程序内置的 provider/model 目录不含密钥。
 
-在 `config/user.json` 中加入：
+在 `config/bots/{QQ号}.json` 中加入：
 
 ```json
 {
   "persona_ai": {
     "providers": {
-      "minimax": {
+      "deepseek": {
         "api_key": "把你的 API Key 放在这里"
       }
     }
@@ -28,7 +28,7 @@ API Key 只写到 `config/user.json`。程序内置的 provider/model 目录不�
 
 ## 启用 Persona
 
-Persona 的实例级设置写在 `config/user.json` 的 `persona_ai` 段；未写出的字段使用程序内置默认值。
+Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写出的字段使用程序内置默认值。
 
 新手只需要先确认这几项：
 
@@ -52,19 +52,19 @@ Persona 的实例级设置写在 `config/user.json` 的 `persona_ai` 段；未�
 
 | 字段 | 说明 |
 |------|------|
-| `enabled` | 设为 `true` 才会启用 Persona（在 `user.json` 中覆盖） |
+| `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
 | `persona` | 角色卡目录名，在 `config/bots/{账号}.json` 顶层设置 |
 | `character_path` | 角色目录根路径，通常不用改 |
 | `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |
 
-MiniMax 的模型配置已经内置。如果你需要在 `user.json` 中覆盖，默认 `providers.minimax.base_url` 是：
+DeepSeek 的模型配置已经内置。如果你需要在 Bot 配置中覆盖，默认 `providers.deepseek.base_url` 是：
 
 ```text
-https://api.minimaxi.com/v1
+https://api.deepseek.com
 ```
 
-`api_key` 只放在 `user.json` 的对应 provider 下。
+`api_key` 只放在该 Bot 配置的对应 provider 下。
 
 ## 准备角色卡
 
@@ -147,7 +147,7 @@ content/characters/mychar/
 
 定时主动分享默认关闭。启用后，角色会在早安、晚安或指定时间点主动生成消息；它不是由某个事件槽位直接触发的旧机制。
 
-在 `config/user.json` 的 `persona_ai` 段中配置。例如：
+在 `config/bots/{QQ号}.json` 的 `persona_ai` 段中配置。例如：
 
 ```json
 {
@@ -194,14 +194,14 @@ content/characters/mychar/
 
 检查：
 
-- `api_key` 是否写在 `config/user.json`
+- `api_key` 是否写在 `config/bots/{QQ号}.json`
 - `base_url` 是否正确
 - 模型名是否写对
 
-MiniMax 常用地址：
+DeepSeek 常用地址：
 
 ```text
-https://api.minimaxi.com/v1
+https://api.deepseek.com
 ```
 
 ### 主动消息太频繁
@@ -212,7 +212,7 @@ https://api.minimaxi.com/v1
 .ai admin pause
 ```
 
-再调整 `config/user.json` 中的主动消息相关配置并重启 Bot。
+再调整 `config/bots/{QQ号}.json` 中的主动消息相关配置并重启 Bot。
 
 ### 修改角色卡后没有生效
 

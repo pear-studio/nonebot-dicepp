@@ -146,7 +146,7 @@ class OpenAIProvider:
             create_kwargs["tools"] = tools
             if tool_choice is not None:
                 create_kwargs["tool_choice"] = tool_choice
-        # thinking 模式下跳过 temperature（MiMo/DeepSeek 静默忽略，但主动跳过更安全）
+        # thinking 模式下跳过 temperature（DeepSeek 静默忽略，但主动跳过更安全）
         if temperature is not None and not thinking:
             create_kwargs["temperature"] = temperature
 
@@ -191,12 +191,12 @@ class OpenAIProvider:
 
         reasoning = self._extract_reasoning(message)
 
-        # content 直接使用（MiniMax 通过 reasoning_split=True 确保分离；其他 API 默认行为即干净文本）
+        # content 直接使用；OpenAI-compatible API 的正文与思考链分开返回
         content = message.content or ""
 
         # 检查：如果 tool_calls 出现在 reasoning_content 里，记录警告
         if message.tool_calls and isinstance(reasoning, str) and "tool_calls" in reasoning:
-            logger.warning("检测到 tool_calls 出现在 reasoning_content 中，可能是 MiMo thinking + tool_calls 不稳定")
+            logger.warning("检测到 tool_calls 出现在 reasoning_content 中，可能是 thinking + tool_calls 不稳定")
 
         # 标准化 tool_calls
         raw_tool_calls = message.tool_calls or []

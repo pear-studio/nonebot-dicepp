@@ -414,9 +414,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     account = json.loads(account_path.read_text(encoding="utf-8"))
     providers = account["persona_ai"]["providers"]
     assert providers["deepseek"] == {"enabled": True, "api_key": secret}
-    assert providers["minimax"]["enabled"] is False
-    assert providers["minimax_image"]["enabled"] is False
-    assert providers["mimo"]["enabled"] is False
+    assert set(providers) == {"deepseek"}
     assert account["persona_ai"]["character_path"] == str(
         (result.path / "content" / "characters").resolve()
     )
@@ -441,7 +439,6 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     )
     assert loaded.persona_ai.providers["deepseek"].api_key == secret
     assert loaded.persona_ai.providers["deepseek"].enabled is True
-    assert loaded.persona_ai.providers["minimax"].enabled is False
 
     summary = prepare.format_summary(result)
     assert secret not in summary

@@ -42,10 +42,10 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 config = module.BotConfig()
-assert set(config.persona_ai.providers) == {"minimax", "deepseek", "minimax_image", "mimo"}
+assert set(config.persona_ai.providers) == {"deepseek"}
 assert all(type(value) is module.ProviderConfig for value in config.persona_ai.providers.values())
 dumped = config.model_dump(mode="json", by_alias=True)
-assert dumped["persona_ai"]["providers"]["minimax"]["base_url"] == "https://api.minimaxi.com/v1"
+assert dumped["persona_ai"]["providers"]["deepseek"]["base_url"] == "https://api.deepseek.com"
 '''
     completed = subprocess.run(
         [sys.executable, "-I", "-c", script, str(assets)],

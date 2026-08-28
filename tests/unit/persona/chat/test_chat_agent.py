@@ -470,6 +470,30 @@ class TestExecuteTurnBranches:
         assert conv.run.call_args.kwargs["selection"] is CHAT_WITH_IMAGE
         assert conv.run.call_args.kwargs["transient_context_messages"]
 
+    def test_no_image_provider_keeps_past_image_tool_only(self):
+        router = MagicMock()
+        router.get_gen_provider.return_value = None
+        agent = ChatAgent(
+            scope=ConversationScope.for_private("u1"),
+            conversation=MagicMock(spec=Conversation),
+            store=_make_store(),
+            router=router,
+            character=_make_char(),
+            config=_make_config(),
+            context_builder=MagicMock(
+                build_static_prompt=MagicMock(return_value="sys")
+            ),
+            make_delivery=lambda: None,
+            after_response=AsyncMock(),
+        )
+
+        toolkit, _ = agent._build_chat_toolkit(
+            None, "interaction", "u1", "", "TestBot"
+        )
+
+        assert "generate_image" not in toolkit.tools
+        assert "look_at_past_image" in toolkit.tools
+
     @pytest.mark.asyncio
     async def test_group_image_transient_keeps_speaker_identity(self):
         conv = self._conv(final_text="ok", final_reason="stop",

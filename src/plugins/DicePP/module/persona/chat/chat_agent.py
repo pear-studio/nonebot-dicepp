@@ -166,7 +166,7 @@ class ChatAgent:
             handle_error = self._router.handle_model_error if hasattr(self._router, "handle_model_error") else None
             base_style = getattr(self._character.extensions, "image_gen_style", "") or ""
             appearance = getattr(self._character.extensions, "image_gen_appearance", "") or ""
-            if get_gen is not None:
+            if get_gen is not None and get_gen() is not None:
                 tools["generate_image"] = build_generate_image_tool(
                     get_gen_provider=get_gen,
                     handle_model_error=handle_error,

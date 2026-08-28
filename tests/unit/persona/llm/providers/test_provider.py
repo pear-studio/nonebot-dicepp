@@ -274,7 +274,7 @@ class TestOpenAIProvider:
 
     @pytest.mark.asyncio
     async def test_temperature_skipped_when_thinking_true(self, provider):
-        """thinking=True 时跳过 temperature（MiMo/DeepSeek 兼容）"""
+        """thinking=True 时跳过 temperature（DeepSeek 兼容）"""
         mock_client = Mock()
         mock_client.chat.completions.create = AsyncMock(
             return_value=self._mock_openai_response(content="ok"))

@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from plugins.DicePP.utils.logger import logger
 
-from .providers import _PROVIDER_CLASSES, _PROVIDER_OVERRIDES
+from .providers import _PROVIDER_CLASSES
 from .providers.protocol import ImageGenProvider
 from .errors import classify_from_provider
 from .circuit_breaker import CircuitBreakerRegistry
@@ -105,11 +105,7 @@ class LLMRouter:
                     probe_interval_seconds=cb_config.probe_interval_seconds if cb_config else 300,
                 )
 
-                provider_cls = _PROVIDER_OVERRIDES.get((pname, mconfig.category))
-                if provider_cls is None:
-                    provider_cls = _PROVIDER_CLASSES.get(mconfig.category)
-                else:
-                    logger.info(f"模型 '{mconfig.name}' (provider={pname}) 使用覆盖 {provider_cls.__name__}")
+                provider_cls = _PROVIDER_CLASSES.get(mconfig.category)
                 if provider_cls is None:
                     logger.warning(
                         f"模型 '{mconfig.name}' (provider={pname}) 跳过: "
@@ -207,10 +203,6 @@ class LLMRouter:
 
         candidates.sort(key=lambda x: x[0], reverse=True)
         return self._model_providers[candidates[0][1]]
-
-    def has_gen_provider(self) -> bool:
-        """检查是否有可用的 gen 模型（启动探针成功且非 dead）。"""
-        return self.get_gen_provider() is not None
 
     def get_provider_key(self, provider) -> Optional[tuple]:
         """获取 provider 对应的 (provider_name, model_name)。"""

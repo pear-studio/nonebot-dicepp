@@ -72,11 +72,6 @@ def build_generate_image_tool(
                 handle_model_error(gen_provider, Exception("timeout"))
             return ToolResult(observation="图片生成超时，请稍后重试", status="error")
         except Exception as e:
-            if "[1000]" in str(e):
-                return ToolResult(
-                    observation="图片生成 prompt 可能过长被远端拒绝。请进一步缩短后重试。",
-                    status="error",
-                )
             if handle_model_error:
                 handle_model_error(gen_provider, e)
             return ToolResult(observation=f"图片生成失败: {e}", status="error")

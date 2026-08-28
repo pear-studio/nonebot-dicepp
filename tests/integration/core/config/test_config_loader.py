@@ -103,13 +103,13 @@ def test_each_config_file_rejects_unknown_fields_and_wrong_types(
 def test_account_sparse_nested_mapping_preserves_default_siblings(dd):
     _write(
         dd.account_cfg("bot1"),
-        {"persona_ai": {"providers": {"minimax": {"api_key": "test-key"}}}},
+        {"persona_ai": {"providers": {"deepseek": {"api_key": "test-key"}}}},
     )
 
     cfg = dd.loader("bot1").load()
 
-    assert cfg.persona_ai.providers["minimax"].api_key == "test-key"
-    assert cfg.persona_ai.providers["minimax"].base_url == "https://api.minimaxi.com/v1"
+    assert cfg.persona_ai.providers["deepseek"].api_key == "test-key"
+    assert cfg.persona_ai.providers["deepseek"].base_url == "https://api.deepseek.com"
     assert cfg.persona_ai.providers["deepseek"].models
 
 

@@ -165,9 +165,9 @@ class TestLLMGateway:
     ):
         provider = Mock()
         provider.generate = AsyncMock(return_value=_make_llm_resp(content="ok"))
-        mock_router.build_candidates.return_value = [("minimax", "m1")]
-        mock_router._model_providers = {("minimax", "m1"): provider}
-        mock_router.stats = {"minimax": {"requests": 0, "errors": 0}}
+        mock_router.build_candidates.return_value = [("generic", "m1")]
+        mock_router._model_providers = {("generic", "m1"): provider}
+        mock_router.stats = {"generic": {"requests": 0, "errors": 0}}
         request = _make_request(messages=[{
             "role": "user",
             "name": "runtime_instruction",

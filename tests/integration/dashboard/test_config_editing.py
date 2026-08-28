@@ -30,10 +30,10 @@ class TestMergedView:
         # Keys from BotConfig with no user override have source "default".
         assert config["friend_request_token"]["value"] == ""
         assert config["friend_request_token"]["source"] == "default"
-        assert config["persona_ai.providers.minimax.base_url"]["value"] == (
-            "https://api.minimaxi.com/v1"
+        assert config["persona_ai.providers.deepseek.base_url"]["value"] == (
+            "https://api.deepseek.com"
         )
-        assert config["persona_ai.providers.minimax.base_url"]["source"] == "default"
+        assert config["persona_ai.providers.deepseek.base_url"]["source"] == "default"
 
     def test_merged_does_not_treat_user_json_as_bot_overlay(
         self, test_client: TestClient, tmp_dashboard_paths
@@ -383,8 +383,8 @@ class TestFieldMetadata:
     def test_dynamic_key_metadata_match(self):
         """_find_meta matches data keys with dynamic segments against static schema keys.
 
-        persona_ai.providers.minimax.api_key (data) should match
-        persona_ai.providers.api_key (metadata) by skipping the dynamic 'minimax' segment.
+        persona_ai.providers.deepseek.api_key (data) should match
+        persona_ai.providers.api_key (metadata) by skipping the dynamic 'deepseek' segment.
         """
         from dashboard.src.app import _find_meta
 
@@ -405,8 +405,8 @@ class TestFieldMetadata:
         assert m["title"] == "启用 Persona"
         assert m["section"] == "basic"
 
-        # Dynamic key skip: persona_ai.providers.minimax.api_key → persona_ai.providers.api_key
-        m = _find_meta("persona_ai.providers.minimax.api_key", field_meta)
+        # Dynamic key skip: persona_ai.providers.deepseek.api_key → persona_ai.providers.api_key
+        m = _find_meta("persona_ai.providers.deepseek.api_key", field_meta)
         assert m["title"] == "API Key", f"expected 'API Key', got {m.get('title')!r}"
         assert m["tab"] == "persona"
         assert m["section"] == "providers"
