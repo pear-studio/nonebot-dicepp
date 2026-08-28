@@ -74,7 +74,7 @@ def life(config, mock_event_agent, mock_data_store, character):
 @pytest.fixture
 def config():
     """标准 CharacterLifeConfig"""
-    return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_force_extend_once_prob=0.0)
+    return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai')
 
 @pytest.fixture
 def life(config, mock_event_agent, mock_data_store, character):
@@ -96,7 +96,7 @@ class TestCharacterLifeBasics:
 
     @pytest.fixture
     def config(self):
-        return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_force_extend_once_prob=0.0)
+        return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai')
 
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
@@ -546,7 +546,7 @@ class TestCharacterLifePhase2:
 
     @pytest.fixture
     def config(self):
-        return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', min_event_interval_minutes=5, chain_max_depth=3, chain_force_extend_once_prob=0.0)
+        return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', min_event_interval_minutes=5, chain_max_depth=3)
 
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
@@ -601,25 +601,6 @@ class TestCharacterLifePhase2:
         assert updated_state.energy == 30
         assert updated_state.mood == 70
         assert updated_state.health == 50
-
-    @pytest.mark.asyncio
-    async def test_chain_force_extend_once_prob_ignored(self, life, mock_event_agent, monkeypatch):
-        """已弃用：chain_force_extend_once_prob 不再影响链深度（want_to_end 协议替代）"""
-        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        set_test_clock(fake_now)
-        life.config.chain_force_extend_once_prob = 1.0
-        life._slot_minutes_today = [(10 * 60, 'system')]
-        life._last_event_date = '2024-01-01'
-        # DM 和 Character 都 set want_to_end=True → 单轮后双方共识结束
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
-            success=True,
-            data=EventGenerationResult(description='事件', want_to_end=True)))
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
-            success=True,
-            data=EventReactionResult(reaction='一般', want_to_end=True)))
-        result = await life.tick()
-        assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_chain_no_consensus_continues_to_max_depth(self, life, mock_event_agent, monkeypatch):

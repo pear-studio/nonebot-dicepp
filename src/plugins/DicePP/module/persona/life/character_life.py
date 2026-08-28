@@ -48,7 +48,6 @@ class CharacterLifeConfig:
         timezone: str = "Asia/Shanghai",
         min_event_interval_minutes: int = 5,
         chain_max_depth: int = 3,
-        chain_force_extend_once_prob: float = 0.0,  # deprecated，不再使用（want_to_end 共识结束替代）
         recovery_energy: int = 20,
         default_energy: int = 50,
         default_mood: int = 50,
@@ -60,7 +59,6 @@ class CharacterLifeConfig:
         self.timezone = timezone
         self.min_event_interval_minutes = min_event_interval_minutes
         self.chain_max_depth = max(1, min(10, chain_max_depth))
-        self.chain_force_extend_once_prob = chain_force_extend_once_prob
         self.recovery_energy = recovery_energy
         self.default_energy = default_energy
         self.default_mood = default_mood
@@ -99,7 +97,6 @@ class CharacterLife:
         self._ongoing_activities: List[OngoingActivity] = []
         self._today_jittered_start: Optional[int] = None
         self._today_jittered_end: Optional[int] = None
-        self._chain_triggered_today: bool = False  # deprecated: 保底续写逻辑已移除，仅保留序列化兼容，后续大版本清理
         self._last_good_night_fired_at: Optional[datetime] = None
         self._slot_cooldown_until: Dict[int, float] = {}  # slot index → time.monotonic() 冷却截止
         self._state_lock = asyncio.Lock()
@@ -201,7 +198,6 @@ class CharacterLife:
                 self._last_event_date = today
                 return
         self._fired_slot_indices.clear()
-        self._chain_triggered_today = False
         self._today_jittered_start = None
         self._today_jittered_end = None
         self._regenerate_slots_for_today()
@@ -278,7 +274,6 @@ class CharacterLife:
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
-        self._chain_triggered_today = bool(data.get("chain_triggered"))
         lg = data.get("last_good_night_fired_at")
         if isinstance(lg, str):
             try:
@@ -309,7 +304,6 @@ class CharacterLife:
                 }
                 for a in self._ongoing_activities
             ],
-            "chain_triggered": self._chain_triggered_today,
             "last_good_night_fired_at": (
                 self._last_good_night_fired_at.isoformat()
                 if self._last_good_night_fired_at else None
@@ -735,7 +729,6 @@ class CharacterLife:
             "event_day_start_hour": self.character.extensions.event_day_start_hour,
             "event_day_end_hour": self.character.extensions.event_day_end_hour,
             "event_jitter_minutes": self.character.extensions.event_jitter_minutes,
-            "chain_triggered_today": self._chain_triggered_today,
             "chain_max_depth": self.config.chain_max_depth,
         }
 

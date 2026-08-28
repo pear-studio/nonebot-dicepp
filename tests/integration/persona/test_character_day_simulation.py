@@ -61,7 +61,7 @@ def mock_agents():
 
 @pytest.fixture
 def config():
-    return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', min_event_interval_minutes=5, chain_max_depth=3, chain_force_extend_once_prob=0.0)
+    return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', min_event_interval_minutes=5, chain_max_depth=3)
 
 @pytest.fixture
 def life(temp_db, mock_agents, character, config):

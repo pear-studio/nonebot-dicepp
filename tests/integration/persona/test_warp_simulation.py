@@ -120,7 +120,6 @@ def config():
         timezone="Asia/Shanghai",
         min_event_interval_minutes=5,
         chain_max_depth=1,
-        chain_force_extend_once_prob=0.0,
     )
 
 

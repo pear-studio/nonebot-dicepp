@@ -25,7 +25,6 @@ def _make_cfg(**kw):
         timezone="Asia/Shanghai",
         min_event_interval_minutes=5,
         chain_max_depth=1,
-        chain_force_extend_once_prob=0.0,
         default_energy=50, default_mood=50, default_health=50,
         recovery_energy=20,
         **kw,
