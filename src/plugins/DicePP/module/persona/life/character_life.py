@@ -248,8 +248,6 @@ class CharacterLife:
                     continue
                 if isinstance(item, list) and len(item) == 2:
                     self._slot_minutes_today.append((int(item[0]), str(item[1])))
-                else:
-                    self._slot_minutes_today.append((int(item), "system"))
             self._slot_minutes_today = [
                 (m % 1440, t) for m, t in self._slot_minutes_today
             ]

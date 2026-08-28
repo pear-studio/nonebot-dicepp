@@ -228,10 +228,10 @@ class TestCharacterLifePersistence:
     async def test_load_state_same_day(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
-        raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0], "jittered_start": 420, "jittered_end": 1260}'
+        raw = '{"date": "2024-01-01", "slot_minutes": [[480, "wake_up"], [720, "system"], [960, "good_night"]], "fired": [0], "jittered_start": 420, "jittered_end": 1260}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
-        assert life._slot_minutes_today == [(480, 'system'), (720, 'system'), (960, 'system')]
+        assert life._slot_minutes_today == [(480, 'wake_up'), (720, 'system'), (960, 'good_night')]
         assert life._fired_slot_indices == {0}
         assert life._last_event_date == '2024-01-01'
 
@@ -239,7 +239,7 @@ class TestCharacterLifePersistence:
     async def test_load_state_old_day_regenerates(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         set_test_clock(fake_now)
-        raw = '{"date": "2024-01-01", "slot_minutes": [480], "fired": [0]}'
+        raw = '{"date": "2024-01-01", "slot_minutes": [[480, "system"]], "fired": [0]}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
         assert life._last_event_date is None
