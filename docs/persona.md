@@ -166,7 +166,7 @@ Persona 对话默认对所有用户开放。管理员可维护不计入 AI 限�
 检查：
 
 - `deepseek_api_key` 是否写在实例级 `config/user.json`
-- `base_url` 是否正确
+- `deepseek_base_url` 是否正确
 - 模型名是否写对
 
 DeepSeek 常用地址：

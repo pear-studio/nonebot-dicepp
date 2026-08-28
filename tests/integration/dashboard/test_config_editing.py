@@ -99,9 +99,10 @@ class TestMergedView:
             assert "sections" in layout
             assert "config" in layout["tabs"]
             assert "persona" in layout["tabs"]
-            assert "account" in layout["sections"]
-            assert "advanced" in layout["sections"]
-            assert "basic" in layout["sections"]
+            assert set(layout["sections"]) == {
+                "user", "account", "modules", "advanced", "basic", "life_sim",
+            }
+            assert layout["sections"]["user"]["label"] == "实例配置"
 
     def test_merged_excludes_comment_keys(self, test_client: TestClient, tmp_dashboard_paths):
         """``_comment`` keys (write-only dev notes) must not appear in merged output."""
@@ -375,11 +376,13 @@ class TestFieldMetadata:
         assert "command_split" not in meta
         assert "bot_default_enable" not in meta
 
-        # Layout must contain expected tabs and sections
+        # Layout must match the sections exposed by the current schemas.
         assert "config" in layout.get("tabs", {})
         assert "persona" in layout.get("tabs", {})
-        assert "account" in layout.get("sections", {})
-        assert "basic" in layout.get("sections", {})
+        assert set(layout.get("sections", {})) == {
+            "user", "account", "modules", "advanced", "basic", "life_sim",
+        }
+        assert layout["sections"]["user"]["label"] == "实例配置"
 
 
 class TestDeferredConfigApplication:

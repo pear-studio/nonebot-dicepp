@@ -305,7 +305,7 @@ class BotRunner:
         if persona_cmd is None or persona_cmd.app is None:
             raise RuntimeError(
                 "Persona 模块未初始化。请检查该 session 的 Persona、角色卡和 "
-                "provider 配置，以及 serve 启动日志。"
+                "DeepSeek 实例配置，以及 serve 启动日志。"
             )
 
         app = persona_cmd.app

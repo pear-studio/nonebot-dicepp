@@ -21,15 +21,13 @@ DASHBOARD_LAYOUT = {
     },
     "sections": {
         # Config tab
-        "account":    {"label": "账号与权限", "tab": "config",  "order": 0},
-        "runtime":    {"label": "运行参数",   "tab": "config",  "order": 1},
+        "user":       {"label": "实例配置",   "tab": "config",  "order": 0},
+        "account":    {"label": "账号与权限", "tab": "config",  "order": 1},
         "modules":    {"label": "模块配置",   "tab": "config",  "order": 2},
         "advanced":   {"label": "高级",       "tab": "config",  "order": 3, "priority": "low"},
         # Persona tab
         "basic":        {"label": "基本设置",     "tab": "persona", "order": 0},
-        "chat_reply":   {"label": "对话与回复",   "tab": "persona", "order": 2},
-        "life_sim":     {"label": "生活模拟",     "tab": "persona", "order": 4},
-        "group_limits": {"label": "群聊与限制",   "tab": "persona", "order": 5},
+        "life_sim":     {"label": "生活模拟",     "tab": "persona", "order": 1},
     },
 }
 

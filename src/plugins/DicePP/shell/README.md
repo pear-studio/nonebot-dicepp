@@ -124,7 +124,7 @@ PowerShell 使用自定义 session 时设置相同的 `DICEPP_PROJECT_ROOT` 即�
 `warp` 是由常驻 Runtime 执行的异步任务。它不会维持一个长 HTTP 请求；CLI
 提交任务后轮询状态并显示进度。`--days N` 表示从 Runtime 当前时间线连续推进
 `N × 24` 小时，并在每个模拟分钟执行一次 Persona tick。运行前必须完成该
-session 的 Persona、角色卡和 provider 配置，并以默认的无 tick 模式启动
+session 的 Persona、角色卡和 DeepSeek 实例配置，并以默认的无 tick 模式启动
 `serve`；`serve --tick` Runtime 会被拒绝，避免真实后台 tick 混入模拟时间线。
 
 ```bash
