@@ -328,7 +328,6 @@ class CharacterAgent(Agent):
             reaction = str(args.get("content", "")).strip().strip('"').strip("'")
             if not reaction:
                 reaction = f"（{character_name}默默地想着这件事）"
-            has_follow_up = bool(args.get("has_follow_up", False))
             want_to_end = bool(args.get("want_to_end", False))
             if len(reaction) > 200:
                 reaction = reaction[:197] + "..."
@@ -336,7 +335,6 @@ class CharacterAgent(Agent):
                 success=True,
                 data=EventReactionResult(
                     reaction=reaction,
-                    has_follow_up=has_follow_up,
                     want_to_end=want_to_end,
                     last_say_content=reaction,
                     raw_response=json.dumps(args, ensure_ascii=False),
@@ -349,7 +347,6 @@ class CharacterAgent(Agent):
                 success=False,
                 data=EventReactionResult(
                     reaction="（默默地想着这件事）",
-                    has_follow_up=False,
                     want_to_end=False,
                 ),
                 error=str(e),

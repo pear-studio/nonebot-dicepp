@@ -55,7 +55,6 @@ def _make_multi_day_agents(days: int, slots_per_day: int):
                     success=True,
                     data=EventReactionResult(
                         reaction=f"Day{d}-Slot{s}: 角色反应",
-                        has_follow_up=False,
                     ),
                 )
             )
@@ -307,11 +306,11 @@ class TestWarpSimulation:
         chain_char = [
             AgentResult(
                 success=True,
-                data=EventReactionResult(reaction="反应1", has_follow_up=True),
+                data=EventReactionResult(reaction="反应1"),
             ),
             AgentResult(
                 success=True,
-                data=EventReactionResult(reaction="反应2", has_follow_up=False),
+                data=EventReactionResult(reaction="反应2"),
             ),
         ]
 
@@ -397,7 +396,7 @@ class TestWarpSimulation:
             async def react(self, context, interaction_id=None):
                 return AgentResult(
                     success=True,
-                    data=EventReactionResult(reaction="ok", has_follow_up=False),
+                    data=EventReactionResult(reaction="ok"),
                 )
 
             async def load_state(self):

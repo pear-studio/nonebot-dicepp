@@ -100,7 +100,7 @@ class TestCharacterDaySimulation:
         """槽位事件链更新状态，energy stays in [0, 100]"""
         dm_agent, character_agent = mock_agents
         chain_event_results = [EventGenerationResult(description='泡了一杯咖啡', duration_minutes=15, energy_delta=5, mood_delta=3, health_delta=0), EventGenerationResult(description='在公园散步', duration_minutes=30, energy_delta=-2, mood_delta=2, health_delta=1), EventGenerationResult(description='坐在长椅上看书', duration_minutes=45, energy_delta=-1, mood_delta=1, health_delta=0)]
-        chain_reaction_results = [EventReactionResult(reaction='咖啡很香', has_follow_up=True), EventReactionResult(reaction='空气很好', has_follow_up=True), EventReactionResult(reaction='书很有意思')]
+        chain_reaction_results = [EventReactionResult(reaction='咖啡很香'), EventReactionResult(reaction='空气很好'), EventReactionResult(reaction='书很有意思')]
 
         class ChainDMAgent:
 

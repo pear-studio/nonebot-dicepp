@@ -573,7 +573,7 @@ class TestCharacterLifePhase2:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='继续', has_follow_up=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='继续')))
         result = await life.tick()
         assert len(result) == 3
         assert len(mock_event_agent.dm.run.await_args_list) == 3
@@ -1489,7 +1489,7 @@ class TestFirstBoot:
         char = MagicMock()
         char.react = AsyncMock(return_value=AgentResult(
             success=True,
-            data=EventReactionResult(reaction='嗯', has_follow_up=False)))
+            data=EventReactionResult(reaction='嗯')))
         life = CharacterLife(config=config, data_store=mock_data_store,
                              dm_agent=dm, character_agent=char, character=character)
         life._first_boot = True

@@ -27,10 +27,7 @@ class SayArgs(BaseModel):
                                    description="事件持续时间（分钟），0 表示瞬时（DM 专用，可选）")
     context_summary: str = Field(default="", min_length=0, max_length=60,
                                   description="事件摘要，用于聊天上下文注入（DM 专用，可选）")
-    # Character 专用（可选，deprecated — 不再在 prompt 中要求，保留 schema 兼容）：
-    has_follow_up: bool = Field(default=False,
-                                 description="是否想继续行动（已弃用，请使用 want_to_end）")
-    # 双方共用（新）：
+    # 双方共用：
     want_to_end: bool = Field(default=False,
                                description="提议结束当前场景。对方收到提示后可同意结束或继续发言。")
 

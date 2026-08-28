@@ -40,7 +40,7 @@ class TestCharacterAgentReact:
                 final_text="",
                 final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '我刚才好像听到什么声音...', 'has_follow_up': True},
+                output_arguments={'content': '我刚才好像听到什么声音...'},
             )
             result = await agent.react({
                 'event': '远处传来一阵奇怪的声音。',
@@ -134,7 +134,7 @@ class TestCharacterAgentContract:
                 final_text="",
                 final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '测试反应', 'has_follow_up': False},
+                output_arguments={'content': '测试反应'},
             )
             result = await agent.run({
                 'mode': 'reaction', 'event': 'test',
@@ -207,7 +207,7 @@ class TestCharacterAgentContract:
                 final_text="",
                 final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '测试', 'has_follow_up': False},
+                output_arguments={'content': '测试'},
             )
             # 不应抛 TypeError: run() got an unexpected keyword argument 'interaction_id'
             result = await agent.run({
@@ -225,7 +225,7 @@ class TestCharacterAgentContract:
                 final_text="",
                 final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '反应内容', 'has_follow_up': False},
+                output_arguments={'content': '反应内容'},
             )
             result = await agent.run({
                 'mode': 'reaction', 'event': 'test',
@@ -472,7 +472,7 @@ class TestTraceMetadata:
             mock_run.return_value = ConversationRunResult(
                 final_text="", final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '嗯', 'has_follow_up': False},
+                output_arguments={'content': '嗯'},
             )
             await agent.react({
                 'event': 'test', 'character_name': '测试角色',
@@ -491,7 +491,7 @@ class TestTraceMetadata:
             mock_run.return_value = ConversationRunResult(
                 final_text="", final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': '嗯', 'has_follow_up': False},
+                output_arguments={'content': '嗯'},
             )
             await agent.react({
                 'event': 'test', 'character_name': '测试角色',
@@ -546,7 +546,7 @@ class TestTraceMetadata:
             mock_run.return_value = ConversationRunResult(
                 final_text="", final_reason="output_collected",
                 completion_kind="completed",
-                output_arguments={'content': 'x', 'has_follow_up': False},
+                output_arguments={'content': 'x'},
             )
             await agent.react({
                 'event': 'test', 'character_name': '测试角色',
