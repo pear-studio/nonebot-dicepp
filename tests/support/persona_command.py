@@ -31,6 +31,7 @@ def default_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_path="./content/characters",
+        character_name="test_char",
         whitelist_enabled=True,
         proactive_enabled=False,
     )
@@ -40,7 +41,6 @@ def make_mock_bot(persona_config=None):
     bot = MagicMock()
     bot.get_nickname = AsyncMock(return_value="测试用户")
     bot.config.persona_ai = persona_config or default_persona_config()
-    bot.config.persona = "test_char"
     bot.config.master = "master_user"
     bot.account = "test_bot"
     return bot

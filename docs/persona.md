@@ -30,26 +30,25 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 
 ```json
 "enabled": true,
+"character_name": "qiqi.local",
 "character_path": "./content/characters",
 "timezone": "Asia/Shanghai",
 "daily_limit": 20
 ```
 
-角色名由每个 bot 的账号配置独立指定。
-打开 `config/bots/{你的QQ号}.json`，在顶层加入：
+`persona_ai.enabled` 默认是 `false`。只有设为 `true` 时才会启动 Persona；角色名由同一段配置中的
+`persona_ai.character_name` 指定，并对应 `content/characters/{名字}/` 目录。默认角色名是
+`qiqi.local`。
 
-```json
-"persona": "default"
-```
-
-字段 `persona` 对应 `content/characters/{名字}/` 目录。设为 `null` 或不设置时 Persona 不启用。
+启用 Persona 时，目标角色目录必须包含 `skin.yaml`；空文件也可以，表示使用该角色的内置默认文本。
+如果文件缺失或格式错误，Bot 会明确启动失败，不会静默回退到 `default` 皮肤。
 
 含义：
 
 | 字段 | 说明 |
 |------|------|
 | `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
-| `persona` | 角色卡目录名，在 `config/bots/{账号}.json` 顶层设置 |
+| `character_name` | 角色卡目录名，在 `persona_ai` 段中设置 |
 | `character_path` | 角色目录根路径，通常不用改 |
 | `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |
@@ -80,10 +79,13 @@ content/characters/mychar/
   skin.yaml
 ```
 
-然后把 `config/bots/{账号}.json` 中的 `persona` 改成：
+然后在 `config/bots/{账号}.json` 的 `persona_ai` 段中设置：
 
 ```json
-"persona": "mychar"
+"persona_ai": {
+  "enabled": true,
+  "character_name": "mychar"
+}
 ```
 
 如果配置了角色名但实例 `content/characters/{角色名}/character.yaml` 不存在，Persona AI 不会从程序模板静默回退；请先创建或导入角色卡。
@@ -174,7 +176,7 @@ content/characters/mychar/
 检查：
 
 - `persona_ai.enabled` 是否为 `true`
-- `config/bots/{账号}.json` 顶层的 `persona` 是否对应 `content/characters/{name}`
+- `config/bots/{账号}.json` 中 `persona_ai.character_name` 是否对应 `content/characters/{name}`
 - `character.yaml` 是否存在
 - YAML 缩进是否正确
 

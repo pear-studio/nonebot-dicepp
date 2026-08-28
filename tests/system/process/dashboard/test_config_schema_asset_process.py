@@ -42,7 +42,7 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 config = module.UserConfig()
 assert config.deepseek_model == "deepseek-v4-flash"
-assert module.BotConfig().persona_ai.enabled is True
+assert module.BotConfig().persona_ai.enabled is False
 dumped = config.model_dump(mode="json", by_alias=True)
 assert dumped["deepseek_base_url"] == "https://api.deepseek.com"
 '''

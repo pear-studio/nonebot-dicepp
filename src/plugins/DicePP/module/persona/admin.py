@@ -295,9 +295,9 @@ class AdminDispatcher:
             return "模块未初始化"
         try:
             from .character.loader import CharacterLoader
-            character_name = self.bot.config.persona
+            character_name = self.bot.config.persona_ai.character_name
             if not character_name:
-                return "未配置角色（bot.config.persona 为空）"
+                return "未配置角色（persona_ai.character_name 为空）"
             new_character = CharacterLoader(self.config.character_path).load(
                 character_name
             )

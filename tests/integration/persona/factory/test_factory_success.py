@@ -82,6 +82,7 @@ def _make_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_path="/tmp/smoke_chars",
+        character_name="test_char",
         # 关闭不需要的子系统
         trace_enabled=False,
         quota_check_enabled=False,
@@ -149,7 +150,6 @@ class TestCreatePersonaSuccess:
         bot.account = "test_bot_smoke"
         bot.user_config = UserConfig(deepseek_api_key="sk-test")
         bot.config.persona_ai = _make_persona_config()
-        bot.config.persona = "test_char"
         bot.config.master = ""          # 避免发送启动报告
         bot.config.timezone = "Asia/Shanghai"
 
@@ -199,7 +199,6 @@ class TestCreatePersonaSuccess:
         bot.account = "test_bot_smoke2"
         bot.user_config = UserConfig(deepseek_api_key="sk-test")
         bot.config.persona_ai = _make_persona_config()
-        bot.config.persona = "test_char"
         bot.config.master = ""
         bot.config.timezone = "Asia/Shanghai"
 

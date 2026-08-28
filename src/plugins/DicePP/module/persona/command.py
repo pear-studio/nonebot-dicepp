@@ -170,17 +170,23 @@ class PersonaCommand(UserCommandBase):
                 if hasattr(self, "_inbound_hook_unregister"):
                     self._inbound_hook_unregister()
                 self._inbound_hook_unregister = self.bot.add_inbound_message_hook(self._inbound_message_recorder)
-                logger.info(f"[Persona] 模块初始化成功: {self.bot.config.persona}")
+                logger.info(
+                    f"[Persona] 模块初始化成功: "
+                    f"{self.bot.config.persona_ai.character_name}"
+                )
             else:
-                # create_persona 返回 None（enabled=False 或 bot.config.persona 为空）
-                logger.info("[Persona] 模块未启用（enabled=False 或 bot.config.persona 为空）")
+                # create_persona 仅在 enabled=False 时返回 None。
+                logger.info("[Persona] 模块未启用（enabled=False）")
                 self.enabled = False
             return []
 
         self._register_admin_handlers()
         self.bot.scheduler.schedule(init_persona, is_async=True, timeout=30)
 
-        return [f"Persona AI 模块加载中 (角色: {self.bot.config.persona or '未指定'})"]
+        return [
+            "Persona AI 模块加载中 "
+            f"(角色: {self.bot.config.persona_ai.character_name or '未指定'})"
+        ]
 
     @staticmethod
     def _is_persona_trigger(meta: MessageMetaData, msg: str) -> bool:
@@ -864,7 +870,7 @@ class PersonaCommand(UserCommandBase):
 
     def _get_introduction(self) -> str:
         if not self.app or not self.app.get_character():
-            char_name = self.bot.config.persona or "未知"
+            char_name = self.bot.config.persona_ai.character_name or "未知"
             return f"你好，我是 {char_name}。（@ 我来聊天，.ai status 查看状态）"
         char = self.app.get_character()
         parts = [f"你好，我是 {char.name}。"]
@@ -899,7 +905,7 @@ class PersonaCommand(UserCommandBase):
         if not char:
             return (
                 f"Persona AI 状态: 初始化中...\n"
-                f"角色: {self.bot.config.persona or '未指定'}\n"
+                f"角色: {self.bot.config.persona_ai.character_name or '未指定'}\n"
                 f"模型: DeepSeek/{model_name}"
                 f"{whitelist_status}"
             )

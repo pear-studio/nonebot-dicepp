@@ -40,7 +40,7 @@ def test_schema_loader_uses_frozen_asset_without_source_tree(
 
         assert schema is not None
         assert schema.UserConfig().deepseek_model == "deepseek-v4-flash"
-        assert schema.BotConfig().persona_ai.enabled is True
+        assert schema.BotConfig().persona_ai.enabled is False
     finally:
         app_module._pydantic_module_cache = previous_cache
 

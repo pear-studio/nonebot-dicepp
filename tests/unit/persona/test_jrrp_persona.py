@@ -57,7 +57,6 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
     # _check_whitelist 使用 self.bot.config.persona_ai，而非 self.config，
     # 因此需同步配置 bot mock
     cmd.bot.config.persona_ai = config
-    cmd.bot.config.persona = None  # 匹配新默认值
 
     return cmd
 

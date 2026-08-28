@@ -408,7 +408,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert account["persona_ai"]["character_path"] == str(
         (result.path / "content" / "characters").resolve()
     )
-    assert account["persona"] == prepare.CHARACTER_NAME
+    assert account["persona_ai"]["character_name"] == prepare.CHARACTER_NAME
     assert (
         result.path
         / "content"
@@ -423,7 +423,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
         data_path=str(result.path / "config"),
         account=shell_session.bot_id_for_session(result.name),
     ).load()
-    assert loaded.persona == prepare.CHARACTER_NAME
+    assert loaded.persona_ai.character_name == prepare.CHARACTER_NAME
     assert loaded.persona_ai.character_path == str(
         (result.path / "content" / "characters").resolve()
     )

@@ -302,8 +302,8 @@ def build_session_bot_config(
         {
             "persona_ai": {
                 "character_path": str(character_path.resolve()),
+                "character_name": CHARACTER_NAME,
             },
-            "persona": CHARACTER_NAME,
         },
     )
 

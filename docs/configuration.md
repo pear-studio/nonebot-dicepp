@@ -21,7 +21,10 @@ DicePP 使用 JSON 配置。常用文件是：
   "master": "你的QQ号",
   "friend_request_token": "添加好友口令",
   "accept_group_invites": true,
-  "persona": "default"
+  "persona_ai": {
+    "enabled": false,
+    "character_name": "qiqi.local"
+  }
 }
 ```
 
@@ -32,7 +35,8 @@ DicePP 使用 JSON 配置。常用文件是：
 | `master` | 唯一 Master QQ号，拥有全部管理权限 |
 | `friend_request_token` | 添加好友口令；留空接受全部好友请求 |
 | `accept_group_invites` | 是否接受加群和群邀请请求 |
-| `persona` | 默认文字人设 |
+| `persona_ai.enabled` | 是否启用 Persona AI；默认关闭 |
+| `persona_ai.character_name` | 启用 Persona AI 时使用的角色卡目录名 |
 
 多条 Bot 指令使用固定的两个反斜杠（`\\`）分隔，不属于配置项，也没有环境变量覆盖。
 
@@ -52,7 +56,6 @@ API Key 放在未提交的 `config/user.json`，例如：
 
 | 变量 | 作用 | 默认值 |
 |---|---|---|
-| `DICE_PERSONA` | 覆盖默认人设 | |
 | `DICEPP_PROJECT_ROOT` | 覆盖实例根目录 | 当前目录 |
 | `DICEPP_DATA_DIR` | 覆盖运行时 data 目录 | |
 | `DICEPP_ONEBOT_HOST` | OneBot 监听地址 | `127.0.0.1` |

@@ -106,7 +106,7 @@ class TestMergedView:
         config = resp.json()["config"]
 
         # Should include normal keys
-        assert config["persona_ai.enabled"]["value"] is True
+        assert config["persona_ai.enabled"]["value"] is False
 
         # Should NOT include comment keys at any level
         for path in config:

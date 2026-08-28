@@ -1,5 +1,6 @@
 {
   "persona_ai": {
+    "enabled": true,
     "trace_enabled": true,
     "proactive_always_send_groups": [
       "llm_test_group"

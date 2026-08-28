@@ -522,11 +522,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         logger.info("Persona AI 模块已禁用")
         return None
 
-    character_name = bot.config.persona
-    if not character_name:
-        logger.info("Persona AI 模块未配置角色（bot.config.persona 为空），已禁用")
-        return None
-
+    character_name = config.character_name
     character = _load_character(config.character_path, character_name)
     if not bot.user_config.deepseek_api_key:
         raise PersonaConfigError(

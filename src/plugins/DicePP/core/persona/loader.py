@@ -2,7 +2,7 @@
 PersonaLoader: discovers and loads Persona files from content/characters/*/skin.yaml.
 """
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
 import yaml
 from pydantic import ValidationError
@@ -43,6 +43,21 @@ class PersonaLoader:
             logger.warning(f"[Persona] Persona '{name}' not found, falling back to 'default'")
         return self._cache.get(_DEFAULT_PERSONA, PersonaModel())
 
+    def require(self, name: str) -> PersonaModel:
+        """Load one explicitly configured skin without fallback.
+
+        Persona is allowed to use an empty ``skin.yaml``; YAML ``null`` is
+        treated as an empty mapping and still gets the requested directory
+        name.  Missing or invalid files are configuration errors for an
+        enabled Bot and must not silently select the default skin.
+        """
+        path = self._dir / name / "skin.yaml"
+        if not path.is_file():
+            raise ValueError(f"Persona skin.yaml 不存在: {path}")
+        persona = cast(PersonaModel, self._load_one(path, name, strict=True))
+        self._cache[name] = persona
+        return persona
+
     def reload(self) -> None:
         """Reload all persona files from disk (for hot-reload support)."""
         self._cache = {}
@@ -79,12 +94,19 @@ class PersonaLoader:
             logger.warning("[Persona] No 'default' persona found; using empty defaults")
             self._cache[_DEFAULT_PERSONA] = PersonaModel()
 
-    def _load_one(self, path: Path, name: str) -> Optional[PersonaModel]:
+    def _load_one(
+        self,
+        path: Path,
+        name: str,
+        *,
+        strict: bool = False,
+    ) -> Optional[PersonaModel]:
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if data is None:
+                data = {}
             if not isinstance(data, dict):
-                logger.warning(f"[Persona] Invalid YAML structure in {path}: expected dict")
-                return None
+                raise TypeError("expected mapping")
             yaml_name = data.get("name")
             if yaml_name is not None and yaml_name != name:
                 logger.warning(
@@ -93,10 +115,8 @@ class PersonaLoader:
                 )
             data["name"] = name
             return PersonaModel.model_validate(data)
-        except yaml.YAMLError as exc:
-            logger.error(f"[Persona] YAML parse error in {path}: {exc}")
-        except ValidationError as exc:
-            logger.error(f"[Persona] Validation error in {path}: {exc}")
-        except OSError as exc:
-            logger.error(f"[Persona] Cannot read {path}: {exc}")
+        except (yaml.YAMLError, ValidationError, OSError, TypeError, ValueError) as exc:
+            if strict:
+                raise ValueError(f"Persona skin.yaml 无效: {path}: {exc}") from exc
+            logger.error(f"[Persona] Cannot load skin from {path}: {exc}")
         return None

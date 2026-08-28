@@ -126,7 +126,6 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         current[keys[-1]] = value
 
     mappings: dict[str, tuple[list[str], Any]] = {
-        "DICE_PERSONA": (["persona"], str),
         "DICE_DICEHUB_API_URL": (["dicehub", "api_url"], str),
         "DICE_DICEHUB_API_KEY": (["dicehub", "api_key"], str),
         "DICE_LOG_LEVEL": (["log", "level"], str),

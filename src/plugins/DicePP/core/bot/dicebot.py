@@ -98,7 +98,10 @@ class Bot:
         # to later service integrations without folding it into BotConfig.
         self.user_config: UserConfig = self._cfg_loader.user_config
         configure_log_level(self.config.log.level)
-        self._persona_loader = PersonaLoader(self.config.persona_ai.character_path)
+        persona_config = self.config.persona_ai
+        self._persona_loader = PersonaLoader(persona_config.character_path)
+        if persona_config.enabled:
+            self._persona_loader.require(persona_config.character_name)
 
         # LocalizationManager now takes a PersonaLoader; no file paths needed
         self.loc_helper = LocalizationManager(persona_loader=self._persona_loader)
@@ -230,7 +233,13 @@ class Bot:
     def start_up(self):
         self.register_command()
         # Apply persona overrides after commands have registered their loc keys
-        self.loc_helper.set_persona(self.config.persona)
+        persona_config = self.config.persona_ai
+        persona_name = (
+            persona_config.character_name
+            if persona_config.enabled
+            else "default"
+        )
+        self.loc_helper.set_persona(persona_name)
 
     async def _safe_update_user_stat(self, user_id: str, updater) -> None:
         """原子更新 user_stat，失败时仅记录日志不抛异常。"""

@@ -62,9 +62,9 @@ def _make_bot(
     cfg = PersonaConfig(
         enabled=enabled,
         character_path="/tmp/chars",
+        character_name="test",
     )
     bot.config.persona_ai = cfg
-    bot.config.persona = "test"
     bot.user_config = UserConfig(deepseek_api_key="sk-test" if has_api_key else "")
 
     bot.db = MagicMock()
@@ -76,24 +76,6 @@ def _make_bot(
 async def test_disabled_returns_none(monkeypatch):
     """config.enabled=False 时返回 None，不抛异常"""
     bot = _make_bot(enabled=False)
-    result = await create_persona(bot)
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_enabled_without_persona_returns_none(monkeypatch):
-    """config.enabled=True 但 bot.config.persona=None 时返回 None"""
-    bot = _make_bot(enabled=True)
-    bot.config.persona = None
-    result = await create_persona(bot)
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_enabled_with_empty_persona_returns_none(monkeypatch):
-    """config.enabled=True 但 bot.config.persona='' 时返回 None"""
-    bot = _make_bot(enabled=True)
-    bot.config.persona = ""
     result = await create_persona(bot)
     assert result is None
 
@@ -112,6 +94,32 @@ async def test_character_load_failure_raises(monkeypatch):
         await create_persona(bot)
     assert "无法加载角色卡" in str(excinfo.value)
     assert isinstance(excinfo.value, PersonaInitError)
+
+
+@pytest.mark.asyncio
+async def test_character_loader_uses_persona_ai_character_name(monkeypatch):
+    """角色加载始终使用 persona_ai.character_name。"""
+    loaded_names = []
+
+    class RecordingLoader:
+        def __init__(self, path):
+            pass
+
+        def load(self, name):
+            loaded_names.append(name)
+            return None
+
+    bot = _make_bot()
+    bot.config.persona_ai.character_name = "configured-character"
+    monkeypatch.setattr(
+        "plugins.DicePP.module.persona.factory.CharacterLoader",
+        RecordingLoader,
+    )
+
+    with pytest.raises(PersonaCharacterLoadError):
+        await create_persona(bot)
+
+    assert loaded_names == ["configured-character"]
 
 
 @pytest.mark.asyncio

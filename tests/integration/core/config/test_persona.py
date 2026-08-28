@@ -2,7 +2,7 @@
 Tests for core/persona/loader.py and core/persona/models.py
 
 Covers:
-  9.3  Persona loading and fallback
+  9.3  Persona loading and explicit skin selection
 """
 from pathlib import Path
 
@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from plugins.DicePP.core.persona.loader import PersonaLoader
-from plugins.DicePP.core.persona.models import PersonaModel
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -31,12 +30,6 @@ def chars_dir(tmp_path):
 
 
 # ── PersonaLoader: loading ────────────────────────────────────────────────────
-
-
-def test_loader_missing_dir_returns_default(tmp_path):
-    loader = PersonaLoader(str(tmp_path / "nonexistent"))
-    p = loader.get("default")
-    assert isinstance(p, PersonaModel)
 
 
 def test_loader_loads_default_persona(chars_dir):
@@ -60,44 +53,30 @@ def test_loader_loads_multiple_personas(chars_dir):
     assert "kawaii" in loader.available_names()
 
 
-# ── PersonaLoader: fallback ───────────────────────────────────────────────────
+# ── PersonaLoader: explicit skin selection ───────────────────────────────────
 
 
-def test_loader_fallback_to_default_when_name_missing(chars_dir):
+def test_required_skin_missing_fails_without_default_fallback(chars_dir):
     _write_skin(chars_dir, "default", {
         "name": "default",
         "localization": {"key": "default_value"},
     })
     loader = PersonaLoader(str(chars_dir))
-    p = loader.get("nonexistent")
-    assert p.get_loc_texts("key") == ["default_value"]
+
+    with pytest.raises(ValueError, match="skin.yaml 不存在"):
+        loader.require("configured")
 
 
-def test_loader_fallback_to_empty_persona_when_no_default(chars_dir):
-    _write_skin(chars_dir, "other", {"name": "other"})
+def test_required_empty_skin_loads_as_its_own_persona(chars_dir):
+    skin_dir = chars_dir / "configured"
+    skin_dir.mkdir()
+    (skin_dir / "skin.yaml").write_text("", encoding="utf-8")
     loader = PersonaLoader(str(chars_dir))
-    p = loader.get("missing")
-    assert isinstance(p, PersonaModel)
-    assert p.localization == {}
 
+    persona = loader.require("configured")
 
-def test_loader_ignores_malformed_yaml(chars_dir):
-    default_dir = chars_dir / "default"
-    default_dir.mkdir(exist_ok=True)
-    (default_dir / "skin.yaml").write_text("NOT YAML: [broken", encoding="utf-8")
-    loader = PersonaLoader(str(chars_dir))
-    p = loader.get("default")
-    assert isinstance(p, PersonaModel)  # empty fallback, no exception
-
-
-def test_loader_ignores_validation_error(chars_dir):
-    _write_skin(chars_dir, "default", {
-        "name": "default",
-        "localization": "should_be_dict_not_string",
-    })
-    loader = PersonaLoader(str(chars_dir))
-    p = loader.get("default")
-    assert isinstance(p, PersonaModel)
+    assert persona.name == "configured"
+    assert persona.localization == {}
 
 
 # ── PersonaLoader: reload ─────────────────────────────────────────────────────

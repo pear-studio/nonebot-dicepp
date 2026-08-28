@@ -93,7 +93,7 @@ class PersonaConfig(BaseModel):
 
     # ── 基本设置 ─────────────────────────────────────────────────────────────
 
-    enabled: bool = Field(default=True, title="启用 Persona")
+    enabled: bool = Field(default=False, title="启用 Persona")
     daily_report_enabled: bool = Field(default=True, title="日报")
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
     character_name: str = Field(default="qiqi.local", title="角色名")
@@ -629,8 +629,6 @@ class BotConfig(BaseModel):
     master: str = Field(default="", title="Master 账号")
     friend_request_token: str = Field(default="", title="好友请求口令")
     accept_group_invites: bool = Field(default=True, title="接受群邀请")
-    persona: str = Field(default="default", title="当前角色")
-
     # ── Subsystem configs ────────────────────────────────────────────────────
 
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
