@@ -58,14 +58,12 @@ class DailyReportGenerator:
         store=None,
         client=None,
         character=None,
-        config=None,
     ):
         self._bot = bot
         self._port = port
         self._store = store
         self._client = client
         self._character = character
-        self._config = config
 
     def set_app(self, app) -> None:
         """PersonaApp 就位后注入引用"""
@@ -362,8 +360,7 @@ class DailyReportGenerator:
 
     async def _generate_opening(self, diary: Optional[str], core_stats: Dict[str, Any]) -> str:
         """生成段 1 开场白 — LLM 角色口吻或纯模板"""
-        voice_enabled = bool(self._config.daily_report_voice_enabled) if self._config else True
-        if voice_enabled and self._character and self._client:
+        if self._character and self._client:
             try:
                 summary = await self._build_summary(diary, core_stats)
                 # opening 是一次性短请求，不复用 Life Character Conversation，

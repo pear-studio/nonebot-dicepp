@@ -78,7 +78,7 @@ def _make_persona_config() -> PersonaConfig:
         character_name="test_char",
         # 关闭不需要的子系统
         trace_enabled=False,
-        character_life_enabled=False,
+        life_simulation_enabled=False,
     )
 
 
@@ -320,7 +320,7 @@ class TestCreatePersonaFromPersonaMappings:
         )
         config = _make_persona_config()
         clc = CharacterLifeConfig.from_persona(config)
-        assert clc.enabled == config.character_life_enabled
+        assert clc.enabled == config.life_simulation_enabled
 
     def test_life_config_from_persona(self):
         """LifeConfig.from_persona 保留公开开关，其余使用内部默认值。"""

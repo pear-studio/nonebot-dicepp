@@ -28,9 +28,8 @@ def _make_mock_bot(with_master=True):
     bot = MagicMock()
     bot.account = "test_bot"
     bot.config.master = "master_123" if with_master else ""
-    bot.config.persona_ai = PersonaConfig(
-        daily_report_voice_enabled=False,
-    )
+    bot.config.daily_summary_enabled = True
+    bot.config.persona_ai = PersonaConfig()
 
     # 模拟 db 访问
     bot.db.user_stat.list_all = AsyncMock(return_value=[])
@@ -199,13 +198,12 @@ class TestDailyReportGenerator:
         seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
         assert "机器人" in seg1
 
-    # ── Q87: LLM voice path ─────────────────────────────────────
+    # ── LLM opening path ───────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_voice_enabled_uses_llm_opening(self):
-        """voice_enabled=True 且 LLM 返回非空时使用 LLM 开场白"""
+    async def test_uses_llm_opening_with_character(self):
+        """有角色和客户端时使用角色口吻生成开场白"""
         bot = _make_mock_bot()
-        bot.config.persona_ai.daily_report_voice_enabled = True
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
         gen._character = MagicMock()
@@ -239,10 +237,9 @@ class TestDailyReportGenerator:
         )
 
     @pytest.mark.asyncio
-    async def test_voice_llm_exception_falls_back_to_template(self):
+    async def test_llm_opening_exception_falls_back_to_template(self):
         """LLM 开场白抛异常时降级为纯模板"""
         bot = _make_mock_bot()
-        bot.config.persona_ai.daily_report_voice_enabled = True
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
         gen._character = MagicMock()
@@ -262,10 +259,9 @@ class TestDailyReportGenerator:
         assert "早上好" in opening
 
     @pytest.mark.asyncio
-    async def test_voice_llm_returns_none_falls_back_to_template(self):
+    async def test_llm_opening_empty_falls_back_to_template(self):
         """LLM 开场白返回 None 时降级为纯模板"""
         bot = _make_mock_bot()
-        bot.config.persona_ai.daily_report_voice_enabled = True
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
         gen._character = MagicMock()
@@ -284,24 +280,6 @@ class TestDailyReportGenerator:
 
         # 降级为模板
         assert "早上好" in opening
-
-    @pytest.mark.asyncio
-    async def test_voice_disabled_uses_template_directly(self):
-        """voice_enabled=False 时即使有 router 也直接使用模板"""
-        bot = _make_mock_bot()
-        bot.config.persona_ai.daily_report_voice_enabled = False
-        port, mock_bot = _make_mock_port()
-        gen = DailyReportGenerator(bot=bot, port=port)
-        gen._character = MagicMock()
-        gen._character.name = "测试角色"
-        gen._client = MagicMock()
-
-        core_stats = gen._empty_core_stats()
-        opening = await gen._generate_opening("昨日日记测试", core_stats)
-
-        # 直接走模板
-        assert "测试角色" in opening
-        assert "每日报告" in opening
 
     # ── _collect_core_stats ─────────────────────────────────────
 
@@ -491,7 +469,6 @@ class TestDailyReportGenerator:
             bot=bot,
             port=port,
             store=mock_store,
-            config=PersonaConfig(daily_report_voice_enabled=False),
         )
         result = await gen._collect_llm_summary(use_cur_day=False)
 
@@ -525,7 +502,6 @@ class TestDailyReportGenerator:
             bot=bot,
             port=port,
             store=mock_store,
-            config=PersonaConfig(daily_report_voice_enabled=False),
         )
         result = await gen._collect_llm_summary(use_cur_day=True)
 
@@ -555,7 +531,6 @@ class TestDailyReportGenerator:
             bot=bot,
             port=port,
             store=mock_store,
-            config=PersonaConfig(daily_report_voice_enabled=False),
         )
         result = await gen._collect_llm_summary(use_cur_day=False)
 
@@ -584,7 +559,6 @@ class TestDailyReportGenerator:
             bot=bot,
             port=port,
             store=mock_store,
-            config=PersonaConfig(daily_report_voice_enabled=False),
         )
 
         await gen.generate_and_send("diary")
@@ -608,7 +582,6 @@ class TestDailyReportGenerator:
             bot=bot,
             port=port,
             store=mock_store,
-            config=PersonaConfig(daily_report_voice_enabled=False),
         )
 
         await gen.generate_and_send("diary")
@@ -724,12 +697,12 @@ class TestTickDailyIntegration:
         ]
 
     @pytest.mark.asyncio
-    async def test_daily_report_disabled_skips_generate(self):
-        """daily_report_enabled=False 时 _run_daily 不调用 generate_and_send"""
+    async def test_daily_summary_disabled_skips_generate(self):
+        """daily_summary_enabled=False 时 _run_daily 不调用每日摘要生成器"""
         from plugins.DicePP.module.persona.command import PersonaCommand
 
         bot = _make_mock_bot()
-        bot.config.persona_ai.daily_report_enabled = False
+        bot.config.daily_summary_enabled = False
         cmd = PersonaCommand(bot)
         cmd.config = bot.config.persona_ai
 

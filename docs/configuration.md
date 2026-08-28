@@ -19,6 +19,7 @@ DicePP 使用 JSON 配置。常用文件是：
 ```json
 {
   "master": "你的QQ号",
+  "daily_summary_enabled": true,
   "friend_request_token": "添加好友口令",
   "accept_group_invites": true,
   "persona_ai": {
@@ -33,10 +34,12 @@ DicePP 使用 JSON 配置。常用文件是：
 | 字段 | 说明 |
 |---|---|
 | `master` | 唯一 Master QQ号，拥有全部管理权限 |
+| `daily_summary_enabled` | 是否发送每日摘要；默认开启，与 Persona 是否启用无关 |
 | `friend_request_token` | 添加好友口令；留空接受全部好友请求 |
 | `accept_group_invites` | 是否接受加群和群邀请请求 |
 | `persona_ai.enabled` | 是否启用 Persona AI；默认关闭 |
 | `persona_ai.character_name` | 启用 Persona AI 时使用的角色卡目录名 |
+| `persona_ai.life_simulation_enabled` | 是否启用角色生活模拟；默认关闭 |
 
 Persona 成功启用后，`.jrrp` 由 Persona 处理，私聊和群聊均支持。Persona 对话始终使用内置的
 分段回复策略。

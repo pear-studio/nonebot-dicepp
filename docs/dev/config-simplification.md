@@ -141,8 +141,9 @@ DeepSeek API Key 直接保存在 `user.json`，Dashboard 使用密码输入框�
 ## 每日摘要
 
 - `daily_summary_enabled` 是 Bot 级运营功能，与 Persona 是否开启无关，默认开启。
+- 设为 `false` 时不发送任何每日摘要。
 - Persona 关闭时发送固定模板摘要。
-- Persona 开启时允许使用当前角色口吻包装同一份摘要，并附带 Persona 调用统计。
+- Persona 正常运行时自动使用当前角色口吻包装同一份摘要，并附带 Persona 调用统计。
 - 不再提供单独的“日报角色口吻/语音”开关。
 - 未配置 Master 时没有接收目标，不发送摘要。
 

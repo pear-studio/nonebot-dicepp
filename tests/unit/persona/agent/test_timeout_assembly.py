@@ -207,9 +207,6 @@ async def test_sa_agent_runtime_uses_summary_task_profile():
 @pytest.mark.asyncio
 async def test_isolated_daily_opening_uses_summary_task_profile():
     """日报 opening 的一次性 Agent 使用摘要 profile。"""
-    config = PersonaConfig(
-        daily_report_voice_enabled=True,
-    )
     provider = _RecordingProvider(content="早上好")
     client = _FakeClient(provider)
     store = _store()
@@ -219,7 +216,6 @@ async def test_isolated_daily_opening_uses_summary_task_profile():
         store=store,
         client=client,
         character=Character(name="Timeout Tester"),
-        config=config,
     )
 
     opening = await generator._generate_opening(

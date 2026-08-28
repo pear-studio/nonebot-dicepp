@@ -43,7 +43,7 @@ class CharacterLifeConfig:
 
     def __init__(
         self,
-        enabled: bool = True,
+        enabled: bool = False,
         slot_match_window_minutes: int = 15,
         timezone: str = "Asia/Shanghai",
         min_event_interval_minutes: int = 5,
@@ -69,7 +69,7 @@ class CharacterLifeConfig:
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "CharacterLifeConfig":
-        return cls(enabled=persona.character_life_enabled)
+        return cls(enabled=persona.life_simulation_enabled)
 
     def now(self) -> datetime:
         from plugins.DicePP.utils.time import get_clock

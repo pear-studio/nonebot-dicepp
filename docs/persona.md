@@ -53,6 +53,11 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 |------|------|
 | `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
 | `character_name` | 角色卡目录名，在 `persona_ai` 段中设置 |
+| `life_simulation_enabled` | 是否启用角色生活模拟；默认关闭 |
+
+每日摘要是 Bot 级功能，默认开启，与 Persona 是否启用相互独立；可在 Bot 配置中设置
+`daily_summary_enabled` 为 `false` 关闭每日摘要。Persona 正常运行时摘要使用角色口吻，
+Persona 未启用或初始化失败时使用固定模板。
 
 DeepSeek 的模型配置由实例级 `config/user.json` 管理，默认接口地址是：
 

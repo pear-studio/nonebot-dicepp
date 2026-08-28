@@ -292,7 +292,7 @@ class TestFieldMetadata:
                         "title": "启用 Persona",
                         "type": "boolean",
                     },
-                    "character_life_enabled": {
+                    "life_simulation_enabled": {
                         "title": "角色生活模拟",
                         "type": "boolean",
                         "dashboard_section": "life_sim",
@@ -320,10 +320,10 @@ class TestFieldMetadata:
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
 
-        # Field with override: persona_ai.character_life_enabled has section="life_sim" (not "basic")
-        assert result["persona_ai.character_life_enabled"]["section"] == "life_sim", \
-            f"character_life_enabled section should be 'life_sim', got {result.get('persona_ai.character_life_enabled', {}).get('section')}"
-        assert result["persona_ai.character_life_enabled"]["tab"] == "persona"
+        # Field with override: persona_ai.life_simulation_enabled has section="life_sim" (not "basic")
+        assert result["persona_ai.life_simulation_enabled"]["section"] == "life_sim", \
+            f"life_simulation_enabled section should be 'life_sim', got {result.get('persona_ai.life_simulation_enabled', {}).get('section')}"
+        assert result["persona_ai.life_simulation_enabled"]["tab"] == "persona"
 
     def test_field_inherits_model_section(self):
         """Field WITHOUT override inherits model-level dashboard_section."""

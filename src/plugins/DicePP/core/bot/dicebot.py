@@ -353,16 +353,17 @@ class Bot:
                 logger.error(f"[TickLoop] 未预期异常 {_type}: {_ex}")
                 logger.error(traceback.format_exc())
                 bot_commands += self.handle_exception(f"Tick Daily: {command.readable_name} CODE111 ({_type})")
-        # 给Master发送每日更新通知（Persona 日报启用时跳过）
+        # 给 Master 发送每日摘要：Persona 正常运行时由 PersonaCommand 生成角色口吻摘要，
+        # 未运行时使用传统固定模板。
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
-        # 此处应与实例状态同步，避免日报和旧通知双双缺失。
+        # 此处应与实例状态同步，避免 Persona 初始化失败时摘要双双缺失。
         from plugins.DicePP.module.persona.command import PersonaCommand
         persona_running = any(
             isinstance(cmd, PersonaCommand) and cmd.enabled
             for cmd in self.command_dict.values()
         )
-        if not (persona_running and self.config.persona_ai.daily_report_enabled):
+        if self.config.daily_summary_enabled and not persona_running:
             from plugins.DicePP.core.localization import LOC_DAILY_UPDATE
             feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
             if feedback and feedback != "$":

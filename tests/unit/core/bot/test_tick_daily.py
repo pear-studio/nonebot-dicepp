@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from plugins.DicePP.utils.time import set_clock, SteppedClock, WallClock
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command import BotCommandBase
-from plugins.DicePP.core.config.pydantic_models import BotConfig, PersonaConfig
+from plugins.DicePP.core.config.pydantic_models import BotConfig
 from plugins.DicePP.core.data.models.extended import MetaStat
 
 
@@ -140,7 +140,7 @@ async def test_tick_loop_starts_and_exits_on_cancel():
 
 @pytest.mark.asyncio
 async def test_tick_daily_suppresses_master_notification_when_persona_running():
-    """PersonaCommand 启用且 daily_report_enabled=True → Master 通知被抑制。"""
+    """Persona 正常运行时由 PersonaCommand 负责每日摘要，Bot 不再发送固定模板。"""
     bot = _make_mock_bot()
     bot.loc_helper.format_loc_text = MagicMock(return_value="每日更新")
 
@@ -149,7 +149,6 @@ async def test_tick_daily_suppresses_master_notification_when_persona_running():
 
     with patch('plugins.DicePP.module.persona.command.PersonaCommand', _FakePersonaCommand):
         bot_commands = []
-        bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
         await Bot.tick_daily(bot, bot_commands)
 
     bot.send_msg_to_master.assert_not_called()
@@ -169,11 +168,11 @@ async def test_tick_daily_sends_master_notification_when_persona_disabled():
 
 
 @pytest.mark.asyncio
-async def test_tick_daily_sends_master_notification_when_daily_report_disabled():
-    """daily_report_enabled=False → Master 通知被发送（即使 PersonaCommand 存在）。"""
+async def test_tick_daily_does_not_send_any_summary_when_disabled():
+    """daily_summary_enabled=False 时，不发送 Persona 或固定模板摘要。"""
     bot = _make_mock_bot()
     bot.loc_helper.format_loc_text = MagicMock(return_value="每日更新")
-    bot.config.persona_ai = PersonaConfig(daily_report_enabled=False)
+    bot.config = BotConfig(daily_summary_enabled=False)
 
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
@@ -182,7 +181,7 @@ async def test_tick_daily_sends_master_notification_when_daily_report_disabled()
         bot_commands = []
         await Bot.tick_daily(bot, bot_commands)
 
-    bot.send_msg_to_master.assert_awaited_once_with("每日更新")
+    bot.send_msg_to_master.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -190,8 +189,6 @@ async def test_tick_daily_sends_master_notification_when_persona_not_enabled():
     """PersonaCommand 存在但 enabled=False → Master 通知被发送。"""
     bot = _make_mock_bot()
     bot.loc_helper.format_loc_text = MagicMock(return_value="每日更新")
-    bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
-
     persona_cmd = _FakePersonaCommand(enabled=False)
     bot.command_dict = {"persona": persona_cmd}
 

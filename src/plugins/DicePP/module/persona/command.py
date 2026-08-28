@@ -136,7 +136,6 @@ class PersonaCommand(UserCommandBase):
         self.report_generator = DailyReportGenerator(
             bot=self.bot,
             port=report_port,
-            config=config,
         )
 
         # 注册异步初始化任务
@@ -810,7 +809,7 @@ class PersonaCommand(UserCommandBase):
         diary = result.diary
         if diary:
             logger.info(f"[Persona] 生成日记: {len(diary)} 字")
-        if self.report_generator and self.config.daily_report_enabled:
+        if self.report_generator and self.bot.config.daily_summary_enabled:
             await self.report_generator.generate_and_send(diary)
 
         if not diary:

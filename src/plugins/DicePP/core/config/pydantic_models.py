@@ -91,8 +91,6 @@ class PersonaConfig(BaseModel):
     # ── 基本设置 ─────────────────────────────────────────────────────────────
 
     enabled: bool = Field(default=False, title="启用 Persona")
-    daily_report_enabled: bool = Field(default=True, title="日报")
-    daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
     character_name: str = Field(default="qiqi.local", title="角色名")
 
     # ── 对话与回复 ───────────────────────────────────────────────────────────
@@ -100,8 +98,8 @@ class PersonaConfig(BaseModel):
     # ── 生活模拟 ─────────────────────────────────────────────────────────────
 
     # Phase 2: 角色生活模拟
-    character_life_enabled: bool = Field(
-        default=True, title="角色生活模拟",
+    life_simulation_enabled: bool = Field(
+        default=False, title="角色生活模拟",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
@@ -160,6 +158,11 @@ class BotConfig(BaseModel):
     # ── 账号与权限 (section=account, default from model_config) ──────────────
 
     master: str = Field(default="", title="Master 账号")
+    daily_summary_enabled: bool = Field(
+        default=True,
+        title="每日摘要",
+        json_schema_extra={"dashboard_section": "modules"},
+    )
     friend_request_token: str = Field(default="", title="好友请求口令")
     accept_group_invites: bool = Field(default=True, title="接受群邀请")
     # ── Subsystem configs ────────────────────────────────────────────────────
