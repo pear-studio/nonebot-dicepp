@@ -20,8 +20,7 @@ from plugins.DicePP.core.message_types import MessageType
 def _make_config():
     config = ChatConfig(
         timezone="Asia/Shanghai",
-        reputation_refuse_threshold=30,
-        relationship_refuse_enabled=False,
+        relationship_enabled=False,
         max_history_turns=20,
         max_history_tokens=8000,
         lore_token_budget=1000,
@@ -85,6 +84,26 @@ class TestChatOrchestratorInit:
         assert orch.client is not None
         assert orch.character is not None
         assert orch.decay_calculator is None
+
+    def test_relationship_switch_controls_private_relation_source(self):
+        orch = ChatOrchestrator(
+            store=_make_store(), client=MagicMock(), character=_make_char(),
+            config=_make_config(), context_builder=_make_context_builder(),
+        )
+
+        source_ids = [
+            source.source_id
+            for source in orch._chat_change_sources(ConversationScope.for_private("u1"))
+        ]
+        assert "chat.relation" not in source_ids
+        assert "chat.profile" in source_ids
+
+        orch._chat_config.relationship_enabled = True
+        source_ids = [
+            source.source_id
+            for source in orch._chat_change_sources(ConversationScope.for_private("u1"))
+        ]
+        assert "chat.relation" in source_ids
 
     @pytest.mark.asyncio
     async def test_is_awake_no_sleep_gate(self):
@@ -264,7 +283,7 @@ class TestChatOrchestratorChat:
         from plugins.DicePP.module.persona.data.models import RelationshipState
 
         orch, mock_conv, store = orch_with_mocks
-        orch._chat_config.relationship_refuse_enabled = True
+        orch._chat_config.relationship_enabled = True
 
         rel = RelationshipState(user_id="u1", reputation=-50)
         store.get_relationship = AsyncMock(return_value=rel)
@@ -980,8 +999,7 @@ class TestF2RealRegistryIntegration:
         # 构造 orchestrator，注入真实 registry
         config = ChatConfig(
             timezone="Asia/Shanghai",
-            reputation_refuse_threshold=30,
-            relationship_refuse_enabled=False,
+            relationship_enabled=False,
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,
@@ -1053,8 +1071,7 @@ class TestF2RealRegistryIntegration:
 
         config = ChatConfig(
             timezone="Asia/Shanghai",
-            reputation_refuse_threshold=30,
-            relationship_refuse_enabled=False,
+            relationship_enabled=False,
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,

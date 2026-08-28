@@ -76,6 +76,8 @@ class ChatAgent:
     ) -> List[dict]:
         """群聊：当前说话者的关系/画像作为 turn_only 状态注入（不持久、不锚定）。
 
+        关系提示由 relationship_enabled 控制，画像提示始终保留。
+
         群 scope 共享 Conversation，注册绑定单一 user 的持久 ChangeSource 会形成
         "首-user 锚定"（阶段 1 D8 退化不注册）。阶段 2 改为每轮按当前说话者查询、
         以 transient 注入，只在本轮可见。best-effort：查询失败不阻断本轮。
@@ -83,14 +85,15 @@ class ChatAgent:
         notes: List[str] = []
         label_name = sanitize_speaker_label(speaker_name)
         subject = f"当前说话者（{label_name}）" if label_name else "当前说话者"
-        try:
-            rel = await self._store.get_relationship(user_id)
-            labels = self._character.get_relation_labels()
-            if rel is not None and labels:
-                _, label = rel.get_relation_level(labels)
-                notes.append(f"你和{subject}的关系是{label}。")
-        except Exception:
-            logger.debug("group_speaker_status: 关系查询失败，跳过", exc_info=True)
+        if self._config.relationship_enabled:
+            try:
+                rel = await self._store.get_relationship(user_id)
+                labels = self._character.get_relation_labels()
+                if rel is not None and labels:
+                    _, label = rel.get_relation_level(labels)
+                    notes.append(f"你和{subject}的关系是{label}。")
+            except Exception:
+                logger.debug("group_speaker_status: 关系查询失败，跳过", exc_info=True)
         try:
             profile = await self._store.get_user_profile(user_id)
             if profile is not None and getattr(profile, "facts", None):

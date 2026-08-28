@@ -28,8 +28,8 @@ from plugins.DicePP.module.persona.life.conversation_scope import ConversationSc
 
 def _make_config():
     return ChatConfig(
-        timezone="Asia/Shanghai", reputation_refuse_threshold=30,
-        relationship_refuse_enabled=False, max_history_turns=20,
+        timezone="Asia/Shanghai", relationship_enabled=False,
+        max_history_turns=20,
         max_history_tokens=8000, lore_token_budget=1000,
     )
 
@@ -246,11 +246,13 @@ class TestProactiveFakeLLM:
 
 
 class TestSpeakerPropagation:
-    def _agent(self, scope, conv, *, store=None, delivery=None):
+    def _agent(self, scope, conv, *, store=None, delivery=None, relationship_enabled=False):
+        config = _make_config()
+        config.relationship_enabled = relationship_enabled
         return ChatAgent(
             scope=scope, conversation=conv,
             store=store or _make_store(), client=MagicMock(), character=_make_char(),
-            config=_make_config(),
+            config=config,
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
             after_response=AsyncMock(),
@@ -284,7 +286,10 @@ class TestSpeakerPropagation:
         store.get_user_profile = AsyncMock(return_value=profile)
 
         conv = self._completed_conv()
-        agent = self._agent(ConversationScope.for_group("g1"), conv, store=store)
+        agent = self._agent(
+            ConversationScope.for_group("g1"), conv, store=store,
+            relationship_enabled=True,
+        )
         await agent.execute_turn("u1", "g1", "hi", speaker_name="小周")
 
         transient = conv.run.call_args.kwargs["transient_context_messages"]
@@ -293,6 +298,27 @@ class TestSpeakerPropagation:
         assert "关系是朋友" in blob
         assert "下棋" in blob
         assert conv.run.call_args.kwargs["group_transcript_in_content"] is True
+
+    @pytest.mark.asyncio
+    async def test_group_scope_omits_relation_but_keeps_profile_when_disabled(self):
+        store = _make_store()
+        rel = MagicMock()
+        rel.get_relation_level.return_value = (2, "朋友")
+        store.get_relationship = AsyncMock(return_value=rel)
+        profile = MagicMock()
+        profile.facts = {"爱好": "下棋"}
+        store.get_user_profile = AsyncMock(return_value=profile)
+
+        conv = self._completed_conv()
+        agent = self._agent(ConversationScope.for_group("g1"), conv, store=store)
+        await agent.execute_turn("u1", "g1", "hi", speaker_name="小周")
+
+        transient = conv.run.call_args.kwargs["transient_context_messages"]
+        blob = "\n".join(m["content"] for m in (transient or []))
+        assert "当前说话者（小周）" in blob
+        assert "下棋" in blob
+        assert "关系是朋友" not in blob
+        store.get_relationship.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_private_scope_no_group_speaker_status(self):

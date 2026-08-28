@@ -77,6 +77,7 @@ def test_user_json_is_independent_and_empty_for_this_batch(dd):
         ("bot", {"persona_ai": {"group_chat_enabled": False}}),
         ("bot", {"persona_ai": {"segment_enabled": False}}),
         ("bot", {"persona_ai": {"max_history_tokens": 8000}}),
+        ("bot", {"persona_ai": {"relationship_refuse_enabled": True}}),
         ("bot", {"unknown": True}),
         ("bot", {"master": ["old-master"]}),
         ("bot", {"admin": ["old-admin"]}),

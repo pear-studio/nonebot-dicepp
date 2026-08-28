@@ -360,8 +360,6 @@ class TestHandleJrrp:
 
         config = ChatConfig(
             timezone="Asia/Shanghai",
-            reputation_refuse_threshold=30,
-            relationship_refuse_enabled=False,
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,

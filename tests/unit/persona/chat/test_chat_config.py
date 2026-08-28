@@ -29,17 +29,15 @@ def test_from_persona_maps_only_public_chat_settings():
     persona = SimpleNamespace(
         timezone="UTC",
         search_max_chars=321,
-        relationship_refuse_enabled=True,
-        reputation_refuse_threshold=12.5,
-        scoring_interval=9,
+        relationship_enabled=True,
     )
 
     config = ChatConfig.from_persona(persona)
 
     assert config.timezone == "UTC"
     assert config.search_max_chars == 321
-    assert config.relationship_refuse_enabled is True
-    assert config.reputation_refuse_threshold == 12.5
-    assert config.scoring_interval == 9
+    assert config.relationship_enabled is True
+    assert config.reputation_refuse_threshold == 30.0
+    assert config.scoring_interval == 5
     assert config.max_history_turns == 10
     assert config.segment_max_chars == 80

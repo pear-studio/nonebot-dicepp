@@ -190,7 +190,7 @@ class ChatDeps:
     coordinator: LLMCallCoordinator
     character: Character
     config: Any
-    decay_calculator: DecayCalculator
+    decay_calculator: Optional[DecayCalculator]
     port: MessagePort
     query_store: Any = None
     resolve_db: Any = None
@@ -357,9 +357,14 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     # ChatConfig owns all chat-only policy defaults and receives only the
     # Persona settings that remain part of the public configuration.
     chat_config = ChatConfig.from_persona(deps.config)
-    scoring_agent = ScoringAgent(deps.client, timezone=deps.config.timezone,
-                                 max_rounds=deps.config.background_llm_max_rounds,
-                                 store=deps.store)
+    scoring_agent = None
+    if chat_config.relationship_enabled:
+        scoring_agent = ScoringAgent(
+            deps.client,
+            timezone=deps.config.timezone,
+            max_rounds=deps.config.background_llm_max_rounds,
+            store=deps.store,
+        )
     from .chat.context import SegmentGuide
 
     segment_guide = SegmentGuide(
@@ -380,11 +385,15 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     )
 
     response_handler = ResponseHandler(store=deps.store, port=deps.port)
-    scoring_trigger = ScoringTrigger(
-        store=deps.store, scoring_agent=scoring_agent,
-        decay_calculator=deps.decay_calculator, character=deps.character,
-        config=chat_config,
-    )
+    scoring_trigger = None
+    if chat_config.relationship_enabled:
+        scoring_trigger = ScoringTrigger(
+            store=deps.store,
+            scoring_agent=scoring_agent,
+            decay_calculator=deps.decay_calculator,
+            character=deps.character,
+            config=chat_config,
+        )
     return ChatOrchestrator(
         store=deps.store,
         client=deps.client,
@@ -404,7 +413,7 @@ async def _build_life(
     config,
     coordinator: LLMCallCoordinator,
     port: MessagePort,
-    decay_calculator: DecayCalculator,
+    decay_calculator: Optional[DecayCalculator],
     character_life: CharacterLife,
     dm_agent: DMAgent,
     character_agent: CharacterAgent,
@@ -539,11 +548,13 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("LLM 调用协调器已初始化")
 
-    decay_calculator = DecayCalculator(
-        DecayConfig.from_persona(config),
-        timezone_name=config.timezone,
-    )
-    logger.info("衰减计算器已初始化")
+    decay_calculator: Optional[DecayCalculator] = None
+    if config.relationship_enabled:
+        decay_calculator = DecayCalculator(
+            DecayConfig(),
+            timezone_name=config.timezone,
+        )
+        logger.info("衰减计算器已初始化")
 
     chat = _build_chat(ChatDeps(
         store=infra.store,

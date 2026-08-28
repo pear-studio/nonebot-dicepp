@@ -4,17 +4,14 @@
 实现好感度随时间自然衰减的逻辑（半衰期模型）
 """
 import math
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional, Tuple
 from datetime import datetime
 from plugins.DicePP.utils.logger import logger
 from ..data.models import RelationshipState, ScoreDeltas
 from plugins.DicePP.utils.time import wall_now
 
 
-if TYPE_CHECKING:
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-
-# 半衰期参数（默认值，实际从 DecayConfig / PersonaConfig 读取）
+# 半衰期参数（关系系统的内部默认值）
 HALF_LIFE_FAMILIARITY = 35   # 熟悉度半衰期（天）
 HALF_LIFE_INTIMACY = 21     # 亲密度半衰期（天）
 FLOOR_RATIO = 0.5           # 软下限 = peak × 0.5
@@ -46,7 +43,7 @@ def _calc_dim_decay(current: float, peak: float, half_life_days: float, idle_day
 
 
 class DecayConfig:
-    """衰减配置（运行时用；字段与 `PersonaConfig` 的 decay_* 一一对应）"""
+    """衰减配置（关系系统的内部运行参数）。"""
 
     def __init__(
         self,
@@ -61,18 +58,6 @@ class DecayConfig:
         self.familiarity_half_life_days = familiarity_half_life_days
         self.intimacy_half_life_days = intimacy_half_life_days
         self.floor_ratio = floor_ratio
-
-    @classmethod
-    def from_persona(cls, persona: "PersonaConfig") -> "DecayConfig":
-        """从机器人 Persona 配置构造。"""
-        return cls(
-            enabled=persona.decay_enabled,
-            grace_period_hours=persona.decay_grace_period_hours,
-            familiarity_half_life_days=persona.decay_familiarity_half_life_days,
-            intimacy_half_life_days=persona.decay_intimacy_half_life_days,
-            floor_ratio=persona.decay_floor_ratio,
-        )
-
 
 class DecayCalculator:
     """衰减计算器（半衰期模型，增量计费：双维度独立衰减）。"""

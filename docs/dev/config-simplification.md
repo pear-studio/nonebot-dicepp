@@ -195,6 +195,7 @@ DeepSeek API Key 直接保存在 `user.json`，Dashboard 使用密码输入框�
 ### 第四批：Persona 高层配置
 
 - 收缩为 Persona、关系、主动消息、生活模拟四个高层开关。
+- 关系系统只保留 `relationship_enabled`；评分、衰减、信誉门控及上下文关系信息随开关统一启停，算法参数固定在运行时内部。
 - 实现共享每日限额与 Bot 数据库豁免语义。
 - 收敛 `.jrrp`、群聊、主动目标和每日摘要行为。
 

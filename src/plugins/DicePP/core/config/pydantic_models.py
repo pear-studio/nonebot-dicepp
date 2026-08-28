@@ -226,34 +226,9 @@ class PersonaConfig(BaseModel):
 
     # ── 生活模拟 ─────────────────────────────────────────────────────────────
 
-    game_enabled: bool = Field(
-        default=True, title="游戏系统",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    scoring_interval: int = Field(
-        default=5, title="计分间隔",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
-    # Phase 2: 好感度时间衰减
-    decay_enabled: bool = Field(
-        default=True, title="衰减系统",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    decay_grace_period_hours: int = Field(
-        default=8, title="衰减宽限期",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    decay_familiarity_half_life_days: int = Field(
-        default=35, title="熟悉度半衰期",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    decay_intimacy_half_life_days: int = Field(
-        default=21, title="亲密度半衰期",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    decay_floor_ratio: float = Field(
-        default=0.5, title="衰减下限比例",
+    relationship_enabled: bool = Field(
+        default=False, title="关系系统",
+        description="启用关系评分、衰减、信誉门控和相关上下文信息",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
@@ -326,16 +301,6 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
-    # Phase 2: 信誉拒绝机制配置
-    relationship_refuse_enabled: bool = Field(
-        default=True, title="信誉拒绝",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    reputation_refuse_threshold: float = Field(
-        default=30.0, title="信誉拒绝阈值",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
     # chat → life 行动建议
     suggest_action_min_relationship: int = Field(
         default=40, ge=0, le=100, title="建议最低关系分数",
@@ -349,11 +314,6 @@ class PersonaConfig(BaseModel):
     )
 
     # ── 群聊与限制 ───────────────────────────────────────────────────────────
-
-    group_simple_scoring: bool = Field(
-        default=True, title="群聊简易计分",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
 
     # Phase 2: 群活跃度
     group_activity_enabled: bool = Field(

@@ -37,6 +37,7 @@ DicePP 使用 JSON 配置。常用文件是：
 | `accept_group_invites` | 是否接受加群和群邀请请求 |
 | `persona_ai.enabled` | 是否启用 Persona AI；默认关闭 |
 | `persona_ai.character_name` | 启用 Persona AI 时使用的角色卡目录名 |
+| `persona_ai.relationship_enabled` | 是否启用关系评分、衰减和信誉门控；默认关闭 |
 
 Persona 成功启用后，`.jrrp` 由 Persona 处理，私聊和群聊均支持。Persona 对话始终使用内置的
 分段回复策略。

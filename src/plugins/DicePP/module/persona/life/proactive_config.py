@@ -51,7 +51,6 @@ class ProactiveConfig:
             miss_enabled=persona.proactive_miss_enabled,
             miss_min_hours=persona.proactive_miss_min_hours,
             miss_min_score=persona.proactive_miss_min_score,
-            reputation_refuse_threshold=persona.reputation_refuse_threshold,
             timezone=persona.timezone,
             share_message_concurrent=persona.proactive_share_message_concurrent,
             share_max_chars=persona.proactive_share_max_chars,

@@ -344,9 +344,13 @@ def estimate_agent_runs(
     config: Any,
     character: Any,
 ) -> tuple[AgentRunEstimate, ...]:
-    scoring_interval = config.persona_ai.scoring_interval
+    relationship_enabled = config.persona_ai.relationship_enabled
+    # 与 ChatConfig 的关系评分批次默认保持一致；该参数不再属于 PersonaConfig。
+    scoring_interval = 5
 
     def scoring_runs(interactions_by_user: Sequence[int]) -> int:
+        if not relationship_enabled:
+            return 0
         return sum(count // scoring_interval for count in interactions_by_user)
 
     results: list[AgentRunEstimate] = []

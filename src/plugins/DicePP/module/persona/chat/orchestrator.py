@@ -177,7 +177,7 @@ class ChatOrchestrator:
                     )
 
         # Gate: 信誉拒绝
-        if self._chat_config.relationship_refuse_enabled:
+        if self._chat_config.relationship_enabled:
             if group_id:
                 history = await self._store.get_group_messages(group_id, limit=1)
             else:
@@ -430,7 +430,8 @@ class ChatOrchestrator:
         """按 scope 装配 ChangeSource（D6/D8）。
 
         - 角色级来源（Date / DailyEvent）：群/私聊都注册。
-        - per-user 来源（Relation / ProfileFacts）：仅私聊 scope 注册。
+        - per-user 来源（Relation / ProfileFacts）：仅私聊 scope 注册；关系来源受
+          relationship_enabled 控制，画像来源始终保留。
           群聊 scope 共享，绑定单一 user 会形成"首-user 锚定"，阶段 1 退化不注册，
           阶段 2 以"当前说话者 turn_only 状态"按轮补回。
         """
@@ -440,12 +441,14 @@ class ChatOrchestrator:
                 store=self._store, timezone=self._chat_config.timezone,
             ),
         ]
-        if scope.is_private:
+        if scope.is_private and self._chat_config.relationship_enabled:
             user_id = scope.key
             sources.append(RelationChangeSource(
                 store=self._store, user_id=user_id,
                 relation_labels=self._character.get_relation_labels(),
             ))
+        if scope.is_private:
+            user_id = scope.key
             sources.append(ProfileFactsChangeSource(
                 store=self._store, user_id=user_id,
             ))
