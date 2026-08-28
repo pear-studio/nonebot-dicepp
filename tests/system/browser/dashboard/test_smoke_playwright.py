@@ -321,6 +321,7 @@ def test_config_edit_saves_typed_field_without_runtime_operation(
             )
             page.locator("aside select").select_option("test_bot")
             page.get_by_role("button", name="配置编辑").click()
+            expect(page.get_by_test_id("missing-master-notice")).to_be_visible(timeout=10000)
             field_card = page.locator(
                 "div.border.rounded-lg.bg-white"
             ).filter(has_text="Master 账号").first
@@ -343,6 +344,7 @@ def test_config_edit_saves_typed_field_without_runtime_operation(
             expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
                 "配置已保存"
             )
+            expect(page.get_by_test_id("missing-master-notice")).to_be_hidden(timeout=10000)
             _wait_for_json_value(
                 tmp_path / "config" / "bots" / "test_bot.json",
                 {"master": "new_master"},
