@@ -178,6 +178,21 @@ def test_command_split_environment_override_is_ignored(dd):
     assert cfg == BotConfig()
 
 
+def test_dicehub_environment_overrides_are_ignored(dd):
+    """DiceHub runtime state is not populated from removed business env vars."""
+    with patch.dict(
+        os.environ,
+        {
+            "DICE_DICEHUB_API_URL": "https://hub.example.test",
+            "DICE_DICEHUB_API_KEY": "secret",
+        },
+    ):
+        cfg = dd.loader("bot1").load()
+
+    assert "dicehub" not in BotConfig.model_fields
+    assert not hasattr(cfg, "dicehub")
+
+
 def test_malformed_json_is_rejected_without_rewriting(dd):
     dd.account_cfg("bot1").write_text("BAD JSON", encoding="utf-8")
 

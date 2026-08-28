@@ -385,9 +385,6 @@ class TestFieldMetadata:
         meta = _get_config_field_metadata()
         layout = _cached_config_layout()
 
-        # Must have real metadata (not the {} fallback)
-        assert len(meta) >= 30, f"expected real fields from source model, got {len(meta)}"
-
         # Verify known fields have correct metadata
         assert meta["persona_ai.enabled"]["title"] == "启用 Persona"
         assert meta["persona_ai.enabled"]["tab"] == "persona"

@@ -108,14 +108,7 @@ def _merge_model_layer(
 
 
 def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply the current BotConfig DICE_* overrides.
-
-    These deployment-time business overrides remain temporarily supported
-    until the second configuration-cleanup batch removes them.  They are
-    applied only to BotConfig; ``user.json`` is never an environment or Bot
-    overlay.  Values are parsed at this boundary so the strict JSON schema
-    remains strict for files and Dashboard submissions.
-    """
+    """Apply the supported deployment-time BotConfig DICE_* overrides."""
 
     env_map: Dict[str, Any] = {}
 
@@ -126,8 +119,6 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         current[keys[-1]] = value
 
     mappings: dict[str, tuple[list[str], Any]] = {
-        "DICE_DICEHUB_API_URL": (["dicehub", "api_url"], str),
-        "DICE_DICEHUB_API_KEY": (["dicehub", "api_key"], str),
         "DICE_LOG_LEVEL": (["log", "level"], str),
         "DICE_LOG_WEB_PROVIDER": (["log", "web", "provider"], str),
         "DICE_LOG_WEB_ENDPOINT": (["log", "web", "endpoint"], str),

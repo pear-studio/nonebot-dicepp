@@ -123,39 +123,6 @@ class PersonaConfig(BaseModel):
     )
 
 
-class HealthMonitorConfig(BaseModel):
-    """Bot 健康监控配置"""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "advanced",
-        }
-    )
-
-    heartbeat_timeout_seconds: int = Field(default=90, ge=1, title="心跳超时")
-    consecutive_fail_threshold: int = Field(default=5, ge=1, title="连续失败阈值")
-    failure_log_interval_seconds: int = Field(default=60, ge=0, title="失败日志间隔")
-
-
-class DiceHubConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "advanced",
-        }
-    )
-
-    api_url: str = Field(default="", title="API 地址")
-    api_key: str = Field(default="", title="API Key")
-    webchat_url: str = Field(default="", title="WebChat 地址")
-    name: str = Field(default="未命名", title="Hub 名称")
-
-
 class LogWebConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -182,7 +149,6 @@ class LogConfig(BaseModel):
 
     level: str = Field(default="DEBUG", title="日志级别")
     web: LogWebConfig = Field(default_factory=LogWebConfig, title="Web 日志发布")
-    max_records: int = Field(default=5000, title="最大记录数")
 
 
 # ── Top-level BotConfig ──────────────────────────────────────────────────────
@@ -208,7 +174,5 @@ class BotConfig(BaseModel):
     # ── Subsystem configs ────────────────────────────────────────────────────
 
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
-    health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig, title="健康监控")
-    dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig, title="DiceHub")
     log: LogConfig = Field(default_factory=LogConfig, title="日志模块")
     default_mode: str = Field(default="DND5E2024", title="默认模式", json_schema_extra={"dashboard_section": "modules"})

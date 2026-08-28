@@ -114,13 +114,7 @@ class Bot:
 
         # 健康监控
         from plugins.DicePP.module.bot_health.monitor import HealthMonitor
-        hc = self.config.health_monitor
-        self.health_monitor = HealthMonitor(
-            account=self.account,
-            heartbeat_timeout_seconds=hc.heartbeat_timeout_seconds,
-            consecutive_fail_threshold=hc.consecutive_fail_threshold,
-            failure_log_interval_seconds=hc.failure_log_interval_seconds,
-        )
+        self.health_monitor = HealthMonitor(account=self.account)
 
         # Some packaged runs may receive events before on_bot_connect completes.
         self._delay_init_lock = asyncio.Lock()
