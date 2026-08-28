@@ -6,6 +6,49 @@ from datetime import datetime, timedelta
 from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.models import LLMTraceRecord
+from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+from plugins.DicePP.module.persona.agent.runtime_types import (
+    AgentRunRequest,
+    LoopLimits,
+    RunMetadata,
+    ToolKit,
+)
+from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage
+
+
+class _RuntimeClient:
+    provider_name = "deepseek"
+    model = "deepseek-v4-flash"
+
+    def __init__(self, store, *, debug: bool, error: str | None = None):
+        self.data_store = store
+        self.llm_debug_enabled = debug
+        self._error = error
+
+    async def generate(self, **kwargs):
+        if self._error:
+            raise RuntimeError(self._error)
+        return LLMResponse(
+            content="runtime secret reply",
+            usage=TokenUsage(input=11, output=7),
+            model=self.model,
+        )
+
+
+def _runtime_request(interaction_id: str) -> AgentRunRequest:
+    return AgentRunRequest(
+        interaction_id=interaction_id,
+        messages=[{"role": "user", "content": "runtime secret prompt"}],
+        tools=ToolKit(),
+        output=None,
+        limits=LoopLimits(max_rounds=1),
+        metadata=RunMetadata(
+            agent_name="test",
+            run_tag="chat",
+            user_id="u-runtime",
+            group_id="g-runtime",
+        ),
+    )
 
 
 @pytest.fixture
@@ -50,6 +93,64 @@ async def test_llm_trace_add_get_and_prune(temp_db):
     assert deleted == 1
     traces = await store.get_llm_traces("u1", limit=5)
     assert len(traces) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("debug", [False, True])
+async def test_runtime_persists_agent_events_as_metadata_and_debug_payload_in_trace(
+    temp_db, debug,
+):
+    """Runtime 内存结果可含正文，但 agent 表只保留轻量数据。"""
+    runtime = AgentRuntime(
+        client=_RuntimeClient(temp_db, debug=debug),
+        store=temp_db,
+    )
+    result = await runtime.run(_runtime_request(f"runtime-success-{debug}"))
+
+    assert result.output is not None
+    assert result.output.text == "runtime secret reply"
+    events = await temp_db.get_agent_events(result.run_id)
+    run = await temp_db.get_agent_run(result.run_id)
+    traces = await temp_db.get_llm_traces("u-runtime", limit=10)
+
+    event_text = json.dumps(events, ensure_ascii=False)
+    run_text = json.dumps(run, ensure_ascii=False)
+    assert "runtime secret reply" not in event_text
+    assert "runtime secret reply" not in run_text
+    assert "runtime secret prompt" not in event_text
+    assert "runtime secret prompt" not in run_text
+    trace = next(item for item in traces if item.run_id == result.run_id)
+    if debug:
+        assert "runtime secret reply" in trace.response
+        assert "runtime secret prompt" in trace.messages
+    else:
+        assert trace.response == ""
+        assert trace.messages == ""
+
+    failed_runtime = AgentRuntime(
+        client=_RuntimeClient(
+            temp_db,
+            debug=debug,
+            error="runtime secret provider failure",
+        ),
+        store=temp_db,
+    )
+    failed = await failed_runtime.run(_runtime_request(f"runtime-failed-{debug}"))
+    assert failed.completion.kind == "failed"
+    failed_events = await temp_db.get_agent_events(failed.run_id)
+    failed_run = await temp_db.get_agent_run(failed.run_id)
+    assert "runtime secret provider failure" not in json.dumps(
+        failed_events, ensure_ascii=False,
+    )
+    assert "runtime secret provider failure" not in json.dumps(
+        failed_run, ensure_ascii=False,
+    )
+    failed_trace = next(item for item in await temp_db.get_llm_traces("u-runtime", limit=10)
+                        if item.run_id == failed.run_id)
+    if debug:
+        assert "runtime secret provider failure" in failed_trace.error
+    else:
+        assert failed_trace.error == "unknown"
 
 
 @pytest.mark.asyncio

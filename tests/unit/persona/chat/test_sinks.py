@@ -91,8 +91,8 @@ class TestRunSummarySink:
         assert updates["completion_code"] == "direct_content"
 
     @pytest.mark.asyncio
-    async def test_output_text_maps_to_completion_message(self, mock_event_store):
-        """R3 修复验证：payload.output_text → DB completion_message"""
+    async def test_output_text_is_not_persisted_in_run_summary(self, mock_event_store):
+        """完成正文只保留在内存结果，不写入 agent run 摘要。"""
         sink = RunSummarySink(event_store=mock_event_store)
         state = _make_state()
 
@@ -103,23 +103,7 @@ class TestRunSummarySink:
         await sink.on_event(event, state)
 
         updates = mock_event_store.update_run.call_args[1]
-        assert updates["completion_message"] == "hello world"
-
-    @pytest.mark.asyncio
-    async def test_output_text_truncated_at_500(self, mock_event_store):
-        """output_text 超过 500 字符时截断"""
-        sink = RunSummarySink(event_store=mock_event_store)
-        state = _make_state()
-        long_text = "x" * 600
-
-        payload = asdict(AgentRunFinishedPayload(
-            status="completed", reason="ok", output_text=long_text,
-        ))
-        event = AgentEvent(run_id="r1", seq=2, event_type="AgentRunFinished", payload=payload)
-        await sink.on_event(event, state)
-
-        updates = mock_event_store.update_run.call_args[1]
-        assert len(updates["completion_message"]) == 500
+        assert "completion_message" not in updates
 
     @pytest.mark.asyncio
     async def test_failed_event_status_mapped(self, mock_event_store):
@@ -167,19 +151,6 @@ class TestRunSummarySink:
 
         updates = mock_event_store.update_run.call_args[1]
         assert updates["sink_failure_count"] == 1
-
-    @pytest.mark.asyncio
-    async def test_run_failed_with_error(self, mock_event_store):
-        sink = RunSummarySink(event_store=mock_event_store)
-        state = _make_state()
-
-        payload = {"status": "failed", "reason": "llm_error", "output_text": "", "error": "timeout"}
-        event = AgentEvent(run_id="r1", seq=3, event_type="AgentRunFailed", payload=payload)
-        await sink.on_event(event, state)
-
-        updates = mock_event_store.update_run.call_args[1]
-        assert updates["status"] == "failed"
-        assert updates["error"] == "timeout"
 
     @pytest.mark.asyncio
     async def test_update_run_failure_does_not_crash(self, mock_event_store):

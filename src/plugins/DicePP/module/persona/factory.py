@@ -207,7 +207,7 @@ def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:
         model=user_config.deepseek_model,
         base_url=user_config.deepseek_base_url,
         data_store=store,
-        trace_enabled=config.trace_enabled,
+        llm_debug_enabled=user_config.llm_debug_enabled,
     )
     logger.info("DeepSeek 文本客户端已初始化: model=%s", client.model)
     return client

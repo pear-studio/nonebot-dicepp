@@ -25,7 +25,7 @@ def _make_simulator(*, event_chain=None, diary: str='今天很好'):
     ))
     character = MagicMock()
     character.extensions = MagicMock()
-    config = LifeConfig(trace_enabled=False)
+    config = LifeConfig()
     sim = LifeSimulator(store=store, character_life=character_life, diary_generator=diary_generator, character=character, config=config)
     return sim
 

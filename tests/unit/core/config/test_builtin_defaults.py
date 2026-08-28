@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from plugins.DicePP.core.config.loader import (
     ConfigValidationError,
@@ -19,7 +20,12 @@ def test_user_config_has_one_shared_deepseek_connection():
     assert first.deepseek_model == "deepseek-v4-flash"
     assert first.deepseek_base_url == "https://api.deepseek.com"
     assert first.daily_ai_limit == 20
+    assert first.log_level == "INFO"
+    assert first.llm_debug_enabled is False
     assert UserConfig(daily_ai_limit=0).daily_ai_limit == 0
+    assert UserConfig(log_level="DEBUG").log_level == "DEBUG"
+    with pytest.raises(ValidationError):
+        UserConfig(log_level="WARNING")
 
     first.deepseek_api_key = "changed"
     assert second.deepseek_api_key == ""
@@ -49,6 +55,7 @@ def test_internal_services_are_not_public_bot_configuration():
     assert "health_monitor" not in BotConfig.model_fields
     assert "dicehub" not in BotConfig.model_fields
     assert "max_records" not in LogConfig.model_fields
+    assert "level" not in LogConfig.model_fields
 
 
 def test_top_level_persona_is_rejected_by_config_schema():

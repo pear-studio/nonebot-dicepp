@@ -3,7 +3,7 @@
 DicePP 使用 JSON 配置。常用文件是：
 
 - `config/bots/{QQ号}.json`：单个 Bot 账号配置，包括 Persona 行为设置；
-- `config/user.json`：实例级 DeepSeek API Key、模型和接口地址；
+- `config/user.json`：实例级 DeepSeek API Key、模型、接口地址、日志级别和 LLM 观测开关；
 - `content/`：角色卡、牌组、随机表和查询库；
 - `data/`：Bot 运行数据库、日志和存档 `data/backups/`；
 - `dashboard/data/`：Dashboard 管理员和 session 数据；
@@ -55,11 +55,15 @@ API Key 放在未提交的 `config/user.json`，例如：
   "deepseek_api_key": "your-api-key-here",
   "deepseek_model": "deepseek-v4-flash",
   "deepseek_base_url": "https://api.deepseek.com",
-  "daily_ai_limit": 20
+  "daily_ai_limit": 20,
+  "log_level": "INFO",
+  "llm_debug_enabled": false
 }
 ```
 
 `daily_ai_limit` 是实例级每用户每日 Persona 对话限额，默认 `20`；设为 `0` 表示不限额。
+`log_level` 只允许 `INFO` 或 `DEBUG`，默认 `INFO`。`llm_debug_enabled` 默认关闭；开启后保存
+LLM 请求与响应的完整调试内容，关闭时仍保留轻量调用元数据。
 
 常用环境变量：
 

@@ -67,7 +67,10 @@ class EventStore:
             run_id=event.run_id,
             seq=event.seq,
             event_type=event.event_type,
-            payload_json=json.dumps(event.payload, ensure_ascii=False),
+            payload_json=json.dumps(
+                _lightweight_event_payload(event.event_type, event.payload),
+                ensure_ascii=False,
+            ),
             created_at=event.created_at,
         )
 
@@ -153,3 +156,33 @@ def _asdict(obj: Any) -> dict:
     result = asdict(obj)
     # 递归处理嵌套 dataclass
     return result
+
+
+def _lightweight_event_payload(event_type: str, payload: dict) -> dict:
+    """保留 Agent 事件的状态元数据，不持久化正文或异常详情。"""
+    persisted = dict(payload)
+
+    if event_type == "ModelResponseReceived":
+        persisted.pop("content_preview", None)
+        persisted["tool_calls"] = [
+            {key: call[key] for key in ("id", "name") if key in call}
+            for call in persisted.get("tool_calls", [])
+        ]
+    elif event_type in {
+        "AgentRunFinished", "AgentRunFailed", "AgentRunAborted",
+    }:
+        persisted.pop("output_text", None)
+    elif event_type == "ToolCallRequested":
+        persisted.pop("raw_arguments", None)
+    elif event_type == "ToolArgumentsInvalid":
+        persisted["error"] = "invalid_arguments"
+    elif event_type == "ToolExecutionCompleted":
+        persisted.pop("content", None)
+    elif event_type == "ToolExecutionFailed":
+        persisted["error"] = "tool_error"
+    elif event_type == "CorrectionInjected":
+        persisted.pop("message", None)
+    elif event_type == "AgentWarning":
+        persisted.pop("message", None)
+
+    return persisted

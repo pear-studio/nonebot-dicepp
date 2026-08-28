@@ -76,8 +76,6 @@ def _make_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_name="test_char",
-        # 关闭不需要的子系统
-        trace_enabled=False,
         life_simulation_enabled=False,
     )
 

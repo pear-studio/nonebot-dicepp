@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 class LifeConfig:
     """生活域配置"""
 
-    trace_enabled: bool = False
     trace_max_age_days: int = 7
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30
@@ -35,7 +34,7 @@ class LifeConfig:
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "LifeConfig":
-        return cls(trace_enabled=persona.trace_enabled)
+        return cls()
 
 
 class LifeSimulator:

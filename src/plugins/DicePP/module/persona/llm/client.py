@@ -21,6 +21,7 @@ class TextModelClient(Protocol):
     model: str
     provider_name: str
     data_store: Any
+    llm_debug_enabled: bool
 
     async def generate(
         self,
@@ -61,11 +62,11 @@ class DeepSeekTextModelClient:
         model: str,
         base_url: str,
         data_store: Any = None,
-        trace_enabled: bool = False,
+        llm_debug_enabled: bool = False,
     ) -> None:
         self.model = model
         self.data_store = data_store
-        self.trace_enabled = trace_enabled
+        self.llm_debug_enabled = llm_debug_enabled
         self._provider = OpenAIProvider(
             api_key=api_key,
             base_url=base_url,

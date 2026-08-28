@@ -42,7 +42,7 @@ def _state(**overrides) -> AgentRunState:
     return AgentRunState(**values)
 
 
-def _client(response=None, error=None, *, trace_enabled=False, data_store=None):
+def _client(response=None, error=None, *, llm_debug_enabled=False, data_store=None):
     async def generate(**kwargs):
         if error is not None:
             raise error
@@ -51,7 +51,7 @@ def _client(response=None, error=None, *, trace_enabled=False, data_store=None):
     return SimpleNamespace(
         provider_name="deepseek",
         model="deepseek-v4-flash",
-        trace_enabled=trace_enabled,
+        llm_debug_enabled=llm_debug_enabled,
         data_store=data_store,
         generate=generate,
     )
@@ -99,6 +99,35 @@ async def test_complete_calls_one_client_and_normalizes_tool_calls():
 
 
 @pytest.mark.asyncio
+async def test_complete_writes_lightweight_success_trace_without_payload_when_debug_disabled():
+    store = SimpleNamespace(add_llm_trace=AsyncMock())
+    tool_call = ToolCall(id="call-1", name="send_reply", arguments='{"content":"secret"}')
+    gateway, _ = _gateway(
+        _client(
+            _response(content="secret", tool_calls=[tool_call]),
+            data_store=store,
+        )
+    )
+
+    await gateway.complete(
+        LLMRequest(messages=[{"role": "user", "content": "secret"}], tools=[{}]),
+        _state(user_id="u1", group_id="g1"),
+        run_id="run-1",
+    )
+
+    trace = store.add_llm_trace.await_args.args[0]
+    assert (trace.status, trace.model, trace.tier) == (
+        "success", "deepseek-v4-flash", "chat",
+    )
+    assert (trace.tokens_in, trace.tokens_out) == (10, 5)
+    assert trace.messages == ""
+    assert trace.response == ""
+    assert trace.tool_calls == ""
+    assert trace.reasoning_content == ""
+    assert trace.usage_raw_json == ""
+
+
+@pytest.mark.asyncio
 async def test_complete_passes_task_and_strips_runtime_fields():
     calls = []
 
@@ -134,7 +163,7 @@ async def test_complete_converts_error_emits_failure_and_writes_trace():
     gateway, event_store = _gateway(
         _client(
             error=RuntimeError("connection refused"),
-            trace_enabled=True,
+            llm_debug_enabled=True,
             data_store=store,
         )
     )
@@ -152,13 +181,14 @@ async def test_complete_converts_error_emits_failure_and_writes_trace():
     assert trace.status == "failed"
     assert trace.model == "deepseek-v4-flash"
     assert json.loads(trace.messages) == [{"role": "user", "content": "hi"}]
+    assert "connection refused" in trace.error
 
 
 @pytest.mark.asyncio
-async def test_complete_does_not_write_trace_when_disabled():
+async def test_complete_writes_lightweight_failure_trace_when_debug_disabled():
     store = SimpleNamespace(add_llm_trace=AsyncMock())
     gateway, _ = _gateway(
-        _client(error=RuntimeError("boom"), trace_enabled=False, data_store=store)
+        _client(error=RuntimeError("boom"), data_store=store)
     )
 
     with pytest.raises(LLMCallError):
@@ -167,4 +197,10 @@ async def test_complete_does_not_write_trace_when_disabled():
             _state(),
         )
 
-    store.add_llm_trace.assert_not_awaited()
+    trace = store.add_llm_trace.await_args.args[0]
+    assert trace.status == "failed"
+    assert trace.error == "unknown"
+    assert "boom" not in trace.error
+    assert trace.messages == ""
+    assert trace.response == ""
+    assert trace.tool_calls == ""

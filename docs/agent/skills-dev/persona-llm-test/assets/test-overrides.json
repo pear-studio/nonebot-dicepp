@@ -1,6 +1,5 @@
 {
   "persona_ai": {
-    "enabled": true,
-    "trace_enabled": true
+    "enabled": true
   }
 }

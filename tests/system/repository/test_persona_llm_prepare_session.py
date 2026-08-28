@@ -414,15 +414,18 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
 
     from plugins.DicePP.core.config.loader import ConfigLoader
 
-    loaded = ConfigLoader(
+    loader = ConfigLoader(
         data_path=str(result.path / "config"),
         account=shell_session.bot_id_for_session(result.name),
-    ).load()
+    )
+    loaded = loader.load()
     assert loaded.persona_ai.character_name == prepare.CHARACTER_NAME
     assert loaded.persona_ai.enabled is True
-    assert json.loads((result.path / "config" / "user.json").read_text())[
-        "deepseek_api_key"
-    ] == secret
+    assert loader.user_config.llm_debug_enabled is True
+    assert json.loads((result.path / "config" / "user.json").read_text()) == {
+        "deepseek_api_key": secret,
+        "llm_debug_enabled": True,
+    }
 
     summary = prepare.format_summary(result)
     assert secret not in summary

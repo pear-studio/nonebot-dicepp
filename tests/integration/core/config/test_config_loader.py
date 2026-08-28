@@ -13,7 +13,7 @@ from plugins.DicePP.core.config.loader import (
     canonicalize_config_layer,
     save_config_file,
 )
-from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
+from plugins.DicePP.core.config.pydantic_models import BotConfig, LogConfig, UserConfig
 
 
 def _write(path: Path, data: dict) -> None:
@@ -155,12 +155,24 @@ def test_identity_environment_overrides_are_ignored(dd):
             "DICE_MASTER": "env-master",
             "DICE_ADMIN": "env-admin",
             "DICE_NICKNAME": "env-name",
+            "DICE_LOG_LEVEL": "DEBUG",
         },
     ):
         cfg = dd.loader("bot1").load()
 
     assert cfg.master == "file-master"
+    assert "level" not in LogConfig.model_fields
     assert _read(dd.account_cfg("bot1")) == {"master": "file-master"}
+
+
+def test_log_level_is_loaded_from_user_config_without_bot_environment_override(dd):
+    _write(dd.user_config, {"log_level": "DEBUG"})
+
+    with patch.dict(os.environ, {"DICE_LOG_LEVEL": "INFO"}):
+        loader = dd.loader("bot1")
+        loader.load()
+
+    assert loader.user_config.log_level == "DEBUG"
 
 
 def test_environment_master_override_does_not_populate_master(dd):

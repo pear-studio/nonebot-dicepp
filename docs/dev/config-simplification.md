@@ -154,7 +154,8 @@ DeepSeek API Key 直接保存在 `user.json`，Dashboard 使用密码输入框�
 1. 轻量 LLM 调用记录始终保存，仅包含模型、时间、状态、Token、耗时、错误类型和用户/群标识等统计元数据。
 2. 完整 LLM Debug Trace 仅在 `llm_debug_enabled=true` 时保存请求消息、回复、推理内容和工具参数。
 
-两者不与 `log_level` 耦合。保留期限使用代码常量，不再暴露天数配置。关闭 Debug 只停止新增完整 Trace，已有数据按固定期限自然清理。
+两者不与 `log_level` 耦合。保留期限使用代码常量，不再暴露天数配置。关闭 Debug 仍保留每次调用的轻量元数据，
+只清空新增记录中的完整 payload；已有数据按固定期限自然清理。
 
 ## 暂缓项目
 

@@ -97,7 +97,7 @@ class Bot:
         # Instance-wide policy is a separate schema/file.  Keep it available
         # to later service integrations without folding it into BotConfig.
         self.user_config: UserConfig = self._cfg_loader.user_config
-        configure_log_level(self.config.log.level)
+        configure_log_level(self.user_config.log_level)
         persona_config = self.config.persona_ai
         self._persona_loader = PersonaLoader()
         if persona_config.enabled:

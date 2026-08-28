@@ -479,7 +479,10 @@ def prepare_session(
         )
         write_json(
             created_path / "config" / "user.json",
-            {"deepseek_api_key": api_key},
+            {
+                "deepseek_api_key": api_key,
+                "llm_debug_enabled": True,
+            },
         )
         shutil.copytree(
             character_asset_root / CHARACTER_NAME,

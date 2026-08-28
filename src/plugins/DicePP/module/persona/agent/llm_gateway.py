@@ -93,7 +93,7 @@ class LLMGateway:
                 ModelInvocationFailedPayload(
                     provider=provider_name,
                     model=model_name,
-                    error=error,
+                    error=kind.value,
                     round_index=state.tool_rounds,
                 ),
                 state,
@@ -107,6 +107,7 @@ class LLMGateway:
                 model_name=model_name,
                 messages=messages,
                 error=error,
+                error_kind=kind.value,
             )
             raise LLMCallError(error) from exc
 
@@ -189,14 +190,16 @@ class LLMGateway:
         cache_creation: int = 0,
         reasoning_tokens: int = 0,
         error: str = "",
+        error_kind: str = "",
         usage_status: str = "",
         usage_raw_json: str = "",
         usage_note: str = "",
     ) -> None:
         """写入 persona_llm_traces 记录（成功/失败统一入口）。"""
         data_store = getattr(self._client, "data_store", None)
-        if not data_store or not getattr(self._client, "trace_enabled", False):
+        if data_store is None:
             return
+        debug_enabled = self._client.llm_debug_enabled
         trace = LLMTraceRecord(
             interaction_id=state.interaction_id or run_id,
             user_id=state.user_id,
@@ -204,30 +207,36 @@ class LLMGateway:
             run_id=run_id,
             model=model_name,
             tier=request.task,
-            messages=json.dumps(
-                messages if messages is not None else request.messages,
-                ensure_ascii=False,
+            messages=(
+                json.dumps(
+                    messages if messages is not None else request.messages,
+                    ensure_ascii=False,
+                )
+                if debug_enabled else ""
             ),
-            response=response,
-            tool_calls=json.dumps(
-                [
-                    {"id": tc["id"], "name": tc["name"], "arguments": tc.get("arguments", "")}
-                    for tc in (tool_calls or [])
-                ],
-                ensure_ascii=False,
+            response=response if debug_enabled else "",
+            tool_calls=(
+                json.dumps(
+                    [
+                        {"id": tc["id"], "name": tc["name"], "arguments": tc.get("arguments", "")}
+                        for tc in (tool_calls or [])
+                    ],
+                    ensure_ascii=False,
+                )
+                if debug_enabled else ""
             ),
             latency_ms=latency_ms,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             status=status,
-            error=error,
-            reasoning_content=reasoning_content or "",
+            error=error if debug_enabled else error_kind,
+            reasoning_content=reasoning_content or "" if debug_enabled else "",
             cache_read=cache_read,
             cache_creation=cache_creation,
             reasoning_tokens=reasoning_tokens,
             usage_status=usage_status,
-            usage_raw_json=usage_raw_json,
-            usage_note=usage_note,
+            usage_raw_json=usage_raw_json if debug_enabled else "",
+            usage_note=usage_note if debug_enabled else "",
         )
         try:
             await data_store.add_llm_trace(trace)

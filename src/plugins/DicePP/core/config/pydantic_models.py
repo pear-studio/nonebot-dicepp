@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
 )
+from typing import Literal
 
 # ── Dashboard layout metadata ─────────────────────────────────────────────────
 
@@ -76,6 +77,17 @@ class UserConfig(BaseModel):
         title="每日 AI 限额",
         description="每个用户每日可使用的 Persona 对话次数；0 表示不限额",
     )
+    log_level: Literal["INFO", "DEBUG"] = Field(
+        default="INFO",
+        title="日志级别",
+        json_schema_extra={"dashboard_section": "advanced"},
+    )
+    llm_debug_enabled: bool = Field(
+        default=False,
+        title="LLM Debug Trace",
+        description="保存 LLM 请求与响应的完整调试内容",
+        json_schema_extra={"dashboard_section": "advanced"},
+    )
 
 
 class PersonaConfig(BaseModel):
@@ -103,14 +115,6 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
-    # ── 群聊与限制 ───────────────────────────────────────────────────────────
-
-    # Phase 7a: LLM Trace & Observability
-    trace_enabled: bool = Field(
-        default=True, title="LLM 追踪",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-
 
 class LogWebConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -136,7 +140,6 @@ class LogConfig(BaseModel):
         }
     )
 
-    level: str = Field(default="DEBUG", title="日志级别")
     web: LogWebConfig = Field(default_factory=LogWebConfig, title="Web 日志发布")
 
 

@@ -17,7 +17,9 @@ API Key 只写到实例级 `config/user.json`。Bot 配置不包含模型连接�
   "deepseek_api_key": "把你的 API Key 放在这里",
   "deepseek_model": "deepseek-v4-flash",
   "deepseek_base_url": "https://api.deepseek.com",
-  "daily_ai_limit": 20
+  "daily_ai_limit": 20,
+  "log_level": "INFO",
+  "llm_debug_enabled": false
 }
 ```
 
@@ -67,6 +69,9 @@ https://api.deepseek.com
 
 `deepseek_api_key`、`deepseek_model` 和 `deepseek_base_url` 只放在 `config/user.json`。
 `daily_ai_limit` 是实例级每用户每日 Persona 对话限额，默认 `20`；设为 `0` 表示不限额。
+`log_level` 是实例共享日志级别，只允许 `INFO` 或 `DEBUG`，默认 `INFO`。
+`llm_debug_enabled` 默认关闭；开启后才会在 LLM trace 中保存请求、回复、推理内容和工具参数等完整内容，
+关闭时仍保留调用状态、耗时、token 和错误类型等轻量元数据。
 
 ## 准备角色卡
 

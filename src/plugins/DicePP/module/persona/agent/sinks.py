@@ -52,8 +52,9 @@ class RunSummarySink:
                 "tool_rounds": state.tool_rounds,
             }
 
-            # completion_kind / completion_code / completion_message 从 payload 字段映射
-            # AgentRunFinishedPayload 字段: status, reason, output_text
+            # completion_kind / completion_code 从 payload 字段映射。
+            # AgentRunFinishedPayload 的 output_text 只在内存中用于完成结果，
+            # 不写入持久化 run 摘要。
             completion_kind = payload.get("status", "")
             if completion_kind:
                 updates["completion_kind"] = completion_kind
@@ -61,15 +62,6 @@ class RunSummarySink:
             completion_code = payload.get("reason", "")
             if completion_code:
                 updates["completion_code"] = completion_code
-
-            # output_text 作为 completion_message 的降级来源
-            completion_message = payload.get("output_text", "")
-            if completion_message:
-                updates["completion_message"] = completion_message[:500]
-
-            error = payload.get("error", "")
-            if error:
-                updates["error"] = error
 
             tokens_input = payload.get("tokens_input", 0)
             if tokens_input:
