@@ -14,6 +14,8 @@ def test_user_config_has_one_shared_deepseek_connection():
     assert first.deepseek_api_key == ""
     assert first.deepseek_model == "deepseek-v4-flash"
     assert first.deepseek_base_url == "https://api.deepseek.com"
+    assert first.daily_ai_limit == 20
+    assert UserConfig(daily_ai_limit=0).daily_ai_limit == 0
 
     first.deepseek_api_key = "changed"
     assert second.deepseek_api_key == ""

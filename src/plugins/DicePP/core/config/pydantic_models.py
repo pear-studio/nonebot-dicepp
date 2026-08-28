@@ -70,6 +70,12 @@ class UserConfig(BaseModel):
         description="高级配置：通常无需修改",
         json_schema_extra={"dashboard_section": "advanced"},
     )
+    daily_ai_limit: int = Field(
+        default=20,
+        ge=0,
+        title="每日 AI 限额",
+        description="每个用户每日可使用的 Persona 对话次数；0 表示不限额",
+    )
 
 
 class PersonaConfig(BaseModel):
@@ -100,19 +106,6 @@ class PersonaConfig(BaseModel):
     )
 
     # ── 群聊与限制 ───────────────────────────────────────────────────────────
-
-    daily_limit: int = Field(
-        default=20, title="每日限额",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    quota_check_enabled: bool = Field(
-        default=True, title="配额检查",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    quota_exceeded_message: str = Field(
-        default="今日配额已用完（{limit}次），请稍后再试", title="超配额消息",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
 
     # Phase 7a: LLM Trace & Observability
     trace_enabled: bool = Field(

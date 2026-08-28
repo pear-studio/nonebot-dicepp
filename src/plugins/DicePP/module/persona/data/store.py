@@ -135,7 +135,7 @@ class PersonaDataStore:
         await self.close()
 
     def _wall_now(self) -> datetime:
-        """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
+        """使用 Persona 内部统一时区的墙钟（naive 本地时间）。"""
         from plugins.DicePP.utils.time import get_clock
         return get_clock().now()
 

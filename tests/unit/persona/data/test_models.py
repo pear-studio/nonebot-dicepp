@@ -1,13 +1,13 @@
 """Persona 数据模型单元测试。"""
 
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig, UserConfig
 
 
 class TestPersonaConfig:
     def test_default_values(self):
         config = PersonaConfig()
         assert config.enabled is False
-        assert config.daily_limit == 20
+        assert UserConfig().daily_ai_limit == 20
 
 
 class TestCharacterState:

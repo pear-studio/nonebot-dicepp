@@ -55,7 +55,6 @@ class _RecordingProvider:
 class _FakeClient:
     provider_name = "deepseek"
     model = "fake-model"
-    quota_check_enabled = False
     data_store = None
 
     def __init__(self, provider: _RecordingProvider) -> None:

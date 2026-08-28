@@ -16,7 +16,8 @@ API Key 只写到实例级 `config/user.json`。Bot 配置不包含模型连接�
 {
   "deepseek_api_key": "把你的 API Key 放在这里",
   "deepseek_model": "deepseek-v4-flash",
-  "deepseek_base_url": "https://api.deepseek.com"
+  "deepseek_base_url": "https://api.deepseek.com",
+  "daily_ai_limit": 20
 }
 ```
 
@@ -30,8 +31,7 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 
 ```json
 "enabled": true,
-"character_name": "qiqi.local",
-"daily_limit": 20
+"character_name": "qiqi.local"
 ```
 
 `persona_ai.enabled` 默认是 `false`。只有设为 `true` 时才会启动 Persona；角色名由同一段配置中的
@@ -53,7 +53,6 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 |------|------|
 | `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
 | `character_name` | 角色卡目录名，在 `persona_ai` 段中设置 |
-| `daily_limit` | 普通用户每日主模型调用次数 |
 
 DeepSeek 的模型配置由实例级 `config/user.json` 管理，默认接口地址是：
 
@@ -62,6 +61,7 @@ https://api.deepseek.com
 ```
 
 `deepseek_api_key`、`deepseek_model` 和 `deepseek_base_url` 只放在 `config/user.json`。
+`daily_ai_limit` 是实例级每用户每日 Persona 对话限额，默认 `20`；设为 `0` 表示不限额。
 
 ## 准备角色卡
 
@@ -148,7 +148,7 @@ Persona 对话默认对所有用户开放。管理员可维护不计入 AI 限�
 检查：
 
 - Persona 模块是否已启用，可发送 `.ai status`
-- 是否超过 `daily_limit`
+- 是否超过实例级 `daily_ai_limit`
 - 日志中是否有 LLM 错误
 
 ### LLM 调用失败

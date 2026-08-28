@@ -25,7 +25,7 @@ from ..transcript import (
     format_player_message,
     provider_user_name,
 )
-from .chat_shared import ChatOutcome, _client_has_quota
+from .chat_shared import ChatOutcome
 
 if TYPE_CHECKING:
     from ..character.models import Character
@@ -296,17 +296,13 @@ class ChatAgent:
                     image_message["name"] = stable_name
             transient_list.append(image_message)
 
-        # 5. 配额检查（Runtime 之前执行）
-        if _client_has_quota(self._client):
-            await self._client.check_daily_quota(user_id)
-
-        # 6. 计算 token_budget（阶段 3b Stage B 硬轮换）
+        # 5. 计算 token_budget（阶段 3b Stage B 硬轮换）
         if self._scope.is_private:
             token_budget = self._config.private_session_token_budget
         else:
             token_budget = self._config.group_session_token_budget
 
-        # 7. 调用 conv.run()
+        # 6. 调用 conv.run()
         # R2: 只接受入站 hook 明确返回的 message_stream_id 作为本次成功证据。
         # user/scope/content 即使完全相同也可能是旧消息，不能用于身份判定。
         messages_before_run = conv.get_messages()
@@ -353,10 +349,6 @@ class ChatAgent:
                 )
             conv.add_messages([fallback_message])
             await conv.save()
-
-        # 配额计数（LLM 调用已完成）
-        if _client_has_quota(self._client):
-            await self._client.increment_usage(user_id)
 
         # 7. 消费 result.output → final_text
         final_text = ""

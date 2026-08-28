@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from plugins.DicePP.utils.logger import logger
+from plugins.DicePP.utils.time import wall_now
 
 from ..data.store import PersonaDataStore
 from ..data.models import MessageType
@@ -61,6 +62,8 @@ class ChatOrchestrator:
         context_builder: Optional[ContextBuilder] = None,
         sleep_gate: Optional[Any] = None,
         registry: Optional[ConversationRegistry] = None,
+        daily_ai_limit: int = 0,
+        master_user_id: str = "",
     ) -> None:
         self._store = store
         self._client = client
@@ -77,6 +80,8 @@ class ChatOrchestrator:
         self._sleep_gate = sleep_gate
         self._action_evaluator = action_evaluator
         self._character_life = character_life
+        self._daily_ai_limit = daily_ai_limit
+        self._master_user_id = master_user_id
 
         # Coordinator 实例（按 target_key 串行）
         self._coordinator = LLMCallCoordinator()
@@ -130,6 +135,31 @@ class ChatOrchestrator:
     def registry(self) -> ConversationRegistry:
         return self._registry
 
+    async def _quota_is_exempt(self, user_id: str, group_id: str) -> bool:
+        if self._daily_ai_limit == 0 or user_id == self._master_user_id:
+            return True
+        if await self._store.is_user_whitelisted(user_id):
+            return True
+        return bool(group_id) and await self._store.is_group_whitelisted(group_id)
+
+    async def _check_daily_quota(self, user_id: str, group_id: str) -> bool:
+        """检查本次用户请求额度，返回是否需要在成功后计数。"""
+        if await self._quota_is_exempt(user_id, group_id):
+            return False
+        today = wall_now("Asia/Shanghai").strftime("%Y-%m-%d")
+        current = await self._store.get_daily_usage(user_id, today)
+        if current >= self._daily_ai_limit:
+            raise QuotaExceeded(
+                f"今日 AI 对话次数已达上限 ({self._daily_ai_limit})，请稍后再试"
+            )
+        return True
+
+    async def _increment_daily_usage(self, user_id: str, should_count: bool) -> None:
+        if not should_count:
+            return
+        today = wall_now("Asia/Shanghai").strftime("%Y-%m-%d")
+        await self._store.increment_daily_usage(user_id, today)
+
     # ── 公开 API ──────────────────────────────────────────────
 
     async def chat(
@@ -172,8 +202,6 @@ class ChatOrchestrator:
                         reason="sleep_gate",
                     )
 
-        # Quota check handled by ChatOrchestrator before calling Runtime
-
         # Ensure Conversation（按 scope 定位，消除跨 scope 共享）+ 延迟创建 ChatAgent
         scope = ConversationScope.from_chat(user_id, group_id)
 
@@ -181,6 +209,7 @@ class ChatOrchestrator:
 
         async def chat_call_fn(messages: List[str]) -> ChatOutcome:
             merged = "\n".join(messages) if messages else message
+            should_count = await self._check_daily_quota(user_id, group_id)
             # 阶段 3b：Stage B 硬轮换重试（最多 1 次）
             for attempt in range(2):
                 async with self._registry.run_guard(scope):
@@ -200,6 +229,8 @@ class ChatOrchestrator:
                     self._agents.pop(scope, None)
                     continue
 
+                if result.sent:
+                    await self._increment_daily_usage(user_id, should_count)
                 return result
             return ChatOutcome("failed", reason="retry_limit_exceeded")
 
@@ -254,6 +285,10 @@ class ChatOrchestrator:
             # R1: 使用 coordinator 传入的 messages 参数（缓冲合并后的消息列表）
             # 而非只用闭包捕获的 message。
             merged = "\n".join(messages) if messages else message
+            try:
+                should_count = await self._check_daily_quota(user_id, group_id)
+            except QuotaExceeded:
+                return ChatOutcome("failed", reason="quota_exceeded")
 
             for attempt in range(2):
                 try:
@@ -273,6 +308,8 @@ class ChatOrchestrator:
                         await self._registry.rotate(scope)
                         self._agents.pop(scope, None)
                         continue
+                    if result.sent:
+                        await self._increment_daily_usage(user_id, should_count)
                     return result
                 except Exception as e:
                     logger.warning(

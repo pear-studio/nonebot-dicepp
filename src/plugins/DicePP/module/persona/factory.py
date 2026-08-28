@@ -147,6 +147,8 @@ class ChatDeps:
     port: MessagePort
     action_evaluator: ActionEvaluator
     character_life: CharacterLife
+    daily_ai_limit: int
+    master_user_id: str
     query_store: Any = None
     resolve_db: Any = None
     sleep_gate: Optional[SleepGate] = None
@@ -205,9 +207,6 @@ def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:
         model=user_config.deepseek_model,
         base_url=user_config.deepseek_base_url,
         data_store=store,
-        timezone="Asia/Shanghai",
-        daily_limit=config.daily_limit,
-        quota_check_enabled=config.quota_check_enabled,
         trace_enabled=config.trace_enabled,
     )
     logger.info("DeepSeek 文本客户端已初始化: model=%s", client.model)
@@ -321,6 +320,8 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
         sleep_gate=deps.sleep_gate,
         action_evaluator=deps.action_evaluator,
         character_life=deps.character_life,
+        daily_ai_limit=deps.daily_ai_limit,
+        master_user_id=deps.master_user_id,
     )
 
 
@@ -432,6 +433,8 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         sleep_gate=character_life,
         action_evaluator=action_evaluator,
         character_life=character_life,
+        daily_ai_limit=bot.user_config.daily_ai_limit,
+        master_user_id=bot.config.master,
     ))
 
     life = await _build_life(

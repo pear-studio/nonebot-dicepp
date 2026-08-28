@@ -53,7 +53,7 @@ def mock_store():
 @pytest.fixture
 def mock_client():
     client = MagicMock()
-    client.data_store = None  # 跳过配额检查（_client_has_quota 返回 False）
+    client.data_store = None
     return client
 
 

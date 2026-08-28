@@ -214,6 +214,51 @@ class TestChatOrchestratorChat:
         assert result.sent_count == 1
 
     @pytest.mark.asyncio
+    async def test_successful_visible_reply_counts_once(self, orch_with_mocks):
+        """配额在编排边界检查，且仅成功送达后计一次。"""
+        orch, mock_conv, store = orch_with_mocks
+        orch._daily_ai_limit = 1
+        store.is_user_whitelisted = AsyncMock(return_value=False)
+        store.is_group_whitelisted = AsyncMock(return_value=False)
+        store.get_daily_usage = AsyncMock(return_value=0)
+        store.increment_daily_usage = AsyncMock()
+
+        async def mock_submit(target_key, message, chat_call_fn):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat("u1", "", "hello")
+
+        assert result.status == "sent"
+        store.increment_daily_usage.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_failed_reply_does_not_count(self, orch_with_mocks):
+        """LLM/交付失败不消耗每日额度。"""
+        orch, mock_conv, store = orch_with_mocks
+        orch._daily_ai_limit = 1
+        store.is_user_whitelisted = AsyncMock(return_value=False)
+        store.is_group_whitelisted = AsyncMock(return_value=False)
+        store.get_daily_usage = AsyncMock(return_value=0)
+        store.increment_daily_usage = AsyncMock()
+        mock_conv.run.return_value = ConversationRunResult(
+            completion_kind="failed", final_reason="provider_error",
+        )
+
+        async def mock_submit(target_key, message, chat_call_fn):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat("u1", "", "hello")
+
+        assert result.status == "failed"
+        store.increment_daily_usage.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_chat_transient_injection(self, orch_with_mocks):
         """transient_message 正确传入 conv.run() 的 transient_context_messages"""
         orch, mock_conv, store = orch_with_mocks
@@ -256,20 +301,59 @@ class TestChatOrchestratorChat:
 
     @pytest.mark.asyncio
     async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
-        """QuotaExceeded 时调用 on_exhausted 回调返回 fallback 文案"""
-        from plugins.DicePP.module.persona.llm.errors import QuotaExceeded
-
+        """达到每日限额时在 ChatAgent 执行前返回 quota fallback。"""
         orch, mock_conv, store = orch_with_mocks
+        orch._daily_ai_limit = 1
+        store.is_user_whitelisted = AsyncMock(return_value=False)
+        store.is_group_whitelisted = AsyncMock(return_value=False)
+        store.get_daily_usage = AsyncMock(return_value=1)
 
-        # 模拟 coordinator.submit 内部调用 on_exhausted
         async def mock_submit(target_key, message, chat_call_fn):
-            return MagicMock(status="failed", value=None, error=QuotaExceeded("今日配额已用完"))
+            try:
+                value = await chat_call_fn([message])
+            except Exception as error:
+                return MagicMock(status="failed", value=None, error=error)
+            return MagicMock(status="success", value=value)
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         result = await orch.chat("u1", "", "hello")
         assert result.status == "sent"
         assert result.reason == "quota_exceeded"
+        mock_conv.run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("user_id", "group_id", "user_whitelisted", "group_whitelisted"),
+        [
+            ("master", "g1", False, False),
+            ("u1", "", True, False),
+            ("u1", "g1", False, True),
+        ],
+    )
+    async def test_quota_exemptions_allow_chat_without_counting(
+        self, orch_with_mocks, user_id, group_id,
+        user_whitelisted, group_whitelisted,
+    ):
+        """Master、用户名单和群名单均豁免，群名单覆盖群内所有用户。"""
+        orch, mock_conv, store = orch_with_mocks
+        orch._daily_ai_limit = 1
+        orch._master_user_id = "master"
+        store.is_user_whitelisted = AsyncMock(return_value=user_whitelisted)
+        store.is_group_whitelisted = AsyncMock(return_value=group_whitelisted)
+        store.get_daily_usage = AsyncMock(return_value=1)
+        store.increment_daily_usage = AsyncMock()
+
+        async def mock_submit(target_key, message, chat_call_fn):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat(user_id, group_id, "hello")
+
+        assert result.status == "sent"
+        store.increment_daily_usage.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_chat_accepts_ctx(self, orch_with_mocks):

@@ -78,9 +78,7 @@ def _make_persona_config() -> PersonaConfig:
         character_name="test_char",
         # 关闭不需要的子系统
         trace_enabled=False,
-        quota_check_enabled=False,
         character_life_enabled=False,
-        daily_limit=9999,
     )
 
 
@@ -134,7 +132,7 @@ class TestCreatePersonaSuccess:
         # ── 3. 构造 Bot mock ──────────────────────────────
         bot = MagicMock()
         bot.account = "test_bot_smoke"
-        bot.user_config = UserConfig(deepseek_api_key="sk-test")
+        bot.user_config = UserConfig(deepseek_api_key="sk-test", daily_ai_limit=7)
         bot.config.persona_ai = _make_persona_config()
         bot.config.master = ""          # 避免发送启动报告
         bot.config.timezone = "Asia/Shanghai"
@@ -166,6 +164,7 @@ class TestCreatePersonaSuccess:
         assert app.store is not None, "store 句柄不应为空"
         assert app.port is not None, "port 句柄不应为空"
         assert app.current_character_name == "test_char"
+        assert app.chat._daily_ai_limit == 7
         system_prompt = app.chat._context_builder.build_static_prompt()
         assert "【回复长度】" in system_prompt
         assert "单段上限 80 字，总字数硬上限 120 字" in system_prompt

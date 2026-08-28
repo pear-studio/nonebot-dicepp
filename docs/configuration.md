@@ -51,9 +51,12 @@ API Key 放在未提交的 `config/user.json`，例如：
 {
   "deepseek_api_key": "your-api-key-here",
   "deepseek_model": "deepseek-v4-flash",
-  "deepseek_base_url": "https://api.deepseek.com"
+  "deepseek_base_url": "https://api.deepseek.com",
+  "daily_ai_limit": 20
 }
 ```
+
+`daily_ai_limit` 是实例级每用户每日 Persona 对话限额，默认 `20`；设为 `0` 表示不限额。
 
 常用环境变量：
 

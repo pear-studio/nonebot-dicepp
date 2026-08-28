@@ -267,9 +267,6 @@ class Agent(ABC):
         try:
             spec = await self.build_run_spec(context)
 
-            if _client_has_quota(self.client):
-                await self.client.check_daily_quota(spec.user_id)
-
             result = await self._run_conversation(
                 context,
                 system_prompt_override=spec.system_prompt,
@@ -285,9 +282,6 @@ class Agent(ABC):
                 user_id=spec.user_id,
                 group_id=spec.group_id,
             )
-
-            if _client_has_quota(self.client):
-                await self.client.increment_usage(spec.user_id)
 
             return await self.interpret_result(result, context)
         except Exception as e:
@@ -308,14 +302,5 @@ class Agent(ABC):
                 error=f"{self.name} 执行异常: {e}",
                 error_kind=kind,
             )
-
-
-def _client_has_quota(client) -> bool:
-    """判断文本客户端是否启用配额。"""
-    from unittest.mock import Mock
-    if isinstance(client, Mock):
-        return False
-    return getattr(client, "quota_check_enabled", False) and getattr(client, "data_store", None) is not None
-
 
 # 子类通过 build_run_spec() 直接构建 ToolKit，使用 tools/*.py 中的 build_xxx_tool() 函数。
