@@ -2,7 +2,7 @@
 Tests for jrrp persona interception paths.
 
 Covers:
-- PersonaCommand.can_process_msg .jrrp branching (is_awake, whitelist, config toggle)
+- PersonaCommand.can_process_msg .jrrp branching (is_awake, whitelist)
 - PersonaCommand._handle_jrrp with mocked compute_jrrp and mocked app.chat.chat
 - is_command=True propagation through ChatSession.chat
 - PersonaApp.is_awake() delegation to sleep_gate
@@ -48,7 +48,6 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
 
     if config is None:
         config = PersonaConfig(
-            jrrp_persona_enabled=True,
             whitelist_enabled=False,
             group_activity_enabled=False,
         )
@@ -94,7 +93,6 @@ class TestCanProcessMsgJrrpBranching:
     async def test_whitelist_enabled_and_not_whitelisted_returns_false(self):
         """白名单启用但用户不在白名单时返回 False"""
         config = PersonaConfig(
-            jrrp_persona_enabled=True,
             whitelist_enabled=True,
             group_activity_enabled=False,
         )
@@ -112,7 +110,6 @@ class TestCanProcessMsgJrrpBranching:
     async def test_whitelist_enabled_and_whitelisted_returns_true(self):
         """白名单启用且用户在白名单时返回 True"""
         config = PersonaConfig(
-            jrrp_persona_enabled=True,
             whitelist_enabled=True,
             group_activity_enabled=False,
         )
@@ -127,20 +124,6 @@ class TestCanProcessMsgJrrpBranching:
         result = await self._call_can_process(cmd, group_id="")
         assert result is True
 
-    async def test_jrrp_persona_disabled_returns_false(self):
-        """jrrp_persona_enabled=False 时 .jrrp 返回 False"""
-        config = PersonaConfig(
-            jrrp_persona_enabled=False,
-            whitelist_enabled=False,
-            group_activity_enabled=False,
-        )
-
-        app = MagicMock()
-
-        cmd = _make_cmd(app=app, config=config)
-        result = await self._call_can_process(cmd)
-        assert result is False
-
     async def test_non_jrrp_command_not_intercepted(self):
         """非 .jrrp 的 . 命令不进入 jrrp 分支"""
         cmd = _make_cmd(enabled=True, app=None)
@@ -154,6 +137,12 @@ class TestCanProcessMsgJrrpBranching:
         app = MagicMock()
         cmd = _make_cmd(app=app)
         result = await self._call_can_process(cmd, msg="。jrrp")
+        assert result is True
+
+    async def test_jrrp_in_group_chat_is_intercepted(self):
+        """Persona 启用时群聊中的 .jrrp 也始终由 Persona 接管"""
+        cmd = _make_cmd(app=MagicMock())
+        result = await self._call_can_process(cmd, group_id="G123")
         assert result is True
 
 

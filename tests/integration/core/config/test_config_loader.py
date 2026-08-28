@@ -73,6 +73,9 @@ def test_user_json_is_independent_and_empty_for_this_batch(dd):
     [
         ("user", {"nickname": "bot field"}),
         ("user", {"persona_ai": {"enabled": True}}),
+        ("bot", {"persona_ai": {"jrrp_persona_enabled": False}}),
+        ("bot", {"persona_ai": {"group_chat_enabled": False}}),
+        ("bot", {"persona_ai": {"segment_enabled": False}}),
         ("bot", {"unknown": True}),
         ("bot", {"master": ["old-master"]}),
         ("bot", {"admin": ["old-admin"]}),

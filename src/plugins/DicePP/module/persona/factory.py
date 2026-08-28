@@ -359,15 +359,13 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
                                  store=deps.store)
     from .chat.context import SegmentGuide
 
-    segment_guide = None
-    if deps.config.segment_enabled:
-        segment_guide = SegmentGuide(
-            enabled=True,
-            target_chars=deps.config.segment_target_chars,
-            max_chars=deps.config.segment_max_chars,
-            soft_limit=deps.config.segment_soft_limit,
-            hard_limit=deps.config.segment_hard_limit,
-        )
+    segment_guide = SegmentGuide(
+        enabled=True,
+        target_chars=deps.config.segment_target_chars,
+        max_chars=deps.config.segment_max_chars,
+        soft_limit=deps.config.segment_soft_limit,
+        hard_limit=deps.config.segment_hard_limit,
+    )
 
     context_builder = ContextBuilder(
         deps.character,

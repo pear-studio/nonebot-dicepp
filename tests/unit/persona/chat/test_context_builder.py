@@ -341,17 +341,6 @@ class TestContextBuilderSegmentGuide:
         assert name_idx < guide_idx < remind_idx
         assert "最后一条[玩家]消息的 uid" in system
 
-    def test_segment_guide_disabled_when_segment_enabled_false(self):
-        char = self._make_character()
-        builder = ContextBuilder(char, segment_guide=None)
-        messages = builder.build(
-            formatted_history=[{"role": "user", "content": "[14:00] hi"}],
-            history_dicts=[{"role": "user", "content": "hi"}],
-        )
-        system = messages[0]["content"]
-        assert "【回复长度】" not in system
-
-
 # ═══════════════════════════════════════════════════════════════════
 # proactive prompt
 # ═══════════════════════════════════════════════════════════════════

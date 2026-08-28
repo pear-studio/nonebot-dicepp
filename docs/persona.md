@@ -43,6 +43,14 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 启用 Persona 时，目标角色目录必须包含 `skin.yaml`；空文件也可以，表示使用该角色的内置默认文本。
 如果文件缺失或格式错误，Bot 会明确启动失败，不会静默回退到 `default` 皮肤。
 
+启用并成功初始化 Persona 后：
+
+- `.jrrp` 由 Persona 处理，私聊和群聊都支持。
+- 群聊中的正常 `@机器人` / `.ai` 对话路径始终可用。
+- 对话始终注入分段回复引导；`segment_target_chars`、`segment_max_chars`、
+  `segment_soft_limit`、`segment_hard_limit`、`segment_count_max` 和 `segment_max_delay`
+  仍是可调整的高级参数。
+
 含义：
 
 | 字段 | 说明 |
@@ -104,6 +112,7 @@ content/characters/mychar/
 1. 启动日志中应出现 `[persona.init] character=... loaded`。
 2. 私聊机器人发送 `.ai`。
 3. 群聊中 `@机器人 你好`。
+4. 私聊或群聊发送 `.jrrp`，确认由 Persona 生成结果。
 
 ## 白名单和口令
 

@@ -129,7 +129,6 @@ class TestPersonaConfig:
     def test_segment_defaults(self):
         """测试分段回复配置默认值"""
         config = PersonaConfig()
-        assert config.segment_enabled is True
         assert config.segment_target_chars == 30
         assert config.segment_max_chars == 80
         assert config.segment_soft_limit == 100

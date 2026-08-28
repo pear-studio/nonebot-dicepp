@@ -374,10 +374,6 @@ class PersonaCommand(UserCommandBase):
             if not whitelisted:
                 logger.info("[Persona] .jrrp 未拦截：用户不在白名单，回退到 JrrpCommand")
                 return False, False, None
-            # 配置开关
-            if not getattr(self.config, 'jrrp_persona_enabled', True):
-                logger.info("[Persona] .jrrp 未拦截：jrrp_persona_enabled=False，回退到 JrrpCommand")
-                return False, False, None
             logger.info("[Persona] .jrrp 已拦截，路由到 _handle_jrrp")
             return True, False, "jrrp"
 

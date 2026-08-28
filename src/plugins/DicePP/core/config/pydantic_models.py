@@ -101,13 +101,6 @@ class PersonaConfig(BaseModel):
 
     whitelist_enabled: bool = Field(default=True, title="白名单")
 
-    # ── JRRP 集成
-    jrrp_persona_enabled: bool = Field(
-        default=True,
-        title="JRRP 接管",
-        description="Persona 是否接管 .jrrp 回复。为 False 时回退到 JrrpCommand 模板渲染",
-    )
-
     image_gen_style: str = Field(
         default="anime style, high quality, clean lines", title="画风描述",
         description="全局默认画风描述，注入到 generate_image prompt 前缀。角色卡配置 image_gen_style 时优先使用角色卡的。",
@@ -204,10 +197,6 @@ class PersonaConfig(BaseModel):
     )
 
     # ── 分段回复（Segmented Reply）
-    segment_enabled: bool = Field(
-        default=True, title="分段回复",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
     segment_target_chars: int = Field(
         default=30, ge=1, title="分段建议字数", description="单段建议字数（写入 system prompt 引导 LLM）",
         json_schema_extra={"dashboard_section": "chat_reply"},
@@ -465,10 +454,6 @@ class PersonaConfig(BaseModel):
 
     # ── 群聊与限制 ───────────────────────────────────────────────────────────
 
-    group_chat_enabled: bool = Field(
-        default=True, title="群聊",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
     group_simple_scoring: bool = Field(
         default=True, title="群聊简易计分",
         json_schema_extra={"dashboard_section": "group_limits"},

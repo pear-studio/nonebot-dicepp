@@ -91,10 +91,10 @@ def _make_persona_config() -> PersonaConfig:
         decay_enabled=False,
         proactive_enabled=False,
         character_life_enabled=False,
-        group_chat_enabled=False,
         relationship_refuse_enabled=False,
-        segment_enabled=False,
         daily_limit=9999,
+        segment_max_chars=64,
+        segment_hard_limit=128,
     )
 
 
@@ -180,6 +180,9 @@ class TestCreatePersonaSuccess:
         assert app.store is not None, "store 句柄不应为空"
         assert app.port is not None, "port 句柄不应为空"
         assert app.current_character_name == "test_char"
+        system_prompt = app.chat._context_builder.build_static_prompt()
+        assert "【回复长度】" in system_prompt
+        assert "单段上限 64 字，总字数硬上限 128 字" in system_prompt
 
         # ── 8. 清理 ──────────────────────────────────────
         await app.store.close()
