@@ -283,19 +283,6 @@ class ConversationStore(Store):
 _SERIALIZED_PREFIX = "\x01JSON:"
 
 
-def _serialize_plain_string_if_ambiguous(value: str) -> str:
-    """标记会被旧格式兼容探测误判的新版纯字符串。"""
-    ambiguous = value == "null" or value.startswith(_SERIALIZED_PREFIX)
-    if value.startswith("["):
-        try:
-            ambiguous = ambiguous or isinstance(json.loads(value), list)
-        except json.JSONDecodeError:
-            pass
-    if ambiguous:
-        return _SERIALIZED_PREFIX + json.dumps(value, ensure_ascii=False)
-    return value
-
-
 def _decompose_message(msg: dict) -> dict:
     """将内存消息 dict 拆为落盘字段。
 
@@ -316,17 +303,13 @@ def _decompose_message(msg: dict) -> dict:
             "entry_type": ENTRY_TYPE_REF,
         }
     content = msg.get("content", "")
-    if isinstance(content, str):
-        content = _serialize_plain_string_if_ambiguous(content)
-    elif content is None:
+    if content is None:
         content = _SERIALIZED_PREFIX + "null"
-    else:
+    elif not isinstance(content, str):
         # 多模态 list[dict] content
         content = _SERIALIZED_PREFIX + json.dumps(content, ensure_ascii=False)
     tool_calls = msg.get("tool_calls", "")
-    if isinstance(tool_calls, str):
-        tool_calls = _serialize_plain_string_if_ambiguous(tool_calls)
-    elif tool_calls:
+    if isinstance(tool_calls, list):
         tool_calls = _SERIALIZED_PREFIX + json.dumps(tool_calls, ensure_ascii=False)
     raw_provider_context = msg.get("_provider_context")
     provider_context = (
@@ -407,12 +390,8 @@ def _recompose_message(row) -> dict:
 def _restore_serialized(value):
     """检测 _SERIALIZED_PREFIX 标记，还原被 JSON 序列化的非字符串类型。
 
-    R5 新数据：标记 + "null" → None；标记 + JSON → json.loads 还原。
-    无标记旧数据（修复前已落盘）：启发式兼容读取 —
-      - "null" → None（content 旧格式）
-      - 以 [ 开头 → 尝试 json.loads，若结果为 list 则还原（tool_calls 旧格式 /
-        多模态 content 旧格式）
-    纯文本 content 不受影响。
+    标记 + "null" → None；标记 + JSON → json.loads 还原。
+    无标记值一律视为普通字符串。
     """
     if not isinstance(value, str):
         return value
@@ -425,16 +404,6 @@ def _restore_serialized(value):
         except json.JSONDecodeError:
             logger.warning("ConversationStore: 无法解析序列化标记后的 payload: %s", payload[:100])
             return payload
-    # 向后兼容：修复前已落盘的无前缀旧数据
-    if value == "null":
-        return None
-    if value.startswith("["):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return parsed
-        except json.JSONDecodeError:
-            pass
     return value
 
 

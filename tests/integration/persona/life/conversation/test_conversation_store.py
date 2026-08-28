@@ -471,13 +471,23 @@ class TestStoreRoundtripRuntimeShapes:
         assert c == "hello world"
 
     @pytest.mark.asyncio
-    async def test_json_like_text_survives(self, conv_store):
+    async def test_json_like_text_survives(self, conv_store, temp_db):
         """新写入的 JSON 文本与 ``null`` 必须精确按字符串往返。"""
         sid = await conv_store.put("", self._snap(messages=[
             {"role": "user", "content": '{"key": "value"}'},
             {"role": "user", "content": '[1, 2, 3]'},
             {"role": "user", "content": "null"},
         ]))
+        cursor = await temp_db._persona_db.execute(
+            "SELECT content FROM persona_session_message "
+            "WHERE session_id=? ORDER BY sequence",
+            (int(sid),),
+        )
+        assert [row["content"] for row in await cursor.fetchall()] == [
+            '{"key": "value"}',
+            "[1, 2, 3]",
+            "null",
+        ]
         restored = await conv_store.get(sid)
         c0 = restored.messages[0].get("content")
         assert isinstance(c0, str), f"JSON 对象文本应为 str，实际为 {type(c0).__name__}"
@@ -488,66 +498,6 @@ class TestStoreRoundtripRuntimeShapes:
         c2 = restored.messages[2].get("content")
         assert isinstance(c2, str), f"null 文本应为 str，实际为 {type(c2).__name__}"
         assert c2 == "null"
-
-    # ── R5[#2]: 无前缀旧数据兼容读取 ──────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_legacy_tool_calls_json_string(self, conv_store, temp_db):
-        """修复前已落盘的无前缀 tool_calls JSON 字符串应还原为 list。"""
-        sid = await conv_store.put("", self._snap(messages=[
-            {"role": "assistant", "content": ""},
-        ]))
-        db = temp_db._persona_db
-        old_json = '[{"id":"c1","type":"function","function":{"name":"say","arguments":"{}"}}]'
-        await db.execute(
-            "UPDATE persona_session_message SET tool_calls=? WHERE session_id=?",
-            (old_json, int(sid)),
-        )
-        await db.commit()
-        restored = await conv_store.get(sid)
-        tc = restored.messages[0].get("tool_calls")
-        assert isinstance(tc, list), (
-            f"旧格式 tool_calls 应还原为 list，实际为 {type(tc).__name__}"
-        )
-        assert tc[0]["id"] == "c1"
-
-    @pytest.mark.asyncio
-    async def test_legacy_content_null_string(self, conv_store, temp_db):
-        """修复前已落盘的无前缀 content 'null' 应还原为 None。"""
-        sid = await conv_store.put("", self._snap(messages=[
-            {"role": "assistant", "content": "dummy"},
-        ]))
-        db = temp_db._persona_db
-        await db.execute(
-            "UPDATE persona_session_message SET content=? WHERE session_id=?",
-            ("null", int(sid)),
-        )
-        await db.commit()
-        restored = await conv_store.get(sid)
-        c = restored.messages[0].get("content")
-        assert c is None, f"旧格式 content 'null' 应还原为 None，实际 repr={c!r}"
-
-    @pytest.mark.asyncio
-    async def test_legacy_content_multimodal_json(self, conv_store, temp_db):
-        """修复前已落盘的无前缀多模态 content JSON 应还原为 list。"""
-        multimodal = [{"type": "text", "text": "看这张图"},
-                      {"type": "image_url", "image_url": {"url": "data:..."}}]
-        sid = await conv_store.put("", self._snap(messages=[
-            {"role": "user", "content": "dummy"},
-        ]))
-        db = temp_db._persona_db
-        await db.execute(
-            "UPDATE persona_session_message SET content=? WHERE session_id=?",
-            (json.dumps(multimodal), int(sid)),
-        )
-        await db.commit()
-        restored = await conv_store.get(sid)
-        c = restored.messages[0].get("content")
-        assert isinstance(c, list), (
-            f"旧格式多模态 content 应还原为 list，实际为 {type(c).__name__}"
-        )
-        assert c[0]["type"] == "text"
-
 
 # ── R6: append() batch 原子性 ─────────────────────────────────
 
