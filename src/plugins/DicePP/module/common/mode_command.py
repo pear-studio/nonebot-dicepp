@@ -1,7 +1,4 @@
 from typing import Dict, List, Tuple, Any
-import openpyxl
-import os
-import re
 
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.data.models.extended import GroupConfig
@@ -11,6 +8,11 @@ from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
 from plugins.DicePP.core.command import CommandTextParser, CommandContextResolver
 from plugins.DicePP.core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from plugins.DicePP.core.localization import LOC_PERMISSION_DENIED_NOTICE
+from plugins.DicePP.module.common.mode_defs import (
+    BUILTIN_MODES,
+    default_dice_for_mode,
+    query_database_for_mode,
+)
 
 # Task 3.3: 统一解析器（替代内嵌前缀判断与参数切分）
 _MODE_PARSER_ZH = CommandTextParser(command_prefix="模式", strip_prefix_len=3)
@@ -25,22 +27,6 @@ LOC_MODE_CURRENT = "mode_current"
 LOC_MODE_DB_MATCH = "mode_db_match"
 LOC_MODE_DB_MULTI_MATCH = "mode_db_multi_match"
 
-MODE_FILE_PATH = "Config/mode_setting.xlsx"
-
-DEFAULT_FIELD = ['mode', 'default_dice', 'query_database']
-DEFAULT_TABLE = [
-    ["DND5E2024", "20", "DND5E2024"],
-    ["DND5E2014", "20", "DND5E2014"],
-    ["DND5E混用", "20", "DND5E混合"],
-    ["DND3R", "20", "DND3R"],
-    ["PF1E", "20", "PF1E"],
-    ["PF2E", "20", "PF2E"],
-    ["PF2R", "20", "PF2R"],
-    ["COC7", "100", "COC7"],
-    ["NECHRONICA", "10", "NECHRONICA"],
-]
-
-
 @custom_user_command(readable_name="模式指令", priority=-2,
                      flag=DPP_COMMAND_FLAG_MANAGE, group_only=False
                      )
@@ -54,9 +40,9 @@ class ModeCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_MODE_SWITCH, "已切换至{new_mode}模式（默认{dice}面骰点，查询数据库使用{database}.db（如果有））。",
                                          "。mode切换群模式指令，切换模式等于一次性修改多个群配置。\nnew_mode：切换后的模式，dice：默认骰面，database：查询使用数据库")
         bot.loc_helper.register_loc_text(
-            LOC_MODE_INVALID, "该模式配置有误，无法切换，请询问骰主。", "。mode切换群模式，但模式文件有问题的情况下返回")
+            LOC_MODE_INVALID, "该模式配置有误，无法切换，请询问骰主。", "。mode切换模式，但模式定义有问题时返回")
         bot.loc_helper.register_loc_text(
-            LOC_MODE_NOT_EXIST, "该模式不存在！", "。mode切换群模式，但模式文件中不存在此模式时返回")
+            LOC_MODE_NOT_EXIST, "该模式不存在！", "。mode切换模式，但没有匹配到内置模式或数据库时返回")
         bot.loc_helper.register_loc_text(
             LOC_MODE_LIST, "以下是可用的模式列表：{modes}", "。mode模式指令查看可用模式列表\nmodes：可用模式列表")
         bot.loc_helper.register_loc_text(
@@ -66,10 +52,14 @@ class ModeCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_MODE_DB_MULTI_MATCH, "找到多个匹配的数据库：{databases}，请使用更精确的名称。", ".mode自动匹配到多个数据库时返回")
 
 
-        self.mode_dict: Dict[str, List[str]] = {}
-        self.mode_field: List[str] = DEFAULT_FIELD
+        self.mode_dict: Dict[str, List[str]] = {
+            definition.mode: [definition.default_dice, definition.query_database]
+            for definition in BUILTIN_MODES
+        }
         # 大写模式名到原始模式名映射，减少重复遍历
-        self.mode_upper_map: Dict[str, str] = {}
+        self.mode_upper_map: Dict[str, str] = {
+            name.upper(): name for name in self.mode_dict
+        }
 
     def _mode_is_available(self, mode_name: str) -> bool:
         values = self.mode_dict.get(mode_name, [])
@@ -80,47 +70,7 @@ class ModeCommand(UserCommandBase):
         return [name for name in self.mode_dict if self._mode_is_available(name)]
 
     def delay_init(self) -> List[str]:
-        bot_id: str = self.bot.account
-        init_info: List[str] = []
-        edited: bool = False
-        # 从本地文件中读取可用模式一览
-        data_path = os.path.join(self.bot.data_path, MODE_FILE_PATH)
-        os.makedirs(os.path.dirname(data_path), exist_ok=True)
-        if os.path.exists(data_path):
-            wb = openpyxl.load_workbook(data_path)
-            id_list = wb.sheetnames
-            if bot_id in id_list:
-                ws = wb[bot_id]
-                for row in ws:
-                    if str(row[0].value) == "mode":
-                        self.mode_field = [str(cell.value) for cell in row]
-                    else:
-                        self.mode_dict[str(row[0].value)] = [
-                            str(cell.value) for cell in row[1:]]
-            else:
-                ws = wb.create_sheet(bot_id)
-                ws.append(DEFAULT_FIELD)
-                for str_row in DEFAULT_TABLE:
-                    ws.append(str_row)
-                    self.mode_dict[str_row[0]] = [
-                        str_cell for str_cell in str_row[1:]]
-                edited = True
-            init_info.append("已载入模式文件。")
-        else:
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = bot_id
-            ws.append(DEFAULT_FIELD)
-            for str_row in DEFAULT_TABLE:
-                ws.append(str_row)
-                self.mode_dict[str_row[0]] = [
-                    str_cell for str_cell in str_row[1:]]
-            edited = True
-            init_info.append("已创建模式文件。")
-        if edited:
-            wb.save(data_path)
-        self.mode_upper_map = {k.upper(): k for k in self.mode_dict.keys()}
-        return init_info
+        return ["已载入内置模式。"]
 
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         # ── Task 3.3: 统一解析层前缀识别（仅做文本解析，不触库）──────────────
@@ -152,7 +102,7 @@ class ModeCommand(UserCommandBase):
         config = await ctx.group_config()
         current_mode = config.data.get("mode", "") if config else ""
         if current_mode == "":
-            default_mode = self.bot.config.mode.default
+            default_mode = self.bot.config.default_mode
             if default_mode != "":
                 await self.switch_mode(target_id, default_mode, is_private=is_private)
             else:
@@ -169,7 +119,7 @@ class ModeCommand(UserCommandBase):
 
         if arg_var == "DEFAULT" or arg_var == "CLEAR":
             feedback = await self.switch_mode(
-                target_id, self.bot.config.mode.default, is_private=is_private)
+                target_id, self.bot.config.default_mode, is_private=is_private)
         elif arg_var != "":
             feedback = await self.switch_mode(target_id, arg_var, is_private=is_private)
         else:
@@ -180,18 +130,14 @@ class ModeCommand(UserCommandBase):
 
             # 处理空/NULL
             if not stored_mode or stored_mode == "NULL":
-                stored_mode = self.bot.config.mode.default
+                stored_mode = self.bot.config.default_mode
 
-            # 尝试从 mode_dict 中找到对应的显示信息
-            mode_key = self.mode_upper_map.get(str(stored_mode).upper())
-
-            if mode_key is not None:
-                dice = self.mode_dict[mode_key][0] if len(self.mode_dict[mode_key]) > 0 else ""
-                database = self.mode_dict[mode_key][1] if len(self.mode_dict[mode_key]) > 1 else ""
-            else:
-                # 回退到读取已保存的具体字段（若存在）或使用默认回退值
-                dice = config.data.get("default_dice", "D20") if config else "D20"
-                database = config.data.get("query_database", self.bot.config.query.private_database) if config else ""
+            # 内置模式使用固定定义，动态模式沿用数据库名和简单骰面猜测。
+            dice = default_dice_for_mode(stored_mode)
+            database = query_database_for_mode(stored_mode)
+            if config and config.data:
+                dice = config.data.get("default_dice", dice)
+                database = config.data.get("query_database", database)
 
             current_text = self.bot.loc_helper.format_loc_text(LOC_MODE_CURRENT, new_mode=stored_mode, dice=dice, database=database)
             list_text = self.bot.loc_helper.format_loc_text(
@@ -205,41 +151,13 @@ class ModeCommand(UserCommandBase):
     async def switch_mode(self, target_id: str, mode: str, is_private: bool = False) -> str:
         # 更新配置数据的内部异步函数
         # 私聊配置统一存储在 group_config 表，以 "__user__{user_id}" 作为 group_id
-        async def update_group_config(tid: str, setting: List[str], var: List[str], is_private_inner: bool = False):
+        async def update_group_config(tid: str, values: Dict[str, Any], is_private_inner: bool = False):
             config_key = f"__user__{tid}" if is_private_inner else tid
             config = await self.bot.db.group_config.get(config_key)
             if config is None:
                 config = GroupConfig(group_id=config_key, data={})
-
-            # 逐项更新字段
-            for index in range(len(setting)):
-                true_var: Any
-                if isinstance(var[index], str) and var[index].isdigit():
-                    true_var = int(var[index])
-                elif isinstance(var[index], str) and var[index].upper() == "TRUE":
-                    true_var = True
-                elif isinstance(var[index], str) and var[index].upper() == "FALSE":
-                    true_var = False
-                else:
-                    true_var = var[index]
-                config.data[setting[index]] = true_var
-
+            config.data.update(values)
             await self.bot.db.group_config.upsert(config)
-
-        def guess_default_dice(db_name: str) -> str:
-            """根据数据库名称猜测默认骰面"""
-            db_upper = db_name.upper()
-            # COC 系列 -> D100
-            if re.search(r'COC', db_upper):
-                return "100"
-            # 忍神 / Shinobigami -> 2D6
-            if '忍神' in db_name or re.search(r'SHINOBI', db_upper):
-                return "2D6"
-            # DND / PF / SF / SW 系列 -> D20
-            if re.search(r'(DND|D&D|PF|PATHFINDER|SF|STARFINDER|SW|STARWARS)', db_upper):
-                return "20"
-            # 默认使用D20
-            return "20"
 
         def find_matching_databases(query: str) -> List[str]:
             """在已连接数据库中查找匹配项"""
@@ -258,10 +176,14 @@ class ModeCommand(UserCommandBase):
         matched = False
         feedback = ""
         # 尝试精准匹配预定义模式
-        exact_key = self.mode_upper_map.get(mode)
+        exact_key = self.mode_upper_map.get(mode.upper())
         if exact_key is not None and self._mode_is_available(exact_key):
-            await update_group_config(target_id, self.mode_field, [
-                                exact_key]+self.mode_dict[exact_key], is_private_inner=is_private)
+            dice, database = self.mode_dict[exact_key][:2]
+            await update_group_config(
+                target_id,
+                {"mode": exact_key, "default_dice": dice, "query_database": database},
+                is_private_inner=is_private,
+            )
             feedback = self.bot.loc_helper.format_loc_text(
                 LOC_MODE_SWITCH, new_mode=exact_key, dice=self.mode_dict[exact_key][0], database=self.mode_dict[exact_key][1])
             matched = True
@@ -272,21 +194,23 @@ class ModeCommand(UserCommandBase):
                 if not self._mode_is_available(key):
                     continue
                 ukey = key.upper()
-                if mode in ukey:
-                    result.append(ukey)
+                if mode.casefold() in key.casefold():
+                    result.append(key)
             if len(result) > 1:
                 feedback = self.bot.loc_helper.format_loc_text(
                     LOC_MODE_LIKELY, modes="、".join(result))
                 matched = True  # 有多个候选，不继续尝试数据库匹配
             elif len(result) == 1:
-                key_upper = result[0]
-                # 通过映射回原始 key 名称
-                orig_key = self.mode_upper_map.get(key_upper)
+                orig_key = result[0]
                 if orig_key is not None:
-                    await update_group_config(target_id, self.mode_field, [
-                                        orig_key]+self.mode_dict[orig_key], is_private_inner=is_private)
+                    dice, database = self.mode_dict[orig_key][:2]
+                    await update_group_config(
+                        target_id,
+                        {"mode": orig_key, "default_dice": dice, "query_database": database},
+                        is_private_inner=is_private,
+                    )
                     feedback = self.bot.loc_helper.format_loc_text(
-                        LOC_MODE_SWITCH, new_mode=orig_key, dice=self.mode_dict[orig_key][0], database=self.mode_dict[orig_key][1])
+                        LOC_MODE_SWITCH, new_mode=orig_key, dice=dice, database=database)
                     matched = True
 
         # 如果预定义模式未匹配，尝试匹配已加载的数据库
@@ -295,9 +219,12 @@ class ModeCommand(UserCommandBase):
             if len(db_matches) == 1:
                 # 唯一匹配，创建动态模式
                 db_name = db_matches[0]
-                dice = guess_default_dice(db_name)
-                await update_group_config(target_id, self.mode_field, [
-                                    mode, dice, db_name], is_private_inner=is_private)
+                dice = default_dice_for_mode(db_name)
+                await update_group_config(
+                    target_id,
+                    {"mode": mode, "default_dice": dice, "query_database": db_name},
+                    is_private_inner=is_private,
+                )
                 feedback = self.bot.loc_helper.format_loc_text(
                     LOC_MODE_DB_MATCH, database=db_name, dice=dice)
                 matched = True

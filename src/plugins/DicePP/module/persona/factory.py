@@ -15,6 +15,7 @@ from plugins.DicePP.core.config.basic import Paths
 
 from .character.loader import CharacterLoader
 from .character.models import Character
+from ..common.mode_defs import query_database_for_mode
 from .chat.orchestrator import ChatOrchestrator, ChatOutcome
 from .chat.chat_config import ChatConfig
 from .chat.scoring import ScoringAgent
@@ -371,18 +372,12 @@ def _build_agents(
 def _make_resolve_query_db(bot: Bot):
     """返回 _build_chat 所需的 resolve_db 回调（闭包捕获 bot）"""
     async def _resolve_query_db(user_id: str, group_id: str) -> str:
-        if group_id:
-            row = await bot.db.group_config.get(group_id)
-            if row and row.data:
-                return row.data.get("query_database", bot.config.mode.default)
-            return bot.config.mode.default
-        else:
-            row = await bot.db.user_stat.get(user_id)
-            if row and row.data:
-                db = row.data.get("query_database")
-                if db:
-                    return db
-            return bot.config.query.private_database
+        config_key = group_id or f"__user__{user_id}"
+        row = await bot.db.group_config.get(config_key)
+        default_database = query_database_for_mode(bot.config.default_mode)
+        if row and row.data:
+            return row.data.get("query_database", default_database)
+        return default_database
     return _resolve_query_db
 
 

@@ -666,46 +666,6 @@ class DiceHubConfig(BaseModel):
     name: str = Field(default="未命名", title="Hub 名称")
 
 
-class DeckConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "modules",
-        }
-    )
-
-    data_path: str = Field(default="./decks", title="卡组路径")
-
-
-class RandomGenConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "modules",
-        }
-    )
-
-    data_path: str = Field(default="./random", title="随机生成路径")
-
-
-class QueryConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "modules",
-        }
-    )
-
-    data_path: str = Field(default="./queries", title="查询路径")
-    private_database: str = Field(default="DND5E2014", title="默认查询库")
-
-
 class LogWebConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -735,20 +695,6 @@ class LogConfig(BaseModel):
     max_records: int = Field(default=5000, title="最大记录数")
 
 
-class ModeConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={
-            "dashboard_tab": "config",
-            "dashboard_section": "modules",
-        }
-    )
-
-    default: str = Field(default="DND5E2024", title="默认模式")
-
-
-
 # ── Top-level BotConfig ──────────────────────────────────────────────────────
 
 
@@ -776,8 +722,5 @@ class BotConfig(BaseModel):
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
     health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig, title="健康监控")
     dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig, title="DiceHub")
-    deck: DeckConfig = Field(default_factory=DeckConfig, title="卡组模块")
-    random_gen: RandomGenConfig = Field(default_factory=RandomGenConfig, title="随机生成模块")
-    query: QueryConfig = Field(default_factory=QueryConfig, title="查询模块")
     log: LogConfig = Field(default_factory=LogConfig, title="日志模块")
-    mode: ModeConfig = Field(default_factory=ModeConfig, title="模式模块")
+    default_mode: str = Field(default="DND5E2024", title="默认模式", json_schema_extra={"dashboard_section": "modules"})

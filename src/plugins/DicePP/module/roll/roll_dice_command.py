@@ -2,7 +2,6 @@ from typing import List, Tuple, Any
 import asyncio
 
 from plugins.DicePP.core.bot import Bot
-from plugins.DicePP.core.statistics import UserStatInfo
 from plugins.DicePP.core.command.const import *
 from plugins.DicePP.core.command import UserCommandBase, custom_user_command
 from plugins.DicePP.core.command import BotCommandBase, BotSendMsgCommand
@@ -28,6 +27,7 @@ from plugins.DicePP.module.roll.default_dice import (
     apply_default_expr,
 )
 from plugins.DicePP.module.roll.karma_manager import get_karma_manager, KarmaConfig
+from plugins.DicePP.module.common.mode_defs import default_dice_for_mode
 from plugins.DicePP.core.data.models import UserKarma
 from plugins.DicePP.utils.logger import logger
 
@@ -125,24 +125,11 @@ class RollDiceCommand(UserCommandBase):
         # 解析表达式并生成结果 (默认路径：AST 引擎)
         try:
             exp_str = preprocess_roll_exp(exp_str)
-            if meta.group_id:
-                _row = await self.bot.db.group_config.get(meta.group_id)
-                if _row and _row.data and "default_dice" in _row.data:
-                    stored_default = _row.data["default_dice"]
-                else:
-                    stored_default = "D20"
-            else:
-                # 私聊时尝试从用户配置读取默认骰面（支持私聊切换模式产生的设置）
-                _row = await self.bot.db.user_stat.get(meta.user_id)
-                stored_default = "D20"
-                if _row and _row.data:
-                    try:
-                        user_stat = UserStatInfo()
-                        user_stat.deserialize(_row.data)
-                        # 尝试从 meta 中读取 default_dice（需要扩展 UserMetaInfo）
-                        # 目前暂时无法支持用户级别 default_dice 的持久化
-                    except Exception:
-                        pass
+            config_key = meta.group_id or f"__user__{meta.user_id}"
+            _row = await self.bot.db.group_config.get(config_key)
+            stored_default = default_dice_for_mode(self.bot.config.default_mode)
+            if _row and _row.data:
+                stored_default = _row.data.get("default_dice", stored_default)
             default_expr = format_default_expr_from_storage(stored_default)
             exp_str = apply_default_expr(exp_str, default_expr)
             karma_enabled = False

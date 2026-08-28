@@ -86,9 +86,54 @@ def _send_group_factory(fresh_bot):
     return send_group
 
 
+@pytest.fixture
+def _send_private_factory(fresh_bot):
+    """Send private messages through the real command pipeline."""
+    bot, _proxy = fresh_bot
+
+    async def send_private(msg: str, user_id: str = "private-user",
+                           nickname: str = "私聊用户"):
+        from plugins.DicePP.core.communication import MessageMetaData, MessageSender
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
+        return await bot.process_message(msg, meta)
+
+    return send_private
+
+
 @pytest.mark.asyncio
 class TestQueryCommandIntegration:
     """QueryCommand (.查询/.q) 集成测试"""
+
+    async def test_private_mode_query_and_roll_share_group_config(
+        self, fresh_bot, query_db, _send_private_factory
+    ):
+        """私聊 .mode 写入的数据库和默认骰由查询、掷骰共同消费。"""
+        bot, _proxy = fresh_bot
+        db_name = await query_db("PRIVATE_COC")
+        await bot.db.query.execute(
+            db_name,
+            "INSERT INTO data VALUES(?,?,?,?,?,?)",
+            ("私聊条目", "Private entry", "TEST", "", "", "私聊查询内容"),
+            commit=True,
+        )
+
+        await _send_private_factory(f".mode {db_name}")
+        stored = await bot.db.group_config.get("__user__private-user")
+        assert stored.data == {
+            "mode": db_name,
+            "default_dice": "100",
+            "query_database": db_name,
+        }
+
+        query_result = "\n".join(
+            str(command) for command in await _send_private_factory(".查询 私聊条目")
+        )
+        assert "私聊查询内容" in query_result
+
+        roll_result = "\n".join(
+            str(command) for command in await _send_private_factory(".r")
+        )
+        assert "1D100=" in roll_result
 
     @pytest.mark.parametrize("command", [".查询 火球术", ".q 火球术"])
     async def test_query_no_database_returns_response(self, command, _send_group_factory):
@@ -104,7 +149,7 @@ class TestQueryCommandIntegration:
         """只读收缩不影响查询、全文搜索、重定向解析、选择和翻页。"""
         bot, _proxy = fresh_bot
         db_name = await query_db("READONLYPLAYER")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
 
         for index in range(31):
             await bot.db.query.execute(
@@ -154,7 +199,7 @@ class TestQueryCommandIntegration:
     ):
         bot, _proxy = fresh_bot
         db_name = await query_db("FORMATERROR")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
 
         result = "\n".join(
             str(command)
@@ -169,7 +214,7 @@ class TestQueryCommandIntegration:
     ):
         bot, _proxy = fresh_bot
         db_name = await query_db("OUTDATED")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
         await bot.db.query.execute(
             db_name,
             "INSERT INTO data VALUES(?,?,?,?,?,?)",
@@ -192,7 +237,7 @@ class TestQueryCommandIntegration:
 
         bot, _proxy = fresh_bot
         db_name = await query_db("DISABLESELECTION")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
         for index in range(2):
             await bot.db.query.execute(
                 db_name,
@@ -251,7 +296,7 @@ class TestQueryCommandIntegration:
         """管理关键字只在精确旧语法中 tombstone，词条前缀仍可查询。"""
         bot, _proxy = fresh_bot
         db_name = await query_db("MANAGEMENTPREFIX")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
         await bot.db.query.execute(
             db_name,
             "INSERT INTO data VALUES(?,?,?,?,?,?)",
@@ -284,7 +329,7 @@ class TestQueryCommandIntegration:
         """旧管理命令应明确拒绝，且不调用 QueryStore 的写入/连接管理 API。"""
         bot, _proxy = fresh_bot
         db_name = await query_db("READONLYADMIN")
-        bot.config.mode.default = db_name
+        bot.config.default_mode = db_name
         await bot.db.query.execute(
             db_name,
             "INSERT INTO data VALUES(?,?,?,?,?,?)",

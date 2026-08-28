@@ -12,6 +12,7 @@ from plugins.DicePP.core.data.query_store import (
     QueryStoreError,
 )
 from plugins.DicePP.core.query_utils import command_split
+from plugins.DicePP.module.common.mode_defs import query_database_for_mode
 from plugins.DicePP.utils.time import get_current_date_raw
 
 LOC_QUERY_RESULT = "query_result"
@@ -217,17 +218,10 @@ class QueryCommand(UserCommandBase):
             "查询结果仍包含旧嵌套查询时返回；database: 数据库名，keyword: 词条名",
         )
 
-        #已弃用，请使用mode_command那边的CFG。
-
     async def delay_init(self) -> List[str]:
         # 从本地文件中读取数据库
-        data_path_list: List[str] = [self.bot.config.query.data_path]
         init_info: List[str] = [""]
-        for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
-                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
-        for data_path in data_path_list:
-            await self.bot.db.query.connect_path(data_path)
+        await self.bot.db.query.connect_path(str(Paths.CONTENT_QUERIES_DIR))
         init_info[0] = self.get_state()
         return init_info
 
@@ -278,22 +272,13 @@ class QueryCommand(UserCommandBase):
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 检测是否为群内
-        if meta.group_id:
-            port = GroupMessagePort(meta.group_id)
-            row = await self.bot.db.group_config.get(meta.group_id)
-            database = self.bot.config.mode.default
-            if row and row.data:
-                database = row.data.get("query_database", self.bot.config.mode.default)
-        else:
-            port = PrivateMessagePort(meta.user_id)
-            # 私聊优先使用用户私设的 query_database（支持私聊切换模式），回退到全局私聊默认
-            user_row = await self.bot.db.user_stat.get(meta.user_id)
-            database = None
-            if user_row and user_row.data:
-                database = user_row.data.get("query_database")
-            if not database:
-                database = self.bot.config.query.private_database
+        # 群聊和私聊模式都统一保存在 group_config；私聊用独立键空间。
+        config_key = meta.group_id or f"__user__{meta.user_id}"
+        port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+        row = await self.bot.db.group_config.get(config_key)
+        database = query_database_for_mode(self.bot.config.default_mode)
+        if row and row.data:
+            database = row.data.get("query_database", database)
         source_port = MessagePort(meta.group_id, meta.user_id)
         mode: Literal["query", "search", "select", "flip_page", "read_only"] = hint[0]
         arg_str: str = hint[1]

@@ -241,13 +241,8 @@ class DeckCommand(UserCommandBase):
 
     def delay_init(self) -> List[str]:
         # 从本地文件中读取资料
-        data_path_list: List[str] = [self.bot.config.deck.data_path]
-        for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
-                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
         init_info: List[str] = []
-        for data_path in data_path_list:
-            self.load_data_from_path(data_path, init_info)
+        self.load_data_from_path(str(Paths.CONTENT_DECKS_DIR), init_info)
         for deck in self.deck_dict.values():
             for item in deck.items:
                 try:

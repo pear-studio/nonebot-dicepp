@@ -19,7 +19,7 @@ import aiosqlite
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.factory import create_persona, PersonaApp
+from plugins.DicePP.module.persona.factory import create_persona, PersonaApp, _make_resolve_query_db
 from plugins.DicePP.core.config.pydantic_models import (
     PersonaConfig,
     ProviderConfig,
@@ -128,6 +128,27 @@ async def _make_core_db():
 # ============================================================
 # Tests
 # ============================================================
+
+
+@pytest.mark.asyncio
+async def test_persona_query_resolver_uses_group_config_for_group_and_private():
+    """Persona 的群聊/私聊查询库都读取统一的 group_config 键。"""
+    bot = MagicMock()
+    bot.config.default_mode = "DND5E2024"
+    rows = {
+        "group-1": MagicMock(data={"query_database": "GROUP_DB"}),
+        "__user__user-1": MagicMock(data={"query_database": "PRIVATE_DB"}),
+    }
+
+    async def get_config(key):
+        return rows.get(key)
+
+    bot.db.group_config.get = get_config
+
+    resolve_db = _make_resolve_query_db(bot)
+
+    assert await resolve_db("user-1", "group-1") == "GROUP_DB"
+    assert await resolve_db("user-1", "") == "PRIVATE_DB"
 
 
 class TestCreatePersonaSuccess:

@@ -41,12 +41,7 @@ class RandomGeneratorCommand(UserCommandBase):
 
     def delay_init(self) -> List[str]:
         # 从本地文件中读取资料
-        data_path_list: List[str] = [self.bot.config.random_gen.data_path]
-        for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
-                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
-            data_path_list[i] = Path(data_path_list[i])
-        data_path_list: List[Path]
+        data_path_list: List[Path] = [Paths.CONTENT_RANDOM_DIR]
         data_dir_path_list: List[Path] = []
         for data_path in data_path_list:
             if data_path.exists():
