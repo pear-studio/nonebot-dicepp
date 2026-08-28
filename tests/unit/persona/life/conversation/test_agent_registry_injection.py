@@ -360,8 +360,6 @@ class TestFactoryRegistryInjection:
         config.background_llm_max_rounds = 10
         config.timezone = "Asia/Shanghai"
         config.character_life_diary_time = "22:00"
-        coordinator = MagicMock()
-        port = MagicMock()
         decay_calculator = MagicMock()
 
         character_life = MagicMock()
@@ -371,28 +369,14 @@ class TestFactoryRegistryInjection:
         character_agent = CharacterAgent(store=MagicMock(), client=MagicMock())
         sa_agent = SAAgent(store=MagicMock(), client=MagicMock())
 
-        # Mock 内部重对象
-        with patch('plugins.DicePP.module.persona.factory.ProactiveConfig') as MockPC, \
-             patch('plugins.DicePP.module.persona.factory.TargetSelector') as MockTS, \
-             patch('plugins.DicePP.module.persona.factory.ProactiveScheduler') as MockPS, \
-             patch('plugins.DicePP.module.persona.factory.ShareScheduler') as MockSS, \
-             patch('plugins.DicePP.module.persona.factory.DiaryConfig') as MockDC, \
+        with patch('plugins.DicePP.module.persona.factory.DiaryConfig') as MockDC, \
              patch('plugins.DicePP.module.persona.factory.DiaryGenerator') as MockDG, \
              patch('plugins.DicePP.module.persona.factory.LifeConfig') as MockLC, \
              patch('plugins.DicePP.module.persona.factory.LifeSimulator') as MockLS:
-
-            MockPSInstance = MagicMock()
-            MockPSInstance.load_persistent_state = AsyncMock()
-            MockPS.return_value = MockPSInstance
-
-            MockSSInstance = MagicMock()
-            MockSSInstance.load_persistent_state = AsyncMock()
-            MockSS.return_value = MockSSInstance
-
             MockLS.return_value = "life-simulator"
 
             result = await _build_life(
-                store, character, config, coordinator, port, decay_calculator,
+                store, character, config, decay_calculator,
                 character_life=character_life,
                 dm_agent=dm_agent,
                 character_agent=character_agent,

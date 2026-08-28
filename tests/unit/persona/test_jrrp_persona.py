@@ -49,7 +49,6 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
     if config is None:
         config = PersonaConfig(
             whitelist_enabled=False,
-            group_activity_enabled=False,
         )
     cmd.config = config
 
@@ -94,7 +93,6 @@ class TestCanProcessMsgJrrpBranching:
         """白名单启用但用户不在白名单时返回 False"""
         config = PersonaConfig(
             whitelist_enabled=True,
-            group_activity_enabled=False,
         )
 
         app = MagicMock()
@@ -111,7 +109,6 @@ class TestCanProcessMsgJrrpBranching:
         """白名单启用且用户在白名单时返回 True"""
         config = PersonaConfig(
             whitelist_enabled=True,
-            group_activity_enabled=False,
         )
 
         app = MagicMock()

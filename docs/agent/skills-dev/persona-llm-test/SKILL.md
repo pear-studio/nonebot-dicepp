@@ -1,6 +1,6 @@
 ---
 name: persona-llm-test
-description: 运行 DicePP Persona 真实 LLM 功能回归，客观验收生活模拟、主动消息、私聊多轮、群聊上下文、持久化和 trace。仅在用户显式调用本技能或明确要求 Persona 真实 LLM 回归时使用；不得自动触发，也不得由 subagent 自行调用。
+description: 运行 DicePP Persona 真实 LLM 功能回归，客观验收生活模拟、私聊多轮、群聊上下文、持久化和 trace。仅在用户显式调用本技能或明确要求 Persona 真实 LLM 回归时使用；不得自动触发，也不得由 subagent 自行调用。
 ---
 
 # Persona 真实 LLM 回归

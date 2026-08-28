@@ -69,7 +69,6 @@ def character():
 def life(config, mock_event_agent, mock_data_store, character):
     """标准 CharacterLife 实例"""
     life = CharacterLife(config=config, data_store=mock_data_store, character=character, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char)
-    life.add_boundary_receiver(MagicMock())
     return life
 
 @pytest.fixture
@@ -81,7 +80,6 @@ def config():
 def life(config, mock_event_agent, mock_data_store, character):
     """标准 CharacterLife 实例"""
     life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-    life.add_boundary_receiver(MagicMock())
     return life
 
 class TestCharacterLifeBasics:
@@ -103,7 +101,6 @@ class TestCharacterLifeBasics:
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     @pytest.mark.asyncio
@@ -394,7 +391,6 @@ class TestCharacterLifePhase1:
     def life(self, config, mock_event_agent, mock_data_store, character):
         from unittest.mock import MagicMock
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     def test_compute_daily_boundaries_stable(self, life, monkeypatch):
@@ -556,17 +552,7 @@ class TestCharacterLifePhase2:
     def life(self, config, mock_event_agent, mock_data_store, character):
         from unittest.mock import MagicMock
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
-
-    def test_boundary_receiver_synced_on_slot_generation(self, life, monkeypatch):
-        """槽位生成时波动边界正确同步到 boundary_receiver"""
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        set_test_clock(fake_now)
-        life._regenerate_slots_for_today()
-        start = life._today_jittered_start
-        end = life._today_jittered_end
-        life._boundary_receivers[0].set_jittered_boundaries.assert_called_once_with(start, end)
 
     @pytest.mark.asyncio
     async def test_chain_depth_one_when_no_tendency(self, life, mock_event_agent, monkeypatch):
@@ -771,7 +757,6 @@ class TestDayTransitionRemoved:
     def life(self, mock_event_agent, mock_data_store, character):
         config = CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai')
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     @pytest.mark.asyncio
@@ -820,7 +805,6 @@ class TestCrossMidnightSlots:
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character_nightowl):
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character_nightowl)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     def test_spans_midnight_property(self, life):
@@ -1040,7 +1024,6 @@ class TestMidnightEndHourJitter:
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character_end24_jitter30):
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character_end24_jitter30)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     def test_spans_midnight_false_when_jitter_before_midnight(self, life, monkeypatch):
@@ -1125,7 +1108,6 @@ class TestEndConversationSlotConsumption:
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     @pytest.mark.asyncio
@@ -1291,7 +1273,6 @@ class TestStateZeroPreserved:
     def life(self, mock_event_agent, mock_data_store, character):
         config = CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_max_depth=1)
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     @pytest.mark.asyncio
@@ -1371,7 +1352,6 @@ class TestSpontaneousIntentionContext:
     def life(self, mock_event_agent, mock_data_store, character):
         config = CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_max_depth=1)
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
 
@@ -1403,7 +1383,6 @@ class TestSpontaneousDmWantToEnd:
     def life(self, mock_event_agent, mock_data_store, character):
         config = CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_max_depth=1)
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
-        life.add_boundary_receiver(MagicMock())
         return life
 
     @pytest.mark.asyncio
@@ -1445,7 +1424,6 @@ class TestFirstBoot:
         """R1: dm_agent=None 时 _first_boot 不被清除，下次 tick 可重试注入"""
         config = CharacterLifeConfig(enabled=True)
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=None, character_agent=None, character=character)
-        life.add_boundary_receiver(MagicMock())
         life._first_boot = True
         await life.generate_daily_event()
         assert life._first_boot is True, "DM 失败时 _first_boot 应保持 True，下次 tick 可重试注入"
@@ -1493,7 +1471,6 @@ class TestFirstBoot:
         char.react = AsyncMock(return_value=AgentResult(success=False, data=None, error='模拟失败'))
         life = CharacterLife(config=config, data_store=mock_data_store,
                              dm_agent=dm, character_agent=char, character=character)
-        life.add_boundary_receiver(MagicMock())
         life._first_boot = True
         await life.generate_daily_event()
         assert life._first_boot is True, (
@@ -1515,7 +1492,6 @@ class TestFirstBoot:
             data=EventReactionResult(reaction='嗯', has_follow_up=False)))
         life = CharacterLife(config=config, data_store=mock_data_store,
                              dm_agent=dm, character_agent=char, character=character)
-        life.add_boundary_receiver(MagicMock())
         life._first_boot = True
         await life.generate_daily_event()
         assert life._first_boot is False, (
@@ -1534,7 +1510,6 @@ class TestFirstBoot:
         char = MagicMock()
         life = CharacterLife(config=config, data_store=mock_data_store,
                              dm_agent=dm, character_agent=char, character=character)
-        life.add_boundary_receiver(MagicMock())
         life._first_boot = True
         await life.generate_daily_event()
         assert life._first_boot is True, (

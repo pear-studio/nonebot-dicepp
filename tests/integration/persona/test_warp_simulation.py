@@ -135,7 +135,6 @@ def life(temp_db, character, config):
         dm_agent=None,
         character_agent=None,
     )
-    life.boundary_receiver = MagicMock()
     return life
 
 

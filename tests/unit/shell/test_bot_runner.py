@@ -37,11 +37,6 @@ class _FakeLife:
             config=SimpleNamespace(chain_max_depth=2),
             _fired_slot_indices=set(),
         )
-        self.share_scheduler = SimpleNamespace(
-            _fired_times=set(),
-            _fired_dates={},
-            _last_event_date=None,
-        )
         self.sa_agent = object()
         self.tick_times: list[dt.datetime] = []
         self.daily_times: list[dt.datetime] = []
@@ -64,15 +59,9 @@ class _FakeLife:
             self._life_date = now.date()
             self.character_life._fired_slot_indices.clear()
             self.character_life._last_event_date = now.date().isoformat()
-            self.share_scheduler._fired_times.clear()
-            self.share_scheduler._fired_dates.clear()
-            self.share_scheduler._last_event_date = now.date().isoformat()
 
         if now.hour == self.slot_hour and now.minute == self.slot_minute:
             self.character_life._fired_slot_indices.add(0)
-        if now.hour == 18 and now.minute == 0:
-            self.share_scheduler._fired_times.add("midday_18:00")
-            self.share_scheduler._fired_dates["midday_18:00"] = now.date().isoformat()
 
     async def tick_daily(self) -> DailyTickResult:
         self.daily_times.append(get_clock().now())
@@ -159,13 +148,6 @@ class _FakeBot:
             persona_ai=SimpleNamespace(
                 background_llm_max_rounds=10,
                 sa_max_rounds=100,
-                proactive_share_schedule_enabled=True,
-                proactive_share_schedule_morning_enabled=True,
-                proactive_share_schedule_evening_enabled=True,
-                proactive_share_schedule_times=["18:00"],
-                proactive_share_schedule_jitter_minutes=15,
-                proactive_always_send_users=[],
-                proactive_always_send_groups=["regression-group"],
             )
         )
         self.shutdown_called = False
@@ -253,8 +235,6 @@ async def test_warp_advances_half_open_minutes_across_midnight_and_keeps_clock(
         "minutes_advanced": 1440,
         "life_slots_marked": 1,
         "tick_errors": 0,
-        "proactive_schedule_count": 1,
-        "proactive_schedule_labels": ["midday_18:00"],
         "daily_runs": 1,
         "daily_errors": 0,
     }
@@ -346,28 +326,10 @@ async def test_dry_run_reports_agent_runs_without_changing_runtime(tmp_path):
             "character_reaction_runs_max": 24,
             "diary_agent_runs_max": 2,
             "sa_agent_runs_max": 2,
-            "proactive_agent_runs_max": 7,
-            "proactive_schedule_windows": 7,
-            "proactive_labels": ["morning", "midday_18:00", "evening"],
             "background_max_rounds": 10,
             "sa_max_rounds": 100,
         },
     }
-
-
-@pytest.mark.asyncio
-async def test_dry_run_counts_only_proactive_windows_intersecting_timeline(
-    tmp_path,
-):
-    start = dt.datetime(2026, 7, 16, 12, 30)
-    runner, _, _ = _make_started_runner(tmp_path, start)
-
-    result = await runner.warp(days=1, dry_run=True)
-
-    estimate = result["estimate"]
-    assert estimate["calendar_days_touched"] == 2
-    assert estimate["proactive_schedule_windows"] == 3
-    assert estimate["proactive_agent_runs_max"] == 3
 
 
 @pytest.mark.asyncio
@@ -383,19 +345,3 @@ async def test_slot_marked_on_first_minute_of_new_date_is_counted(tmp_path):
     result = await runner.warp(days=1)
 
     assert result["life_slots_marked"] == 1
-
-
-@pytest.mark.asyncio
-async def test_warp_summary_excludes_preexisting_proactive_markers(tmp_path):
-    start = dt.datetime(2026, 7, 16, 17, 59)
-    runner, life, _ = _make_started_runner(tmp_path, start)
-    life._life_date = start.date()
-    life.character_life._last_event_date = start.date().isoformat()
-    life.share_scheduler._last_event_date = start.date().isoformat()
-    life.share_scheduler._fired_times = {"morning"}
-    life.share_scheduler._fired_dates = {"morning": start.date().isoformat()}
-
-    result = await runner.warp(days=1)
-
-    assert result["proactive_schedule_count"] == 1
-    assert result["proactive_schedule_labels"] == ["midday_18:00"]

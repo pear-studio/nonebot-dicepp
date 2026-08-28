@@ -48,7 +48,7 @@ class RelationshipState(BaseModel):
 
     composite_score（关系等级标签用）= familiarity x 0.6 + intimacy x 0.4。
     reputation 是独立的信誉门控维度，不参与 composite_score 计算：
-    - composite_score 决定关系等级标签（冷淡/疏远/友好/默契/亲密），用于展示与主动消息门控。
+    - composite_score 决定关系等级标签（冷淡/疏远/友好/默契/亲密），用于关系展示。
     - reputation 控制聊天拒绝阈值（行为惩罚门控），低于阈值时禁止所有交互。
     两者为正交的访问控制维度：高 composite_score 不保证 reputation 未被门控。
     若未来需将 reputation 纳入 composite_score，应添加为额外加权维度并调整权重。
@@ -318,13 +318,6 @@ class Front(BaseModel):
     name: str  # Front 名称
     type: str  # campaign | adventure
     threads: list[Thread] = Field(default_factory=list)
-
-
-class GroupActivity(BaseModel):
-    """群活跃度记录"""
-    group_id: str
-    score: float = 50.0  # 活跃度分数
-    last_interaction_at: Optional[datetime] = None  # 最后互动时间（@bot/AI回复）
 
 
 class LLMTraceRecord(BaseModel):

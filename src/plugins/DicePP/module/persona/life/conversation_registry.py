@@ -179,28 +179,6 @@ class ConversationRegistry:
                 await conv.append_ref(message_stream_id, role)
                 return conv
 
-    async def append_visible_if_active(
-        self, scope: ConversationScope, message_stream_id: int, role: str,
-    ) -> Optional[Conversation]:
-        """仅在该 scope 已有 active session 时 append_ref；绝不创建新 session。
-
-        A4: 主动消息回流使用。若 scope 无 active session（缓存和 DB 均无），
-        返回 None 且不触发 session 创建或静默轮换。
-
-        不做锁外摘要预生成——本方法只向已存在的 active session 追加，绝不创建，
-        无摘要继承需求；避免对「有 closed 无 active」的 scope 触发无谓 LLM 调用。
-        """
-        async with self._lock_for(scope):
-            has_active = self.peek_cached(scope) is not None
-            if not has_active:
-                sid = await self._find_active_session_id(scope)
-                has_active = sid is not None
-            if not has_active:
-                return None
-            conv = await self._get_or_create_locked(scope)
-            await conv.append_ref(message_stream_id, role)
-            return conv
-
     async def close(self, scope: ConversationScope) -> None:
         """关闭该 scope 当前 active Conversation（status='closed' + 清缓存）。
 

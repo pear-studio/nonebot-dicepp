@@ -137,15 +137,6 @@ class ContextBuilder:
 
         return "\n\n".join(parts)
 
-    def build_static_prompt_proactive(self) -> str:
-        """构建用于 proactive（系统主动触发）场景的静态基座 prompt。
-
-        proactive 不支持分段发送，因此不注入 chat 路径的回复长度约束。
-        工具提交协议由 Runtime 根据 OutputSpec 统一注入。
-        """
-        parts = self._render_character_base()
-        return "\n\n".join(parts)
-
     def build(
         self,
         messages: List[Any] = None,

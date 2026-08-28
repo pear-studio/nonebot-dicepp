@@ -141,12 +141,9 @@ warp 完成或取消后保留，后续 warp 从当前模拟时间继续；时间
 指定 `--start`。`serve --stop` 会恢复 Runtime 启动前的时钟。
 
 `--dry-run` 不推进时钟、不执行 tick、也不写 Persona 数据；它显示实际起止时间，
-并按 DM、Character、Diary、SA 和 Proactive 的 Agent Run 上界分类估算。Agent
+并按 DM、Character、Diary 和 SA 的 Agent Run 上界分类估算。Agent
 内部轮次仍使用正式配置，输出会同时显示 `background_llm_max_rounds` 和
 `sa_max_rounds`。
-
-完成摘要中的 proactive schedule point 只表示调度器已标记该日程点，不能据此
-断言消息已经送达；发送结果需结合捕获消息、日志或 Persona trace 验收。
 
 需要让任务脱离当前 CLI 后继续运行时：
 

@@ -113,7 +113,7 @@ class ChatAgent:
         group_id: str,
         char_name: str,
     ):
-        """构建 Chat 工具集（ToolKit + OutputSpec），供 execute_turn / trigger_proactive 复用。
+        """构建 Chat 工具集（ToolKit + OutputSpec），供 execute_turn 复用。
 
         Returns:
             (toolkit, send_reply) 元组
@@ -176,7 +176,6 @@ class ChatAgent:
             description="通过聊天通道向玩家发送最终回复，并结束本轮交流。",
             args_schema=SendReplyArgs,
         )
-
         return toolkit, send_reply
 
     async def _finalize_turn(
@@ -306,7 +305,6 @@ class ChatAgent:
         toolkit, send_reply = self._build_chat_toolkit(
             delivery, interaction_id, user_id, group_id, char_name,
         )
-
         # 4. 准备 transient（本轮可见、不持久化）内容
         #    chat 路径 record_user_input=False —— 用户消息正文由消息接入 hook 以 ref
         #    写入 message_stream 并 append 进本 scope Conversation（在 run 之前）。
@@ -425,95 +423,4 @@ class ChatAgent:
             result=result,
             run_after_response=run_after_response,
             user_input=user_input,
-        )
-
-    async def trigger_proactive(
-        self,
-        trigger_message: str,
-        user_id: str = "",
-        group_id: str = "",
-        message_type: MessageType = MessageType.PROACTIVE,
-    ) -> ChatOutcome:
-        """系统主动触发场景：不接收用户输入，仅以 trigger_message 作为系统通知触发一轮 LLM 回复。"""
-        import uuid
-        from ..agent.runtime_types import (
-            SendReplyArgs,
-            LoopLimits,
-            OutputSpec,
-            ToolKit,
-        )
-        from ..agent.runtime_types import ToolSpec as NewToolSpec
-        from ..tools.send_reply_segment import build_send_reply_segment_tool
-
-        conv = self._conversation
-        interaction_id = uuid.uuid4().hex
-        char_name = getattr(self._character, "name", "") or "我"
-
-        # 1. 构建 DeliveryQueue
-        delivery = self._make_delivery()
-
-        # 2. 构建 ToolKit（与 execute_turn 共用 _build_chat_toolkit）
-        toolkit, send_reply = self._build_chat_toolkit(
-            delivery, interaction_id, user_id, group_id, char_name,
-        )
-
-        # 4. 构建 transient_list — 仅 trigger_message
-        transient_list = [
-            {"role": "user", "name": "系统", "content": trigger_message}
-        ]
-
-        # 5. SKIP quota check（不调用 check_daily_quota / increment_usage）
-
-        # 6. 计算 token_budget
-        if self._scope.is_private:
-            token_budget = self._config.private_session_token_budget
-        else:
-            token_budget = self._config.group_session_token_budget
-
-        # 7. 调用 conv.run()
-        result = await conv.run(
-            system_prompt=self._context_builder.build_static_prompt_proactive(),
-            user_input="",
-            interaction_id=interaction_id,
-            tools=toolkit,
-            output=send_reply,
-            task="chat",
-            limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
-            run_tag="proactive",
-            agent_name="Chat",
-            user_id=user_id,
-            group_id=group_id,
-            transient_context_messages=transient_list,
-            record_user_input=False,
-            token_budget=token_budget,
-        )
-
-        # 8. 处理 rotation_needed 信号
-        if result.final_reason == "rotation_needed":
-            return ChatOutcome("skipped", reason="rotation_needed")
-
-        # 9. SKIP R2 fallback（不追加空 user_input）
-
-        # 10. 消费 result.output → final_text
-        final_text = ""
-        if result.output_arguments:
-            final_content = result.output_arguments.get("content", "")
-            if final_content:
-                final_text = final_content
-        elif result.final_text:
-            final_text = result.final_text
-
-        # 11. 调用 _finalize_turn（不执行评分后处理）
-        return await self._finalize_turn(
-            conv=conv,
-            delivery=delivery,
-            interaction_id=interaction_id,
-            user_id=user_id,
-            group_id=group_id,
-            message_type=message_type,
-            char_name=char_name,
-            final_text=final_text,
-            result=result,
-            run_after_response=False,
-            user_input="",
         )

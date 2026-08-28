@@ -67,8 +67,8 @@ class TestLLMCallCoordinatorBasics:
         assert first_result.value == "first"
 
     @pytest.mark.asyncio
-    async def test_continue_on_buffered_true_loops_on_buffered(self, coordinator):
-        """continue_on_buffered=True: 成功后发现 buffered，继续循环"""
+    async def test_buffered_submits_are_processed_in_a_follow_up_round(self, coordinator):
+        """成功后发现 buffered 时，下一轮处理待处理消息。"""
         barrier = asyncio.Event()
         execution_started = asyncio.Event()
         second_done = asyncio.Event()
@@ -90,9 +90,7 @@ class TestLLMCallCoordinatorBasics:
             second_done.set()
 
         first_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", "msg1", slow_call_fn, continue_on_buffered=True
-            )
+            coordinator.submit("user:1", "msg1", slow_call_fn)
         )
         await execution_started.wait()
 
@@ -109,40 +107,6 @@ class TestLLMCallCoordinatorBasics:
         assert attempts == [["msg1"], ["msg2"]]
         assert result.status == "success"
         assert result.value == "result_2"
-
-    @pytest.mark.asyncio
-    async def test_continue_on_buffered_false_exits_on_success(self, coordinator):
-        """continue_on_buffered=False: 成功后直接退出，buffered 在 finally 中清理"""
-        barrier = asyncio.Event()
-        execution_started = asyncio.Event()
-
-        async def slow_call_fn(messages):
-            execution_started.set()
-            await barrier.wait()
-            return "result_1"
-
-        first_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", "msg1", slow_call_fn, continue_on_buffered=False
-            )
-        )
-        await execution_started.wait()
-
-        second_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", "msg2", AsyncMock(return_value="ignored")
-            )
-        )
-        second_result = await second_task
-        assert second_result.status == "buffered"
-        assert coordinator._has_buffered.get("user:1") is True
-
-        barrier.set()
-        result = await first_task
-        assert result.status == "success"
-        assert result.value == "result_1"
-        # finally 统一清理 _has_buffered
-        assert coordinator._has_buffered.get("user:1") is None
 
     @pytest.mark.asyncio
     async def test_three_consecutive_failures_trigger_on_exhausted(self, coordinator):
@@ -276,51 +240,6 @@ class TestLLMCallCoordinatorBasics:
         assert coordinator._executing.get("user:1") is None
 
     @pytest.mark.asyncio
-    async def test_share_success_then_chat_starts_fresh(self, coordinator):
-        """share 成功后 finally 清理状态；下次 chat submit 启动新循环"""
-        barrier = asyncio.Event()
-        execution_started = asyncio.Event()
-
-        async def slow_call_fn(messages):
-            execution_started.set()
-            await barrier.wait()
-            return "share_msg"
-
-        first_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", None, slow_call_fn, continue_on_buffered=False
-            )
-        )
-        await execution_started.wait()
-
-        second_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", None, AsyncMock(return_value="ignored")
-            )
-        )
-        second_result = await second_task
-        assert second_result.status == "buffered"
-        assert coordinator._has_buffered.get("user:1") is True
-
-        barrier.set()
-        result = await first_task
-        assert result.status == "success"
-        assert result.value == "share_msg"
-        # finally 统一清理 _has_buffered
-        assert coordinator._has_buffered.get("user:1") is None
-
-        # 下一次 chat submit 启动新循环，正常执行
-        async def chat_call_fn(messages):
-            return "chat_reply"
-
-        result2 = await coordinator.submit(
-            "user:1", "msg", chat_call_fn, continue_on_buffered=True
-        )
-        assert result2.status == "success"
-        assert result2.value == "chat_reply"
-        assert coordinator._has_buffered.get("user:1") is None
-
-    @pytest.mark.asyncio
     async def test_multiple_concurrent_pending_submits_coalesced(self, coordinator):
         """多个并发的 pending submit 只应产生一个 buffered 标记"""
         barrier = asyncio.Event()
@@ -394,11 +313,7 @@ class TestLLMCallCoordinatorExhaustion:
                 await barriers[idx].wait()
             return f"result_{len(attempts)}"
 
-        first_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", "msg", call_fn, continue_on_buffered=True
-            )
-        )
+        first_task = asyncio.create_task(coordinator.submit("user:1", "msg", call_fn))
         await started_events[0].wait()
 
         # 每次 call_fn 开始后，提交新的 submit 来设置 buffered
@@ -518,7 +433,7 @@ class TestLLMCallCoordinatorExhaustion:
 
         first_task = asyncio.create_task(
             coordinator.submit(
-                "user:1", "msg1", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted_fn
+                "user:1", "msg1", call_fn, on_exhausted=on_exhausted_fn
             )
         )
         await started1.wait()
@@ -579,94 +494,13 @@ class TestLLMCallCoordinatorExhaustion:
         assert r2.value == "r2"
 
     @pytest.mark.asyncio
-    async def test_chat_blocks_share_on_same_target(self):
-        """同一 target 上 share 执行中时，chat submit 应被 queued（buffered）"""
-        coordinator = LLMCallCoordinator()
-        barrier = asyncio.Event()
-        execution_started = asyncio.Event()
-
-        async def slow_share_fn(messages):
-            execution_started.set()
-            await barrier.wait()
-            return "share_msg"
-
-        # 先启动 share
-        share_task = asyncio.create_task(
-            coordinator.submit("user:1", None, slow_share_fn)
-        )
-        await execution_started.wait()
-
-        # 同一 target 启动 chat
-        chat_task = asyncio.create_task(
-            coordinator.submit("user:1", "msg", AsyncMock(return_value="chat_reply"))
-        )
-        chat_result = await chat_task
-        assert chat_result.status == "buffered"
-        assert coordinator._has_buffered.get("user:1") is True
-
-        barrier.set()
-        share_result = await share_task
-        assert share_result.status == "success"
-        assert share_result.value == "share_msg"
-
-    @pytest.mark.asyncio
-    async def test_share_continue_on_buffered_detected(self):
-        """share 路径 (continue_on_buffered=False) 执行期间有缓冲消息时应继续迭代
-
-        share 完成后检测到 has_buffered，应继续处理缓冲消息而非直接退出。
-        max_iterations=5 兜底防止 share 被无限延长。
-        """
-        coordinator = LLMCallCoordinator()
-        barrier = asyncio.Event()
-        started = asyncio.Event()
-        attempts = []
-
-        async def share_fn(messages):
-            attempts.append(messages)
-            if len(attempts) == 1:
-                started.set()
-                await barrier.wait()
-            return f"share_{len(attempts)}"
-
-        share_task = asyncio.create_task(
-            coordinator.submit(
-                "user:1", None, share_fn, continue_on_buffered=False
-            )
-        )
-        await started.wait()
-
-        # share 执行期间缓冲 chat 消息
-        chat_task = asyncio.create_task(
-            coordinator.submit("user:1", "chat_msg", AsyncMock(return_value="reply"))
-        )
-        chat_result = await chat_task
-        assert chat_result.status == "buffered"
-        assert coordinator._has_buffered.get("user:1") is True
-
-        barrier.set()
-        share_result = await share_task
-        assert share_result.status == "success"
-        # share_fn 被调用 2 次：第 1 次正常执行，第 2 次处理缓冲消息
-        assert attempts == [[], ["chat_msg"]]
-        assert share_result.value == "share_2"
-        # 缓冲消息已被消费，状态已清理
-        assert coordinator._has_buffered.get("user:1") is None
-
-    @pytest.mark.asyncio
     async def test_pending_messages_preserved_across_submits(self):
-        """share 退出后缓冲消息保留，下一次 chat submit 追加而非覆盖
-
-        share (continue_on_buffered=False) 不处理缓冲消息时，消息留在
-        _pending_messages。下一次 chat submit 获取执行权时应追加新消息，
-        而非覆盖旧消息。
-        """
-        # 此测试验证 B1 修复（append 代替 overwrite）的独立价值。
-        # 使用默认 continue_on_buffered=True + 手动设置 _executing
-        # 来模拟 share 不检查 buffered 的旧行为，排除 B2 修复的干扰。
+        """驱动任务退出后缓冲消息保留，下一次 submit 追加而非覆盖。"""
+        # 此测试验证 pending 消息追加的独立价值。
         coordinator = LLMCallCoordinator()
         seen_messages = []
 
-        # 模拟 share 执行中：直接设置 _executing
+        # 模拟执行中：直接设置 _executing
         key = "user:1"
         coordinator._executing[key] = True
 
@@ -677,7 +511,7 @@ class TestLLMCallCoordinatorExhaustion:
         assert chat_a.status == "buffered"
         assert coordinator._pending_messages.get(key) == ["msg_A"]
 
-        # 模拟 share 退出：清除 _executing 和 _has_buffered，
+        # 模拟驱动任务退出：清除 _executing 和 _has_buffered，
         # 但保留 _pending_messages（finally 块逻辑）
         coordinator._executing.pop(key, None)
         coordinator._has_buffered.pop(key, None)
@@ -714,7 +548,7 @@ class TestLLMCallCoordinatorExhaustion:
             return "exhausted_fallback"
 
         result = await coordinator.submit(
-            "user:1", "msg", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted
+            "user:1", "msg", call_fn, on_exhausted=on_exhausted
         )
         assert len(attempts) == 5
         assert on_exhausted_called is False
@@ -743,7 +577,6 @@ class TestLLMCallCoordinatorExhaustion:
             "user:dup",
             "msg",
             call_fn,
-            continue_on_buffered=True,
             on_exhausted=on_exhausted,
             on_result=on_result,
         )

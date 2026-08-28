@@ -33,7 +33,6 @@ def default_persona_config() -> PersonaConfig:
         character_path="./content/characters",
         character_name="test_char",
         whitelist_enabled=True,
-        proactive_enabled=False,
     )
 
 

@@ -355,52 +355,6 @@ class BotRunner:
         diary_runs_max = daily_runs_max
         sa_runs_max = daily_runs_max if life_sim.sa_agent else 0
 
-        proactive_labels: list[str] = []
-        proactive_occurrences: set[tuple[dt.date, str]] = set()
-        share_scheduler = getattr(life_sim, "share_scheduler", None)
-        if (
-            share_scheduler is not None
-            and persona_config.proactive_share_schedule_enabled
-        ):
-            schedule: list[tuple[str, int]] = []
-            if persona_config.proactive_share_schedule_morning_enabled:
-                start_hour = character.extensions.event_day_start_hour
-                if start_hour is not None and start_hour > 0:
-                    schedule.append(("morning", (start_hour * 60 + 5) % 1440))
-            for value in persona_config.proactive_share_schedule_times:
-                try:
-                    hour, minute = map(int, value.split(":", 1))
-                except (ValueError, AttributeError):
-                    continue
-                schedule.append(
-                    (f"midday_{value}", (hour * 60 + minute) % 1440)
-                )
-            if persona_config.proactive_share_schedule_evening_enabled:
-                end_hour = character.extensions.event_day_end_hour
-                if end_hour is not None and end_hour > 0:
-                    schedule.append(("evening", (end_hour * 60 - 5) % 1440))
-
-            proactive_labels = [label for label, _ in schedule]
-            jitter = persona_config.proactive_share_schedule_jitter_minutes
-            cursor = start_dt
-            while cursor < end_dt:
-                minute_of_day = cursor.hour * 60 + cursor.minute
-                for label, center_minute in schedule:
-                    if self._minute_in_jitter_window(
-                        minute_of_day,
-                        center_minute,
-                        jitter,
-                    ):
-                        proactive_occurrences.add((cursor.date(), label))
-                cursor += dt.timedelta(minutes=1)
-
-        force_targets = len({
-            value for value in persona_config.proactive_always_send_users if value
-        }) + len({
-            value for value in persona_config.proactive_always_send_groups if value
-        })
-        proactive_runs_max = len(proactive_occurrences) * force_targets
-
         # 获取模型名
         model = "unknown"
         try:
@@ -422,9 +376,6 @@ class BotRunner:
                     "character_reaction_runs_max": char_reaction_runs,
                     "diary_agent_runs_max": diary_runs_max,
                     "sa_agent_runs_max": sa_runs_max,
-                    "proactive_agent_runs_max": proactive_runs_max,
-                    "proactive_schedule_windows": len(proactive_occurrences),
-                    "proactive_labels": proactive_labels,
                     "background_max_rounds": (
                         persona_config.background_llm_max_rounds
                     ),
@@ -443,32 +394,6 @@ class BotRunner:
         tick_errors = 0
         daily_runs = 0
         daily_errors = 0
-        fired_proactive: set[tuple[str, str]] = set()
-        preexisting_proactive: set[tuple[str, str]] = set()
-
-        def _proactive_markers(
-            scheduler: object,
-            fallback_date: dt.date,
-        ) -> set[tuple[str, str]]:
-            fired_dates = getattr(scheduler, "_fired_dates", None)
-            if isinstance(fired_dates, dict):
-                return {
-                    (str(fired_date), str(label))
-                    for label, fired_date in fired_dates.items()
-                }
-            fired_date = getattr(
-                scheduler, "_last_event_date", None
-            ) or fallback_date.isoformat()
-            return {
-                (str(fired_date), str(label))
-                for label in getattr(scheduler, "_fired_times", set())
-            }
-
-        if share_scheduler is not None:
-            preexisting_proactive = _proactive_markers(
-                share_scheduler, start_dt.date()
-            )
-
         for minute_idx in range(total_minutes):
             current = stepped.now()
             life_date_before = getattr(char_life, "_last_event_date", None)
@@ -500,13 +425,6 @@ class BotRunner:
                     0,
                     len(fired_after) - len(fired_before),
                 )
-
-            if share_scheduler is not None:
-                for marker in _proactive_markers(
-                    share_scheduler, current.date()
-                ):
-                    if marker not in preexisting_proactive:
-                        fired_proactive.add(marker)
 
             next_minute = current + dt.timedelta(minutes=1)
             if next_minute.date() != current.date():
@@ -556,25 +474,9 @@ class BotRunner:
             "minutes_advanced": minutes_advanced,
             "life_slots_marked": life_slots_marked,
             "tick_errors": tick_errors,
-            "proactive_schedule_count": len(fired_proactive),
-            "proactive_schedule_labels": sorted({
-                label for _, label in fired_proactive
-            }),
             "daily_runs": daily_runs,
             "daily_errors": daily_errors,
         }
-
-    @staticmethod
-    def _minute_in_jitter_window(
-        minute_of_day: int,
-        center_minute: int,
-        jitter_minutes: int,
-    ) -> bool:
-        """Return whether a minute falls in a cyclic ±jitter schedule window."""
-        if jitter_minutes <= 0:
-            return minute_of_day == center_minute
-        distance = abs(minute_of_day - center_minute)
-        return min(distance, 1440 - distance) <= jitter_minutes
 
     async def send(
         self,

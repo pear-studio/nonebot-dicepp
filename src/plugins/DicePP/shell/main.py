@@ -317,14 +317,6 @@ def _print_dry_run(result: dict[str, Any]) -> None:
     )
     print(f"    Character diary:    {estimate['diary_agent_runs_max']:>4d}")
     print(f"    SA planning:        {estimate['sa_agent_runs_max']:>4d}")
-    print(f"    Proactive chat:     {estimate['proactive_agent_runs_max']:>4d}")
-    labels = estimate.get("proactive_labels") or []
-    if labels:
-        print(
-            "  Proactive schedule windows in timeline:"
-            f" {estimate.get('proactive_schedule_windows', 0)}"
-            f" ({', '.join(labels)})"
-        )
     print(
         "  Configured max rounds:"
         f" background={estimate['background_max_rounds']},"
@@ -346,13 +338,6 @@ def _print_warp_result(result: dict[str, Any]) -> None:
         f" {result.get('life_slots_marked', 0)};"
         f" daily runs: {result.get('daily_runs', 0)}"
     )
-    labels = result.get("proactive_schedule_labels") or []
-    if labels:
-        print(
-            "  Proactive schedule points marked:"
-            f" {result.get('proactive_schedule_count', 0)}"
-            f" ({', '.join(labels)})"
-        )
     errors = result.get("tick_errors", 0) + result.get("daily_errors", 0)
     if errors:
         print(

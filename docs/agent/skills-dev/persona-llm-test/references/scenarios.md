@@ -9,14 +9,13 @@
 操作：
 
 1. 对新 session 执行一天 warp。
-2. 检查生活事件、角色反应、日记、SA 以及 morning、18:00、evening proactive。
-3. proactive 目标使用群聊场景的同一测试群。
+2. 检查生活事件、角色反应、日记和 SA。
 
 验收：
 
 - warp job 完整结束；job 自身成功不等于场景自动通过。
 - 随机生活槽位与边界时间在角色卡允许范围内，没有丢失或重复。
-- 预期的生活事件、反应、日记、SA 和三类 proactive 有对应持久化记录或明确可解释的结果。
+- 预期的生活事件、反应、日记和 SA 有对应持久化记录或明确可解释的结果。
 - Agent Run、trace 和 completion code 没有异常；fallback 需作为警告说明。
 
 ## 私聊跑团多轮

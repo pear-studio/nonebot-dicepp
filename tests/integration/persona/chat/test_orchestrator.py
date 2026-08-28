@@ -222,8 +222,7 @@ class TestChatOrchestratorChat:
         """chat 成功时返回已发送 outcome，不返回待发送文本"""
         orch, mock_conv, store = orch_with_mocks
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -240,8 +239,7 @@ class TestChatOrchestratorChat:
         orch, mock_conv, store = orch_with_mocks
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -261,8 +259,7 @@ class TestChatOrchestratorChat:
         """5s 内重复消息返回 None"""
         orch, mock_conv, store = orch_with_mocks
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -302,8 +299,7 @@ class TestChatOrchestratorChat:
         orch, mock_conv, store = orch_with_mocks
 
         # 模拟 coordinator.submit 内部调用 on_exhausted
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             return MagicMock(status="failed", value=None, error=QuotaExceeded("今日配额已用完"))
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
@@ -323,8 +319,7 @@ class TestChatOrchestratorChat:
         orch._scoring_trigger = mock_scoring_trigger
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn → after_response
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -341,8 +336,7 @@ class TestChatOrchestratorChat:
         orch, mock_conv, store = orch_with_mocks
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -364,51 +358,13 @@ class TestChatOrchestratorChat:
         """chat 路径 record_user_input=False：用户正文由 hook 以 ref 记录，不重复持久。"""
         orch, mock_conv, store = orch_with_mocks
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
         await orch.chat("u1", "", "hello")
         assert mock_conv.run.call_args.kwargs.get("record_user_input") is False
-
-
-class TestProactiveSerialization:
-    @pytest.mark.asyncio
-    async def test_proactive_returns_buffered_while_same_target_is_busy(self):
-        """同一会话忙碌时 proactive 应立即跳过，让调度器稍后重试。"""
-        orch = ChatOrchestrator(
-            store=_make_store(), client=MagicMock(), character=_make_char(),
-            config=_make_config(), context_builder=_make_context_builder(),
-            response_handler=_make_response_handler(),
-        )
-        entered = asyncio.Event()
-        release = asyncio.Event()
-
-        async def blocking_call(_messages):
-            entered.set()
-            await release.wait()
-            return ChatOutcome("sent", sent_count=1, reason="busy_done")
-
-        driver = asyncio.create_task(
-            orch._coordinator.submit("user:u1", "busy", blocking_call)
-        )
-        await entered.wait()
-        try:
-            outcome = await asyncio.wait_for(
-                orch.trigger_proactive(
-                    ConversationScope.for_private("u1"),
-                    "（和用户聊聊吧。）",
-                    user_id="u1",
-                ),
-                timeout=0.5,
-            )
-        finally:
-            release.set()
-            await driver
-
-        assert (outcome.status, outcome.reason) == ("skipped", "buffered")
 
 
 # ── 阶段 3b：轮换测试 ──────────────────────────────────
@@ -447,8 +403,7 @@ class TestStageBRetry:
         orch._registry.get_or_create = AsyncMock(return_value=mock_conv)
         orch._registry.rotate = AsyncMock()
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -488,8 +443,7 @@ class TestStageBRetry:
         orch._registry.get_or_create = AsyncMock(return_value=mock_conv)
         orch._registry.rotate = AsyncMock()
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -566,8 +520,7 @@ class TestStageBRetry:
         orch._registry.get_or_create = AsyncMock(side_effect=_get_or_create)
         orch._registry.rotate = AsyncMock(side_effect=_rotate)
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -624,8 +577,7 @@ class TestStageBRetry:
         orch._registry.get_or_create = AsyncMock(side_effect=_get_or_create)
         orch._registry.rotate = AsyncMock()
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -937,7 +889,7 @@ class TestChatOrchestratorScope:
         orch._registry.release_lease = AsyncMock()
         orch._registry.get_or_create = AsyncMock(return_value=mock_conv)
 
-        async def mock_submit(target_key, message, chat_call_fn, *, continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             return MagicMock(status="success", value=await chat_call_fn([message]))
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
@@ -1013,8 +965,7 @@ class TestF2RealRegistryIntegration:
         )
 
         # mock coordinator.submit → 直接驱动 chat_call_fn
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                               continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -1085,8 +1036,7 @@ class TestF2RealRegistryIntegration:
             registry=reg,
         )
 
-        async def mock_submit(target_key, message, chat_call_fn, *,
-                               continue_on_buffered):
+        async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 

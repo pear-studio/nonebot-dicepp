@@ -816,13 +816,6 @@ class TestRelationshipCRUD:
         user_ids = {r.user_id for r in rels}
         assert user_ids == {'u1', 'u2'}
 
-    @pytest.mark.asyncio
-    async def test_list_active_relationships(self, temp_db):
-        store = temp_db
-        await store.init_relationship('u1')
-        rels = await store.list_active_relationships(min_score=0, active_within_days=30)
-        assert len(rels) >= 1
-
 class TestScoreEventCRUD:
     """测试评分事件 CRUD"""
 
@@ -853,42 +846,6 @@ class TestUserProfileCRUD:
     async def test_get_nonexistent_profile(self, temp_db):
         store = temp_db
         assert await store.get_user_profile('u_unknown') is None
-
-class TestMuteFunctionality:
-    """测试 mute/unmute 功能"""
-
-    @pytest.mark.asyncio
-    async def test_initial_state_not_muted(self, temp_db):
-        """初始状态应该未静音"""
-        store = temp_db
-        assert await store.is_user_muted('test_user') is False
-
-    @pytest.mark.asyncio
-    async def test_mute_user(self, temp_db):
-        """静音用户"""
-        store = temp_db
-        user_id = 'test_user'
-        await store.mute_user(user_id, reason='user_request')
-        assert await store.is_user_muted(user_id) is True
-
-    @pytest.mark.asyncio
-    async def test_unmute_user(self, temp_db):
-        """取消静音"""
-        store = temp_db
-        user_id = 'test_user'
-        await store.mute_user(user_id)
-        assert await store.is_user_muted(user_id) is True
-        await store.unmute_user(user_id)
-        assert await store.is_user_muted(user_id) is False
-
-    @pytest.mark.asyncio
-    async def test_repeat_mute_idempotent(self, temp_db):
-        """重复静音应该保持静音状态"""
-        store = temp_db
-        user_id = 'test_user'
-        await store.mute_user(user_id)
-        await store.mute_user(user_id)
-        assert await store.is_user_muted(user_id) is True
 
 class TestSwitchPersonaDb:
     """switch_persona_db 测试"""
@@ -1078,7 +1035,7 @@ class TestMigrateCodeSetting:
             assert global_code is None
 
 class TestPersonaScopeFilter:
-    """_PERSONA_SCOPE 排除 system_log，包含 ambient / chat / command / proactive"""
+    """_PERSONA_SCOPE 排除 system_log，包含 ambient / chat / command"""
 
     @pytest.mark.asyncio
     async def test_ambient_included_in_recent_messages(self, temp_db):
@@ -1121,18 +1078,6 @@ class TestPersonaScopeFilter:
         msgs = await temp_db.read_messages('u1', '')
         assert len(msgs) == 2
         assert msgs[0].content == 'hello'
-
-    @pytest.mark.asyncio
-    async def test_proactive_not_counted_in_chat_stats(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
-        y = (wall_now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        ts = f'{y}T10:00:00'
-        await temp_db.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'chat reply')
-        await temp_db.add_message_stream('u1', '', 'assistant', MessageType.PROACTIVE, 'miss you')
-        await temp_db.db.execute('UPDATE message_stream SET created_at = ?', (ts,))
-        await temp_db.db.commit()
-        stats = await temp_db.get_daily_chat_stats(y)
-        assert stats['bot'] == 1
 
     @pytest.mark.asyncio
     async def test_search_messages_ambient_included(self, temp_db):
@@ -1490,43 +1435,6 @@ class TestSessionCRUD:
         session = await store.create_session(user_id='u1', character_id='char1', static_prompt='test', static_hash='h1', token_budget=64000, status='active', last_active_at=datetime(2026, 6, 1, 12, 0, 0))
         msgs = await store.get_session_messages(session.session_id)
         assert msgs == []
-
-class TestGroupActivityCRUD:
-    """测试群活跃度 (update_group_activity / get_group_activity)"""
-
-    @pytest.mark.asyncio
-    async def test_update_group_activity_new(self, temp_db):
-        """新群首次更新创建默认记录 score=50"""
-        store = temp_db
-        result = await store.update_group_activity('g1')
-        assert result.group_id == 'g1'
-        assert result.score > 50.0
-
-    @pytest.mark.asyncio
-    async def test_update_group_activity_daily_cap(self, temp_db):
-        """每日累计不超过 max_daily_add (默认20)"""
-        store = temp_db
-        for _ in range(5):
-            await store.update_group_activity('g1', score_delta=10.0, max_daily_add=20.0)
-        activity = await store.get_group_activity('g1')
-        assert 50.0 < activity.score <= 70.0
-
-    @pytest.mark.asyncio
-    async def test_update_group_activity_whitelist_floor(self, temp_db):
-        """白名单群有下限保护"""
-        store = temp_db
-        await store.update_group_activity('g1', score_delta=0.0)
-        store._group_activity_floor_whitelist = 90.0
-        result = await store.update_group_activity('g1', score_delta=1.0, is_whitelisted=True)
-        assert result.score >= 90.0
-
-    @pytest.mark.asyncio
-    async def test_get_group_activity_nonexistent(self, temp_db):
-        """不存在的群返回默认 score=50.0"""
-        store = temp_db
-        activity = await store.get_group_activity('nonexistent')
-        assert activity.group_id == 'nonexistent'
-        assert activity.score == 50.0
 
 class TestFamiliarityDaily:
     """测试 add_familiarity_daily / get_familiarity_daily"""

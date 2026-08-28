@@ -21,7 +21,6 @@ from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
 from plugins.DicePP.utils.time import format_timestamp
 from .types import EventGenerationResult, EventReactionResult, UnrecoverableAgentError
-from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
     from plugins.DicePP.core.config.pydantic_models import PersonaConfig
@@ -132,19 +131,12 @@ class CharacterLife:
         self._chain_triggered_today: bool = False  # deprecated: 保底续写逻辑已移除，仅保留序列化兼容，后续大版本清理
         self._last_good_night_fired_at: Optional[datetime] = None
         self._slot_cooldown_until: Dict[int, float] = {}  # slot index → time.monotonic() 冷却截止
-        self._boundary_receivers: List[BoundaryReceiver] = []
-        self._boundaries_loaded = False
         self._state_lock = asyncio.Lock()
         self._first_boot: bool = False  # Life 首次启动标记，用于 init_scenario 一次性注入
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
         self.character = character
-
-    def add_boundary_receiver(self, receiver: BoundaryReceiver) -> None:
-        if self._boundaries_loaded:
-            raise RuntimeError("必须在 load_persistent_state 之前注入 boundary_receiver")
-        self._boundary_receivers.append(receiver)
 
     def _get_today_str(self) -> str:
         return self.config.now().strftime("%Y-%m-%d")
@@ -178,11 +170,6 @@ class CharacterLife:
         self._slot_cooldown_until.clear()  # 新一天的槽位可能不同，旧冷却记录无意义
         self._today_jittered_start = start
         self._today_jittered_end = end
-        if self._boundary_receivers:
-            for receiver in self._boundary_receivers:
-                receiver.set_jittered_boundaries(start, end)
-        else:
-            logger.debug("boundary_receiver 未注入，跳过波动边界同步")
         min_interval = self.config.min_event_interval_minutes
         constrained_start = start + min_interval
         constrained_end = end - min_interval
@@ -272,7 +259,6 @@ class CharacterLife:
             )
 
     async def load_persistent_state(self) -> None:
-        self._boundaries_loaded = True
         raw = await self.data_store.get_setting(PERSONA_SK_CHARACTER_LIFE)
         if not raw:
             self._first_boot = True

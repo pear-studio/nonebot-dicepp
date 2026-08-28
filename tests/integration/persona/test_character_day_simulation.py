@@ -68,7 +68,6 @@ def life(temp_db, mock_agents, character, config):
     from unittest.mock import MagicMock
     dm_agent, character_agent = mock_agents
     life = CharacterLife(config=config, data_store=temp_db, character=character, dm_agent=dm_agent, character_agent=character_agent)
-    life.boundary_receiver = MagicMock()
     return life
 
 class TestCharacterDaySimulation:

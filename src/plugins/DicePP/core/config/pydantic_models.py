@@ -5,8 +5,6 @@ former contains instance-wide service policy while the latter contains one
 QQ account's runtime settings.  Their JSON files are independent sparse
 overlays; one is never treated as an overlay of the other.
 """
-from typing import List
-
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -29,7 +27,6 @@ DASHBOARD_LAYOUT = {
         # Persona tab
         "basic":        {"label": "基本设置",     "tab": "persona", "order": 0},
         "chat_reply":   {"label": "对话与回复",   "tab": "persona", "order": 2},
-        "proactive":    {"label": "主动消息",     "tab": "persona", "order": 3},
         "life_sim":     {"label": "生活模拟",     "tab": "persona", "order": 4},
         "group_limits": {"label": "群聊与限制",   "tab": "persona", "order": 5},
     },
@@ -127,103 +124,6 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
 
-    # ── 主动消息 ─────────────────────────────────────────────────────────────
-
-    proactive_enabled: bool = Field(
-        default=True, title="主动消息",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_min_interval_hours: int = Field(
-        default=4, title="主动消息最小间隔",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_max_shares: int = Field(
-        default=10, title="最大分享数",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_time_window_minutes: int = Field(
-        default=15, title="分享时间窗口",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_miss_enabled: bool = Field(
-        default=True, title="思念消息",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_miss_min_hours: int = Field(
-        default=72, title="思念最小间隔",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_miss_min_score: float = Field(
-        default=20.0, title="思念最低分数",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_always_send_users: List[str] = Field(
-        default_factory=list, title="强制推送用户",
-        description="必定接收主动消息的私聊用户 ID 列表（绕过 min_interval 与好感度阈值）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_always_send_groups: List[str] = Field(
-        default_factory=list, title="强制推送群聊",
-        description="必定接收主动消息的群聊 ID 列表（绕过 min_interval 与活跃度阈值）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_message_concurrent: int = Field(
-        default=3, ge=1, title="分享消息并发数", description="并发生成分享消息的最大 LLM 调用数",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_max_chars: int = Field(
-        default=200, ge=10, title="分享消息最大字符", description="分享消息硬截断上限（包含省略号）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_context_history_limit: int = Field(
-        default=5, ge=0, title="分享上下文轮数", description="分享消息构建时读取的最近对话轮数",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_schedule_enabled: bool = Field(
-        default=False, title="分享日程总开关",
-        description="启用后，角色按日程时间点主动分享消息（早安/晚安/自定义时段）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_schedule_morning_enabled: bool = Field(
-        default=False, title="早安问候",
-        description="在角色起床后发送早安问候",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_schedule_evening_enabled: bool = Field(
-        default=False, title="晚间晚安",
-        description="在角色睡前发送晚间晚安",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_schedule_times: List[str] = Field(
-        default_factory=list, title="分享时间点",
-        description='自定义分享时间点，格式 HH:MM，如 ["14:00", "18:30"]。每天在这些时间点附近触发分享',
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_schedule_jitter_minutes: int = Field(
-        default=15, title="时间点随机偏移",
-        description="每个分享时间点的 ±N 分钟随机偏移，避免定时感。建议不超过 60",
-        ge=0, le=120,
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_max_retries: int = Field(
-        default=2, ge=0, title="分享最大重试", description="分享消息生成失败后的最大重试次数",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_share_backoff_base_seconds: int = Field(
-        default=2, ge=1, title="分享退避基数", description="分享消息重试的指数退避基数（秒）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-
-    # LLM 调用协调器配置
-    proactive_coordinator_max_failures: int = Field(
-        default=3, ge=0, title="协调器最大失败", description="coordinator 连续失败上限",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_coordinator_max_iterations: int = Field(
-        default=5, ge=1, title="协调器最大迭代", description="coordinator 单次 submit 最大迭代次数（防刷屏）",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-
     # ── 生活模拟 ─────────────────────────────────────────────────────────────
 
     relationship_enabled: bool = Field(
@@ -314,32 +214,6 @@ class PersonaConfig(BaseModel):
     )
 
     # ── 群聊与限制 ───────────────────────────────────────────────────────────
-
-    # Phase 2: 群活跃度
-    group_activity_enabled: bool = Field(
-        default=True, title="群活跃度",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    group_activity_decay_per_day: float = Field(
-        default=10.0, title="活跃度日衰减",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    group_activity_add_per_interaction: float = Field(
-        default=2.0, title="活跃度单次增加",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    group_activity_max_daily_add: float = Field(
-        default=20.0, title="活跃度日增上限",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    group_activity_min_threshold: float = Field(
-        default=60.0, title="活跃度最低阈值",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    group_activity_floor_whitelist: float = Field(
-        default=50.0, title="白名单活跃度下限",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
 
     daily_limit: int = Field(
         default=20, title="每日限额",

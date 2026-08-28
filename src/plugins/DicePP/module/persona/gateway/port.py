@@ -9,14 +9,12 @@ from ..data.models import MessageType
 
 from .pipeline import MessagePipeline, SendAction
 from ..tools.context import SendPort
-from ..life.protocols import EventSharePort
 
 
-class MessagePort(EventSharePort):
-    """唯一消息发送出口 — 同时满足 SendPort (tools) 和 EventSharePort (life)
+class MessagePort(SendPort):
+    """唯一消息发送出口 — 满足 SendPort (tools)
 
     = SendPort 契约 + pipeline（截断等元数据转换）+ 失败回调 + proxy 兜底。
-    EventSharePort 已继承 SendPort，确保工具域与生活域的 send
     签名始终一致，消除 MRO 风险。
     """
 

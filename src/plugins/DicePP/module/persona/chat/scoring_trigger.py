@@ -135,7 +135,6 @@ class ScoringTrigger:
                 rel.apply_familiarity_delta(actual_delta, updated_at=now)
 
         rel.last_interaction_at = now
-        rel.last_miss_sent_at = None  # 用户回应后关闭衰减开关
         rel.last_relationship_decay_applied_at = None  # 下次衰减从新互动起算
         await self._store.update_relationship(rel)
         if decay_event:

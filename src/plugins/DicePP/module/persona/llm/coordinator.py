@@ -2,7 +2,7 @@
 LLM 调用协调器
 
 同一 target key 在任意时刻只允许一个 LLM 调用在执行，
-后续 chat / share 请求排队等待，不得并发。
+后续请求排队等待，不得并发。
 调用期间到达的新消息被标记为待合并（消息本身已写入数据库）。
 
 buffered merge-retry 状态机：``pending_consumed`` 标记最近一轮 result
@@ -81,9 +81,8 @@ class LLMCallCoordinator:
     async def submit(
         self,
         target_key: str,
-        message: Optional[str],
+        message: str,
         call_fn: Callable[[List[str]], Awaitable[T]],
-        continue_on_buffered: bool = True,
         on_exhausted: Optional[Callable[[Optional[Exception]], Awaitable[Any]]] = None,
         on_result: Optional[Callable[[T], Awaitable[None]]] = None,
     ) -> SubmitResult[T]:
@@ -91,11 +90,9 @@ class LLMCallCoordinator:
 
         Args:
             target_key: 目标标识（如 user:123 或 group:456）
-            message: 本次请求携带的消息（chat 路径为用户输入；share/miss 路径可为 None）
+            message: 本次请求携带的非空消息
             call_fn: 异步可调用对象，接收本轮待处理的消息列表，执行单次 LLM 调用
-            continue_on_buffered: True=chat 路径（成功后检查 buffered 继续循环）;
-                                 False=share 路径（成功直接退出）
-            on_exhausted: 最终失败且无成功时的回调，接收最后一次异常（chat 路径发送兜底文案）
+            on_exhausted: 最终失败且无成功时的回调，接收最后一次异常
             on_result: 每轮 call_fn 成功后、继续下一轮前调用，用于发送中间结果
 
         Returns:
@@ -115,14 +112,13 @@ class LLMCallCoordinator:
         is_driver = False
         async with lock:
             if self._executing.get(target_key, False):
-                if message is not None:
-                    if target_key not in self._pending_messages:
-                        self._pending_messages[target_key] = []
-                    self._pending_messages[target_key].append(message)
-                    self._pending_call_fns.setdefault(target_key, []).append(call_fn)
-                    self._pending_result_futures.setdefault(target_key, []).append(
-                        result_future
-                    )
+                if target_key not in self._pending_messages:
+                    self._pending_messages[target_key] = []
+                self._pending_messages[target_key].append(message)
+                self._pending_call_fns.setdefault(target_key, []).append(call_fn)
+                self._pending_result_futures.setdefault(target_key, []).append(
+                    result_future
+                )
                 self._has_buffered[target_key] = True
                 logger.debug(
                     f"[Persona] coordinator: target={target_key} 正在执行中，标记 buffered"
@@ -132,14 +128,13 @@ class LLMCallCoordinator:
             else:
                 self._executing[target_key] = True
                 is_driver = True
-                if message is not None:
-                    if target_key not in self._pending_messages:
-                        self._pending_messages[target_key] = []
-                    self._pending_messages[target_key].append(message)
-                    self._pending_call_fns.setdefault(target_key, []).append(call_fn)
-                    self._pending_result_futures.setdefault(target_key, []).append(
-                        result_future
-                    )
+                if target_key not in self._pending_messages:
+                    self._pending_messages[target_key] = []
+                self._pending_messages[target_key].append(message)
+                self._pending_call_fns.setdefault(target_key, []).append(call_fn)
+                self._pending_result_futures.setdefault(target_key, []).append(
+                    result_future
+                )
 
         if not is_driver:
             # 显式分批请求在同 scope 的 driver 执行到本请求后，取得自己的结果；
@@ -151,7 +146,7 @@ class LLMCallCoordinator:
         try:
             while True:
                 result, last_exception = await self._run_loop(
-                    target_key, call_fn, continue_on_buffered, on_exhausted, on_result
+                    target_key, call_fn, on_exhausted, on_result
                 )
                 # 与 executing=False 原子衔接：若请求恰好在 _run_loop 最后一次
                 # buffered 检查之后入队，当前 driver 继续消费，不能留下无人完成的
@@ -213,7 +208,6 @@ class LLMCallCoordinator:
         self,
         target_key: str,
         call_fn: Callable[[List[str]], Awaitable[T]],
-        continue_on_buffered: bool,
         on_exhausted: Optional[Callable[[Optional[Exception]], Awaitable[Any]]],
         on_result: Optional[Callable[[T], Awaitable[None]]],
     ) -> tuple[Optional[T], Optional[Exception]]:
@@ -311,10 +305,6 @@ class LLMCallCoordinator:
                     f"(failures={failures}, iterations={iterations})"
                 )
                 continue
-
-            # share 路径：成功且无缓冲时直接退出（失败走下方 on_exhausted 逻辑）
-            if not continue_on_buffered and had_success:
-                return result, last_exception
 
             # 退出循环
             if failures >= self.max_failures and not had_success:

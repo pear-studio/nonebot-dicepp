@@ -19,7 +19,7 @@ from dicepp_data import PERSONA_DB_ASSET
 
 from .models import (
     WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
-    RelationshipState, DailyEvent, GroupActivity,
+    RelationshipState, DailyEvent,
     LLMTraceRecord, CharacterState, DMState, SAState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
     DEFAULT_SESSION_TOKEN_BUDGET,
@@ -60,16 +60,12 @@ class PersonaDataStore:
         persona_db_path: str,
         core_db: aiosqlite.Connection,
         *,
-        group_activity_decay_per_day: float = 10.0,
-        group_activity_floor_whitelist: float = 50.0,
         timezone: str = "Asia/Shanghai",
         message_stream_max_per_group: int = 1000,
     ):
         self._persona_db_path = persona_db_path
         self._core_db = core_db
         self._persona_db: Optional[aiosqlite.Connection] = None
-        self._group_activity_decay_per_day = group_activity_decay_per_day
-        self._group_activity_floor_whitelist = group_activity_floor_whitelist
         self._timezone = timezone
         self._message_stream_max_per_group = message_stream_max_per_group
         self._msg_stream_write_count = 0
@@ -944,35 +940,6 @@ class PersonaDataStore:
             (group_id,)
         ) as cursor:
             return await cursor.fetchone() is not None
-
-    # --- 用户主动消息静音 (core_db 侧) ---
-
-    async def is_user_muted(self, user_id: str) -> bool:
-        """检查用户是否关闭了主动消息"""
-        async with self._core_db.execute(
-            "SELECT 1 FROM persona_user_mute WHERE user_id = ?",
-            (user_id,)
-        ) as cursor:
-            return await cursor.fetchone() is not None
-
-    async def mute_user(self, user_id: str, reason: str = "") -> None:
-        """关闭用户的主动消息"""
-        await self._core_db.execute(
-            """
-            INSERT OR REPLACE INTO persona_user_mute (user_id, muted_at, reason)
-            VALUES (?, ?, ?)
-            """,
-            (user_id, self._wall_now().isoformat(), reason)
-        )
-        await self._core_db.commit()
-
-    async def unmute_user(self, user_id: str) -> None:
-        """开启用户的主动消息"""
-        await self._core_db.execute(
-            "DELETE FROM persona_user_mute WHERE user_id = ?",
-            (user_id,)
-        )
-        await self._core_db.commit()
 
     async def add_user_to_whitelist(self, user_id: str) -> None:
         """添加用户到白名单"""
@@ -1918,7 +1885,7 @@ class PersonaDataStore:
     ) -> bool:
         """执行 reputation 每日恢复。返回是否发生了恢复。
 
-        persist=True（默认）时立即持久化，适用于 session.py 和 proactive_scheduler.py
+        persist=True（默认）时立即持久化。
         等恢复后方法即返回的场景。
         persist=False 时仅修改内存，由调用方在后续统一 update_relationship 时持久化，
         适用于 on_interaction 等已有后续持久化的路径。
@@ -2002,194 +1969,6 @@ class PersonaDataStore:
                 for row in rows
             ]
 
-    # ========== 群活跃度相关 ==========
-
-    async def get_group_activity(self, group_id: str) -> GroupActivity:
-        """
-        获取群活跃度（惰性计算，带衰减）
-
-        衰减策略：
-        - 24小时内有互动（@bot/AI回复）→ 不衰减
-        - 无互动 → 按天衰减
-
-        Returns:
-            GroupActivity 对象
-        """
-        async with self.db.execute(
-            """
-            SELECT score, last_interaction_at
-            FROM persona_group_activity WHERE group_id = ?
-            """,
-            (group_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-
-            if not row:
-                return GroupActivity(group_id=group_id)
-
-            score = row["score"]
-            last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
-
-            now = self._wall_now()
-            decay = self._calculate_decay(now, last_interaction)
-            if decay > 0:
-                score = max(0.0, score - decay)
-
-            return GroupActivity(
-                group_id=group_id,
-                score=score,
-                last_interaction_at=last_interaction,
-            )
-
-    def _calculate_decay(
-        self,
-        now: datetime,
-        last_interaction: Optional[datetime],
-    ) -> float:
-        """
-        计算衰减量
-
-        Returns:
-            应衰减的分数
-        """
-        if last_interaction:
-            hours_since_interaction = (now - last_interaction).total_seconds() / 3600
-            if hours_since_interaction < 24.0:
-                return 0.0
-
-            days_since = (now - last_interaction).days
-            if days_since <= 0:
-                days_since = 1
-            return float(days_since) * self._group_activity_decay_per_day
-
-        # 新群，不衰减
-        return 0.0
-
-    async def update_group_activity(
-        self,
-        group_id: str,
-        score_delta: float = 2.0,
-        max_daily_add: float = 20.0,
-        is_whitelisted: bool = False,
-    ) -> GroupActivity:
-        """
-        更新群活跃度（互动类型：@bot/AI回复）
-
-        衰减策略：
-        - 24小时内有互动 → 不衰减
-        - 无互动 → 按天衰减
-
-        Args:
-            group_id: 群ID
-            score_delta: 每次互动增加的分数
-            max_daily_add: 每天最多增加的分数（按自然日累计）
-            is_whitelisted: 是否在白名单（有下限保护）
-
-        Returns:
-            更新后的 GroupActivity
-        """
-        async with self.db.execute(
-            """
-            SELECT score, last_interaction_at,
-                   daily_add_date, daily_add_total
-            FROM persona_group_activity
-            WHERE group_id = ?
-            """,
-            (group_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-        today_s = self._wall_now().strftime("%Y-%m-%d")
-        if not row:
-            raw_score = 50.0
-            last_interaction: Optional[datetime] = None
-            daily_add_date: Optional[str] = None
-            daily_add_total = 0.0
-        else:
-            raw_score = float(row["score"])
-            last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
-            daily_add_date = row["daily_add_date"]
-            daily_add_total = float(row["daily_add_total"]) if row.get("daily_add_total") is not None else 0.0
-
-        now = self._wall_now()
-        decay = self._calculate_decay(now, last_interaction)
-        score = max(0.0, raw_score - decay)
-
-        # 检查每日加分限额
-        if daily_add_date == today_s:
-            today_added = daily_add_total
-        else:
-            today_added = 0.0
-
-        actual_add = min(score_delta, max(0.0, max_daily_add - today_added))
-        score_after_add = min(100.0, score + actual_add)
-
-        # 白名单下限保护
-        floor = self._group_activity_floor_whitelist
-        if is_whitelisted and score_after_add < floor:
-            new_score = floor
-        else:
-            new_score = score_after_add
-
-        new_daily_total = today_added + actual_add
-
-        await self.db.execute(
-            """
-            INSERT INTO persona_group_activity (
-                group_id, score, last_interaction_at,
-                daily_add_date, daily_add_total
-            )
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(group_id) DO UPDATE SET
-                score = excluded.score,
-                last_interaction_at = excluded.last_interaction_at,
-                daily_add_date = excluded.daily_add_date,
-                daily_add_total = excluded.daily_add_total
-            """,
-            (
-                group_id,
-                new_score,
-                now.isoformat(),
-                today_s,
-                new_daily_total,
-            ),
-        )
-        await self.db.commit()
-
-        return GroupActivity(
-            group_id=group_id,
-            score=new_score,
-            last_interaction_at=now,
-        )
-
-    async def get_all_group_activities(self, min_score: float = 0) -> List[GroupActivity]:
-        """获取所有群活跃度（应用衰减）"""
-        async with self.db.execute(
-            """
-            SELECT group_id, score, last_interaction_at
-            FROM persona_group_activity
-            WHERE score >= ?
-            ORDER BY score DESC
-            """,
-            (min_score,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            activities = []
-            now = self._wall_now()
-            for row in rows:
-                last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
-
-                decay = self._calculate_decay(now, last_interaction)
-                score = max(0.0, row["score"] - decay)
-
-                activity = GroupActivity(
-                    group_id=row["group_id"],
-                    score=score,
-                    last_interaction_at=last_interaction,
-                )
-                activities.append(activity)
-            return activities
-
     async def list_all_relationships_raw(self) -> List[RelationshipState]:
         """列出所有关系行，无过滤（用于每日衰减批处理等）。"""
         async with self.db.execute(
@@ -2221,54 +2000,6 @@ class PersonaDataStore:
                     ),
                     last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
                     updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
-                )
-                for row in rows
-            ]
-
-    async def list_active_relationships(self, min_score: float = 0, active_within_days: int = 30) -> List[RelationshipState]:
-        """列出活跃关系记录（用于想念触发等场景）
-
-        Args:
-            min_score: 最小综合分数
-            active_within_days: 只返回最近 N 天内有互动的关系
-
-        Returns:
-            关系状态列表
-        """
-        cutoff_date = (self._wall_now() - timedelta(days=active_within_days)).isoformat()
-
-        async with self.db.execute(
-            """
-            SELECT user_id,
-                   COALESCE(familiarity, 0.0) AS familiarity,
-                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
-                   COALESCE(intimacy, 0.0) AS intimacy,
-                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
-                   COALESCE(reputation, 100.0) AS reputation,
-                   last_interaction_at, last_relationship_decay_applied_at,
-                   last_miss_sent_at, updated_at
-            FROM persona_user_relationships
-            WHERE (familiarity * 0.6 + intimacy * 0.4) >= ?
-              AND last_interaction_at >= ?
-            ORDER BY last_interaction_at DESC
-            """,
-            (min_score, cutoff_date)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                RelationshipState(
-                    user_id=row["user_id"],
-                    familiarity=row["familiarity"],
-                    peak_familiarity=row["peak_familiarity"],
-                    intimacy=row["intimacy"],
-                    peak_intimacy=row["peak_intimacy"],
-                    reputation=row["reputation"],
-                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
-                    last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
-                    ),
-                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
                 )
                 for row in rows
             ]

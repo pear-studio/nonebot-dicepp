@@ -342,33 +342,6 @@ class TestContextBuilderSegmentGuide:
         assert "最后一条[玩家]消息的 uid" in system
 
 # ═══════════════════════════════════════════════════════════════════
-# proactive prompt
-# ═══════════════════════════════════════════════════════════════════
-
-class TestContextBuilderProactivePrompt:
-
-    def _make_character(self):
-        return Character(name="苏晓", description="一个温柔的AI伴侣")
-
-    def test_proactive_prompt_does_not_duplicate_output_protocol(self):
-        """输出协议由 Runtime 注入，不在 Agent prompt 中重复维护。"""
-        char = self._make_character()
-        builder = ContextBuilder(char, segment_guide=None)
-        prompt = builder.build_static_prompt_proactive()
-        assert "send_reply" not in prompt
-        assert "不要直接输出文本" not in prompt
-
-    def test_proactive_prompt_excludes_segment_params(self):
-        """proactive prompt 不含分段参数（send_reply_segment / 单段上限 / 总字数硬上限）"""
-        char = self._make_character()
-        builder = ContextBuilder(char, segment_guide=None)
-        prompt = builder.build_static_prompt_proactive()
-        assert "send_reply_segment" not in prompt
-        assert "单段上限" not in prompt
-        assert "总字数硬上限" not in prompt
-
-
-# ═══════════════════════════════════════════════════════════════════
 # 6.1 私聊格式化 _format_private_history
 # ═══════════════════════════════════════════════════════════════════
 

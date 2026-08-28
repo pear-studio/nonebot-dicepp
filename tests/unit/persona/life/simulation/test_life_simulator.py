@@ -2,20 +2,17 @@
 
 LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 
-1. tick() 调用 character_life.tick；若链中最高 share_desire 达阈值，
-   则调用 scheduler.schedule_share 调度延迟分享
-2. tick() 调用 scheduler.tick，将返回的消息逐条 send 出去
-3. tick() 内部异常不向上抛（保护调度器）
-4. tick_daily() 依次 prune_traces → decay_batch → diary，返回原子的正文/日期结果
-5. tick_daily() 内部异常返回空结果
+1. tick() 调用 character_life.tick 驱动生活事件
+2. tick() 内部异常不向上抛
+3. tick_daily() 依次 prune_traces → decay_batch → diary，返回原子的正文/日期结果
+4. tick_daily() 内部异常返回空结果
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
-from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.life.types import DailyTickResult
 
-def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天很好'):
+def _make_simulator(*, event_chain=None, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
     store = AsyncMock()
     store.list_all_relationships_raw = AsyncMock(return_value=[])
@@ -24,12 +21,6 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天
     store.prune_llm_traces = AsyncMock(return_value=0)
     character_life = MagicMock()
     character_life.tick = AsyncMock(return_value=event_chain)
-    scheduler = MagicMock()
-    scheduler.tick = AsyncMock(return_value=proactive_msgs or [])
-    scheduler.config = MagicMock(spec=ProactiveConfig())
-    scheduler.config.max_shares_per_event = 1
-    scheduler.share_event_to_targets = AsyncMock(return_value=[])
-    scheduler.schedule_share = MagicMock()
     diary_generator = MagicMock()
     diary_generator.generate_diary = AsyncMock(return_value=DailyTickResult(
         diary=diary,
@@ -37,49 +28,24 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天
     ))
     character = MagicMock()
     character.extensions = MagicMock()
-    port = MagicMock()
-    port.send = AsyncMock()
     config = LifeConfig(trace_enabled=False)
-    sim = LifeSimulator(store=store, character_life=character_life, scheduler=scheduler, diary_generator=diary_generator, character=character, config=config, port=port, decay_calculator=None)
+    sim = LifeSimulator(store=store, character_life=character_life, diary_generator=diary_generator, character=character, config=config, decay_calculator=None)
     return sim
 
 @pytest.mark.asyncio
-async def test_tick_sends_proactive_messages():
-    """scheduler 返回的消息应通过 port 发送"""
-    sim = _make_simulator(proactive_msgs=[{'user_id': 'u1', 'group_id': '', 'content': '嗨'}])
-    await sim.tick()
-    sim.port.send.assert_called_once()
-    args, kwargs = sim.port.send.call_args
-    assert args[0] == 'u1'
-
-@pytest.mark.asyncio
-async def test_send_msg_calls_port_with_correct_args():
-    """_send_msg 将 user_id / group_id / content 正确传递给 port.send"""
-    sim = _make_simulator()
-    await sim._send_msg({'user_id': 'u1', 'group_id': 'g1', 'content': '群消息'})
-    args, _ = sim.port.send.call_args
-    assert args == ('u1', 'g1', '群消息')
-    sim.port.send.reset_mock()
-    await sim._send_msg({'user_id': 'u1', 'group_id': '', 'content': '私聊'})
-    args, _ = sim.port.send.call_args
-    assert args == ('u1', '', '私聊')
-
-@pytest.mark.asyncio
 async def test_tick_swallows_exceptions():
-    """tick 内部异常不抛，便于调度器持续运行"""
+    """tick 内部异常不抛，便于后台生活模拟持续运行"""
     sim = _make_simulator()
     sim.character_life.tick = AsyncMock(side_effect=RuntimeError('boom'))
     await sim.tick()
 
 @pytest.mark.asyncio
-async def test_tick_character_life_timeout_continues_scheduler():
-    """character_life.tick 超时时记录警告并跳过（不阻塞 scheduler）"""
+async def test_tick_character_life_timeout_is_swallowed():
+    """character_life.tick 超时时记录警告并跳过"""
     import asyncio
-    sim = _make_simulator(proactive_msgs=[{'user_id': 'u1', 'group_id': '', 'content': '继续调度'}])
+    sim = _make_simulator()
     sim.character_life.tick = AsyncMock(side_effect=asyncio.TimeoutError())
     await sim.tick()
-    sim.scheduler.tick.assert_awaited_once()
-    sim.port.send.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_tick_daily_runs_diary_generation():
@@ -111,20 +77,6 @@ async def test_tick_daily_calls_run_cleanup():
     sim = _make_simulator()
     await sim.tick_daily()
     sim.store.run_cleanup.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_send_msg_drops_empty_recipient():
-    """_send_msg 收件人为空（user_id 与 group_id 都缺失）时跳过 port.send"""
-    sim = _make_simulator()
-    await sim._send_msg({'user_id': '', 'group_id': '', 'content': '孤儿消息'})
-    sim.port.send.assert_not_called()
-
-@pytest.mark.asyncio
-async def test_send_msg_with_user_only_still_sends():
-    """仅有 user_id 仍应正常发送，确认空收件人防御不会误伤"""
-    sim = _make_simulator()
-    await sim._send_msg({'user_id': 'u1', 'group_id': '', 'content': 'hi'})
-    sim.port.send.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_tick_daily_applies_relationship_decay():
@@ -223,19 +175,12 @@ async def test_tick_daily_close_in_finally():
     character_agent.compact_conversation.assert_awaited_once()
 
 
-def test_update_character_propagates_to_share_scheduler():
-    """R1: update_character 将新角色卡同步到 share_scheduler。
-
-    CharacterLife / ProactiveScheduler / DiaryGenerator / ShareScheduler 均应收到新引用。
-    """
+def test_update_character_propagates_to_life_components():
+    """update_character 将新角色卡同步到生活组件。"""
     sim = _make_simulator()
-    share_scheduler = MagicMock()
-    sim.share_scheduler = share_scheduler
 
     new_char = MagicMock()
     sim.update_character(new_char)
 
     sim.character_life.update_character.assert_called_once_with(new_char)
-    sim.scheduler.update_character.assert_called_once_with(new_char)
     sim.diary_generator.update_character.assert_called_once_with(new_char)
-    share_scheduler.update_character.assert_called_once_with(new_char)

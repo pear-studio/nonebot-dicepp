@@ -415,7 +415,7 @@ class PersonaCommand(UserCommandBase):
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
-        if cmd in ("clear", "status", "profile", "mute"):
+        if cmd in ("clear", "status", "profile"):
             return True, False, None
         # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
         if meta.to_me and not msg.startswith(".ai"):
@@ -498,8 +498,6 @@ class PersonaCommand(UserCommandBase):
 
                 if content == "status" or hint == "status":
                     response = await self._get_status(user_id, group_id, is_private)
-                elif content == "mute":
-                    response = await self._handle_mute_toggle(user_id)
                 elif is_at_trigger:
                     if self.app and self.enabled:
                         try:
@@ -563,22 +561,6 @@ class PersonaCommand(UserCommandBase):
                 if isinstance(response, ChatOutcome):
                     if response.skipped:
                         return []
-                    if (
-                        response.counts_as_interaction
-                        and group_id
-                        and self.data_store
-                        and self.config.group_activity_enabled
-                    ):
-                        try:
-                            is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
-                            await self.data_store.update_group_activity(
-                                group_id=group_id,
-                                score_delta=self.config.group_activity_add_per_interaction,
-                                max_daily_add=self.config.group_activity_max_daily_add,
-                                is_whitelisted=is_whitelisted,
-                            )
-                        except Exception as e:
-                            logger.warning(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
                     return []
 
                 # 发送非 chat outcome 回复
@@ -773,28 +755,13 @@ class PersonaCommand(UserCommandBase):
         """处理 admin 命令（管理员功能）——分发给 AdminDispatcher"""
         if not self.admin_dispatcher:
             return "模块未初始化"
-        tick_p = self._async_tick_task is not None and not self._async_tick_task.done()
         daily_p = (
             self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()
         )
         return await self.admin_dispatcher.dispatch(
             user_id, group_id, args,
-            tick_pending=tick_p, daily_pending=daily_p,
+            daily_pending=daily_p,
         )
-
-    async def _handle_mute_toggle(self, user_id: str) -> str:
-        """处理 mute toggle 命令（翻转主动消息开关）"""
-        if not self.data_store:
-            return "模块未初始化"
-
-        is_muted = await self.data_store.is_user_muted(user_id)
-
-        if is_muted:
-            await self.data_store.unmute_user(user_id)
-            return "已开启主动消息（再次发送 .ai mute 可重新关闭）"
-        else:
-            await self.data_store.mute_user(user_id)
-            return "已关闭主动消息（再次发送 .ai mute 可重新开启）"
 
     async def _handle_profile(self, user_id: str, group_id: str) -> str:
         if not self.data_store:
@@ -924,20 +891,18 @@ class PersonaCommand(UserCommandBase):
                 "@bot <消息> - 与 AI 对话",
                 ".ai status - 查看状态",
                 ".ai profile - 查看你的档案",
-                ".ai mute - 切换主动消息开关",
                 ".ai join <口令> - 加入白名单（私聊）",
             ]
             if self._is_admin(meta.user_id):
                 lines.append("")
                 lines.append("[管理员调试]")
-                lines.append(".ai admin debug - 运行诊断（错误摘要、调度器状态、群活跃度）")
+                lines.append(".ai admin debug - 运行诊断（错误摘要）")
                 lines.append(".ai admin rel <用户ID> - 查看关系")
                 lines.append(".ai admin setrel <用户ID> <分数> - 修改好感度")
                 lines.append(".ai admin reload - 热重载角色卡")
                 lines.append(".ai admin events - 事件配置")
                 lines.append(".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）")
                 lines.append(".ai admin whitelist code <口令> - 设置/更新口令")
-                lines.append(".ai admin pause/resume - 暂停/恢复主动消息")
             return "\n".join(lines)
         return ""
 
@@ -972,7 +937,7 @@ class PersonaCommand(UserCommandBase):
 
     def tick(self) -> List[BotCommandBase]:
         """
-        每秒调用，驱动主动消息调度器。
+        每秒调用，驱动角色生活事件。
 
         主循环在运行中的事件循环里同步调用本方法：通过 create_task 执行异步 tick，
         并在后续每秒收齐已完成任务的结果，避免消息丢失。
@@ -990,7 +955,7 @@ class PersonaCommand(UserCommandBase):
                 await self.app.tick()
                 elapsed = time.monotonic() - t0
                 if elapsed > 10:
-                    logger.warning(f"[Persona] tick 耗时 {elapsed:.1f}s (>10s)，可能阻塞后续槽位")
+                    logger.warning(f"[Persona] tick 耗时 {elapsed:.1f}s (>10s)，可能阻塞后续事件槽位")
 
             # 清理已完成的任务（消费结果，不返回命令）
             t = self._async_tick_task

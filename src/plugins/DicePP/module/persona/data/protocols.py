@@ -90,10 +90,6 @@ class RelationshipStore(Protocol):
 
     async def list_all_relationships_raw(self) -> List[RelationshipState]: ...
 
-    async def list_active_relationships(
-        self, min_score: float = 0, active_within_days: int = 30
-    ) -> List[RelationshipState]: ...
-
     async def get_top_relationships(
         self, limit: int = 10
     ) -> List[RelationshipState]: ...

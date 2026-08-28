@@ -5,18 +5,11 @@
 """
 from plugins.DicePP.utils.logger import logger
 import random
-from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..data.models import DEFAULT_RELATION_LABELS
-
-
-class SharePolicy(str, Enum):
-    REQUIRED = "required"
-    OPTIONAL = "optional"
-    NEVER = "never"
 
 
 class PersonaExtensions(BaseModel):
@@ -42,12 +35,6 @@ class PersonaExtensions(BaseModel):
     # - ["...", "..."]（非空列表）：使用自定义拒绝语
     # 注意：关系相关功能由 Persona 的 `relationship_enabled` 统一控制
     refuse_messages: Optional[List[str]] = Field(default=None)
-    # Phase: 主动消息分享示例（可选，不配置则使用系统默认）
-    # 语义说明：
-    # - None（或未配置）：使用系统默认示例
-    # - []（空列表）：不使用任何示例
-    # - ["...", "..."]（非空列表）：使用自定义示例
-    share_message_examples: Optional[List[str]] = Field(default=None)
     # 睡眠期间回复语（可选，不配置则使用系统默认）
     # 语义说明：
     # - None（或未配置）：使用系统默认回复语

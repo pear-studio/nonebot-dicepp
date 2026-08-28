@@ -349,8 +349,6 @@ extensions:
     refuse_messages:
       - 我不想理你
       - 走开
-    share_message_examples:
-      - 今天天气真好
     sleep_messages:
       - zzz
     image_gen_style: 水彩画风
@@ -378,7 +376,6 @@ extensions:
             assert ext.event_day_start_jitter_minutes == 15
             assert ext.event_day_end_jitter_minutes == 20
             assert ext.refuse_messages == ["我不想理你", "走开"]
-            assert ext.share_message_examples == ["今天天气真好"]
             assert ext.sleep_messages == ["zzz"]
             assert ext.image_gen_style == "水彩画风"
             assert ext.image_gen_appearance == "黑发、高挑、戴眼镜"

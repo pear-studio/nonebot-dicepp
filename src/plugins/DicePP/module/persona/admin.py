@@ -42,7 +42,7 @@ class AdminDispatcher:
     # ── 公开 API ──────────────────────────────────────────────
 
     async def dispatch(self, user_id: str, group_id: str, args: List[str],
-                       tick_pending: bool = False, daily_pending: bool = False) -> str:
+                       daily_pending: bool = False) -> str:
         """分发 admin 子命令"""
         if not self._is_admin(user_id):
             return "权限不足"
@@ -55,14 +55,13 @@ class AdminDispatcher:
             args = ["diary", "-1"] if subcmd == "yesterday" else ["diary"]
             subcmd = "diary"
 
-        # debug 特殊处理：需要 data_store 和 app，接收 tick_pending/daily_pending
+        # debug 特殊处理：需要 data_store 和 app
         if subcmd == "debug":
             if not self.data_store:
                 return "模块未初始化"
             if self.app is None:
                 return "模块未初始化"
             return await self._admin_debug(user_id, group_id, args,
-                                           tick_pending=tick_pending,
                                            daily_pending=daily_pending)
 
         # code 已迁移到 whitelist code
@@ -93,14 +92,12 @@ class AdminDispatcher:
             ".ai admin whitelist remove <user_id> - 移除用户\n"
             ".ai admin whitelist remove group <group_id> - 移除群\n"
             ".ai admin whitelist clear - 清空白名单\n"
-            ".ai admin debug - 运行诊断（LLM统计、错误摘要、调度器状态、群活跃度）\n"
+            ".ai admin debug - 运行诊断（LLM统计、错误摘要）\n"
             ".ai admin rel <用户ID> - 查看指定用户关系\n"
             ".ai admin setrel <用户ID> <分数> - 修改好感度\n"
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
-            ".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）\n"
-            ".ai admin pause - 暂停主动消息\n"
-            ".ai admin resume - 恢复主动消息"
+            ".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）"
         )
 
     # ── admin 子命令 ──────────────────────────────────────────
@@ -182,7 +179,6 @@ class AdminDispatcher:
         group_id: str,
         args: List[str],
         *,
-        tick_pending: bool = False,
         daily_pending: bool = False,
     ) -> str:
         lines = ["=== Persona AI 调试信息 ==="]
@@ -225,24 +221,7 @@ class AdminDispatcher:
         else:
             lines.append(f"  数据存储未初始化")
 
-        config = self.config
-        lines.append(f"\n[调度器状态]")
-        if self.app and self.app.get_scheduler():
-            scheduler_status = self.app.get_scheduler_status()
-            lines.append(f"  上次主动数: {scheduler_status.get('last_proactive_count', 0)}")
-            lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
-        else:
-            lines.append(f"  调度器未初始化")
-        lines.append(f"  proactive tick 进行中: {'是' if tick_pending else '否'}")
         lines.append(f"  tick_daily 进行中: {'是' if daily_pending else '否'}")
-        if group_id and config.group_activity_enabled:
-            try:
-                activity = await self.data_store.get_group_activity(group_id)
-                lines.append(f"\n[群活跃度]")
-                lines.append(f"  分数: {activity.score:.1f}")
-                lines.append(f"  最后互动: {activity.last_interaction_at.strftime('%Y-%m-%d %H:%M') if activity.last_interaction_at else '无'}")
-            except Exception:
-                pass
         return "\n".join(lines)
 
     async def _admin_rel(self, user_id: str, group_id: str, args: List[str]) -> str:
@@ -365,18 +344,6 @@ class AdminDispatcher:
         else:
             lines.append(f"\n[事件] 暂无")
         return "\n".join(lines)
-
-    async def _admin_pause(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.app and self.app.get_scheduler():
-            self.app.pause_scheduler()
-            return "已暂停主动消息发送"
-        return "调度器未初始化"
-
-    async def _admin_resume(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.app and self.app.get_scheduler():
-            self.app.resume_scheduler()
-            return "已恢复主动消息发送"
-        return "调度器未初始化"
 
     # ── 辅助方法 ──────────────────────────────────────────────
 

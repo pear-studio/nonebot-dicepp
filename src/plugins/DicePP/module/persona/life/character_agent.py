@@ -1,7 +1,7 @@
 """
 Character Agent — 角色第一人称
 
-合并 reaction + diary + share + opening 四个模式。
+合并 reaction + diary + opening 三个模式。
 Phase 1: 真实 LLM 调用，根据 context.mode 使用不同 prompt 模板。
 """
 import asyncio
@@ -21,21 +21,6 @@ from .types import AgentResult, EventReactionResult
 
 if TYPE_CHECKING:
     from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-
-
-# ── 默认 few-shot 示例（系统默认）
-_DEFAULT_SHARE_EXAMPLES: List[str] = [
-    "场景：午后在公园长椅上打盹，被鸽子踩醒了\n"
-    '消息："刚才在公园长椅上眯了一会儿，被鸽子踩醒了。你们那边公园鸽子多吗？"\n'
-    "→ 陈述事实 + 自然收尾 + 礼貌关联，无生硬开场，无角色名",
-    "场景：午后在公园长椅上打盹，被鸽子踩醒了\n"
-    '消息："在公园睡觉被鸽子踩脸了，它把我当地板。这事必须让你知道，不能只有我一个人丢脸。"\n'
-    "→ 自嘲 + 强制分享感 + 亲密调侃，符合高亲密度语气",
-    '消息："你好~ {{character_name}}刚才在公园被鸽子踩醒了"\n'
-    "→ 坏：生硬开场（\"你好~\"）+ 出现角色名（\"{{character_name}}\"）",
-    '消息："{{character_name}}低头看着鸽子，叹了口气"\n'
-    '→ 坏：第三人称动作描写（"低头"）+ 出现角色名（"{{character_name}}"）',
-]
 
 
 class CharacterAgent(Agent):
@@ -90,8 +75,7 @@ class CharacterAgent(Agent):
         不包含 mode 特定任务指令。任务指令由各 user prompt builder 注入。
         state 形参保留给 Agent ABC 接口兼容；角色身份数据实际通过 context dict 注入。
         状态数据（体力/心情/健康）：reaction 模式由 CharacterStateChangeSource
-        通过 Conversation 通知管道注入，diary/share 当前仍在 user prompt 层注入
-        （待后续统一迁移到通知管道）。
+        通过 Conversation 通知管道注入，diary 当前仍在 user prompt 层注入。
         """
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -112,41 +96,6 @@ class CharacterAgent(Agent):
         """订阅角色状态变更通知（体力/心情/健康三维合并为单 source，一次 DB 查询）。"""
         return [CharacterStateChangeSource(self.store)]
 
-    def _build_share_prompt(self, context: dict) -> str:
-        """构建 share-specific 系统指令（不含人设层，人设由 build_system_prompt 提供）。"""
-        character_name = context.get("character_name", "")
-        share_examples = context.get("share_message_examples")
-
-        # few-shot
-        examples = _DEFAULT_SHARE_EXAMPLES if share_examples is None else (share_examples or None)
-        few_shot_block = ""
-        if examples:
-            replaced = [
-                ex.replace("{{character_name}}", character_name)
-                for ex in examples
-            ]
-            few_shot_block = "\n\n示例:\n" + "\n\n".join(replaced)
-
-        share_prompt = f"""消息要求：
-1. 用第一人称"我"说话，就像日常聊天
-2. 20-60字，约1-2句话
-3. 语气根据你和对方的关系亲密度调整
-4. 基于"发生了什么"和"你的反应"来写，不要编造新内容
-
-必须遵守：
-- 禁止出现角色名（{character_name}）或任何第三人称称呼
-- 禁止第三人称动作描写
-- 禁止生硬开场，如"你好~""在吗""好久不见"等问候语
-- 禁止添加与事件无关的内容
-
-关系亲密度对应的语气参考：
-- "冷淡" / "陌生"：简短、礼貌、不过界
-- "一般" / "友好"：自然、可带轻微关心
-- "亲近" / "亲密"：放松、可撒娇、可调侃、可分享糗事
-
-{few_shot_block}"""
-        return share_prompt
-
     # ── Opening Prompt ───────────────────────────────────────
 
     # ── Build User Prompt ────────────────────────────────────
@@ -157,8 +106,6 @@ class CharacterAgent(Agent):
             return self._build_reaction_user_prompt(context)
         elif mode == "diary":
             return self._build_diary_user_prompt(context)
-        elif mode == "share":
-            return self._build_share_user_prompt(context)
         elif mode == "opening":
             return self._build_opening_user_prompt(context)
         return str(context)
@@ -252,70 +199,6 @@ class CharacterAgent(Agent):
 3. 不需要提及今天发生的所有事——选你真正想写的来写"""
         return user_prompt
 
-    def _build_share_user_prompt(self, context: dict) -> str:
-        # TODO: share 重构中，暂时禁用。恢复时 ChangeSource 通知不会自动注入
-        # （share 为单轮独立调用，不经过 Conversation），状态数据由 context
-        # 直接传入 _format_state_prompt()。
-        event_description = context.get("event_description", "")
-        reaction = context.get("reaction", "")
-        relationship_score = context.get("relationship_score", 0.0)
-        relation_label = context.get("relation_label", "")
-        user_profile_facts = context.get("user_profile_facts", "")
-        recent_history = context.get("recent_history", "")
-        message_type = context.get("message_type", "scheduled_event")
-        environment = context.get("environment", "private")
-        energy = context.get("energy")
-        mood = context.get("mood")
-        health = context.get("health")
-        today_events = context.get("today_events")
-
-        state_text = self._format_state_prompt(energy, mood, health)
-
-        intention_text = ""
-
-        today_events_text = ""
-        if today_events:
-            from plugins.DicePP.utils.time import get_clock
-            now = get_clock().now()
-            ev_lines = []
-            for e in today_events:
-                created_at = e.get("created_at")
-                if created_at:
-                    ts = format_timestamp(created_at, now)
-                    rel = format_relative_time(created_at, now)
-                    time_str = f"{ts} {rel}" if rel else ts
-                else:
-                    time_str = e.get("time", "??:??")
-                desc = e.get("description", "")
-                ev_lines.append(f"- [{time_str}] {desc}")
-            if ev_lines:
-                today_events_text = "\n今天还发生了:\n" + "\n".join(ev_lines)
-
-        user_prompt = f"""以下是你刚才经历的事：
-{event_description}
-
-你的内心反应：
-{reaction}
-
-你当前的状态：
-{state_text}{intention_text}{today_events_text}
-
-对方信息：
-- 关系分数: {relationship_score:.0f}/100
-- 亲密度标签: {relation_label}
-
-已知关于对方的事实：
-{user_profile_facts}
-
-最近对话：
-{recent_history}
-
-消息类型: {message_type}
-当前环境: {environment}
-
-写一条要发给对方的自然消息。"""
-        return user_prompt
-
     def _build_opening_user_prompt(self, context: dict) -> str:
         summary = context.get("summary", "")
         return f"""请用第一人称"我"，以轻松自然的语气写2-3句话，作为每日报告的简短开场白。要点：
@@ -354,16 +237,13 @@ class CharacterAgent(Agent):
     ) -> AgentResult:
         """统一入口 — 根据 context["mode"] 分派到专用方法。
 
-        mode: "reaction" | "diary" | "share" | "opening"
+        mode: "reaction" | "diary" | "opening"
         """
         mode = context.get("mode", "reaction")
         if mode == "reaction":
             return await self.react(context, interaction_id=interaction_id)
         elif mode == "diary":
             return await self.diary(context, interaction_id=interaction_id)
-        # TODO: share 重构中，暂时禁用
-        elif mode == "share":
-            return await self.share(context)
         elif mode == "opening":
             return await self.opening(context, interaction_id=interaction_id)
         else:
@@ -556,12 +436,6 @@ class CharacterAgent(Agent):
                 data=None,
                 error=f"日记解析异常: {e}",
             )
-
-    # TODO: share 重构中，暂时禁用
-    async def share(self, context: dict) -> AgentResult:
-        """[DISABLED] 生成分享消息 — 重构中，暂时返回空结果"""
-        logger.warning("share() 已被禁用（重构中），返回空结果")
-        return AgentResult(success=True, data=None)
 
     async def opening(
         self, context: dict, *, interaction_id: str,

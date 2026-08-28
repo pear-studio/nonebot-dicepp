@@ -2,9 +2,8 @@
 
 负责从 Bot 组装所有依赖，创建 ChatOrchestrator / LifeSimulator / MessagePort。
 """
-import asyncio
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from dataclasses import dataclass
 
 from dicepp_data import PERSONA_DB_ASSET
@@ -35,12 +34,8 @@ from .gateway.port import MessagePort
 from .life.action_evaluator import ActionEvaluator
 from .life.character_life import CharacterLife, CharacterLifeConfig
 from .life.diary import DiaryGenerator, DiaryConfig
-from .life.proactive_config import ProactiveConfig
-from .life.proactive_scheduler import ProactiveScheduler
 from .life.simulator import LifeSimulator, LifeConfig
-from .life.share_scheduler import ShareScheduler
 from .life.protocols import SleepGate
-from .life.target import TargetSelector
 from .life.types import DailyTickResult
 from .life.dm_agent import DMAgent
 from .life.character_agent import CharacterAgent
@@ -49,7 +44,6 @@ from .life.conversation_scope import ConversationScope, NS_LIFE_CHARACTER
 from .life.conversation_registry import ConversationRegistry
 from .life.conversation_summary import ProviderSummarizer
 from .life.change_sources import CharacterStateChangeSource
-from .llm.coordinator import LLMCallCoordinator
 from .llm.client import DeepSeekTextModelClient, TextModelClient
 
 
@@ -122,28 +116,9 @@ class PersonaApp:
     def get_client(self) -> Optional[TextModelClient]:
         return self.chat.client
 
-    # ── 调度器 ──
-
-    def get_scheduler(self) -> Optional[ProactiveScheduler]:
-        return self.life.scheduler
-
-    def get_scheduler_status(self) -> Dict[str, Any]:
-        scheduler = self.life.scheduler
-        return scheduler.get_status() if scheduler else {}
-
     def get_character_agent(self) -> Optional[Any]:
         """返回 LifeSimulator 持有的 CharacterAgent（日报/外部模块使用）"""
         return getattr(self.life, 'character_agent', None)
-
-    def pause_scheduler(self) -> None:
-        scheduler = self.life.scheduler
-        if scheduler:
-            scheduler.config.enabled = False
-
-    def resume_scheduler(self) -> None:
-        scheduler = self.life.scheduler
-        if scheduler:
-            scheduler.config.enabled = True
 
     # ── 衰减计算 ──
 
@@ -187,7 +162,6 @@ class ChatDeps:
     profile_store: ProfileStore
     event_store: EventStore
     client: TextModelClient
-    coordinator: LLMCallCoordinator
     character: Character
     config: Any
     decay_calculator: Optional[DecayCalculator]
@@ -228,8 +202,6 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
     store = PersonaDataStore(
         persona_db_path,
         core_db,
-        group_activity_decay_per_day=config.group_activity_decay_per_day,
-        group_activity_floor_whitelist=config.group_activity_floor_whitelist,
         timezone=config.timezone,
         message_stream_max_per_group=config.message_stream_max_per_group,
     )
@@ -411,18 +383,14 @@ async def _build_life(
     store: PersonaDataStore,
     character: Character,
     config,
-    coordinator: LLMCallCoordinator,
-    port: MessagePort,
     decay_calculator: Optional[DecayCalculator],
     character_life: CharacterLife,
     dm_agent: DMAgent,
     character_agent: CharacterAgent,
     sa_agent: SAAgent,
-    chat_registry: Optional[Any] = None,  # A4: Chat ConversationRegistry
 ) -> LifeSimulator:
-    """组装 LifeSimulator
+    """组装 LifeSimulator。
 
-    Phase 1: Agent 引用注入到 ProactiveScheduler / DiaryGenerator / LifeSimulator。
     A2: 创建 Life ConversationRegistry 并注入 DM / Character Agent。
     """
     # A2: 创建 Life ConversationRegistry
@@ -456,34 +424,6 @@ async def _build_life(
     # SA 不注入 registry（保持内存后即弃）
     logger.info("A2: Life ConversationRegistry 已创建并注入 DM/Character Agent")
 
-    target_selector = TargetSelector(
-        data_store=store,
-        bot_config=config,
-        decay_calculator=decay_calculator,
-        character=character,
-    )
-    share_scheduler = ShareScheduler(
-        config=config,
-        character=character,
-        target_selector=target_selector,
-        data_store=store,
-    )
-    await share_scheduler.load_persistent_state()
-    scheduler_config = ProactiveConfig.from_persona(config)
-    scheduler = ProactiveScheduler(
-        config=scheduler_config,
-        data_store=store,
-        character=character,
-        character_agent=character_agent,
-        decay_calculator=decay_calculator,
-        target_selector=target_selector,
-        coordinator=coordinator,
-    )
-    await scheduler.load_persistent_state()
-    logger.info("主动消息调度器已初始化")
-
-    character_life.add_boundary_receiver(scheduler)
-    character_life.add_boundary_receiver(share_scheduler)
     await character_life.load_persistent_state()
     logger.info("角色生活模拟已初始化")
 
@@ -502,17 +442,13 @@ async def _build_life(
     return LifeSimulator(
         store=store,
         character_life=character_life,
-        scheduler=scheduler,
         diary_generator=diary_generator,
         character=character,
         config=life_config_obj,
         dm_agent=dm_agent,
         character_agent=character_agent,
         sa_agent=sa_agent,
-        port=port,
         decay_calculator=decay_calculator,
-        chat_registry=chat_registry,
-        share_scheduler=share_scheduler,
     )
 
 async def create_persona(bot: Bot) -> Optional[PersonaApp]:
@@ -542,12 +478,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         infra.store, infra.client, config, character,
     )
 
-    coordinator = LLMCallCoordinator(
-        max_failures=config.proactive_coordinator_max_failures,
-        max_iterations=config.proactive_coordinator_max_iterations,
-    )
-    logger.info("LLM 调用协调器已初始化")
-
     decay_calculator: Optional[DecayCalculator] = None
     if config.relationship_enabled:
         decay_calculator = DecayCalculator(
@@ -563,7 +493,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         profile_store=infra.store,
         event_store=infra.store,
         client=infra.client,
-        coordinator=coordinator,
         character=character,
         config=config,
         decay_calculator=decay_calculator,
@@ -574,17 +503,12 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     ))
 
     life = await _build_life(
-        infra.store, character, config, coordinator, infra.port, decay_calculator,
+        infra.store, character, config, decay_calculator,
         character_life=character_life,
         dm_agent=dm_agent,
         character_agent=character_agent,
         sa_agent=sa_agent,
-        chat_registry=chat.registry,
     )
-
-    # 注入分享日程触发回调
-    if life.share_scheduler is not None:
-        life.share_scheduler.set_trigger_callback(chat.trigger_proactive)
 
     logger.info("Persona 模块初始化完成")
     return PersonaApp(

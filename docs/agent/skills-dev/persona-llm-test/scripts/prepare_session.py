@@ -359,16 +359,7 @@ def estimate_agent_runs(
             calendar_days_max = 2
             daily_events = character.extensions.daily_events_count
             life_slots = calendar_days_max * (daily_events + 2)
-            persona = config.persona_ai
-            chain_depth = persona.character_life_chain_max_depth
-            proactive_labels = (
-                int(persona.proactive_share_schedule_morning_enabled)
-                + len(persona.proactive_share_schedule_times)
-                + int(persona.proactive_share_schedule_evening_enabled)
-            )
-            force_targets = len(
-                set(persona.proactive_always_send_groups)
-            ) + len(set(persona.proactive_always_send_users))
+            chain_depth = config.persona_ai.character_life_chain_max_depth
             results.append(
                 AgentRunEstimate(
                     scenario="一天连续 warp",
@@ -377,12 +368,6 @@ def estimate_agent_runs(
                         ("Character 反应（上界）", life_slots * chain_depth),
                         ("Diary", 1),
                         ("SA", 1),
-                        (
-                            "Proactive Chat（上界）",
-                            calendar_days_max
-                            * proactive_labels
-                            * force_targets,
-                        ),
                     ),
                     notes=(
                         "离线估算按 24 小时窗口最多触及 2 个日历日；"

@@ -1,8 +1,7 @@
 """
-单元测试: CharacterAgent — react() / diary() / share() 入口
+单元测试: CharacterAgent — react() / diary() / opening() 入口
 """
 from unittest.mock import AsyncMock, MagicMock, patch
-import json
 import pytest
 from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
 from plugins.DicePP.module.persona.life.types import AgentResult, EventReactionResult
@@ -109,40 +108,6 @@ class TestCharacterAgentDiary:
         assert result.data.endswith('...')
 
 
-class TestCharacterAgentShare:
-    """测试 CharacterAgent.share() — 重构中，当前 disabled stub"""
-
-    @pytest.fixture
-    def mock_store(self):
-        store = MagicMock()
-        store.get_character_state = AsyncMock(return_value=CharacterState())
-        store.update_character_state = AsyncMock()
-        return store
-
-    @pytest.fixture
-    def mock_client(self):
-        return MagicMock()
-
-    @pytest.fixture
-    def agent(self, mock_store, mock_client):
-        return CharacterAgent(store=mock_store, client=mock_client)
-
-    @pytest.mark.asyncio
-    async def test_share_disabled_returns_empty_success(self, agent):
-        """share 已禁用，始终返回 success=True data=None。"""
-        result = await agent.share({'mode': 'share'})
-        assert result.success is True
-        assert result.data is None
-
-    @pytest.mark.asyncio
-    async def test_share_disabled_no_side_effects(self, agent):
-        """禁用 stub 不访问 registry、store 或 router。"""
-        agent._registry = MagicMock()
-        result = await agent.share({})
-        assert result.success is True
-        assert agent._registry.get_or_create if hasattr(agent._registry, 'get_or_create') else True
-
-
 class TestCharacterAgentContract:
     """测试 CharacterAgent.run() 统一入口"""
 
@@ -195,15 +160,6 @@ class TestCharacterAgentContract:
             }, interaction_id="test-id")
         assert result.success is True
         assert '天气真好' in result.data
-
-    @pytest.mark.asyncio
-    async def test_run_share_mode(self, agent):
-        """share mode — disabled stub，返回空成功。"""
-        result = await agent.run({
-            'mode': 'share', 'character_name': '测试角色', 'character_description': '',
-        }, interaction_id="test-id")
-        assert result.success is True
-        assert result.data is None
 
     @pytest.mark.asyncio
     async def test_run_dispatches_to_opening(self, agent):

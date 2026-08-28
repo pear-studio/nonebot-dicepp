@@ -41,7 +41,7 @@ uv run dicepp-shell rm <session>
 ## warp — 生活模拟时间加速
 
 `warp` 从常驻 Runtime 当前时间线连续推进，驱动 persona 生活模拟（DM 叙事 →
-Character 反应 → Diary → SA 叙事规划）和主动分享日程。用于调试 LLM prompt、
+Character 反应 → Diary → SA 叙事规划）。用于调试 LLM prompt、
 生活模拟、冷启动和时间调度行为。
 
 ```bash
@@ -85,13 +85,12 @@ uv run dicepp-shell rm warp-qiqi-test
 
 **注意事项：**
 
-- warp 使用真实 LLM，执行前先用 `--dry-run` 检查 DM、Character、Diary、SA 和 Proactive 的 Agent Run 上界
+- warp 使用真实 LLM，执行前先用 `--dry-run` 检查 DM、Character、Diary 和 SA 的 Agent Run 上界
 - dry-run 会显示正式配置中的 background/SA 最大轮次；实际 Agent Run 可能因事件链提前结束而更少
 - warp 期间 send 和普通 stop 会返回 runtime_busy；可用 `job cancel` 取消
 - Runtime 异常退出后，未完成 job 标记为 interrupted，不会自动续跑
 - warp 完成或取消后 Runtime 继续持有推进后的模拟时间；后续 send 和 warp 沿同一时间线运行，`serve --stop` 时恢复
-- 逐分钟 tick 会自然经过角色随机槽位以及 morning、自定义时点、evening 主动分享窗口
-- 结果中的 proactive schedule point 仅表示调度器已标记日程，不代表消息成功送达；需结合捕获消息、日志或 trace 验收
+- 逐分钟 tick 会自然经过角色随机槽位和日界处理
 - warp 完成后，DM/Character 对话原文、SA 思考过程等原始数据在 `persona_llm_traces` 和 `persona_agent_events` 表中，可导出分析
 
 ## 验收原则

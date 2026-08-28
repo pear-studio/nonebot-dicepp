@@ -57,7 +57,6 @@ class FakeCharacterLoader:
         ext.event_day_start_jitter_minutes = 30
         ext.event_day_end_jitter_minutes = 30
         ext.refuse_messages = None
-        ext.share_message_examples = None
         ext.sleep_messages = None
         ext.image_gen_style = ""
         ext.image_gen_appearance = ""
@@ -87,9 +86,7 @@ def _make_persona_config(*, relationship_enabled: bool = False) -> PersonaConfig
         trace_enabled=False,
         quota_check_enabled=False,
         whitelist_enabled=False,
-        group_activity_enabled=False,
         relationship_enabled=relationship_enabled,
-        proactive_enabled=False,
         character_life_enabled=False,
         daily_limit=9999,
     )
@@ -230,11 +227,6 @@ class TestCreatePersonaSuccess:
         client = app.get_client()
         assert client is not None
 
-        scheduler = app.get_scheduler()
-        if scheduler is not None:
-            status = scheduler.get_status()
-            assert isinstance(status, dict)
-
         decay_calc = app.get_decay_calculator()
         assert (decay_calc is not None) is relationship_enabled
         assert (app.chat._scoring_trigger is not None) is relationship_enabled
@@ -277,15 +269,6 @@ class TestCreatePersonaFromPersonaMappings:
         config = _make_persona_config()
         clc = CharacterLifeConfig.from_persona(config)
         assert clc.enabled == config.character_life_enabled
-
-    def test_proactive_config_from_persona(self):
-        """ProactiveConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.life.proactive_config import (
-            ProactiveConfig,
-        )
-        config = _make_persona_config()
-        pc = ProactiveConfig.from_persona(config)
-        assert pc.enabled == config.proactive_enabled
 
     def test_life_config_from_persona(self):
         """LifeConfig.from_persona 映射所有字段。"""

@@ -1,6 +1,6 @@
 # Persona AI 使用
 
-Persona AI 可以让 DicePP 扮演一个有角色设定、记忆和主动消息能力的 AI 角色。
+Persona AI 可以让 DicePP 扮演一个有角色设定、记忆和正常对话能力的 AI 角色。
 
 开始前先确认 DicePP 已能正常收发 `.help`。
 
@@ -144,39 +144,9 @@ content/characters/mychar/
 | `.ai admin reload` | 重新加载角色卡 |
 | `.ai admin events` | 查看角色事件配置 |
 | `.ai admin today` | 查看今天的日记和事件 |
-| `.ai admin pause` | 暂停主动消息 |
-| `.ai admin resume` | 恢复主动消息 |
 | `.ai admin list` | 查看白名单 |
 
 这些命令只对 `master` 或 `admin` 有效。
-
-## 定时主动分享
-
-定时主动分享默认关闭。启用后，角色会在早安、晚安或指定时间点主动生成消息；它不是由某个事件槽位直接触发的旧机制。
-
-在 `config/bots/{QQ号}.json` 的 `persona_ai` 段中配置。例如：
-
-```json
-{
-  "persona_ai": {
-    "proactive_share_schedule_enabled": true,
-    "proactive_share_schedule_morning_enabled": true,
-    "proactive_share_schedule_evening_enabled": false,
-    "proactive_share_schedule_times": ["14:00", "18:30"],
-    "proactive_share_schedule_jitter_minutes": 15,
-    "proactive_always_send_users": ["你的QQ号"],
-    "proactive_always_send_groups": ["群号"]
-  }
-}
-```
-
-- 总开关打开后，还要至少启用早安、晚安或填入一个 `HH:MM` 时间点；空日程不会发送消息。
-- 早安和晚安根据角色卡的活动日开始/结束时间计算；角色卡没有这些时间时会跳过对应问候。
-- 每个时间点会在设定时间的正负 `proactive_share_schedule_jitter_minutes` 分钟内随机触发。设为 `0` 可关闭随机偏移，允许范围为 `0` 到 `120`。
-- 定时分享只发送给 `proactive_always_send_users` 和 `proactive_always_send_groups` 中明确列出的目标；两个列表都为空时不会发送。重复的同一私聊或群聊只会收到一次。
-- 主动分享与该私聊或群聊中的正常对话串行执行，不计入普通用户的 `daily_limit` 配额。若会话正忙或生成失败，当前时间窗口内可以重试。
-
-需要立即停止时使用 `.ai admin pause`；确认后用 `.ai admin resume` 恢复。修改配置后需重启 Bot 使新设置完整生效。
 
 ## 常见问题
 
@@ -201,7 +171,7 @@ content/characters/mychar/
 
 检查：
 
-- `api_key` 是否写在 `config/bots/{QQ号}.json`
+- `api_key` 是否写在实例级 `config/user.json`
 - `base_url` 是否正确
 - 模型名是否写对
 
@@ -210,16 +180,6 @@ DeepSeek 常用地址：
 ```text
 https://api.deepseek.com
 ```
-
-### 主动消息太频繁
-
-先暂停：
-
-```text
-.ai admin pause
-```
-
-再调整 `config/bots/{QQ号}.json` 中的主动消息相关配置并重启 Bot。
 
 ### 修改角色卡后没有生效
 

@@ -135,17 +135,6 @@ CREATE_SCORING_FAILURES_INDEX_CREATED_AT = """
 CREATE INDEX IF NOT EXISTS idx_persona_scoring_failures_created_at ON persona_scoring_failures(created_at);
 """
 
-# 群活跃度表
-CREATE_GROUP_ACTIVITY_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_group_activity (
-    group_id TEXT PRIMARY KEY,
-    score REAL DEFAULT 50.0,
-    last_interaction_at TIMESTAMP,    -- 最后互动时间（@bot/AI回复）
-    daily_add_date TEXT,              -- 当日累计加分日期 (YYYY-MM-DD)
-    daily_add_total REAL DEFAULT 0    -- 当日累计加分值
-);
-"""
-
 # familiarity 每日累计表（持久化日上限，防重启丢失）
 CREATE_FAMILIARITY_DAILY_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_familiarity_daily (
@@ -153,15 +142,6 @@ CREATE TABLE IF NOT EXISTS persona_familiarity_daily (
     date TEXT NOT NULL,
     total REAL DEFAULT 0.0,
     PRIMARY KEY (user_id, date)
-);
-"""
-
-# 用户主动消息静音表 (Phase 3)
-CREATE_USER_MUTE_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_user_mute (
-    user_id TEXT PRIMARY KEY,
-    muted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    reason TEXT DEFAULT ''
 );
 """
 
@@ -435,7 +415,6 @@ PERSONA_SCHEMA_SQL = [
     CREATE_USER_PROFILES_TABLE,
     CREATE_USER_RELATIONSHIPS_TABLE,
     CREATE_FAMILIARITY_DAILY_TABLE,
-    CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_LLM_TRACES_TABLE,
     CREATE_LLM_TRACES_INDEX_INTERACTION,
     CREATE_LLM_TRACES_INDEX_USER,
@@ -459,6 +438,5 @@ PERSONA_SCHEMA_SQL = [
 # 留主库 -> core_db
 BOT_CORE_SCHEMA_SQL = [
     CREATE_WHITELIST_TABLE,
-    CREATE_USER_MUTE_TABLE,
     CREATE_GLOBAL_SETTINGS_TABLE,
 ]

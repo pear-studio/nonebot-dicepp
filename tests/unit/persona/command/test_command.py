@@ -21,7 +21,6 @@ from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
     WhitelistEntry,
-    GroupActivity,
     DiaryEntry,
     DailyEvent,
 )
@@ -90,7 +89,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
 
     async def test_tool_commands_exempt_whitelist(self):
         cmd = self.make_cmd()
-        for sub in ["clear", "status", "profile", "mute"]:
+        for sub in ["clear", "status", "profile"]:
             meta = self.make_private_meta(f".ai {sub}")
             ok, _, _ = await cmd.can_process_msg(f".ai {sub}", meta)
             assert ok is True, f"failed for {sub}"
@@ -176,14 +175,6 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
         self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.current_character_name = "test_char"
-
-        self.cmd.app.life = MagicMock()
-        self.cmd.app.life.scheduler = MagicMock()
-        self.cmd.app.life.scheduler.get_status.return_value = {
-            "pending_shares": 0,
-            "scheduled_today": [],
-            "is_character_active": True,
-        }
 
         # AdminDispatcher 在 make_cmd 中初始化时 app/data_store 为 None，
         # 后续赋值后需同步更新 dispatcher 引用。
@@ -316,16 +307,6 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
             await self.cmd.process_msg(".ai admin yesterday", meta2, "admin")
             assert "昨天" in self.get_sent_content(self.cmd)
 
-    async def test_admin_pause_and_resume(self):
-        meta = self.make_private_meta(".ai admin pause", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin pause", meta, "admin")
-        assert "已暂停" in self.get_sent_content(self.cmd)
-
-        meta2 = self.make_private_meta(".ai admin resume", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin resume", meta2, "admin")
-        assert "已恢复" in self.get_sent_content(self.cmd)
-
-
 class TestUserCommands(IsolatedAsyncioTestCase):
     """用户命令（7个）"""
 
@@ -370,17 +351,6 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         meta = self.make_private_meta(".ai profile")
         await self.cmd.process_msg(".ai profile", meta, None)
         assert "你的档案" in self.get_sent_content(self.cmd)
-
-    async def test_mute_toggle(self):
-        self.store.is_user_muted = AsyncMock(return_value=False)
-        meta = self.make_private_meta(".ai mute")
-        await self.cmd.process_msg(".ai mute", meta, None)
-        assert "已关闭主动消息" in self.get_sent_content(self.cmd)
-
-        self.store.is_user_muted = AsyncMock(return_value=True)
-        meta2 = self.make_private_meta(".ai mute")
-        await self.cmd.process_msg(".ai mute", meta2, None)
-        assert "已开启主动消息" in self.get_sent_content(self.cmd)
 
     async def test_join(self):
         self.store.get_global_setting = AsyncMock(return_value="secret")

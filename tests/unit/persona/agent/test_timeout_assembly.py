@@ -123,15 +123,12 @@ async def test_factory_life_registry_uses_background_task_profile():
     character_agent = CharacterAgent(store, client, config=config)
     sa_agent = SAAgent(store, client, config=config)
     character_life = MagicMock()
-    character_life.add_boundary_receiver = MagicMock()
     character_life.load_persistent_state = AsyncMock()
 
     life = await _build_life(
         store=store,
         character=character,
         config=config,
-        coordinator=MagicMock(),
-        port=MagicMock(),
         decay_calculator=MagicMock(),
         character_life=character_life,
         dm_agent=dm_agent,
