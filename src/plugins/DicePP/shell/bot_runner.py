@@ -317,7 +317,6 @@ class BotRunner:
 
         config = char_life.config
         character = char_life.character
-        persona_config = self.bot.config.persona_ai
 
         if start:
             start_dt = dt.datetime.fromisoformat(start)
@@ -376,10 +375,6 @@ class BotRunner:
                     "character_reaction_runs_max": char_reaction_runs,
                     "diary_agent_runs_max": diary_runs_max,
                     "sa_agent_runs_max": sa_runs_max,
-                    "background_max_rounds": (
-                        persona_config.background_llm_max_rounds
-                    ),
-                    "sa_max_rounds": persona_config.sa_max_rounds,
                 },
             }
 

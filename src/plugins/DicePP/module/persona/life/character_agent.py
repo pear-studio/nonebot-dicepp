@@ -41,9 +41,8 @@ class CharacterAgent(Agent):
         self,
         store: PersonaDataStore,
         client: TextModelClient,
-        config=None,
     ):
-        super().__init__(store, client, config)
+        super().__init__(store, client)
 
     async def load_state(self) -> CharacterState:
         """从 store 加载角色状态"""

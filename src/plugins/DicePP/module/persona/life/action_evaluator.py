@@ -6,7 +6,7 @@ ActionEvaluator — 独立的 LLM 评估管线
 """
 import re
 import uuid
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from plugins.DicePP.utils.logger import logger
@@ -19,9 +19,6 @@ class RecordEvaluationArgs(BaseModel):
     """行动可行性评估结果"""
     result: str = Field(..., description="approved | rejected | deferred")
     reason: str = Field(..., description="评估原因")
-
-if TYPE_CHECKING:
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 # 常见中文地点词匹配
 _LOCATION_RE = re.compile(
@@ -46,13 +43,11 @@ class ActionEvaluator:
         self,
         store: PersonaDataStore,
         client: TextModelClient,
-        config: "PersonaConfig",
         timezone: str = "Asia/Shanghai",
     ):
         self._store = store
         self._client = client
         self._timezone = timezone
-        self._timeout = config.suggest_action_evaluation_timeout
 
     def _get_today_str(self) -> str:
         from plugins.DicePP.utils.time import get_clock

@@ -47,19 +47,13 @@ class CharacterLifeConfig:
         slot_match_window_minutes: int = 15,
         timezone: str = "Asia/Shanghai",
         min_event_interval_minutes: int = 5,
-        chain_max_depth: int = 5,
+        chain_max_depth: int = 3,
         chain_force_extend_once_prob: float = 0.0,  # deprecated，不再使用（want_to_end 共识结束替代）
         recovery_energy: int = 20,
         default_energy: int = 50,
         default_mood: int = 50,
         default_health: int = 50,
         good_night_cooldown_hours: int = 22,
-        story_deck_max_injection: int = 3,
-        story_deck_max_entries: int = 100,
-        front_max_campaign: int = 1,
-        front_max_adventure: int = 2,
-        threads_per_front: int = 3,
-        sa_max_rounds: int = 100,
     ):
         self.enabled = enabled
         self.slot_match_window_minutes = slot_match_window_minutes
@@ -72,33 +66,10 @@ class CharacterLifeConfig:
         self.default_mood = default_mood
         self.default_health = default_health
         self.good_night_cooldown_hours = good_night_cooldown_hours
-        self.story_deck_max_injection = story_deck_max_injection
-        self.story_deck_max_entries = story_deck_max_entries
-        self.front_max_campaign = front_max_campaign
-        self.front_max_adventure = front_max_adventure
-        self.threads_per_front = threads_per_front
-        self.sa_max_rounds = sa_max_rounds
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "CharacterLifeConfig":
-        return cls(
-            enabled=persona.character_life_enabled,
-            slot_match_window_minutes=persona.character_life_jitter_minutes,
-            timezone=persona.timezone,
-            min_event_interval_minutes=persona.character_life_min_event_interval_minutes,
-            chain_max_depth=persona.character_life_chain_max_depth,
-            chain_force_extend_once_prob=persona.character_life_chain_force_extend_once_prob,
-            default_energy=persona.character_life_default_energy,
-            default_mood=persona.character_life_default_mood,
-            default_health=persona.character_life_default_health,
-            recovery_energy=persona.character_life_recovery_energy,
-            story_deck_max_injection=persona.story_deck_max_injection,
-            story_deck_max_entries=persona.story_deck_max_entries,
-            front_max_campaign=persona.front_max_campaign,
-            front_max_adventure=persona.front_max_adventure,
-            threads_per_front=persona.threads_per_front,
-            sa_max_rounds=persona.sa_max_rounds,
-        )
+        return cls(enabled=persona.character_life_enabled)
 
     def now(self) -> datetime:
         from plugins.DicePP.utils.time import get_clock

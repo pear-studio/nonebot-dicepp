@@ -31,8 +31,6 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 ```json
 "enabled": true,
 "character_name": "qiqi.local",
-"character_path": "./content/characters",
-"timezone": "Asia/Shanghai",
 "daily_limit": 20
 ```
 
@@ -55,8 +53,6 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 |------|------|
 | `enabled` | 设为 `true` 才会启用 Persona（在该 Bot 配置中设置） |
 | `character_name` | 角色卡目录名，在 `persona_ai` 段中设置 |
-| `character_path` | 角色目录根路径，通常不用改 |
-| `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |
 
 DeepSeek 的模型配置由实例级 `config/user.json` 管理，默认接口地址是：

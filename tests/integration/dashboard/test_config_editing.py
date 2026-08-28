@@ -292,10 +292,10 @@ class TestFieldMetadata:
                         "title": "启用 Persona",
                         "type": "boolean",
                     },
-                    "search_max_chars": {
-                        "title": "搜索结果最大字符数",
-                        "type": "integer",
-                        "dashboard_section": "chat_reply",
+                    "character_life_enabled": {
+                        "title": "角色生活模拟",
+                        "type": "boolean",
+                        "dashboard_section": "life_sim",
                     },
                 },
             },
@@ -320,10 +320,10 @@ class TestFieldMetadata:
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
 
-        # Field with override: persona_ai.search_max_chars has section="chat_reply" (not "basic")
-        assert result["persona_ai.search_max_chars"]["section"] == "chat_reply", \
-            f"search_max_chars section should be 'chat_reply', got {result.get('persona_ai.search_max_chars', {}).get('section')}"
-        assert result["persona_ai.search_max_chars"]["tab"] == "persona"
+        # Field with override: persona_ai.character_life_enabled has section="life_sim" (not "basic")
+        assert result["persona_ai.character_life_enabled"]["section"] == "life_sim", \
+            f"character_life_enabled section should be 'life_sim', got {result.get('persona_ai.character_life_enabled', {}).get('section')}"
+        assert result["persona_ai.character_life_enabled"]["tab"] == "persona"
 
     def test_field_inherits_model_section(self):
         """Field WITHOUT override inherits model-level dashboard_section."""
@@ -386,7 +386,7 @@ class TestFieldMetadata:
         layout = _cached_config_layout()
 
         # Must have real metadata (not the {} fallback)
-        assert len(meta) > 50, f"expected >50 fields from real model, got {len(meta)}"
+        assert len(meta) >= 30, f"expected real fields from source model, got {len(meta)}"
 
         # Verify known fields have correct metadata
         assert meta["persona_ai.enabled"]["title"] == "启用 Persona"

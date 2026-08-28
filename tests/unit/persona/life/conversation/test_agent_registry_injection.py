@@ -357,9 +357,6 @@ class TestFactoryRegistryInjection:
         character = MagicMock()
         character.character_id = "test-char-id"
         config = MagicMock()
-        config.background_llm_max_rounds = 10
-        config.timezone = "Asia/Shanghai"
-        config.character_life_diary_time = "22:00"
         character_life = MagicMock()
         character_life.load_persistent_state = AsyncMock()
 

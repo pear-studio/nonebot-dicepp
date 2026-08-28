@@ -74,11 +74,7 @@ class UserConfig(BaseModel):
 
 class PersonaConfig(BaseModel):
     model_config = ConfigDict(
-        # Runtime callers still construct PersonaConfig with a handful of
-        # legacy-only values.  Config files are independently canonicalized
-        # against ``model_fields`` by the loader, so this does not relax the
-        # strict persistence boundary.
-        extra="ignore",
+        extra="forbid",
         strict=True,
         json_schema_extra={
             "dashboard_tab": "persona",
@@ -92,113 +88,16 @@ class PersonaConfig(BaseModel):
     daily_report_enabled: bool = Field(default=True, title="日报")
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
     character_name: str = Field(default="qiqi.local", title="角色名")
-    character_path: str = Field(default="./content/characters", title="角色路径")
 
     whitelist_enabled: bool = Field(default=True, title="白名单")
 
-    image_gen_style: str = Field(
-        default="anime style, high quality, clean lines", title="画风描述",
-        description="全局默认画风描述，注入到 generate_image prompt 前缀。角色卡配置 image_gen_style 时优先使用角色卡的。",
-    )
-
-    timezone: str = Field(default="Asia/Shanghai", title="时区")
-
     # ── 对话与回复 ───────────────────────────────────────────────────────────
-
-    # 搜索结果和消息流上限仍是公开运行配置；其余纯聊天算法参数由
-    # ``module.persona.chat.ChatConfig`` 的内部默认值统一管理。
-    search_max_chars: int = Field(
-        default=180, title="搜索结果最大字符数",
-        description="搜索结果中每条消息的最大字符数",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    message_stream_max_per_group: int = Field(
-        default=1000, ge=10, title="消息流每组上限",
-        description="消息流表每组/用户保留上限（写入后按限频触发清理）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-
-    # Phase 3: 后台 LLM 工具调用轮次（与响应式聊天策略分开保留）
-    background_llm_max_rounds: int = Field(
-        default=10, title="后台 LLM 最大轮次",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
 
     # ── 生活模拟 ─────────────────────────────────────────────────────────────
 
     # Phase 2: 角色生活模拟
     character_life_enabled: bool = Field(
         default=True, title="角色生活模拟",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_jitter_minutes: int = Field(
-        default=15, title="生活事件抖动",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_diary_time: str = Field(
-        default="23:30", title="日记时间",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_chain_max_depth: int = Field(
-        default=3, title="事件链最大深度",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_chain_force_extend_once_prob: float = Field(
-        default=0.0, title="保底续写概率",
-        description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_min_event_interval_minutes: int = Field(
-        default=5, title="事件最小间隔",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_recovery_energy: int = Field(
-        default=20, title="恢复体力值",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_default_energy: int = Field(
-        default=50, title="默认体力",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_default_mood: int = Field(
-        default=50, title="默认心情",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    character_life_default_health: int = Field(
-        default=50, title="默认健康",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
-    # Story Deck / Front / SA 配置（CharacterLifeConfig.from_persona 消费）
-    story_deck_max_injection: int = Field(
-        default=3, title="叙事条目每轮最大注入量",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    story_deck_max_entries: int = Field(
-        default=100, title="叙事条目最大保存数",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    front_max_campaign: int = Field(
-        default=1, title="最大战役 Front 数",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    front_max_adventure: int = Field(
-        default=2, title="最大冒险 Front 数",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    threads_per_front: int = Field(
-        default=3, title="每个 Front 最大 Thread 数",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    sa_max_rounds: int = Field(
-        default=100, title="SA agent 最大轮次",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
-    # chat → life 行动建议
-    suggest_action_evaluation_timeout: int = Field(
-        default=30, ge=5, le=120, title="建议评估超时",
-        description="suggest_action 评估 LLM 的超时时间（秒）",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
@@ -220,25 +119,6 @@ class PersonaConfig(BaseModel):
     # Phase 7a: LLM Trace & Observability
     trace_enabled: bool = Field(
         default=True, title="LLM 追踪",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    trace_max_age_days: int = Field(
-        default=7, title="追踪保留天数",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-
-    # 数据清理 TTL
-    daily_events_keep_days: int = Field(
-        default=30, title="每日事件保留天数",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    diary_keep_days: int = Field(
-        default=30, title="日记保留天数",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-
-    observation_store_raw_digest: bool = Field(
-        default=True, title="存储原始摘要",
         json_schema_extra={"dashboard_section": "group_limits"},
     )
 

@@ -99,7 +99,7 @@ class Bot:
         self.user_config: UserConfig = self._cfg_loader.user_config
         configure_log_level(self.config.log.level)
         persona_config = self.config.persona_ai
-        self._persona_loader = PersonaLoader(persona_config.character_path)
+        self._persona_loader = PersonaLoader()
         if persona_config.enabled:
             self._persona_loader.require(persona_config.character_name)
 

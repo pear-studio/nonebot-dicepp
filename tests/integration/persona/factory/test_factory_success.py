@@ -75,7 +75,6 @@ def _make_persona_config() -> PersonaConfig:
     """
     return PersonaConfig(
         enabled=True,
-        character_path="/tmp/smoke_chars",
         character_name="test_char",
         # 关闭不需要的子系统
         trace_enabled=False,
@@ -316,17 +315,6 @@ class TestCreatePersonaFromPersonaMappings:
     from_persona 会抛出 AttributeError，而 MagicMock 会静默掩盖。
     """
 
-    def test_chat_config_from_persona(self):
-        """ChatConfig.from_persona 只映射仍公开的 Persona 设置。"""
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        config = _make_persona_config()
-        config.timezone = "UTC"
-        config.search_max_chars = 321
-        cc = ChatConfig.from_persona(config)
-        assert cc.timezone == "UTC"
-        assert cc.search_max_chars == 321
-        assert cc.max_history_turns == 10
-
     def test_character_life_config_from_persona(self):
         """CharacterLifeConfig.from_persona 映射所有字段。"""
         from plugins.DicePP.module.persona.life.character_life import (
@@ -337,8 +325,9 @@ class TestCreatePersonaFromPersonaMappings:
         assert clc.enabled == config.character_life_enabled
 
     def test_life_config_from_persona(self):
-        """LifeConfig.from_persona 映射所有字段。"""
+        """LifeConfig.from_persona 保留公开开关，其余使用内部默认值。"""
         from plugins.DicePP.module.persona.life.simulator import LifeConfig
         config = _make_persona_config()
         lc = LifeConfig.from_persona(config)
-        assert lc.timezone == config.timezone
+        assert lc.timezone == "Asia/Shanghai"
+        assert (lc.trace_max_age_days, lc.daily_events_keep_days, lc.diary_keep_days) == (7, 30, 30)

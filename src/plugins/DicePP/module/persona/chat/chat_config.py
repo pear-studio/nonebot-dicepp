@@ -1,10 +1,6 @@
 """ChatConfig — 对话域运行策略与少量公开 Persona 设置。"""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 from ..data.models import DEFAULT_SESSION_TOKEN_BUDGET
 
@@ -14,7 +10,6 @@ class ChatConfig:
     """对话域配置。
 
     纯聊天算法参数在此处提供内部默认值，不再由 PersonaConfig 暴露。
-    ``from_persona`` 只复制仍属于公开 Persona 边界的字段。
     """
 
     max_history_turns: int = 10
@@ -34,11 +29,3 @@ class ChatConfig:
     group_session_gap_seconds: int = 1800
     private_session_token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
     group_session_token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
-
-    @classmethod
-    def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
-        """Build runtime chat policy from the Persona settings still public."""
-        return cls(
-            timezone=persona.timezone,
-            search_max_chars=persona.search_max_chars,
-        )

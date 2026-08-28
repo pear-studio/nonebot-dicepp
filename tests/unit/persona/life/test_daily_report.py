@@ -236,7 +236,6 @@ class TestDailyReportGenerator:
         mock_char_agent_cls.assert_called_once_with(
             store=gen._store,
             client=gen._client,
-            config=gen._config,
         )
 
     @pytest.mark.asyncio
@@ -488,7 +487,12 @@ class TestDailyReportGenerator:
         ])
         mock_store.get_error_summary_since = AsyncMock(return_value=[])
 
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        gen = DailyReportGenerator(
+            bot=bot,
+            port=port,
+            store=mock_store,
+            config=PersonaConfig(daily_report_voice_enabled=False),
+        )
         result = await gen._collect_llm_summary(use_cur_day=False)
 
         assert result["total_calls"] == 15
@@ -517,7 +521,12 @@ class TestDailyReportGenerator:
         ])
         mock_store.get_error_summary_since = AsyncMock(return_value=[("failed", 5)])
 
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        gen = DailyReportGenerator(
+            bot=bot,
+            port=port,
+            store=mock_store,
+            config=PersonaConfig(daily_report_voice_enabled=False),
+        )
         result = await gen._collect_llm_summary(use_cur_day=True)
 
         assert result["errors"] == 5
@@ -542,7 +551,12 @@ class TestDailyReportGenerator:
         ])
         mock_store.get_error_summary_since = AsyncMock(return_value=[("failed", 3)])
 
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        gen = DailyReportGenerator(
+            bot=bot,
+            port=port,
+            store=mock_store,
+            config=PersonaConfig(daily_report_voice_enabled=False),
+        )
         result = await gen._collect_llm_summary(use_cur_day=False)
 
         assert result["errors"] == 3
@@ -566,7 +580,12 @@ class TestDailyReportGenerator:
         mock_store = MagicMock()
         mock_store.get_character_state = AsyncMock(return_value=state)
 
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        gen = DailyReportGenerator(
+            bot=bot,
+            port=port,
+            store=mock_store,
+            config=PersonaConfig(daily_report_voice_enabled=False),
+        )
 
         await gen.generate_and_send("diary")
 
@@ -585,7 +604,12 @@ class TestDailyReportGenerator:
         mock_store = MagicMock()
         mock_store.get_character_state = AsyncMock(return_value=None)
 
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        gen = DailyReportGenerator(
+            bot=bot,
+            port=port,
+            store=mock_store,
+            config=PersonaConfig(daily_report_voice_enabled=False),
+        )
 
         await gen.generate_and_send("diary")
 
@@ -799,8 +823,3 @@ class TestFlagDisplayOrder:
         from plugins.DicePP.core.command.const import DPP_COMMAND_FLAG_DICT
         assert set(_FLAG_DISPLAY_ORDER) == set(DPP_COMMAND_FLAG_DICT.keys()), \
             "_FLAG_DISPLAY_ORDER 与 DPP_COMMAND_FLAG_DICT 键集不一致，请同步更新"
-
-
-class MockConfig:
-    timezone = "Asia/Shanghai"
-    daily_report_voice_enabled = False

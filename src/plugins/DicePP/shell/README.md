@@ -142,8 +142,7 @@ warp 完成或取消后保留，后续 warp 从当前模拟时间继续；时间
 
 `--dry-run` 不推进时钟、不执行 tick、也不写 Persona 数据；它显示实际起止时间，
 并按 DM、Character、Diary 和 SA 的 Agent Run 上界分类估算。Agent
-内部轮次仍使用正式配置，输出会同时显示 `background_llm_max_rounds` 和
-`sa_max_rounds`。
+内部 Agent 轮次由运行时策略控制，实际请求数可能因提前结束而低于上界。
 
 需要让任务脱离当前 CLI 后继续运行时：
 

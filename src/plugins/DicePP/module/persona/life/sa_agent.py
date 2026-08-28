@@ -25,9 +25,8 @@ class SAAgent(Agent):
         self,
         store: PersonaDataStore,
         client,
-        config=None,
     ):
-        super().__init__(store, client, config)
+        super().__init__(store, client)
         self._sa_fronts_dicts: list = []  # build_run_spec → interpret_result 间传递
         self._sa_state: Optional[SAState] = None
 
@@ -128,11 +127,11 @@ class SAAgent(Agent):
         user_prompt = self._build_user_prompt(context, fronts_dicts)
 
         # 获取配置参数
-        max_entries = self.config.story_deck_max_entries if self.config else 100
-        front_max_campaign = self.config.front_max_campaign if self.config else 1
-        front_max_adventure = self.config.front_max_adventure if self.config else 2
-        threads_per_front = self.config.threads_per_front if self.config else 3
-        sa_max_rounds = self.config.sa_max_rounds if self.config else 100
+        max_entries = 100
+        front_max_campaign = 1
+        front_max_adventure = 2
+        threads_per_front = 3
+        sa_max_rounds = 100
 
         # 构建 ToolKit（新路径）
         toolkit = build_sa_toolkit(

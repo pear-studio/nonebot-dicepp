@@ -103,7 +103,7 @@ async def test_chat_runtime_uses_the_client():
         store=store,
         client=client,
         character=character,
-        config=ChatConfig.from_persona(PersonaConfig()),
+        config=ChatConfig(),
         action_evaluator=MagicMock(),
         character_life=MagicMock(),
     )
@@ -121,9 +121,9 @@ async def test_factory_life_registry_uses_background_task_profile():
     client = _FakeClient(provider)
     store = _store()
     character = Character(name="Timeout Tester")
-    dm_agent = DMAgent(store, client, config=config)
-    character_agent = CharacterAgent(store, client, config=config)
-    sa_agent = SAAgent(store, client, config=config)
+    dm_agent = DMAgent(store, client)
+    character_agent = CharacterAgent(store, client)
+    sa_agent = SAAgent(store, client)
     character_life = MagicMock()
     character_life.load_persistent_state = AsyncMock()
 
@@ -160,7 +160,6 @@ async def test_diary_agent_uses_background_task_profile():
     agent = CharacterAgent(
         _store(),
         client,
-        config=PersonaConfig(),
     )
 
     result = await agent.diary({
@@ -191,7 +190,7 @@ async def test_sa_agent_runtime_uses_summary_task_profile():
         )],
     )
     client = _FakeClient(provider)
-    agent = SAAgent(_store(), client, config=config)
+    agent = SAAgent(_store(), client)
 
     result = await agent.run({
         "character_name": "Timeout Tester",

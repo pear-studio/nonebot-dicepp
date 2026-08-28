@@ -61,7 +61,6 @@ def _make_bot(
     bot = MagicMock()
     cfg = PersonaConfig(
         enabled=enabled,
-        character_path="/tmp/chars",
         character_name="test",
     )
     bot.config.persona_ai = cfg

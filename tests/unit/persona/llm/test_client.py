@@ -12,7 +12,11 @@ from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("task", "timeout", "thinking"),
-    [("chat", 30, True), ("background", 90, False)],
+    [
+        ("chat", 30, True),
+        ("background", 90, False),
+        ("action_evaluation", 30, False),
+    ],
 )
 async def test_generate_uses_internal_task_request_profile(task, timeout, thinking):
     response = LLMResponse(content="ok")
@@ -51,3 +55,5 @@ def test_unknown_tasks_use_chat_profile():
     assert DeepSeekTextModelClient._profile_for("unknown").thinking is True
     assert DeepSeekTextModelClient._profile_for("summary").timeout == 90
     assert DeepSeekTextModelClient._profile_for("summary").thinking is False
+    assert DeepSeekTextModelClient._profile_for("action_evaluation").timeout == 30
+    assert DeepSeekTextModelClient._profile_for("action_evaluation").thinking is False

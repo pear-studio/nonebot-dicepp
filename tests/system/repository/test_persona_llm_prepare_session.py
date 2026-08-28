@@ -324,8 +324,6 @@ def _prepared_for_confirmation(
         model="deepseek-v4-flash",
         scenarios=tuple(estimate.scenario for estimate in estimates),
         estimates=estimates,
-        background_max_rounds=10,
-        sa_max_rounds=100,
     )
 
 
@@ -405,9 +403,6 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     )
     account = json.loads(account_path.read_text(encoding="utf-8"))
     assert "providers" not in account.get("persona_ai", {})
-    assert account["persona_ai"]["character_path"] == str(
-        (result.path / "content" / "characters").resolve()
-    )
     assert account["persona_ai"]["character_name"] == prepare.CHARACTER_NAME
     assert (
         result.path
@@ -424,9 +419,6 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
         account=shell_session.bot_id_for_session(result.name),
     ).load()
     assert loaded.persona_ai.character_name == prepare.CHARACTER_NAME
-    assert loaded.persona_ai.character_path == str(
-        (result.path / "content" / "characters").resolve()
-    )
     assert loaded.persona_ai.enabled is True
     assert json.loads((result.path / "config" / "user.json").read_text())[
         "deepseek_api_key"

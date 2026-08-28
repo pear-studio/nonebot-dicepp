@@ -30,7 +30,6 @@ def make_private_meta(
 def default_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
-        character_path="./content/characters",
         character_name="test_char",
         whitelist_enabled=True,
     )

@@ -144,12 +144,7 @@ class _FakeBot:
         persona = object.__new__(PersonaCommand)
         persona.app = app
         self.command_dict = {"persona": persona}
-        self.config = SimpleNamespace(
-            persona_ai=SimpleNamespace(
-                background_llm_max_rounds=10,
-                sa_max_rounds=100,
-            )
-        )
+        self.config = SimpleNamespace(persona_ai=SimpleNamespace())
         self.shutdown_called = False
 
     async def shutdown_async(self) -> None:
@@ -326,8 +321,6 @@ async def test_dry_run_reports_agent_runs_without_changing_runtime(tmp_path):
             "character_reaction_runs_max": 24,
             "diary_agent_runs_max": 2,
             "sa_agent_runs_max": 2,
-            "background_max_rounds": 10,
-            "sa_max_rounds": 100,
         },
     }
 

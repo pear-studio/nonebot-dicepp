@@ -58,6 +58,11 @@ class DeepSeekTextModelClient:
 
     _CHAT_PROFILE = _RequestProfile(timeout=30, temperature=None, thinking=True)
     _BACKGROUND_PROFILE = _RequestProfile(timeout=90, temperature=None, thinking=False)
+    _ACTION_EVALUATION_PROFILE = _RequestProfile(
+        timeout=30,
+        temperature=None,
+        thinking=False,
+    )
 
     def __init__(
         self,
@@ -120,8 +125,10 @@ class DeepSeekTextModelClient:
     @classmethod
     def _profile_for(cls, task: str) -> _RequestProfile:
         """按内部任务类型选择请求参数；用户不需要理解这些参数。"""
+        if task == "action_evaluation":
+            return cls._ACTION_EVALUATION_PROFILE
         return cls._BACKGROUND_PROFILE if task in {
-            "background", "event", "diary", "summary", "action_evaluation",
+            "background", "event", "diary", "summary",
         } else cls._CHAT_PROFILE
 
 

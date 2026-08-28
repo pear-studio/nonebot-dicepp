@@ -50,8 +50,6 @@ class PreparedSession:
     model: str
     scenarios: tuple[str, ...]
     estimates: tuple[AgentRunEstimate, ...]
-    background_max_rounds: int
-    sa_max_rounds: int
 
 
 def find_repo_root(script_path: Path | None = None) -> Path:
@@ -293,13 +291,11 @@ def validate_character_assets(
 def build_session_bot_config(
     default_config: Mapping[str, Any],
     test_overrides: Mapping[str, Any],
-    character_path: Path,
 ) -> dict[str, Any]:
     return deep_merge(
         test_overrides,
         {
             "persona_ai": {
-                "character_path": str(character_path.resolve()),
                 "character_name": CHARACTER_NAME,
             },
         },
@@ -348,7 +344,7 @@ def estimate_agent_runs(
             calendar_days_max = 2
             daily_events = character.extensions.daily_events_count
             life_slots = calendar_days_max * (daily_events + 2)
-            chain_depth = config.persona_ai.character_life_chain_max_depth
+            chain_depth = 3
             results.append(
                 AgentRunEstimate(
                     scenario="一天连续 warp",
@@ -456,11 +452,9 @@ def prepare_session(
 
     name = build_session_name(now=now, token=token)
     session_path = shell_session.get_session_dir(name)
-    character_path = session_path / "content" / "characters"
     bot_config = build_session_bot_config(
         default_config,
         test_overrides,
-        character_path,
     )
     validated = validate_merged_config(
         bot_config_type,
@@ -507,8 +501,6 @@ def prepare_session(
         model=default_user_config["deepseek_model"],
         scenarios=selected,
         estimates=estimates,
-        background_max_rounds=validated.persona_ai.background_llm_max_rounds,
-        sa_max_rounds=validated.persona_ai.sa_max_rounds,
     )
 
 
@@ -530,10 +522,6 @@ def format_summary(prepared: PreparedSession) -> str:
         lines.extend(f"    - 说明: {note}" for note in estimate.notes)
     lines.extend(
         (
-            "正式轮次上限:",
-            f"  - background_llm_max_rounds: "
-            f"{prepared.background_max_rounds}",
-            f"  - sa_max_rounds: {prepared.sa_max_rounds}",
             "尚未启动 Runtime，未发出任何 LLM 请求。",
             "",
             format_confirmation(prepared),

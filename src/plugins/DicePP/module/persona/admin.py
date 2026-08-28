@@ -8,6 +8,7 @@ from plugins.DicePP.utils.logger import logger
 from datetime import timedelta
 
 from plugins.DicePP.core.bot import Bot
+from plugins.DicePP.core.config.basic import Paths
 
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
@@ -189,7 +190,7 @@ class AdminDispatcher:
         lines.append(f"\n[24h 错误摘要]")
         if self.data_store:
             from plugins.DicePP.utils.time import wall_now
-            since = (wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
+            since = (wall_now("Asia/Shanghai") - timedelta(hours=24)).isoformat()
             error_rows = await self.data_store.get_error_summary_since(since)
             if error_rows:
                 err_total = sum(count for _, count in error_rows)
@@ -211,7 +212,7 @@ class AdminDispatcher:
             character_name = self.bot.config.persona_ai.character_name
             if not character_name:
                 return "未配置角色（persona_ai.character_name 为空）"
-            new_character = CharacterLoader(self.config.character_path).load(
+            new_character = CharacterLoader(str(Paths.CONTENT_CHARACTERS_DIR)).load(
                 character_name
             )
             if not new_character:
@@ -242,7 +243,7 @@ class AdminDispatcher:
         return "\n".join(lines)
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
         from plugins.DicePP.utils.time import wall_now
-        wall = wall_now(self.config.timezone)
+        wall = wall_now("Asia/Shanghai")
         if len(args) < 2:
             date = wall.strftime("%Y-%m-%d")
             date_label = "今天"

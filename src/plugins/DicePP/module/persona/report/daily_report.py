@@ -318,7 +318,7 @@ class DailyReportGenerator:
             if not self._store:
                 return {"total_calls": 0, "total_tokens": 0, "errors": 0, "models": []}
 
-            tz = self._config.timezone if self._config else "Asia/Shanghai"
+            tz = "Asia/Shanghai"
             if use_cur_day:
                 date = wall_now(tz).strftime("%Y-%m-%d")
             else:
@@ -372,7 +372,6 @@ class DailyReportGenerator:
                 agent = CharacterAgent(
                     store=self._store,
                     client=self._client,
-                    config=self._config,
                 )
                 context = {
                     "mode": "opening",

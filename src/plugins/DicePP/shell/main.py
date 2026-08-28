@@ -317,11 +317,6 @@ def _print_dry_run(result: dict[str, Any]) -> None:
     )
     print(f"    Character diary:    {estimate['diary_agent_runs_max']:>4d}")
     print(f"    SA planning:        {estimate['sa_agent_runs_max']:>4d}")
-    print(
-        "  Configured max rounds:"
-        f" background={estimate['background_max_rounds']},"
-        f" SA={estimate['sa_max_rounds']}"
-    )
     print(f"  Model: {result.get('model', 'unknown')}")
     print("  Actual Agent Runs may be lower when a chain finishes early.")
 

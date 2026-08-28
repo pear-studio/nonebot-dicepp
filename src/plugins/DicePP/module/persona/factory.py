@@ -36,6 +36,7 @@ from .life.types import DailyTickResult
 from .life.dm_agent import DMAgent
 from .life.character_agent import CharacterAgent
 from .life.sa_agent import SAAgent
+from .life.agent import DEFAULT_BACKGROUND_LLM_MAX_ROUNDS
 from .life.conversation_scope import ConversationScope, NS_LIFE_CHARACTER
 from .life.conversation_registry import ConversationRegistry
 from .life.conversation_summary import ProviderSummarizer
@@ -182,8 +183,6 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
     store = PersonaDataStore(
         persona_db_path,
         core_db,
-        timezone=config.timezone,
-        message_stream_max_per_group=config.message_stream_max_per_group,
     )
     try:
         await store.open()
@@ -221,7 +220,7 @@ def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:
         model=user_config.deepseek_model,
         base_url=user_config.deepseek_base_url,
         data_store=store,
-        timezone=config.timezone,
+        timezone="Asia/Shanghai",
         daily_limit=config.daily_limit,
         quota_check_enabled=config.quota_check_enabled,
         trace_enabled=config.trace_enabled,
@@ -268,9 +267,9 @@ def _build_agents(
     character: Character,
 ) -> tuple[DMAgent, CharacterAgent, SAAgent, CharacterLife, ActionEvaluator]:
     """创建 Agent 实例 — 工具由各 Agent 自建。"""
-    dm_agent = DMAgent(store, client, config=config)
-    character_agent = CharacterAgent(store, client, config=config)
-    sa_agent = SAAgent(store, client, config=config)
+    dm_agent = DMAgent(store, client)
+    character_agent = CharacterAgent(store, client)
+    sa_agent = SAAgent(store, client)
 
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
@@ -284,8 +283,7 @@ def _build_agents(
     action_evaluator = ActionEvaluator(
         store=store,
         client=client,
-        config=config,
-        timezone=config.timezone,
+        timezone="Asia/Shanghai",
     )
     logger.info("ActionEvaluator 已初始化")
     logger.info("Agent 实例已初始化")
@@ -306,9 +304,8 @@ def _make_resolve_query_db(bot: Bot):
 
 def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     """组装 ChatOrchestrator（替代 ChatSession）"""
-    # ChatConfig owns all chat-only policy defaults and receives only the
-    # Persona settings that remain part of the public configuration.
-    chat_config = ChatConfig.from_persona(deps.config)
+    # ChatConfig owns all chat-only policy defaults.
+    chat_config = ChatConfig()
     from .chat.context import SegmentGuide
 
     segment_guide = SegmentGuide(
@@ -356,7 +353,7 @@ async def _build_life(
     A2: 创建 Life ConversationRegistry 并注入 DM / Character Agent。
     """
     # A2: 创建 Life ConversationRegistry
-    max_rounds = config.background_llm_max_rounds if config else 10
+    max_rounds = DEFAULT_BACKGROUND_LLM_MAX_ROUNDS
     from .agent.runtime_types import LoopLimits
     from .agent.runtime import AgentRuntime
     # 所有 Life Agent 共享同一文本客户端。
@@ -390,8 +387,8 @@ async def _build_life(
     logger.info("角色生活模拟已初始化")
 
     diary_config = DiaryConfig(
-        diary_time=config.character_life_diary_time,
-        timezone=config.timezone,
+        diary_time="23:30",
+        timezone="Asia/Shanghai",
     )
     diary_generator = DiaryGenerator(
         store=store,
@@ -429,7 +426,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         return None
 
     character_name = config.character_name
-    character = _load_character(config.character_path, character_name)
+    character = _load_character(str(Paths.CONTENT_CHARACTERS_DIR), character_name)
     if not bot.user_config.deepseek_api_key:
         raise PersonaConfigError(
             "未配置 DeepSeek API Key，请在 config/user.json 中设置 deepseek_api_key"

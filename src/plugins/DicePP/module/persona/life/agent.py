@@ -12,6 +12,8 @@ from ..llm.client import TextModelClient
 from ..agent.runtime_types import AgentRunSpec, LoopLimits, OutputSpec, ToolKit
 from .types import AgentResult
 
+DEFAULT_BACKGROUND_LLM_MAX_ROUNDS = 10
+
 
 class Agent(ABC):
     """有状态的 LLM Agent 基类
@@ -32,14 +34,12 @@ class Agent(ABC):
         self,
         store: PersonaDataStore,
         client: TextModelClient,
-        config=None,
     ):
         self.store = store
         self.client = client
-        self.config = config
         self._cached_state = None  # DMAgent 专用：在 super().run() 前设置以跳过 load_state()
         self._cached_system_prompt: Optional[str] = None  # DMAgent 专用：在 super().run() 前设置以跳过重复构建
-        self._max_rounds = config.background_llm_max_rounds if config else 10
+        self._max_rounds = DEFAULT_BACKGROUND_LLM_MAX_ROUNDS
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
         # A2: Registry 注入 — 不为 None 时 Conversation 由 registry 托管

@@ -69,9 +69,8 @@ class DMAgent(Agent):
         self,
         store: PersonaDataStore,
         client: TextModelClient,
-        config=None,
     ):
-        super().__init__(store, client, config)
+        super().__init__(store, client)
 
     def build_system_prompt(self, state: None, context: dict) -> str:
         """构建 DM 系统提示词
@@ -255,7 +254,7 @@ class DMAgent(Agent):
         injected_keys = conv.get_keys_by_message_prefix(_STORY_DECK_INJECTION_PREFIX)
 
         # 裁剪：≤ max_injection
-        max_injection = getattr(self.config, "story_deck_max_injection", 3) if self.config else 3
+        max_injection = 3
         selected = []
         for entry in matched:
             if entry.key in injected_keys:
@@ -297,7 +296,7 @@ class DMAgent(Agent):
         user_prompt = self._build_user_prompt(context)
 
         # T6: 直接构建 ToolKit
-        timezone = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
+        timezone = "Asia/Shanghai"
         toolkit = ToolKit(tools={
             "roll_dice": build_roll_dice_tool(),
             "read_events": build_read_events_tool(self.store, timezone),

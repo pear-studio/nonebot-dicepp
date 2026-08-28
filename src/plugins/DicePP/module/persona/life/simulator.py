@@ -35,13 +35,7 @@ class LifeConfig:
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "LifeConfig":
-        return cls(
-            trace_enabled=persona.trace_enabled,
-            trace_max_age_days=persona.trace_max_age_days,
-            daily_events_keep_days=persona.daily_events_keep_days,
-            diary_keep_days=persona.diary_keep_days,
-            timezone=persona.timezone,
-        )
+        return cls(trace_enabled=persona.trace_enabled)
 
 
 class LifeSimulator:

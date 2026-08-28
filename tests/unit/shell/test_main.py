@@ -60,11 +60,9 @@ def test_dry_run_output_describes_agent_run_upper_bounds(capsys):
             "character_reaction_runs_max": 8,
             "diary_agent_runs_max": 1,
             "sa_agent_runs_max": 1,
-            "background_max_rounds": 10,
-            "sa_max_rounds": 100,
         },
     })
 
     output = capsys.readouterr().out
     assert "Agent Run upper bounds" in output
-    assert "background=10, SA=100" in output
+    assert "Configured max rounds" not in output
