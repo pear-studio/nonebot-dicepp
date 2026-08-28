@@ -19,7 +19,7 @@ from dicepp_data import PERSONA_DB_ASSET
 
 from .models import (
     WhitelistEntry, DailyUsage, DailyEvent,
-    LLMTraceRecord, CharacterState, DMState, SAState,
+    LLMTraceRecord, CharacterState, SAState,
     UnifiedMessage, MessageType,
     DEFAULT_SESSION_TOKEN_BUDGET,
     StoryDeckEntry, VALID_ENTRY_TYPES,
@@ -1285,16 +1285,6 @@ class PersonaDataStore:
             (state.model_dump_json(),)
         )
         await self.db.commit()
-
-    # ========== DM 状态 (Phase 1 Agent 框架 — 已废弃，表已删除) ==========
-
-    async def get_dm_state(self) -> DMState:
-        """[已废弃] 获取 DM 工作状态。DMState 表已删除，始终返回空默认值。"""
-        return DMState()
-
-    async def update_dm_state(self, state: DMState) -> None:
-        """[已废弃] 更新 DM 工作状态。DMState 表已删除，无操作。"""
-        pass
 
     # ========== Story Deck (叙事条目图) ==========
 

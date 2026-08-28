@@ -112,19 +112,6 @@ class CharacterState(BaseModel):
     health: Optional[int] = None
 
 
-class DMState(BaseModel):
-    """[已弃用] DM 工作状态 — 单行表 JSON blob。
-
-    DMState 表已删除（persona_dm_state），此类仅保留用于向后兼容
-    （store.get_dm_state() 返回空默认值，update_dm_state() 为 no-op）。
-    DM 工作状态已被 story_deck 系统取代。
-    """
-
-    scene: str = ""  # 当前场景上下文
-    recent_rulings: str = ""  # 最近裁决记录
-    scratchpad: str = ""  # 自由工作笔记
-
-
 class SAState(BaseModel):
     """SA 世界设定 — 单行表 JSON blob"""
 

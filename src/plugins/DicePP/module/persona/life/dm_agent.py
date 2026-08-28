@@ -62,7 +62,7 @@ class DMAgent(Agent):
 
     name = "DM"
     role = "世界观裁决者"
-    state_model = None  # DM 不再需要持久状态（DMState 表已删除）
+    state_model = None  # DM 不再需要持久状态
     tools = ["roll_dice", "say", "read_events", "search_events"]
 
     def __init__(
