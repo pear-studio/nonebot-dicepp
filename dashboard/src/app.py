@@ -769,7 +769,7 @@ def _load_pydantic_models_module():
 
 def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
                          inherited_tab: str = "", inherited_section: str = "") -> dict:
-    """Flatten a Pydantic v2 JSON schema to dotted-key → {title, description, tab, section}.
+    """Flatten a Pydantic v2 JSON schema to typed dotted-field metadata.
 
     Model-level json_schema_extra (ConfigDict) keys are merged directly into the
     model schema by Pydantic v2.  Likewise, Field(json_schema_extra={...}) keys
@@ -802,6 +802,10 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
             "section": field_section,
             "format": prop.get("format", ""),
             "writeOnly": bool(prop.get("writeOnly", False)),
+            "type": prop.get("type", ""),
+            "enum": prop.get("enum", []),
+            "minimum": prop.get("minimum"),
+            "maximum": prop.get("maximum"),
         }
 
         # Resolve $ref for nested models
@@ -836,7 +840,7 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
 def _get_config_field_metadata() -> dict:
     """Extract field metadata from both independent configuration schemas.
 
-    Returns a flat dict mapping dotted keys to {title, description, tab, section}.
+    Returns a flat dict mapping dotted keys to display and input metadata.
     Model-level json_schema_extra (ConfigDict) provides default tab/section;
     field-level json_schema_extra (Field) can override section per-field.
     """
@@ -967,6 +971,10 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             "section": meta.get("section", "runtime"),
             "format": meta.get("format", ""),
             "writeOnly": bool(meta.get("writeOnly", False)),
+            "type": meta.get("type", ""),
+            "enum": meta.get("enum", []),
+            "minimum": meta.get("minimum"),
+            "maximum": meta.get("maximum"),
         }
 
     layout = _cached_config_layout()
@@ -1102,39 +1110,6 @@ async def config_bot_save(bot_id: str, request: Request):
 
     db_path = request.app.state.dashboard_db
     audit_log(db_path, "config.bot.save", f"bots/{bot_id}", "",
-              ip=request.client.host if request.client else "")
-
-    return _config_save_result({})
-
-
-@app.get("/api/config/user", dependencies=[Depends(require_auth)])
-async def config_user_get(request: Request):
-    """Return raw user.json content for JSON view editing."""
-    try:
-        user_cfg = read_config_object(DashboardPaths.CONFIG_USER)
-        validate_user_candidate(DashboardPaths.instance_layout(), user_cfg)
-    except ConfigurationValidationError:
-        _err("Stored configuration is unreadable or invalid", 500)
-    return _ok({"config": user_cfg})
-
-
-@app.post("/api/config/user/save", dependencies=[Depends(require_auth)])
-async def config_user_save(request: Request):
-    """Validate then overwrite user.json locally and audit the save."""
-    body = await request.json()
-    if not isinstance(body, dict):
-        _err("Body must be a JSON object")
-
-    try:
-        candidate = validate_user_candidate(DashboardPaths.instance_layout(), body)
-        write_config_object(
-            DashboardPaths.CONFIG_USER, candidate, model_type=UserConfig
-        )
-    except ConfigurationValidationError as exc:
-        return JSONResponse(status_code=422, content={"ok": False, "message": str(exc), "errors": exc.errors})
-
-    db_path = request.app.state.dashboard_db
-    audit_log(db_path, "config.user.save", "user.json", "",
               ip=request.client.host if request.client else "")
 
     return _config_save_result({})

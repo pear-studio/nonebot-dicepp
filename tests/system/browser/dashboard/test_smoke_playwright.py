@@ -302,11 +302,11 @@ def test_setup_form_inline_validation(dashboard_url: str) -> None:
             browser.close()
 
 
-def test_config_edit_saves_without_runtime_operation(
+def test_config_edit_saves_typed_field_without_runtime_operation(
     dashboard_url: str,
     tmp_path: Path,
 ) -> None:
-    """Config save is local to Dashboard; Bot lifecycle is separate."""
+    """Typed field editing saves through the sparse endpoint only."""
     (tmp_path / "data" / "bots" / "test_bot").mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
@@ -321,84 +321,34 @@ def test_config_edit_saves_without_runtime_operation(
             )
             page.locator("aside select").select_option("test_bot")
             page.get_by_role("button", name="配置编辑").click()
-            json_view = page.get_by_role("button", name="JSON 视图")
-            expect(json_view).to_be_enabled(timeout=10000)
-            json_view.click()
-            textarea = page.locator("textarea").first
-            expect(textarea).to_be_enabled(timeout=10000)
-            # UserConfig is intentionally empty in this batch; JSON view can
-            # still save the valid empty object without touching Bot config.
-            textarea.fill('{}')
+            field_card = page.locator(
+                "div.border.rounded-lg.bg-white"
+            ).filter(has_text="Master 账号").first
+            expect(field_card).to_be_visible(timeout=10000)
+            field_card.locator(
+                "div.flex.items-center.justify-between.p-2.cursor-pointer"
+            ).click()
+            field_card.get_by_role("button", name="编辑").click()
+            text_input = field_card.locator("input[type='text']")
+            expect(text_input).to_be_visible(timeout=10000)
+            text_input.fill("new_master")
             with page.expect_response(
                 lambda response: (
-                    urlparse(response.url).path == "/api/config/user/save"
+                    urlparse(response.url).path == "/api/config/set"
                     and response.request.method == "POST"
                 )
             ) as response_info:
-                page.get_by_role("button", name="保存").click()
+                field_card.get_by_role("button", name="保存").last.click()
             assert response_info.value.status == 200
             expect(page.get_by_test_id("config-save-feedback")).to_contain_text(
                 "配置已保存"
             )
             _wait_for_json_value(
-                tmp_path / "config" / "user.json",
-                {},
+                tmp_path / "config" / "bots" / "test_bot.json",
+                {"master": "new_master"},
             )
         finally:
             browser.close()
-def test_config_read_failure_is_visible_and_retryable(
-    dashboard_url: str,
-    tmp_path: Path,
-) -> None:
-    """A failed initial config read leaves a visible path to retry safely."""
-    (tmp_path / "data" / "bots" / "test_bot").mkdir(parents=True, exist_ok=True)
-
-    with sync_playwright() as p:
-        browser = launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
-            _login(page, dashboard_url)
-            first_read = True
-
-            def fail_first_config_read(route) -> None:
-                nonlocal first_read
-                if route.request.method == "GET" and first_read:
-                    first_read = False
-                    route.fulfill(
-                        status=503,
-                        content_type="application/json",
-                        body=json.dumps(
-                            {"ok": False, "message": "Config is unavailable"}
-                        ),
-                    )
-                    return
-                route.continue_()
-
-            page.route("**/api/config/user", fail_first_config_read)
-            page.wait_for_selector(
-                "aside select option[value='test_bot']",
-                state="attached",
-                timeout=10000,
-            )
-            page.locator("aside select").select_option("test_bot")
-            page.get_by_role("button", name="配置编辑").click()
-
-            json_view = page.get_by_role("button", name="JSON 视图")
-            expect(json_view).to_be_disabled(timeout=10000)
-            load_error = page.get_by_test_id("config-user-load-error")
-            expect(load_error).to_be_visible(timeout=10000)
-            retry = load_error.get_by_role("button", name="重试")
-            expect(retry).to_be_enabled()
-
-            retry.click()
-            expect(load_error).not_to_be_visible(timeout=10000)
-            expect(json_view).to_be_enabled(timeout=10000)
-            json_view.click()
-            expect(page.locator("textarea").first).to_be_enabled(timeout=10000)
-        finally:
-            browser.close()
-
 
 def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -> None:
     """After login, the first bot is auto-selected and data tab loads without manual selection."""

@@ -302,18 +302,8 @@
             <div x-show="configSaveResult?.saved" data-testid="config-save-feedback" class="mb-4 bg-green-50 border border-green-200 text-green-800 p-3 rounded text-sm">
               <span x-text="configSaveResult?.saved ? '配置已保存。' : ''"></span>
             </div>
-            <div class="flex gap-4 mb-4 border-b">
-              <button @click="configView = 'fields'" :class="configView === 'fields' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">字段视图</button>
-              <button @click="configView = 'json'; userConfigText = JSON.stringify(userConfig, null, 2)" :disabled="configLoading || !userConfigReady" :class="configView === 'json' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium disabled:opacity-50">JSON 视图</button>
-            </div>
-
-            <div x-show="userConfigLoadError" data-testid="config-user-load-error" class="mb-2 bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm">
-              <span x-text="userConfigLoadError"></span>
-              <button @click="retryConfigLoad" :disabled="configLoading" class="ml-2 underline disabled:opacity-50">重试</button>
-            </div>
-
             <!-- Fields view -->
-            <div x-show="configView === 'fields'" x-cloak>
+            <div>
               <!-- Config skeleton -->
               <div x-show="configLoading" class="space-y-3 p-4">
                 <div class="animate-pulse bg-gray-200 rounded h-6 w-1/3"></div>
@@ -370,11 +360,27 @@
                           </template>
                           <template x-if="field.editing">
                             <div class="pt-2">
+                              <template x-if="field.type === 'boolean'">
+                                <label class="flex items-center gap-2 text-sm">
+                                  <input type="checkbox" x-model="field.editValue" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                  <span x-text="field.editValue ? '已启用' : '已关闭'"></span>
+                                </label>
+                              </template>
+                              <template x-if="field.enum.length > 0">
+                                <select x-model="field.editValue" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                  <template x-for="option in field.enum" :key="option">
+                                    <option :value="option" x-text="option"></option>
+                                  </template>
+                                </select>
+                              </template>
+                              <template x-if="field.type === 'integer' || field.type === 'number'">
+                                <input type="number" x-model="field.editValue" :min="field.minimum" :max="field.maximum" :step="field.type === 'integer' ? 1 : 'any'" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </template>
                               <template x-if="field.writeOnly || field.format === 'password'">
                                 <input type="password" x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" />
                               </template>
-                              <template x-if="!(field.writeOnly || field.format === 'password')">
-                                <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                              <template x-if="field.type === 'string' && !field.enum.length && !field.writeOnly && field.format !== 'password'">
+                                <input type="text" x-model="field.editValue" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
                               </template>
                               <div class="flex gap-2 mt-1">
                                 <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
@@ -390,14 +396,6 @@
               </template>
             </div>
 
-            <!-- JSON view -->
-            <div x-show="configView === 'json'" x-cloak>
-              <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
-              <div x-show="configLoading" data-testid="config-json-loading" class="text-sm text-gray-500 mb-2">正在读取配置…</div>
-              <textarea x-model="userConfigText" :disabled="configLoading || !userConfigReady" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500" @input="validateJson"></textarea>
-              <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
-              <button @click="saveUserConfig" :disabled="configLoading || !userConfigReady || !userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-            </div>
           </div>
         </template>
       </div>
@@ -473,11 +471,27 @@
                         </template>
                         <template x-if="field.editing">
                           <div class="pt-2">
+                            <template x-if="field.type === 'boolean'">
+                              <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" x-model="field.editValue" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                <span x-text="field.editValue ? '已启用' : '已关闭'"></span>
+                              </label>
+                            </template>
+                            <template x-if="field.enum.length > 0">
+                              <select x-model="field.editValue" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                <template x-for="option in field.enum" :key="option">
+                                  <option :value="option" x-text="option"></option>
+                                </template>
+                              </select>
+                            </template>
+                            <template x-if="field.type === 'integer' || field.type === 'number'">
+                              <input type="number" x-model="field.editValue" :min="field.minimum" :max="field.maximum" :step="field.type === 'integer' ? 1 : 'any'" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </template>
                             <template x-if="field.writeOnly || field.format === 'password'">
                               <input type="password" x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </template>
-                            <template x-if="!(field.writeOnly || field.format === 'password')">
-                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                            <template x-if="field.type === 'string' && !field.enum.length && !field.writeOnly && field.format !== 'password'">
+                              <input type="text" x-model="field.editValue" class="w-full border rounded p-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
                             </template>
                             <div class="flex gap-2 mt-1">
                               <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
@@ -1430,15 +1444,9 @@ function app() {
     selectedBotId: '',
 
     // ── Tab: Config Edit ──
-    configView: 'fields',
     configSections: [],           // [{key, label, priority, fields: [{path, value, source, ...}]}]
     showAdvanced: false,
     collapsedSections: {},        // {sectionKey: true|false} — true = collapsed
-    userConfig: {},
-    userConfigText: '',
-    userConfigValid: true,
-    userConfigReady: false,
-    userConfigLoadError: '',
     configSaveResult: null,
 
     // ── Tab: Persona ──
@@ -1781,8 +1789,6 @@ function app() {
       this.configSaveResult = null;
       this._mergedCache = null;
       this._lastBotId = '';
-      this.userConfigReady = false;
-      this.userConfigLoadError = '';
       this.loadTabData(this.currentTab);
     },
 
@@ -1807,15 +1813,7 @@ function app() {
     async ensureConfigLoaded() {
       if (this._mergedCache && this._lastBotId === this.selectedBotId) return;
       this._mergedCache = null;
-      this.userConfigReady = false;
-      this.userConfigLoadError = '';
-      const [mergedResult, userResult] = await Promise.allSettled([
-        this.api(`/api/config/merged?bot_id=${this.selectedBotId}`),
-        this.api('/api/config/user'),
-      ]);
-      const mergedData = mergedResult.status === 'fulfilled'
-        ? mergedResult.value
-        : { config: {}, layout: {} };
+      const mergedData = await this.api(`/api/config/merged?bot_id=${this.selectedBotId}`);
       const configData = mergedData.config || {};
       this._mergedCache = configData;
       this._layout = mergedData.layout || {};
@@ -1823,23 +1821,6 @@ function app() {
       if (Object.keys(configData).length > 0) {
         this._lastBotId = this.selectedBotId;
       }
-      if (userResult.status === 'fulfilled' && userResult.value.config && typeof userResult.value.config === 'object') {
-        this.userConfig = userResult.value.config;
-        this.userConfigText = JSON.stringify(this.userConfig, null, 2);
-        this.userConfigValid = true;
-        this.userConfigReady = true;
-      } else {
-        this.userConfig = {};
-        this.userConfigText = '';
-        this.userConfigValid = true;
-        this.userConfigLoadError = '无法读取 user.json，请稍后重试。';
-      }
-    },
-
-    async retryConfigLoad() {
-      this._mergedCache = null;
-      this._lastBotId = '';
-      await this.loadConfig();
     },
 
     // Build field objects from merged config, filtered by tab
@@ -1861,6 +1842,10 @@ function app() {
           writeOnly: entry.writeOnly === true,
           tab: entry.tab || 'config',
           section: entry.section || 'runtime',
+          type: entry.type || '',
+          enum: Array.isArray(entry.enum) ? entry.enum : [],
+          minimum: entry.minimum,
+          maximum: entry.maximum,
           expanded: false,
         };
       }
@@ -1992,7 +1977,9 @@ function app() {
       const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       field.editing = true;
-      field.editValue = typeof field.value === 'object' ? JSON.stringify(field.value, null, 2) : String(field.value);
+      field.editValue = field.type === 'boolean'
+        ? Boolean(field.value)
+        : String(field.value ?? '');
     },
 
     cancelEditField(path) {
@@ -2007,7 +1994,13 @@ function app() {
       if (!field) return;
       try {
         let newVal = field.editValue;
-        try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
+        if (field.type === 'boolean') {
+          newVal = Boolean(field.editValue);
+        } else if (field.type === 'integer') {
+          newVal = Number.parseInt(field.editValue, 10);
+        } else if (field.type === 'number') {
+          newVal = Number.parseFloat(field.editValue);
+        }
         const data = await this.api('/api/config/set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2038,35 +2031,6 @@ function app() {
         if (this.currentTab === 'persona') await this.loadPersonaConfig();
       } catch (err) {
         this.errorMessage = '重置失败: ' + err.message;
-      }
-    },
-
-    validateJson() {
-      try {
-        JSON.parse(this.userConfigText);
-        this.userConfigValid = true;
-      } catch (_) {
-        this.userConfigValid = false;
-      }
-    },
-
-    async saveUserConfig() {
-      if (!this.userConfigReady || !this.userConfigValid) return;
-      this.saving = true;
-      try {
-        const parsed = JSON.parse(this.userConfigText);
-        const data = await this.api('/api/config/user/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed),
-        });
-        this.userConfig = parsed;
-        this.userConfigText = JSON.stringify(parsed, null, 2);
-        this.configSaveResult = data;
-      } catch (err) {
-        this.errorMessage = '保存失败: ' + err.message;
-      } finally {
-        this.saving = false;
       }
     },
 

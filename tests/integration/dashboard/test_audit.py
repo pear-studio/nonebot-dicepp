@@ -154,7 +154,6 @@ class TestAuditList:
             ("config.set", "bots/demo/master", json.dumps({"value": "DicePP"})),
             ("config.reset", "bots/demo/master", "reset to default"),
             ("config.bot.save", "bots/demo", ""),
-            ("config.user.save", "user.json", ""),
             ("persona.character.save", "调查员", ""),
             ("bot.start", "bot", json.dumps({"status": "running"})),
             ("bot.stop", "bot", json.dumps({"status": "stopped"})),
@@ -183,7 +182,6 @@ class TestAuditList:
             "config.set": "修改配置项",
             "config.reset": "重置配置项",
             "config.bot.save": "保存 Bot 配置",
-            "config.user.save": "保存全局配置",
             "persona.character.save": "保存角色配置",
             "bot.start": "启动 Bot 进行中",
             "bot.stop": "停止 Bot",
@@ -195,7 +193,6 @@ class TestAuditList:
         assert presented["config.set"]["summary"] == "新值：DicePP"
         assert presented["auth.login"]["target_label"] == "管理员账户"
         assert presented["config.bot.save"]["target_label"] == "demo"
-        assert presented["config.user.save"]["target_label"] == "全局配置"
         assert presented["custom.event"]["action_label"] == "custom.event"
         assert presented["custom.event"]["summary"] == "成功 · 完成"
         assert presented["custom.event"]["tone"] == "success"

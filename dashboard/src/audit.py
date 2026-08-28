@@ -11,7 +11,6 @@ _ACTION_PRESENTATION: dict[str, tuple[str, str]] = {
     "config.set": ("修改配置项", "info"),
     "config.reset": ("重置配置项", "warning"),
     "config.bot.save": ("保存 Bot 配置", "info"),
-    "config.user.save": ("保存全局配置", "info"),
     "persona.character.save": ("保存角色配置", "info"),
     "bot.start": ("启动 Bot", "success"),
     "bot.stop": ("停止 Bot", "neutral"),
@@ -66,8 +65,6 @@ def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
     if action.startswith("auth.") and target == "auth":
         target_label = "管理员账户"
-    elif action == "config.user.save" and target == "user.json":
-        target_label = "全局配置"
     elif action == "config.bot.save" and target.startswith("bots/"):
         target_label = target.removeprefix("bots/")
 
@@ -81,7 +78,7 @@ def present_entry(entry: dict[str, Any]) -> dict[str, Any]:
         summary = f"新值：{_compact(detail.get('value'))}"
     elif action == "config.reset":
         summary = "已恢复默认值"
-    elif action in {"config.bot.save", "config.user.save"}:
+    elif action == "config.bot.save":
         summary = "配置已保存"
     elif action == "persona.character.save":
         summary = "角色配置已保存"

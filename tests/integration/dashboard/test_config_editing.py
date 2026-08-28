@@ -36,6 +36,10 @@ class TestMergedView:
         assert config["deepseek_model"]["source"] == "default"
         assert config["deepseek_api_key"]["format"] == "password"
         assert config["deepseek_api_key"]["writeOnly"] is True
+        assert config["persona_ai.enabled"]["type"] == "boolean"
+        assert config["daily_ai_limit"]["type"] == "integer"
+        assert config["daily_ai_limit"]["minimum"] == 0
+        assert config["log_level"]["enum"] == ["INFO", "DEBUG"]
 
     def test_deepseek_api_key_is_redacted_in_set_audit(
         self, test_client: TestClient, tmp_dashboard_paths
@@ -242,37 +246,6 @@ class TestBotConfig:
         assert not DashboardPaths.bot_config_path("nonexistent_bot").exists()
 
 
-class TestUserJsonSave:
-    def test_save_empty_user_json(self, test_client: TestClient):
-        """The first-batch UserConfig is strict and currently empty."""
-        setup_auth(test_client)
-        body = {}
-        resp = test_client.post("/api/config/user/save", json=body)
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-        from dashboard.src.config import DashboardPaths
-        saved = json.loads(DashboardPaths.CONFIG_USER.read_text())
-        assert saved == body
-
-    def test_save_user_bot_field_rejected(self, test_client: TestClient):
-        setup_auth(test_client)
-        resp = test_client.post(
-            "/api/config/user/save", json={"nickname": "not-global"}
-        )
-        assert resp.status_code == 422
-
-    def test_save_user_json_non_dict_body_rejected(self, test_client: TestClient):
-        """``POST /api/config/user/save`` with a list body returns 400."""
-        setup_auth(test_client)
-        resp = test_client.post(
-            "/api/config/user/save",
-            json=[1, 2, 3],
-        )
-        assert resp.status_code == 400
-        data = resp.json()
-        assert data["ok"] is False
-
 class TestFieldMetadata:
     """Unit tests for _flatten_json_schema — verify Pydantic v2 schema parsing."""
 
@@ -296,6 +269,11 @@ class TestFieldMetadata:
                         "title": "角色生活模拟",
                         "type": "boolean",
                         "dashboard_section": "life_sim",
+                    },
+                    "daily_ai_limit": {
+                        "title": "每日 AI 限额",
+                        "type": "integer",
+                        "minimum": 0,
                     },
                 },
             },
@@ -336,6 +314,9 @@ class TestFieldMetadata:
         assert result["persona_ai.enabled"]["section"] == "basic", \
             f"enabled section should be 'basic', got {result.get('persona_ai.enabled', {}).get('section')}"
         assert result["persona_ai.enabled"]["tab"] == "persona"
+        assert result["persona_ai.enabled"]["type"] == "boolean"
+        assert result["persona_ai.enabled"]["enum"] == []
+        assert result["persona_ai.daily_ai_limit"]["minimum"] == 0
 
     def test_exact_field_metadata_match(self):
         from dashboard.src.app import _find_meta
