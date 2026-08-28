@@ -10,7 +10,6 @@ from typing import List, Optional, Protocol, runtime_checkable
 
 from plugins.DicePP.utils.logger import logger
 
-from ..llm.selection import SUMMARIZE
 from ..agent.output_protocol import is_runtime_instruction, is_unsubmitted_draft
 from .conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX
 
@@ -33,30 +32,21 @@ class Summarizer(Protocol):
 
 
 class ProviderSummarizer:
-    """使用 LLMRouter + provider.generate 的 Summarizer 实现。
+    """使用文本客户端生成摘要。"""
 
-    走 SUMMARIZE selection（cost-prefer, text+tool_calls）。
-    复用 _llm_compact_summarize 的 provider 调用模式，不依赖 LLMGateway/AgentRunState。
-    """
-
-    def __init__(self, router) -> None:
-        self._router = router
+    def __init__(self, client) -> None:
+        self._client = client
 
     async def generate_summary(self, messages: list[dict]) -> str:
         if not messages:
             return ""
         summary_prompt = _build_summary_prompt(messages)
         try:
-            candidates = self._router.build_candidates(SUMMARIZE)
-            for key in candidates:
-                provider = self._router.get_model_provider(key)
-                if provider is None:
-                    continue
-                resp = await provider.generate(
-                    messages=summary_prompt, temperature=0.3, timeout=30,
-                )
-                if resp and resp.content:
-                    return resp.content.strip()
+            response = await self._client.generate(
+                messages=summary_prompt, task="summary",
+            )
+            if response and response.content:
+                return response.content.strip()
         except Exception:
             logger.warning("ProviderSummarizer 调用失败", exc_info=True)
         return ""

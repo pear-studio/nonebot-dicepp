@@ -83,10 +83,10 @@ class TestAgentRuntime:
         from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
         from plugins.DicePP.module.persona.agent.runtime_types import LoopLimits
 
-        router = object()
+        client = object()
         store = object()
-        runtime = AgentRuntime(router=router, store=store)
-        assert runtime._router is router
+        runtime = AgentRuntime(client=client, store=store)
+        assert runtime._client is client
         assert runtime._store is store
         assert isinstance(runtime._limits, LoopLimits)
 
@@ -96,7 +96,7 @@ class TestAgentRuntime:
         from plugins.DicePP.module.persona.agent.runtime_types import LoopLimits
 
         limits = LoopLimits(max_rounds=5)
-        runtime = AgentRuntime(router=Mock(), store=Mock(), limits=limits)
+        runtime = AgentRuntime(client=Mock(), store=Mock(), limits=limits)
         assert runtime._limits is limits
 
 

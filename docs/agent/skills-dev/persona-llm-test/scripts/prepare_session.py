@@ -2,7 +2,7 @@
 """Prepare an isolated DicePP Shell session for Persona real-LLM regression.
 
 This script is deliberately offline: it validates and writes configuration,
-but never starts a Runtime, constructs an LLM provider, or performs network I/O.
+but never starts a Runtime, constructs a model client, or performs network I/O.
 """
 
 from __future__ import annotations
@@ -49,8 +49,7 @@ class PreparedSession:
     name: str
     path: Path
     credential_path: Path
-    providers: tuple[str, ...]
-    probe_models: tuple[str, ...]
+    model: str
     scenarios: tuple[str, ...]
     estimates: tuple[AgentRunEstimate, ...]
     background_max_rounds: int
@@ -128,58 +127,18 @@ def validate_override_paths(
 
 def validate_local_credentials(
     local_config: Mapping[str, Any],
-    default_config: Mapping[str, Any],
-) -> dict[str, str]:
-    if set(local_config) != {"persona_ai"}:
+    default_user_config: Mapping[str, Any],
+) -> str:
+    if set(local_config) != {"deepseek_api_key"}:
         raise PreparationError(
-            "test_llm.local.json 只能包含 persona_ai.providers API key"
+            "test_llm.local.json 只能包含 deepseek_api_key"
         )
-    persona = local_config.get("persona_ai")
-    if not isinstance(persona, dict) or set(persona) != {"providers"}:
-        raise PreparationError(
-            "test_llm.local.json 的 persona_ai 只能包含 providers"
-        )
-    providers = persona.get("providers")
-    if not isinstance(providers, dict) or not providers:
-        raise PreparationError(
-            "test_llm.local.json 至少要为一个正式 provider 配置 api_key"
-        )
-
-    default_persona = default_config.get("persona_ai")
-    builtin_providers = (
-        default_persona.get("providers")
-        if isinstance(default_persona, dict)
-        else None
-    )
-    if not isinstance(builtin_providers, dict):
-        raise PreparationError(
-            "BotConfig 默认配置缺少 persona_ai.providers"
-        )
-
-    result: dict[str, str] = {}
-    for provider_name, provider_override in providers.items():
-        if provider_name not in builtin_providers:
-            raise PreparationError(
-                f"不允许自定义 provider: {provider_name}"
-            )
-        if (
-            not isinstance(provider_override, dict)
-            or set(provider_override) != {"api_key"}
-        ):
-            raise PreparationError(
-                f"provider {provider_name!r} 只能包含 api_key"
-            )
-        api_key = provider_override.get("api_key")
-        if not isinstance(api_key, str) or not api_key.strip():
-            raise PreparationError(
-                f"provider {provider_name!r} 的 api_key 不能为空"
-            )
-        if "api_key" not in builtin_providers[provider_name]:
-            raise PreparationError(
-                f"正式 provider {provider_name!r} 缺少 api_key 字段"
-            )
-        result[provider_name] = api_key.strip()
-    return result
+    api_key = local_config.get("deepseek_api_key")
+    if not isinstance(api_key, str) or not api_key.strip():
+        raise PreparationError("deepseek_api_key 不能为空")
+    if "deepseek_api_key" not in default_user_config:
+        raise PreparationError("UserConfig 默认配置缺少 deepseek_api_key 字段")
+    return api_key.strip()
 
 
 def deep_merge(
@@ -211,12 +170,12 @@ def import_runtime_types(repo_root: Path):
         sys.path.insert(0, src_root)
 
     try:
-        from plugins.DicePP.core.config.pydantic_models import BotConfig
+        from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
         from plugins.DicePP.core.persona.models import PersonaModel
         from plugins.DicePP.module.persona.character.loader import CharacterLoader
         from plugins.DicePP.shell import session as shell_session
 
-        return BotConfig, CharacterLoader, PersonaModel, shell_session
+        return BotConfig, UserConfig, CharacterLoader, PersonaModel, shell_session
     finally:
         if added_src_root:
             sys.path.remove(src_root)
@@ -336,24 +295,13 @@ def validate_character_assets(
 def build_session_bot_config(
     default_config: Mapping[str, Any],
     test_overrides: Mapping[str, Any],
-    credentials: Mapping[str, str],
     character_path: Path,
 ) -> dict[str, Any]:
-    builtin_providers = default_config["persona_ai"]["providers"]
-    provider_overrides: dict[str, dict[str, Any]] = {}
-    for provider_name, api_key in credentials.items():
-        provider_config = builtin_providers[provider_name]
-        provider_overrides[provider_name] = {
-            "enabled": bool(provider_config.get("enabled", True)),
-            "api_key": api_key,
-        }
-
     return deep_merge(
         test_overrides,
         {
             "persona_ai": {
                 "character_path": str(character_path.resolve()),
-                "providers": provider_overrides,
             },
             "persona": CHARACTER_NAME,
         },
@@ -478,25 +426,6 @@ def estimate_agent_runs(
     return tuple(results)
 
 
-def configured_probe_models(
-    default_config: Mapping[str, Any],
-    credentials: Mapping[str, str],
-) -> tuple[str, ...]:
-    models: list[str] = []
-    for provider_name in credentials:
-        provider = default_config["persona_ai"]["providers"][provider_name]
-        if not provider.get("enabled", True):
-            continue
-        for model in provider.get("models", []):
-            if model.get("enabled", True):
-                models.append(f"{provider_name}/{model['name']}")
-    if not models:
-        raise PreparationError(
-            "提供了 API key，但正式配置中没有对应的已启用模型"
-        )
-    return tuple(models)
-
-
 def normalize_scenarios(values: Iterable[str]) -> tuple[str, ...]:
     selected = set(values)
     unknown = selected.difference(SCENARIO_ORDER)
@@ -539,14 +468,15 @@ def prepare_session(
 
     (
         bot_config_type,
+        user_config_type,
         character_loader_type,
         persona_model_type,
         shell_session,
     ) = import_runtime_types(repo_root)
     default_config = bot_config_type().model_dump(mode="json", by_alias=True)
+    default_user_config = user_config_type().model_dump(mode="json", by_alias=True)
     validate_override_paths(default_config, test_overrides)
-    credentials = validate_local_credentials(local_config, default_config)
-    probe_models = configured_probe_models(default_config, credentials)
+    api_key = validate_local_credentials(local_config, default_user_config)
     character_asset_root = skill_dir / "assets"
     character = validate_character_assets(
         character_asset_root,
@@ -560,7 +490,6 @@ def prepare_session(
     bot_config = build_session_bot_config(
         default_config,
         test_overrides,
-        credentials,
         character_path,
     )
     validated = validate_merged_config(
@@ -584,6 +513,10 @@ def prepare_session(
             / f"{shell_session.bot_id_for_session(name)}.json",
             bot_config,
         )
+        write_json(
+            created_path / "config" / "user.json",
+            {"deepseek_api_key": api_key},
+        )
         shutil.copytree(
             character_asset_root / CHARACTER_NAME,
             created_path / "content" / "characters" / CHARACTER_NAME,
@@ -601,8 +534,7 @@ def prepare_session(
         name=name,
         path=created_path,
         credential_path=credential_path,
-        providers=tuple(credentials),
-        probe_models=probe_models,
+        model=default_user_config["deepseek_model"],
         scenarios=selected,
         estimates=estimates,
         background_max_rounds=validated.persona_ai.background_llm_max_rounds,
@@ -616,10 +548,8 @@ def format_summary(prepared: PreparedSession) -> str:
         f"Session: {prepared.name}",
         f"目录: {prepared.path}",
         f"凭据文件: {prepared.credential_path}",
-        f"已配置 provider: {', '.join(prepared.providers)}",
-        f"Runtime 启动将 probe {len(prepared.probe_models)} 个模型:",
+        f"模型: DeepSeek/{prepared.model}",
     ]
-    lines.extend(f"  - {model}" for model in prepared.probe_models)
     lines.append("Agent Run 估算:")
     for estimate in prepared.estimates:
         lines.append(f"  {estimate.scenario}:")
@@ -634,7 +564,7 @@ def format_summary(prepared: PreparedSession) -> str:
             f"  - background_llm_max_rounds: "
             f"{prepared.background_max_rounds}",
             f"  - sa_max_rounds: {prepared.sa_max_rounds}",
-            "尚未启动 Runtime，未执行模型 probe，也未发出任何 LLM 请求。",
+            "尚未启动 Runtime，未发出任何 LLM 请求。",
             "",
             format_confirmation(prepared),
         )

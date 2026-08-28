@@ -16,7 +16,8 @@ from plugins.DicePP.utils.time import wall_now
 
 from ..data.store import PersonaDataStore
 from ..data.models import MessageType, RelationshipState
-from ..llm.router import LLMRouter, QuotaExceeded
+from ..llm.client import TextModelClient
+from ..llm.errors import QuotaExceeded
 from ..llm.coordinator import LLMCallCoordinator
 from ..character.models import Character
 from ..chat.chat_config import ChatConfig
@@ -31,10 +32,10 @@ from ..life.change_sources import (
     ProfileFactsChangeSource,
     DailyEventChangeSource,
 )
-# ChatOutcome / _router_has_quota 下沉到 chat_shared（供 orchestrator 与 chat_agent
+# ChatOutcome 下沉到 chat_shared（供 orchestrator 与 chat_agent
 # 共用、消除双向依赖）；此处 re-export 保持既有导入路径（command / factory / 测试
 # 仍 `from .chat.orchestrator import ChatOutcome`）。
-from .chat_shared import ChatCallContext, ChatOutcome, _router_has_quota
+from .chat_shared import ChatCallContext, ChatOutcome
 from .chat_agent import ChatAgent
 if TYPE_CHECKING:
     from .scoring_trigger import ScoringTrigger
@@ -54,7 +55,7 @@ class ChatOrchestrator:
     def __init__(
         self,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client: TextModelClient,
         character: Character,
         config: ChatConfig,
         scoring_trigger: Optional["ScoringTrigger"] = None,
@@ -65,7 +66,7 @@ class ChatOrchestrator:
         registry: Optional[ConversationRegistry] = None,
     ) -> None:
         self._store = store
-        self._router = router
+        self._client = client
         self._character = character
         self._chat_config = config
         self._scoring_trigger = scoring_trigger
@@ -89,7 +90,7 @@ class ChatOrchestrator:
 
         # 按 scope 缓存 ChatAgent（回复触发时延迟创建、绑定当前 Conversation）。
         # 有界常驻：上界＝累计出现过的不同 scope 去重基数（群数+私聊数），与
-        # registry._active_convs / _locks 同界，非无界泄漏。store/router/character 均为
+        # registry._active_convs / _locks 同界，非无界泄漏。store/client/character 均为
         # 共享单例（各 Agent 仅持同一引用、无内存倍增）；每 scope 新增仅 ChatAgent 对象
         # 本身 + 其绑定 Conversation，而该 Conversation 同时被 registry._active_convs 持有，
         # 故 _agents 不使任何 Conversation 存活期超过 registry。释放由 update_character→clear
@@ -107,8 +108,8 @@ class ChatOrchestrator:
     # ── 代理属性（供 PersonaApp 委托）─────────────────────────
 
     @property
-    def router(self) -> LLMRouter:
-        return self._router
+    def client(self) -> TextModelClient:
+        return self._client
 
     @property
     def character(self) -> Character:
@@ -400,7 +401,7 @@ class ChatOrchestrator:
 
     def _build_default_registry(self) -> ConversationRegistry:
         """构建默认 registry（未注入共享实例时）。change source 策略见 D6/D8。"""
-        summarizer = ProviderSummarizer(self._router)
+        summarizer = ProviderSummarizer(self._client)
         return ConversationRegistry(
             self._store,
             runtime_factory=self._make_runtime,
@@ -416,7 +417,7 @@ class ChatOrchestrator:
         from ..agent.runtime_types import LoopLimits
         from ..agent.runtime import AgentRuntime
         return AgentRuntime(
-            router=self._router,
+            client=self._client,
             store=self._store,
             limits=LoopLimits(max_rounds=self._chat_config.tools_max_rounds),
         )
@@ -471,7 +472,7 @@ class ChatOrchestrator:
                 scope=scope,
                 conversation=conv,
                 store=self._store,
-                router=self._router,
+                client=self._client,
                 character=self._character,
                 config=self._chat_config,
                 context_builder=self._context_builder,

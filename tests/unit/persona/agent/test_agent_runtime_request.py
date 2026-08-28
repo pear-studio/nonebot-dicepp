@@ -44,7 +44,6 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunRequest,
     RunMetadata,
 )
-from plugins.DicePP.module.persona.llm.selection import CHAT
 
 
 # ── Test args schemas ──────────────────────────────────────────────
@@ -148,7 +147,7 @@ class TestEmptyResponse:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -156,34 +155,6 @@ class TestEmptyResponse:
         assert result.completion.kind == "failed"
         assert result.completion.code == "empty_response"
         assert result.output is None
-
-    @pytest.mark.asyncio
-    async def test_loop_forwards_runtime_timeout_to_every_gateway_call(self, mock_llm):
-        """Runtime 配置的后台超时传入 Gateway，且不充当 Agent 总预算。"""
-        mock_llm.complete.side_effect = [
-            _make_llm_result(content="", tool_calls=[
-                _make_tc("search", {"query": "first"}),
-            ]),
-            _make_llm_result(content="done", tool_calls=[]),
-        ]
-        background_loop = AgentLoop(
-            llm_gateway=mock_llm,
-            event_bus=None,
-            llm_timeout=90,
-        )
-
-        result = await background_loop.run(
-            buffer=MessageBuffer.from_initial([{"role": "user", "content": "hi"}]),
-            state=_make_state(),
-            toolkit=_mock_toolkit(),
-            output_spec=None,
-            limits=LoopLimits(max_rounds=3),
-            selection=CHAT,
-            interaction_id="i1",
-        )
-
-        assert result.output.text == "done"
-        assert [call.kwargs["timeout"] for call in mock_llm.complete.await_args_list] == [90, 90]
 
     @pytest.mark.asyncio
     async def test_no_output_nonempty_text_returns_completed(self, loop, mock_llm):
@@ -196,7 +167,7 @@ class TestEmptyResponse:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -229,7 +200,7 @@ class TestOutputCorrection:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -264,7 +235,7 @@ class TestOutputCorrection:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=10, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -298,7 +269,7 @@ class TestOutputValidationRetry:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -327,7 +298,7 @@ class TestOutputValidationRetry:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -358,7 +329,7 @@ class TestOutputOrderingCandidate:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -389,7 +360,7 @@ class TestOutputOrderingCandidate:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -412,7 +383,7 @@ class TestOutputOrderingCandidate:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -465,7 +436,7 @@ class TestMultimodalObservation:
             toolkit=multi_toolkit,
             output_spec=None,
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -495,7 +466,7 @@ class TestMultimodalObservation:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -517,19 +488,18 @@ class TestTerminalEvent:
         """RunMetadata 身份必须进入每轮 Gateway 共用的 run state。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
-        runtime = AgentRuntime(router=Mock(spec=LLMRouter), store=store)
+        runtime = AgentRuntime(client=Mock(), store=store)
         request = AgentRunRequest(
             interaction_id="i_test",
             messages=[{"role": "user", "content": "hi"}],
             tools=ToolKit(),
             output=None,
-            selection=CHAT,
+            task="chat",
             limits=LoopLimits(max_rounds=3, max_corrections=2),
             metadata=RunMetadata(
                 agent_name="test", run_tag="test",
@@ -556,14 +526,13 @@ class TestTerminalEvent:
         """Runtime 首轮装配输出协议，同时保持调用方消息不可变。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
         from plugins.DicePP.module.persona.agent.output_protocol import OUTPUT_PROTOCOL_HEADING
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
-        runtime = AgentRuntime(router=Mock(spec=LLMRouter), store=store)
+        runtime = AgentRuntime(client=Mock(), store=store)
         original_messages = [
             {"role": "system", "content": "你是测试角色"},
             {"role": "user", "content": "你好"},
@@ -573,7 +542,7 @@ class TestTerminalEvent:
             messages=original_messages,
             tools=ToolKit(),
             output=_mock_output_spec("say"),
-            selection=CHAT,
+            task="chat",
             limits=LoopLimits(max_rounds=3, max_corrections=2),
             metadata=RunMetadata(agent_name="test", run_tag="test"),
         )
@@ -599,16 +568,15 @@ class TestTerminalEvent:
         """AgentRuntime.run() 成功时 emit AgentRunFinished，RunSummarySink 更新状态。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
 
-        router = Mock(spec=LLMRouter)
+        client = Mock()
 
-        runtime = AgentRuntime(router=router, store=store)
+        runtime = AgentRuntime(client=client, store=store)
 
         # Mock AgentLoop.run 直接返回成功结果
         fake_result = AgentRunResult(
@@ -641,7 +609,7 @@ class TestTerminalEvent:
                 messages=[{"role": "user", "content": "hi"}],
                 tools=ToolKit(),
                 output=None,
-                selection=CHAT,
+                task="chat",
                 limits=LoopLimits(max_rounds=3, max_corrections=2),
                 metadata=RunMetadata(agent_name="test", run_tag="test"),
             )
@@ -660,16 +628,15 @@ class TestTerminalEvent:
         """AgentRuntime.run() 失败时 emit AgentRunFailed。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
 
-        router = Mock(spec=LLMRouter)
+        client = Mock()
 
-        runtime = AgentRuntime(router=router, store=store)
+        runtime = AgentRuntime(client=client, store=store)
 
         fake_result = AgentRunResult(
             run_id="r_test",
@@ -686,7 +653,7 @@ class TestTerminalEvent:
                 messages=[{"role": "user", "content": "hi"}],
                 tools=ToolKit(),
                 output=None,
-                selection=CHAT,
+                task="chat",
                 limits=LoopLimits(max_rounds=3, max_corrections=2),
                 metadata=RunMetadata(agent_name="test", run_tag="test"),
             )
@@ -704,15 +671,14 @@ class TestTerminalEvent:
         """invalid request 不调用 store.insert_agent_run 等 DB 方法。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
 
-        router = Mock(spec=LLMRouter)
-        runtime = AgentRuntime(router=router, store=store)
+        client = Mock()
+        runtime = AgentRuntime(client=client, store=store)
 
         # 空 interaction_id
         request = AgentRunRequest(
@@ -720,7 +686,7 @@ class TestTerminalEvent:
             messages=[{"role": "user", "content": "hi"}],
             tools=ToolKit(),
             output=None,
-            selection=CHAT,
+            task="chat",
             limits=LoopLimits(max_rounds=3, max_corrections=2),
             metadata=RunMetadata(agent_name="test", run_tag="test"),
         )
@@ -738,15 +704,14 @@ class TestTerminalEvent:
     async def test_name_collision_skips_db_writes(self):
         """output/tool 重名时不写 DB。"""
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
         store.update_agent_run = AsyncMock()
         store.insert_agent_event = AsyncMock()
 
-        router = Mock(spec=LLMRouter)
-        runtime = AgentRuntime(router=router, store=store)
+        client = Mock()
+        runtime = AgentRuntime(client=client, store=store)
 
         # 创建重名的 toolkit
         class SayArgs(BaseModel):
@@ -764,7 +729,7 @@ class TestTerminalEvent:
             messages=[{"role": "user", "content": "hi"}],
             tools=colliding,
             output=_mock_output_spec("say"),
-            selection=CHAT,
+            task="chat",
             limits=LoopLimits(max_rounds=3, max_corrections=2),
             metadata=RunMetadata(agent_name="test", run_tag="test"),
         )
@@ -802,7 +767,7 @@ class TestBillingMissingUsage:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -827,7 +792,7 @@ class TestBillingMissingUsage:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -848,7 +813,7 @@ class TestBillingMissingUsage:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -869,7 +834,7 @@ class TestBillingMissingUsage:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -901,7 +866,7 @@ class TestToolExecution:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -942,7 +907,7 @@ class TestToolExecution:
             toolkit=fail_toolkit,
             output_spec=None,
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -986,7 +951,7 @@ class TestToolExecution:
             toolkit=idx_toolkit,
             output_spec=None,
             limits=LoopLimits(max_rounds=5, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -1018,7 +983,7 @@ class TestLLMError:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -1058,7 +1023,7 @@ class TestOutputOrderingCorrectionStreak:
             toolkit=_mock_toolkit(),
             output_spec=_mock_output_spec("say"),
             limits=LoopLimits(max_rounds=10, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="i1",
         )
 
@@ -1116,7 +1081,7 @@ class TestRequestValidation:
             toolkit=_mock_toolkit(),
             output_spec=None,
             limits=LoopLimits(max_rounds=3, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="valid-id",
         )
 

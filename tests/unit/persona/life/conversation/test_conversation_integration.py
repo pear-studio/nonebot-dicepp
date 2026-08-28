@@ -149,7 +149,7 @@ class TestFullRunPipeline:
         for i in range(10):
             conv.add_message("user", f"msg{i}")
 
-        await conv.compact(keep_recent=3, router=None)
+        await conv.compact(keep_recent=3, client=None)
         assert conv.length == 4
         assert conv._cursors["keep"] == "this"
 

@@ -10,8 +10,7 @@ from typing import Any, List, Optional, TYPE_CHECKING
 from plugins.DicePP.utils.logger import logger
 from ..data.models import CharacterState
 from ..data.store import PersonaDataStore
-from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.selection import EVENT_GEN, DIARY, SUMMARIZE
+from ..llm.client import TextModelClient
 from ..tools.collecting import (
     SAY_TOOL_CHARACTER,
 )
@@ -56,10 +55,10 @@ class CharacterAgent(Agent):
     def __init__(
         self,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client: TextModelClient,
         config=None,
     ):
-        super().__init__(store, router, config)
+        super().__init__(store, client, config)
 
     async def load_state(self) -> CharacterState:
         """从 store 加载角色状态"""
@@ -419,7 +418,7 @@ class CharacterAgent(Agent):
             user_input=user_prompt,
             tools=ToolKit(),
             output=output_spec,
-            selection=EVENT_GEN,
+            task="event",
             limits=LoopLimits(max_rounds=self._max_rounds),
             run_tag="reaction",
             user_id=context.get("user_id", ""),
@@ -523,7 +522,7 @@ class CharacterAgent(Agent):
             user_input=user_prompt,
             tools=ToolKit(),
             output=output_spec,
-            selection=DIARY,
+            task="diary",
             limits=LoopLimits(max_rounds=self._max_rounds),
             run_tag="diary",
             user_id=context.get("user_id", ""),
@@ -594,7 +593,7 @@ class CharacterAgent(Agent):
                 interaction_id=interaction_id,
                 tools=ToolKit(),
                 output=None,
-                selection=SUMMARIZE,
+                task="summary",
                 limits=LoopLimits(max_rounds=1),
                 run_tag="opening",
                 agent_name=self.name,

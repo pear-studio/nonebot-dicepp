@@ -1,12 +1,14 @@
 """Tests for the ``/api/config/**`` config-editing endpoints."""
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
 from tests.support.dashboard.app import setup_auth
+from tests.support.dashboard.paths import repo_root
 
 # Check if Pydantic is importable (for integration tests using real models)
 try:
@@ -30,10 +32,26 @@ class TestMergedView:
         # Keys from BotConfig with no user override have source "default".
         assert config["friend_request_token"]["value"] == ""
         assert config["friend_request_token"]["source"] == "default"
-        assert config["persona_ai.providers.deepseek.base_url"]["value"] == (
-            "https://api.deepseek.com"
+        assert config["deepseek_model"]["value"] == "deepseek-v4-flash"
+        assert config["deepseek_model"]["source"] == "default"
+        assert config["deepseek_api_key"]["format"] == "password"
+        assert config["deepseek_api_key"]["writeOnly"] is True
+
+    def test_deepseek_api_key_is_redacted_in_set_audit(
+        self, test_client: TestClient, tmp_dashboard_paths
+    ):
+        setup_auth(test_client)
+        secret = "deepseek-api-key-do-not-store"
+        response = test_client.post(
+            "/api/config/set",
+            json={"path": "deepseek_api_key", "value": secret},
         )
-        assert config["persona_ai.providers.deepseek.base_url"]["source"] == "default"
+        assert response.status_code == 200
+
+        entries = test_client.get("/api/audit").json()["entries"]
+        entry = next(e for e in entries if e["action"] == "config.set")
+        assert secret not in entry["detail"]
+        assert json.loads(entry["detail"]) == {"value": "***"}
 
     def test_merged_does_not_treat_user_json_as_bot_overlay(
         self, test_client: TestClient, tmp_dashboard_paths
@@ -49,38 +67,6 @@ class TestMergedView:
 
         assert config["master"]["value"] == "bot-master"
         assert config["master"]["source"] == "bot"
-
-    def test_merged_preserves_dynamic_provider_mapping_keys(
-        self, test_client: TestClient, tmp_dashboard_paths
-    ):
-        """Legal provider names absent from the built-in catalog remain visible."""
-        bot_path = DashboardPaths.bot_config_path("test_bot")
-        bot_path.write_text(json.dumps({
-            "persona_ai": {
-                "providers": {
-                    "custom": {
-                        "api_key": "",
-                        "base_url": "https://custom.example.test/v1",
-                        "models": [{
-                            "name": "custom-model",
-                            "category": "llm",
-                            "capabilities": ["text"],
-                        }],
-                    }
-                }
-            }
-        }))
-
-        setup_auth(test_client)
-        response = test_client.get(
-            "/api/config/merged", params={"bot_id": "test_bot"}
-        )
-        assert response.status_code == 200
-        entry = response.json()["config"]["persona_ai.providers.custom.base_url"]
-        assert entry["value"] == "https://custom.example.test/v1"
-        assert entry["source"] == "bot"
-        assert entry["tab"] == "persona"
-        assert entry["section"] == "providers"
 
     def test_merged_includes_tab_and_section(self, test_client: TestClient, tmp_dashboard_paths):
         """Each config field in merged output includes tab and section keys."""
@@ -313,16 +299,6 @@ class TestFieldMetadata:
                     },
                 },
             },
-            "ProviderConfig": {
-                "dashboard_tab": "persona",
-                "dashboard_section": "providers",
-                "properties": {
-                    "api_key": {
-                        "title": "API Key",
-                        "type": "string",
-                    },
-                },
-            },
         }
         schema = {
             "dashboard_tab": "config",
@@ -331,11 +307,6 @@ class TestFieldMetadata:
                 "persona_ai": {
                     "title": "Persona AI",
                     "$ref": "#/$defs/PersonaConfig",
-                },
-                "persona_ai_providers": {
-                    "title": "模型提供商",
-                    "type": "object",
-                    "additionalProperties": {"$ref": "#/$defs/ProviderConfig"},
                 },
             },
             "$defs": defs,
@@ -366,65 +337,26 @@ class TestFieldMetadata:
             f"enabled section should be 'basic', got {result.get('persona_ai.enabled', {}).get('section')}"
         assert result["persona_ai.enabled"]["tab"] == "persona"
 
-    def test_provider_additional_properties_handled(self):
-        """additionalProperties.$ref is resolved, child fields inherit model tab/section."""
-        from dashboard.src.app import _flatten_json_schema
-        schema = self._make_mock_defs()
-        defs = schema.get("$defs", {})
-        result = _flatten_json_schema(schema, defs)
-
-        # persona_ai_providers.api_key should inherit ProviderConfig's "providers" section
-        assert "persona_ai_providers.api_key" in result, \
-            "additionalProperties.$ref child fields not enumerated"
-        assert result["persona_ai_providers.api_key"]["section"] == "providers", \
-            f"api_key section should be 'providers', got {result.get('persona_ai_providers.api_key', {}).get('section')}"
-        assert result["persona_ai_providers.api_key"]["tab"] == "persona"
-
-    def test_dynamic_key_metadata_match(self):
-        """_find_meta matches data keys with dynamic segments against static schema keys.
-
-        persona_ai.providers.deepseek.api_key (data) should match
-        persona_ai.providers.api_key (metadata) by skipping the dynamic 'deepseek' segment.
-        """
+    def test_exact_field_metadata_match(self):
         from dashboard.src.app import _find_meta
 
         field_meta = {
-            "persona_ai.providers": {
-                "title": "模型提供商", "description": "", "tab": "persona", "section": "providers",
-            },
-            "persona_ai.providers.api_key": {
-                "title": "API Key", "description": "", "tab": "persona", "section": "providers",
-            },
             "persona_ai.enabled": {
                 "title": "启用 Persona", "description": "", "tab": "persona", "section": "basic",
             },
         }
+        assert _find_meta("persona_ai.enabled", field_meta)["title"] == "启用 Persona"
+        assert _find_meta("persona_ai.unknown", field_meta) == {}
 
-        # Exact match still works
-        m = _find_meta("persona_ai.enabled", field_meta)
-        assert m["title"] == "启用 Persona"
-        assert m["section"] == "basic"
+    def test_write_only_metadata_drives_password_field_in_normal_view(self):
+        from dashboard.src.app import _is_sensitive_config_path
 
-        # Dynamic key skip: persona_ai.providers.deepseek.api_key → persona_ai.providers.api_key
-        m = _find_meta("persona_ai.providers.deepseek.api_key", field_meta)
-        assert m["title"] == "API Key", f"expected 'API Key', got {m.get('title')!r}"
-        assert m["tab"] == "persona"
-        assert m["section"] == "providers"
+        html_path = repo_root() / "dashboard" / "src" / "static" / "dashboard.html"
+        html = html_path.read_text(encoding="utf-8")
 
-        # Dynamic key skip (different provider name)
-        m = _find_meta("persona_ai.providers.anthropic.api_key", field_meta)
-        assert m["title"] == "API Key"
-
-        # Unknown provider field has no static metadata.
-        m = _find_meta("persona_ai.providers.openai.unknown_field", field_meta)
-        assert m == {}
-
-        # Other paths do not use dynamic segment deletion.
-        assert _find_meta("persona_ai.other.value", field_meta) == {}
-
-        # Completely unknown key returns empty
-        m = _find_meta("nonexistent.field.path", field_meta)
-        assert m == {}
+        assert _is_sensitive_config_path("deepseek_api_key") is True
+        assert "field.writeOnly ?" in html
+        assert '<input type="password" x-model="field.editValue"' in html
 
     @pytest.mark.skipif(not _HAVE_PYDANTIC, reason="Pydantic not installed")
     def test_metadata_loads_from_installed_source_for_isolated_workspace(

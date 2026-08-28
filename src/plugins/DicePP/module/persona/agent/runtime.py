@@ -8,7 +8,7 @@ import uuid
 from typing import Optional
 
 from ..data.store import PersonaDataStore
-from ..llm.router import LLMRouter
+from ..llm.client import TextModelClient
 
 from .event_bus import AgentEventBus, EventStore
 from .events import AgentRunStartedPayload, AgentRunFinishedPayload
@@ -37,15 +37,13 @@ class AgentRuntime:
 
     def __init__(
         self,
-        router: LLMRouter,
+        client: TextModelClient,
         store: PersonaDataStore,
         limits: Optional[LoopLimits] = None,
-        llm_timeout: Optional[int] = None,
     ) -> None:
-        self._router = router
+        self._client = client
         self._store = store
         self._limits = limits or LoopLimits()
-        self._llm_timeout = llm_timeout
 
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         """接受 AgentRunRequest，走 ToolKit + OutputSpec 路径。"""
@@ -76,12 +74,11 @@ class AgentRuntime:
 
         event_store = EventStore(self._store)
         bus = AgentEventBus(event_store=event_store, sinks=[RunSummarySink(event_store)])
-        gateway = LLMGateway(router=self._router, event_bus=bus)
+        gateway = LLMGateway(client=self._client, event_bus=bus)
 
         loop = AgentLoop(
             llm_gateway=gateway, event_bus=bus,
             limits=self._limits,
-            llm_timeout=self._llm_timeout,
         )
 
         # OutputSpec 协议从首次调用起就是稳定 prompt 的一部分。复制消息
@@ -114,8 +111,8 @@ class AgentRuntime:
             toolkit=request.tools,
             output_spec=request.output,
             limits=request.limits,
-            selection=request.selection,
             interaction_id=request.interaction_id,
+            task=request.task,
         )
 
         # ── 写入 terminal event，让 RunSummarySink 更新 persona_agent_runs ──

@@ -37,7 +37,6 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
 from plugins.DicePP.module.persona.agent.loop import AgentLoop
 from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
 from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.llm.selection import CHAT
 
 
 # ── Fake LLM Gateway ─────────────────────────────────────────
@@ -161,7 +160,7 @@ class TestSAFinishPlan:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.completion.kind == "completed"
@@ -213,7 +212,7 @@ class TestSAFinishPlan:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -251,7 +250,7 @@ class TestSAFinishPlan:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=5),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.completion.kind == "limit_reached"
@@ -282,7 +281,7 @@ class TestSAFinishPlan:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -341,7 +340,7 @@ class TestChatSegments:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -414,7 +413,7 @@ class TestChatSegments:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         # 验证 message_delta 结构
@@ -680,7 +679,7 @@ class TestChatOrderRecovery:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -720,7 +719,7 @@ class TestChatOrderRecovery:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -1255,7 +1254,7 @@ class TestConcurrentTools:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=None,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
         elapsed = time.time() - t0
 

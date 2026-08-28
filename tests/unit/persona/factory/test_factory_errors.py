@@ -3,7 +3,7 @@
 create_persona 在 Phase 2 之后用具名异常 PersonaInitError 报告初始化失败：
 
 1. 角色卡缺失 → PersonaCharacterLoadError
-2. providers 为空 → PersonaConfigError
+2. DeepSeek API Key 为空 → PersonaConfigError
 3. 数据库未连接 → PersonaStorageError
 
 模块禁用（config.enabled=False）仍返回 None，不抛异常——这是合法状态。
@@ -22,7 +22,7 @@ from plugins.DicePP.module.persona.exceptions import (
     PersonaCharacterLoadError,
     PersonaStorageError,
 )
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig, UserConfig
 
 
 class FakeLoaderReturnsNone:
@@ -45,24 +45,11 @@ class FakeLoaderReturnsChar:
         return MagicMock(name="char")
 
 
-def _make_providers_config():
-    """最小有效的 providers 配置（真实 PersonaConfig 子字段）"""
-    from plugins.DicePP.core.config.pydantic_models import ProviderConfig, ModelConfig
-    model = ModelConfig(
-        name="gpt-4o",
-        category="llm",
-        capabilities=["text", "tool_calls"],
-        quality=0.9,
-        cost=0.5,
-    )
-    return {"openai": ProviderConfig(api_key="sk-test", base_url="https://api.openai.com/v1", models=[model])}
-
-
 def _make_bot(
     *,
     enabled: bool = True,
     character_loaded=True,
-    has_providers: bool = True,
+    has_api_key: bool = True,
     db_connected: bool = True,
 ) -> MagicMock:
     """构造最小可走 create_persona 前 3 步的 Bot mock
@@ -75,10 +62,10 @@ def _make_bot(
     cfg = PersonaConfig(
         enabled=enabled,
         character_path="/tmp/chars",
-        providers=_make_providers_config() if has_providers else {},
     )
     bot.config.persona_ai = cfg
     bot.config.persona = "test"
+    bot.user_config = UserConfig(deepseek_api_key="sk-test" if has_api_key else "")
 
     bot.db = MagicMock()
     bot.db._db = MagicMock() if db_connected else None
@@ -129,8 +116,8 @@ async def test_character_load_failure_raises(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_api_key_raises(monkeypatch):
-    """providers 为空 → 抛 PersonaConfigError"""
-    bot = _make_bot(has_providers=False)
+    """DeepSeek API Key 为空 → 抛 PersonaConfigError"""
+    bot = _make_bot(has_api_key=False)
 
     monkeypatch.setattr(
         'plugins.DicePP.module.persona.factory.CharacterLoader',
@@ -139,7 +126,7 @@ async def test_missing_api_key_raises(monkeypatch):
 
     with pytest.raises(PersonaConfigError) as excinfo:
         await create_persona(bot)
-    assert "providers" in str(excinfo.value)
+    assert "API Key" in str(excinfo.value)
     assert isinstance(excinfo.value, PersonaInitError)
 
 
@@ -151,12 +138,6 @@ async def test_db_not_connected_raises(monkeypatch):
     monkeypatch.setattr(
         'plugins.DicePP.module.persona.factory.CharacterLoader',
         FakeLoaderReturnsChar,
-    )
-
-    # 防止真的构造 LLMRouter 失败：替换为 MagicMock
-    monkeypatch.setattr(
-        'plugins.DicePP.module.persona.factory.LLMRouter',
-        MagicMock(return_value=MagicMock()),
     )
 
     with pytest.raises(PersonaStorageError) as excinfo:

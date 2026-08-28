@@ -14,13 +14,12 @@ ROOT = find_repository_root(Path(__file__))
 SCHEMA_DIR = ROOT / "src" / "plugins" / "DicePP" / "core" / "config"
 
 
-def test_standalone_schema_assets_construct_only_local_provider_types(
+def test_standalone_schema_assets_construct_without_runtime_package(
     tmp_path: Path,
 ) -> None:
     assets = tmp_path / "dashboard_config_schema"
     assets.mkdir()
-    for name in ("pydantic_models.py", "builtin_providers.py"):
-        shutil.copyfile(SCHEMA_DIR / name, assets / name)
+    shutil.copyfile(SCHEMA_DIR / "pydantic_models.py", assets / "pydantic_models.py")
 
     script = r'''
 import importlib.util
@@ -41,11 +40,11 @@ assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
-config = module.BotConfig()
-assert set(config.persona_ai.providers) == {"deepseek"}
-assert all(type(value) is module.ProviderConfig for value in config.persona_ai.providers.values())
+config = module.UserConfig()
+assert config.deepseek_model == "deepseek-v4-flash"
+assert module.BotConfig().persona_ai.enabled is True
 dumped = config.model_dump(mode="json", by_alias=True)
-assert dumped["persona_ai"]["providers"]["deepseek"]["base_url"] == "https://api.deepseek.com"
+assert dumped["deepseek_base_url"] == "https://api.deepseek.com"
 '''
     completed = subprocess.run(
         [sys.executable, "-I", "-c", script, str(assets)],

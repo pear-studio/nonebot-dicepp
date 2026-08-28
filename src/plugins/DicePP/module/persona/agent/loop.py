@@ -50,10 +50,6 @@ from .runtime_types import (
 )
 
 from .state import AgentRunState
-from ..llm.selection import SelectionPolicy
-
-
-
 class AgentLoop:
     """Agent 状态机 — LLM 调用 → 工具分派 → 继续/终止"""
 
@@ -62,16 +58,11 @@ class AgentLoop:
         llm_gateway: LLMGateway,
         event_bus: Optional[AgentEventBus] = None,
         limits: Optional[LoopLimits] = None,
-        llm_timeout: Optional[int] = None,
     ) -> None:
         self._llm = llm_gateway
         self._event_bus = event_bus
 
         self._limits = limits or LoopLimits()
-        self._llm_timeout = llm_timeout
-
-
-
     # ── 新路径：ToolKit + OutputSpec ──────────────────────────────
 
     async def run(
@@ -82,8 +73,8 @@ class AgentLoop:
         toolkit: ToolKit,
         output_spec: OutputSpec | None,
         limits: LoopLimits,
-        selection: SelectionPolicy,
         interaction_id: str,
+        task: str = "chat",
     ) -> RunResult:
         """ToolKit + OutputSpec 分流执行。
 
@@ -93,7 +84,6 @@ class AgentLoop:
             toolkit: 普通工具集
             output_spec: 最终输出协议（None 时允许直接文本完成）
             limits: 循环约束
-            selection: 模型选择策略
             interaction_id: caller-owned orchestration id
         """
         output_collector = OutputCollector(output_spec) if output_spec else None
@@ -114,16 +104,13 @@ class AgentLoop:
             req = LLMRequest(
                 messages=messages,
                 tools=llm_tools if llm_tools else None,
-                temperature=None,
-                selection=selection,
-                preferred_provider=provider,
-                preferred_model=model,
+                task=task,
             )
 
             # LLM 调用
             try:
                 result = await self._llm.complete(
-                    request=req, state=state, timeout=self._llm_timeout,
+                    request=req, state=state,
                     run_id=state.run_id,
                 )
             except Exception as e:
@@ -138,7 +125,7 @@ class AgentLoop:
                 )
 
             # 累计 billing
-            self._accumulate_billing(billing, result, provider, model)
+            self._accumulate_billing(billing, result)
             provider = result.provider
             model = result.model
 
@@ -542,8 +529,6 @@ class AgentLoop:
     def _accumulate_billing(
         billing: BillingSummary,
         llm_result: LLMGatewayResult,
-        provider: str,
-        model: str,
     ) -> None:
         """从 LLMGatewayResult 累计 BillingEntry。
 
@@ -573,8 +558,8 @@ class AgentLoop:
                 note = ""
 
         entry = BillingEntry(
-            provider=llm_result.provider or provider,
-            model=llm_result.model or model,
+            provider=llm_result.provider,
+            model=llm_result.model,
             usage=UsageReport(
                 status=status,
                 tokens_in=tokens_in,

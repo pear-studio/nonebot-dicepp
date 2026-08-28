@@ -100,46 +100,44 @@ def test_each_config_file_rejects_unknown_fields_and_wrong_types(
         dd.loader("bot1").load()
 
 
-def test_account_sparse_nested_mapping_preserves_default_siblings(dd):
+def test_user_sparse_deepseek_config_preserves_default_siblings(dd):
     _write(
-        dd.account_cfg("bot1"),
-        {"persona_ai": {"providers": {"deepseek": {"api_key": "test-key"}}}},
+        dd.user_config,
+        {"deepseek_api_key": "test-key"},
     )
 
     cfg = dd.loader("bot1").load()
 
-    assert cfg.persona_ai.providers["deepseek"].api_key == "test-key"
-    assert cfg.persona_ai.providers["deepseek"].base_url == "https://api.deepseek.com"
-    assert cfg.persona_ai.providers["deepseek"].models
+    assert cfg.persona_ai is not None
+    assert dd.loader("bot1").user_config.deepseek_api_key == "test-key"
+    assert dd.loader("bot1").user_config.deepseek_base_url == "https://api.deepseek.com"
 
 
-def test_explicit_empty_mapping_overrides_non_empty_default_and_roundtrips(dd):
+def test_bot_default_values_roundtrip_as_empty_sparse_file(dd):
     path = dd.account_cfg("bot1")
     save_config_file(
         path,
-        {"persona_ai": {"providers": {}}},
+        {},
         model_type=BotConfig,
     )
 
-    assert _read(path) == {"persona_ai": {"providers": {}}}
-    assert dd.loader("bot1").load().persona_ai.providers == {}
+    assert _read(path) == {}
+    assert dd.loader("bot1").load().persona_ai is not None
 
 
-def test_saving_default_values_removes_nested_overrides(dd):
-    path = dd.account_cfg("bot1")
+def test_saving_default_values_removes_user_overrides(dd):
+    path = dd.user_config
     save_config_file(
         path,
-        {"persona_ai": {"providers": {"deepseek": {"api_key": "secret"}}}},
-        model_type=BotConfig,
+        {"deepseek_api_key": "secret"},
+        model_type=UserConfig,
     )
-    assert _read(path) == {
-        "persona_ai": {"providers": {"deepseek": {"api_key": "secret"}}}
-    }
+    assert _read(path) == {"deepseek_api_key": "secret"}
 
     save_config_file(
         path,
-        {"persona_ai": {"providers": {"deepseek": {"api_key": ""}}}},
-        model_type=BotConfig,
+        {"deepseek_api_key": ""},
+        model_type=UserConfig,
     )
     assert _read(path) == {}
 

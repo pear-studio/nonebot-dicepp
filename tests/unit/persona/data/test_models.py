@@ -124,8 +124,6 @@ class TestPersonaConfig:
         config = PersonaConfig()
         assert config.enabled is True
         assert config.whitelist_enabled == True
-        assert set(config.providers) == {"deepseek"}
-        assert config.max_concurrent_requests == 2
         assert config.daily_limit == 20
 
     def test_segment_defaults(self):

@@ -86,7 +86,7 @@ def _make_test_repo(tmp_path: Path, *, ignored: bool = True) -> tuple[Path, Path
 
 
 def _isolate_shell_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    _, _, _, shell_session = prepare.import_runtime_types(REPO_ROOT)
+    _, _, _, _, shell_session = prepare.import_runtime_types(REPO_ROOT)
     shell_root = tmp_path / "shell-sessions"
     monkeypatch.setattr(shell_session, "SHELL_DIR", shell_root)
     monkeypatch.setattr(shell_session, "_LOCKS_DIR", shell_root / ".locks")
@@ -126,7 +126,7 @@ assert spec and spec.loader
 prepare = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = prepare
 spec.loader.exec_module(prepare)
-bot_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
+bot_config, user_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
 
 print("__DICEPP_IMPORT_PROBE__" + json.dumps({{
     "path_restored": sys.path == original_path,
@@ -273,7 +273,7 @@ sys.path.insert(0, str(foreign_plugins_root))
 import DicePP
 assert Path(DicePP.__file__).resolve().is_relative_to(foreign_dicepp_root)
 
-bot_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
+bot_config, user_config, character_loader, persona_model, shell_session = prepare.import_runtime_types(repo_root)
 print("__DICEPP_UNRELATED_IMPORT_PROBE__" + json.dumps({{
     "external_package": str(Path(DicePP.__file__).resolve()),
     "modules": [
@@ -321,8 +321,7 @@ def _prepared_for_confirmation(
         name="test-session",
         path=Path("test-session"),
         credential_path=Path("test_llm.local.json"),
-        providers=("deepseek",),
-        probe_models=("deepseek/model",),
+        model="deepseek-v4-flash",
         scenarios=tuple(estimate.scenario for estimate in estimates),
         estimates=estimates,
         background_max_rounds=10,
@@ -379,13 +378,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     secret = "sk-test-never-print-this"
     _write_json(
         skill / "test_llm.local.json",
-        {
-            "persona_ai": {
-                "providers": {
-                    "deepseek": {"api_key": secret},
-                }
-            }
-        },
+        {"deepseek_api_key": secret},
     )
     shell_session = _isolate_shell_sessions(monkeypatch, tmp_path)
 
@@ -399,11 +392,10 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
 
     assert result.name == "llm-test-260716-203045-abcd"
     assert result.scenarios == ("warp", "private", "group")
-    assert result.providers == ("deepseek",)
-    assert all(model.startswith("deepseek/") for model in result.probe_models)
+    assert result.model == "deepseek-v4-flash"
     assert not (result.path / "config" / "global.json").exists()
 
-    assert not (result.path / "config" / "user.json").exists()
+    assert (result.path / "config" / "user.json").exists()
 
     account_path = (
         result.path
@@ -412,9 +404,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
         / f"{shell_session.bot_id_for_session(result.name)}.json"
     )
     account = json.loads(account_path.read_text(encoding="utf-8"))
-    providers = account["persona_ai"]["providers"]
-    assert providers["deepseek"] == {"enabled": True, "api_key": secret}
-    assert set(providers) == {"deepseek"}
+    assert "providers" not in account.get("persona_ai", {})
     assert account["persona_ai"]["character_path"] == str(
         (result.path / "content" / "characters").resolve()
     )
@@ -437,8 +427,10 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert loaded.persona_ai.character_path == str(
         (result.path / "content" / "characters").resolve()
     )
-    assert loaded.persona_ai.providers["deepseek"].api_key == secret
-    assert loaded.persona_ai.providers["deepseek"].enabled is True
+    assert loaded.persona_ai.enabled is True
+    assert json.loads((result.path / "config" / "user.json").read_text())[
+        "deepseek_api_key"
+    ] == secret
 
     summary = prepare.format_summary(result)
     assert secret not in summary
@@ -458,13 +450,7 @@ def test_prepare_rejects_drifted_override_and_unignored_credentials(
     repo, skill = _make_test_repo(tmp_path)
     _write_json(
         skill / "test_llm.local.json",
-        {
-            "persona_ai": {
-                "providers": {
-                    "deepseek": {"api_key": "sk-test"},
-                }
-            }
-        },
+        {"deepseek_api_key": "sk-test"},
     )
     _write_json(
         skill / "assets" / "test-overrides.json",
@@ -486,13 +472,7 @@ def test_prepare_rejects_drifted_override_and_unignored_credentials(
     repo2, skill2 = _make_test_repo(tmp_path / "unignored", ignored=False)
     _write_json(
         skill2 / "test_llm.local.json",
-        {
-            "persona_ai": {
-                "providers": {
-                    "deepseek": {"api_key": "sk-test"},
-                }
-            }
-        },
+        {"deepseek_api_key": "sk-test"},
     )
     with pytest.raises(prepare.PreparationError, match="未被 Git ignore"):
         prepare.prepare_session(

@@ -9,8 +9,7 @@ from plugins.DicePP.utils.logger import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, DEFAULT_RELATION_LABELS
 from ..data.store import PersonaDataStore
-from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.selection import SelectionPolicy, SCORING
+from ..llm.client import TextModelClient
 from ..utils.json_helpers import safe_json_loads
 from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time
 
@@ -26,10 +25,10 @@ class ScoringAnalysisResult(BaseModel):
 class ScoringAgent:
     """评分 Agent - 批量分析对话提取用户档案和好感度变化"""
 
-    def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai",
+    def __init__(self, client: TextModelClient, timezone: str = "Asia/Shanghai",
                  max_rounds: int = 3,
                  store: Optional[PersonaDataStore] = None):
-        self.llm_router = llm_router
+        self.client = client
         self.timezone = timezone
         self.max_rounds = max_rounds
         self._store = store
@@ -60,7 +59,7 @@ class ScoringAgent:
 
         try:
             runtime = AgentRuntime(
-                router=self.llm_router,
+                client=self.client,
                 store=self._store,
                 limits=LoopLimits(max_rounds=self.max_rounds),
             )
@@ -74,7 +73,7 @@ class ScoringAgent:
                 messages=[{"role": "user", "content": prompt}],
                 tools=ToolKit(),
                 output=output_spec,
-                selection=SCORING,
+                task="scoring",
                 limits=LoopLimits(max_rounds=self.max_rounds),
                 metadata=RunMetadata(agent_name="scoring", run_tag="scoring"),
             )
@@ -91,12 +90,6 @@ class ScoringAgent:
             data = dict(result.output.arguments) if result.output and result.output.arguments else None
             content = result.output.text or ""
 
-        except ServiceUnavailableError as e:
-            logger.error(f"评分: 无可用 LLM provider: {e}")
-            return ScoringAnalysisResult(
-                deltas=ScoreDeltas(), facts={},
-                parse_error=f"无可用 LLM provider: {e}",
-            )
         except Exception as e:
             logger.error(f"评分 LLM 调用失败: {e}")
             return ScoringAnalysisResult(

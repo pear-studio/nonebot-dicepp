@@ -193,7 +193,7 @@ class TestDailyReportGenerator:
         gen = DailyReportGenerator(bot=bot, port=port)
 
         gen._character = None
-        gen._router = None
+        gen._client = None
 
         await gen.generate_and_send(None)
         seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
@@ -211,7 +211,7 @@ class TestDailyReportGenerator:
         gen._character = MagicMock()
         gen._character.name = "测试角色"
         gen._character.description = "一个测试角色"
-        gen._router = MagicMock()
+        gen._client = MagicMock()
 
         mock_opening = "早上好，主人！今天机器人状态良好。"
 
@@ -221,7 +221,7 @@ class TestDailyReportGenerator:
         shared_agent.opening = AsyncMock()
         app = MagicMock()
         app.store = MagicMock()
-        app.get_router.return_value = gen._router
+        app.get_client.return_value = gen._client
         app.get_character.return_value = gen._character
         app.get_character_agent.return_value = shared_agent
         gen.set_app(app)
@@ -235,7 +235,7 @@ class TestDailyReportGenerator:
         shared_agent.opening.assert_not_awaited()
         mock_char_agent_cls.assert_called_once_with(
             store=gen._store,
-            router=gen._router,
+            client=gen._client,
             config=gen._config,
         )
 
@@ -249,7 +249,7 @@ class TestDailyReportGenerator:
         gen._character = MagicMock()
         gen._character.name = "测试角色"
         gen._character.description = ""
-        gen._router = MagicMock()
+        gen._client = MagicMock()
 
         target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
         core_stats = gen._empty_core_stats()
@@ -272,7 +272,7 @@ class TestDailyReportGenerator:
         gen._character = MagicMock()
         gen._character.name = "测试角色"
         gen._character.description = ""
-        gen._router = MagicMock()
+        gen._client = MagicMock()
 
         from plugins.DicePP.module.persona.life.types import AgentResult
         target = 'plugins.DicePP.module.persona.life.character_agent.CharacterAgent'
@@ -295,7 +295,7 @@ class TestDailyReportGenerator:
         gen = DailyReportGenerator(bot=bot, port=port)
         gen._character = MagicMock()
         gen._character.name = "测试角色"
-        gen._router = MagicMock()
+        gen._client = MagicMock()
 
         core_stats = gen._empty_core_stats()
         opening = await gen._generate_opening("昨日日记测试", core_stats)
@@ -613,7 +613,7 @@ class TestDailyReportGenerator:
     # ── set_app ─────────────────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_set_app_injects_store_and_router(self):
+    async def test_set_app_injects_store_and_client(self):
         """set_app 从 PersonaApp 注入 store/router/character"""
         bot = _make_mock_bot()
         port, _mock_bot = _make_mock_port()
@@ -621,13 +621,13 @@ class TestDailyReportGenerator:
 
         mock_app = MagicMock()
         mock_app.store = MagicMock()
-        mock_app.get_router.return_value = "mock_router"
+        mock_app.get_client.return_value = "mock_client"
         mock_app.get_character.return_value = "mock_character"
 
         gen.set_app(mock_app)
 
         assert gen._store is mock_app.store
-        assert gen._router == "mock_router"
+        assert gen._client == "mock_client"
         assert gen._character == "mock_character"
 
     # ── per-table 容错集成测试 ──────────────────────────────────

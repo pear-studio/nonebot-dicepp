@@ -1,6 +1,6 @@
 """chat 模块共享类型/辅助 — 供 orchestrator 与 chat_agent 共用，避免双向依赖。
 
-`ChatOutcome`（chat 调用结果）与 `_router_has_quota`（配额能力探测）原本定义在
+`ChatOutcome`（chat 调用结果）与 `_client_has_quota`（配额能力探测）原本定义在
 orchestrator，被抽出的 ChatAgent 反向 import 形成模块环（靠 orchestrator 侧延迟
 import 打破）。下沉到本中立模块后两侧均从此导入，orchestrator 得以顶层导入
 ChatAgent、消除延迟导入。orchestrator 顶部 re-export 二者以保持既有导入路径
@@ -55,9 +55,9 @@ class ChatOutcome:
         return self.status == "empty"
 
 
-def _router_has_quota(router) -> bool:
-    """判断 router 是否配置了配额功能（排除 mock 对象）。"""
+def _client_has_quota(client) -> bool:
+    """判断文本客户端是否配置了配额功能（排除 mock 对象）。"""
     from unittest.mock import Mock
-    if isinstance(router, Mock):
+    if isinstance(client, Mock):
         return False
-    return getattr(router, "quota_check_enabled", False) and getattr(router, "data_store", None) is not None
+    return getattr(client, "quota_check_enabled", False) and getattr(client, "data_store", None) is not None

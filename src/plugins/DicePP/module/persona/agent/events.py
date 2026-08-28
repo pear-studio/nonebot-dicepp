@@ -67,29 +67,6 @@ class ModelRequestPreparedPayload:
 
 
 @dataclass
-class ModelCandidateSelectedPayload:
-    provider: str
-    model: str
-    candidate_index: int
-    total_candidates: int
-
-
-@dataclass
-class ModelCandidateFailedPayload:
-    provider: str
-    model: str
-    error: str
-    candidate_index: int
-
-
-@dataclass
-class ModelCandidateSucceededPayload:
-    provider: str
-    model: str
-    candidate_index: int
-
-
-@dataclass
 class ModelResponseReceivedPayload:
     round_index: int
     content_ignored: bool

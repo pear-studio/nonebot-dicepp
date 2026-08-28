@@ -51,15 +51,15 @@ def mock_store():
 
 
 @pytest.fixture
-def mock_router():
-    router = MagicMock()
-    router.data_store = None  # 跳过配额检查（_router_has_quota 返回 False）
-    return router
+def mock_client():
+    client = MagicMock()
+    client.data_store = None  # 跳过配额检查（_client_has_quota 返回 False）
+    return client
 
 
 @pytest.fixture
-def minimal_agent(mock_store, mock_router):
-    return _MinimalAgent(store=mock_store, router=mock_router)
+def minimal_agent(mock_store, mock_client):
+    return _MinimalAgent(store=mock_store, client=mock_client)
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ class TestCharacterAgentNoDoubleRegistration:
     @pytest.mark.asyncio
     async def test_registry_path_skips_agent_register(self):
         """注入后 _ensure_conversation 不应调 _register_change_sources。"""
-        agent = CharacterAgent(store=MagicMock(), router=MagicMock())
+        agent = CharacterAgent(store=MagicMock(), client=MagicMock())
         registry = MagicMock()
         registry.get_or_create = AsyncMock(return_value=MagicMock(spec=Conversation))
         scope = ConversationScope.for_life_character("char-001")
@@ -255,7 +255,7 @@ class TestCharacterAgentNoDoubleRegistration:
         """未注入时 CharacterAgent 仍自注册 CharacterStateChangeSource。"""
         store = MagicMock()
         store.get_character_state = AsyncMock(return_value=None)
-        agent = CharacterAgent(store=store, router=MagicMock())
+        agent = CharacterAgent(store=store, client=MagicMock())
 
         conv = await agent._ensure_conversation({})
 
@@ -268,7 +268,7 @@ class TestDMAgentRegistryPath:
 
     @pytest.mark.asyncio
     async def test_registry_path_skips_agent_register(self):
-        agent = DMAgent(store=MagicMock(), router=MagicMock())
+        agent = DMAgent(store=MagicMock(), client=MagicMock())
         registry = MagicMock()
         registry.get_or_create = AsyncMock(return_value=MagicMock(spec=Conversation))
         scope = ConversationScope.for_life_dm("char-001")
@@ -284,7 +284,7 @@ class TestDMAgentRegistryPath:
     @pytest.mark.asyncio
     async def test_non_registry_path_returns_empty(self):
         """未注入时 DMAgent 自注册无 change source（_get_change_sources 返回 []）。"""
-        agent = DMAgent(store=MagicMock(), router=MagicMock())
+        agent = DMAgent(store=MagicMock(), client=MagicMock())
 
         conv = await agent._ensure_conversation({})
 
@@ -367,9 +367,9 @@ class TestFactoryRegistryInjection:
         character_life = MagicMock()
         character_life.load_persistent_state = AsyncMock()
 
-        dm_agent = DMAgent(store=MagicMock(), router=MagicMock())
-        character_agent = CharacterAgent(store=MagicMock(), router=MagicMock())
-        sa_agent = SAAgent(store=MagicMock(), router=MagicMock())
+        dm_agent = DMAgent(store=MagicMock(), client=MagicMock())
+        character_agent = CharacterAgent(store=MagicMock(), client=MagicMock())
+        sa_agent = SAAgent(store=MagicMock(), client=MagicMock())
 
         # Mock 内部重对象
         with patch('plugins.DicePP.module.persona.factory.ProactiveConfig') as MockPC, \

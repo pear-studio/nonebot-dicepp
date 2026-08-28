@@ -1,20 +1,21 @@
-from plugins.DicePP.core.config.pydantic_models import BotConfig
+from plugins.DicePP.core.config.pydantic_models import BotConfig, UserConfig
 
 
-def test_builtin_provider_catalog_is_complete_and_not_shared() -> None:
-    first = BotConfig()
-    second = BotConfig()
+def test_user_config_has_one_shared_deepseek_connection():
+    first = UserConfig()
+    second = UserConfig()
 
-    assert set(first.persona_ai.providers) == {"deepseek"}
-    assert {
-        name: [model.name for model in provider.models]
-        for name, provider in first.persona_ai.providers.items()
-    } == {
-        "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-pro-t"],
-    }
+    assert first.deepseek_api_key == ""
+    assert first.deepseek_model == "deepseek-v4-flash"
+    assert first.deepseek_base_url == "https://api.deepseek.com"
 
-    first.persona_ai.providers["deepseek"].api_key = "changed"
-    first.persona_ai.providers["deepseek"].models[0].enabled = False
+    first.deepseek_api_key = "changed"
+    assert second.deepseek_api_key == ""
 
-    assert second.persona_ai.providers["deepseek"].api_key == ""
-    assert second.persona_ai.providers["deepseek"].models[0].enabled is True
+
+def test_persona_config_has_no_provider_catalog():
+    persona = BotConfig().persona_ai
+
+    assert not hasattr(persona, "providers")
+    assert not hasattr(persona, "max_concurrent_requests")
+    assert not hasattr(persona, "chat_llm_timeout_seconds")

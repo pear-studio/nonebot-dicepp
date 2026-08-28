@@ -2,13 +2,7 @@
 LLMProvider 协议与标准化数据结构
 """
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Protocol, runtime_checkable, List, Optional
-
-
-class ErrorClass(str, Enum):
-    NON_RETRYABLE = "non_retryable"
-    RETRYABLE = "retryable"
 
 
 class NonRetryableError(Exception):
@@ -56,9 +50,7 @@ class LLMResponse:
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """LLM 供应商协议"""
-
-    retryable_errors: frozenset[str]
+    """OpenAI-compatible 文本请求解析协议。"""
 
     async def generate(
         self,
@@ -70,17 +62,6 @@ class LLMProvider(Protocol):
         thinking: bool = False,
     ) -> LLMResponse:
         ...
-
-    async def probe(self) -> bool:
-        """Health check: 发送 max_tokens=1 的 completion 请求。成功返回 True。"""
-        ...
-
-    @staticmethod
-    def classify_error(exception: Exception) -> ErrorClass:
-        """将异常分类为 NON_RETRYABLE 或 RETRYABLE。"""
-        ...
-
-
 @runtime_checkable
 class ImageGenProvider(Protocol):
     """图片生成供应商协议"""
@@ -89,13 +70,4 @@ class ImageGenProvider(Protocol):
 
     async def generate_image(self, prompt: str, **kwargs) -> str:
         """生成图片，返回 URL。"""
-        ...
-
-    async def probe(self) -> bool:
-        """Health check: 轻量 API 调用验证可用性。成功返回 True。"""
-        ...
-
-    @staticmethod
-    def classify_error(exception: Exception) -> ErrorClass:
-        """将异常分类为 NON_RETRYABLE 或 RETRYABLE。"""
         ...

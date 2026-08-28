@@ -79,17 +79,17 @@ class TestChatOrchestratorInit:
 
     def test_creates_with_minimal_deps(self):
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
         )
-        assert orch.router is not None
+        assert orch.client is not None
         assert orch.character is not None
         assert orch.decay_calculator is None
 
     @pytest.mark.asyncio
     async def test_is_awake_no_sleep_gate(self):
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
         )
         assert await orch.is_awake() is True
@@ -97,7 +97,7 @@ class TestChatOrchestratorInit:
     @pytest.mark.asyncio
     async def test_update_character_clears_registry_cache(self):
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
         )
         orch._registry = MagicMock()
@@ -124,7 +124,7 @@ class TestChatOrchestratorGate:
         sleep_gate.is_awake = AsyncMock(return_value=False)
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=char,
+            store=store, client=MagicMock(), character=char,
             config=_make_config(), sleep_gate=sleep_gate,
             response_handler=_make_response_handler(),
         )
@@ -146,7 +146,7 @@ class TestChatOrchestratorGate:
         sleep_gate.is_awake = AsyncMock(return_value=False)
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=char,
+            store=store, client=MagicMock(), character=char,
             config=_make_config(), sleep_gate=sleep_gate,
             response_handler=_make_response_handler(),
         )
@@ -190,7 +190,7 @@ class TestChatOrchestratorChat:
         ))
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -278,7 +278,7 @@ class TestChatOrchestratorChat:
     @pytest.mark.asyncio
     async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
         """QuotaExceeded 时调用 on_exhausted 回调返回 fallback 文案"""
-        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+        from plugins.DicePP.module.persona.llm.errors import QuotaExceeded
 
         orch, mock_conv, store = orch_with_mocks
 
@@ -360,7 +360,7 @@ class TestProactiveSerialization:
     async def test_proactive_returns_buffered_while_same_target_is_busy(self):
         """同一会话忙碌时 proactive 应立即跳过，让调度器稍后重试。"""
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -418,7 +418,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -459,7 +459,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -526,7 +526,7 @@ class TestStageBRetry:
         config = _make_config()
         config.private_session_token_budget = 50  # conv1 超, conv2(空) 在预算内
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -588,7 +588,7 @@ class TestStageBRetry:
         config.private_session_token_budget = 50  # 两个超预算 conv 都超出
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -643,7 +643,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -677,7 +677,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -712,7 +712,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -744,7 +744,7 @@ class TestStageBRetry:
 
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -801,7 +801,7 @@ class TestStageBRetry:
         mock_conv.run = AsyncMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -858,7 +858,7 @@ class TestChatOrchestratorScope:
 
     def _make_orch(self):
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
         )
         orch._registry = MagicMock()
@@ -909,7 +909,7 @@ class TestChatOrchestratorScope:
         ))
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -989,7 +989,7 @@ class TestF2RealRegistryIntegration:
         )
 
         orch = ChatOrchestrator(
-            store=temp_db, router=MagicMock(), character=_make_char(),
+            store=temp_db, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
             registry=reg,
         )
@@ -1063,7 +1063,7 @@ class TestF2RealRegistryIntegration:
         )
 
         orch = ChatOrchestrator(
-            store=temp_db, router=MagicMock(), character=_make_char(),
+            store=temp_db, client=MagicMock(), character=_make_char(),
             config=config, context_builder=_make_context_builder(),
             registry=reg,
         )
@@ -1130,7 +1130,7 @@ class TestChatCommandSerialization:
         mock_conv.run = AsyncMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -1199,7 +1199,7 @@ class TestChatCommandSerialization:
         mock_conv.run = AsyncMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -1254,7 +1254,7 @@ class TestChatCommandSerialization:
         agent = MagicMock()
         agent.execute_turn = AsyncMock(side_effect=_execute_turn)
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=_make_char(),
+            store=store, client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -1311,7 +1311,7 @@ class TestChatCommandSerialization:
         agent = MagicMock()
         agent.execute_turn = AsyncMock(side_effect=_execute_turn)
         orch = ChatOrchestrator(
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
             response_handler=_make_response_handler(),
         )
@@ -1384,7 +1384,7 @@ class TestAgentCacheInvalidationOnSilentRotation:
         # 注入真实 registry 构造 orchestrator（不设 response_handler，_make_delivery 返回 None）
         orch = ChatOrchestrator(
             store=temp_db,
-            router=MagicMock(),
+            client=MagicMock(),
             character=MagicMock(),
             config=ChatConfig(timezone="Asia/Shanghai"),
             context_builder=MagicMock(),

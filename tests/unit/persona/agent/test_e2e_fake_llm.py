@@ -32,7 +32,6 @@ from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventSt
 from plugins.DicePP.module.persona.agent.llm_gateway import LLMGatewayResult
 from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
 from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.llm.selection import CHAT
 
 
 # ── Reusable Fake Infrastructure ───────────────────────────────────
@@ -171,7 +170,7 @@ class TestCharacterReactionLifeChain:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -206,7 +205,7 @@ class TestCharacterReactionLifeChain:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -239,7 +238,7 @@ class TestCharacterReactionLifeChain:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -333,7 +332,7 @@ class TestDiaryGeneration:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -365,7 +364,7 @@ class TestDiaryGeneration:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         # message_delta 中 tool role 的 content 是 OutputSpec 收集结果，不是 record_diary_entry
@@ -422,7 +421,7 @@ class TestOutputSpecCorrection:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -444,8 +443,6 @@ class TestOutputSpecCorrection:
         assert correction["name"] == "runtime_instruction"
         assert "内部草稿" in correction["content"]
         assert "只有成功调用 say" in correction["content"]
-        assert fake_llm.requests[1].preferred_provider == "provider-a"
-        assert fake_llm.requests[1].preferred_model == "model-a"
 
         # 完整纠错轨迹会作为成功 run 的 message_delta 返回。
         delta = result.message_delta
@@ -490,7 +487,7 @@ class TestOutputSpecCorrection:
                 name="say", description="提交最终回复", args_schema=_SayArgs,
             ),
             limits=LoopLimits(max_rounds=5, max_corrections=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="test",
         )
 
@@ -543,7 +540,7 @@ class TestOutputSpecCorrection:
             toolkit=ToolKit(),
             output_spec=output_spec,
             limits=LoopLimits(max_rounds=5, max_corrections=1),
-            selection=CHAT,
+            task="chat",
             interaction_id="test",
         )
 
@@ -588,7 +585,7 @@ class TestOutputSpecCorrection:
                 name="say", description="输出", args_schema=_SayArgs,
             ),
             limits=LoopLimits(max_rounds=1, max_corrections=3),
-            selection=CHAT,
+            task="chat",
             interaction_id="test",
         )
 
@@ -657,7 +654,7 @@ class TestOutputSpecCorrection:
             toolkit=toolkit,
             output_spec=output_spec,
             limits=LoopLimits(max_rounds=5),
-            selection=CHAT,
+            task="chat",
             interaction_id="test",
         )
 
@@ -674,10 +671,6 @@ class TestOutputSpecCorrection:
             for msg in fake_llm.requests[2].messages
             if msg.get("role") == "assistant" and msg.get("tool_calls")
         ) == 1
-        assert fake_llm.requests[1].preferred_provider == "provider-a"
-        assert fake_llm.requests[1].preferred_model == "model-a"
-        assert fake_llm.requests[2].preferred_provider == "provider-b"
-        assert fake_llm.requests[2].preferred_model == "model-b"
 
     @pytest.mark.asyncio
     async def test_tool_limit_keeps_calls_paired_and_skipped_output_unaccepted(self):
@@ -710,7 +703,7 @@ class TestOutputSpecCorrection:
                 name="say", description="输出", args_schema=_SayArgs,
             ),
             limits=LoopLimits(max_rounds=3, max_tools_per_round=2),
-            selection=CHAT,
+            task="chat",
             interaction_id="test",
         )
 
@@ -753,7 +746,7 @@ class TestOutputSpecCorrection:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=None,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -791,7 +784,7 @@ class TestOutputSpecCorrection:
             buffer=buffer, state=state,
             toolkit=ToolKit(), output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -842,7 +835,7 @@ class TestOutputSpecCorrection:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success
@@ -895,7 +888,7 @@ class TestMultimodalObservation:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=None,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         tool_msgs = [m for m in result.message_delta if m["role"] == "tool"]
@@ -939,7 +932,7 @@ class TestMultimodalObservation:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=None,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         tool_msgs = [m for m in result.message_delta if m["role"] == "tool"]
@@ -965,7 +958,7 @@ class TestMultimodalObservation:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=None,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         # 未知工具被回填错误 observation，循环继续
@@ -1250,7 +1243,7 @@ class TestSAFinishPlanSideEffects:
             buffer=buffer, state=state,
             toolkit=toolkit, output_spec=output_spec,
             limits=LoopLimits(max_rounds=10),
-            selection=CHAT, interaction_id="test",
+            task="chat", interaction_id="test",
         )
 
         assert result.success

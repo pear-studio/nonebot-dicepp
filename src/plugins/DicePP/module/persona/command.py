@@ -24,7 +24,7 @@ from plugins.DicePP.core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_
 from .factory import PersonaApp, create_persona
 from .chat.orchestrator import ChatOutcome
 from .exceptions import PersonaInitError
-from .llm.router import QuotaExceeded
+from .llm.errors import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import MessageType
 from .admin import AdminDispatcher
@@ -894,48 +894,24 @@ class PersonaCommand(UserCommandBase):
             else:
                 whitelist_status = "\n白名单: 未激活（所有人可用）"
 
-        # 构建已注册模型列表
-        provider_models: List[str] = []
-        for pname, pconfig in config.providers.items():
-            for m in pconfig.models:
-                provider_models.append(f"{pname}/{m.name} (category={m.category})")
-
-        models_str = ", ".join(provider_models) if provider_models else "无"
+        model_name = self.bot.user_config.deepseek_model
 
         if not char:
             return (
                 f"Persona AI 状态: 初始化中...\n"
                 f"角色: {self.bot.config.persona or '未指定'}\n"
-                f"已注册模型: {models_str}"
+                f"模型: DeepSeek/{model_name}"
                 f"{whitelist_status}"
             )
 
         base = (
             f"Persona AI 状态: 已启用\n"
             f"角色: {char.name}\n"
-            f"已注册模型: {models_str}"
+            f"模型: DeepSeek/{model_name}"
             f"{whitelist_status}\n"
             f"\n使用方法: @bot <消息>\n"
             f".ai status - 查看状态"
         )
-
-        if self._is_admin(user_id) and self.app.get_router():
-            stats = self.app.get_router_stats()
-            stat_lines = []
-            total_req = 0
-            total_err = 0
-            for pname in sorted(stats.keys()):
-                s = stats[pname]
-                total_req += s["requests"]
-                total_err += s["errors"]
-                stat_lines.append(
-                    f"{pname}: {s['requests']} 次 / {s['errors']} 错误"
-                )
-            stat_lines.append(f"合计: {total_req} 次 / {total_err} 错误")
-            base += (
-                f"\n\n[管理员] LLM 统计（本次运行）\n"
-                + "\n".join(stat_lines)
-            )
 
         return base
 
@@ -952,7 +928,7 @@ class PersonaCommand(UserCommandBase):
             if self._is_admin(meta.user_id):
                 lines.append("")
                 lines.append("[管理员调试]")
-                lines.append(".ai admin debug - 运行诊断（LLM统计、错误摘要、调度器状态、群活跃度）")
+                lines.append(".ai admin debug - 运行诊断（错误摘要、调度器状态、群活跃度）")
                 lines.append(".ai admin rel <用户ID> - 查看关系")
                 lines.append(".ai admin setrel <用户ID> <分数> - 修改好感度")
                 lines.append(".ai admin reload - 热重载角色卡")

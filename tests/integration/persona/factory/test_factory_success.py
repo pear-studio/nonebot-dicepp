@@ -2,7 +2,7 @@
 create_persona 全路径冒烟测试
 
 验证 `create_persona()` 成功路径上所有组件可正确组装：
-- CharacterLoader, PersonaDataStore, LLMRouter, MessagePort, ChatOrchestrator, LifeSimulator
+- CharacterLoader, PersonaDataStore, DeepSeekTextModelClient, MessagePort, ChatOrchestrator, LifeSimulator
 - SessionManager, LLMCallCoordinator, DecayCalculator
 
 使用真实 PersonaConfig（Pydantic 模型）替代 MagicMock，
@@ -11,8 +11,7 @@ create_persona 全路径冒烟测试
 外部依赖策略：
 - CharacterLoader → monkey-patch FakeLoader（无需真实角色卡 YAML）
 - bot.db._db     → 内存 aiosqlite（schema 语句真实运行）
-- LLMRouter 构造 → 真实（验证 ProviderConfig 格式）
-- probe 调用     → monkey-patch 避免 HTTP
+- DeepSeek 客户端构造 → 真实（不发起网络请求）
 """
 
 import aiosqlite
@@ -22,8 +21,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.factory import create_persona, PersonaApp, _make_resolve_query_db
 from plugins.DicePP.core.config.pydantic_models import (
     PersonaConfig,
-    ProviderConfig,
-    ModelConfig,
+    UserConfig,
 )
 
 
@@ -76,24 +74,6 @@ class FakeCharacterLoader:
 # ============================================================
 
 
-def _make_providers() -> dict:
-    """最小有效 providers 配置（真实 Pydantic 模型）。"""
-    model = ModelConfig(
-        name="gpt-4o",
-        category="llm",
-        capabilities=["text", "tool_calls"],
-        quality=0.9,
-        cost=0.5,
-    )
-    return {
-        "openai": ProviderConfig(
-            api_key="sk-test",
-            base_url="https://api.openai.com/v1",
-            models=[model],
-        ),
-    }
-
-
 def _make_persona_config() -> PersonaConfig:
     """最小可成功初始化 Persona 模块的 PersonaConfig。
 
@@ -102,7 +82,6 @@ def _make_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_path="/tmp/smoke_chars",
-        providers=_make_providers(),
         # 关闭不需要的子系统
         trace_enabled=False,
         quota_check_enabled=False,
@@ -165,24 +144,10 @@ class TestCreatePersonaSuccess:
             FakeCharacterLoader,
         )
 
-        # ── 2. Patch LLMRouter 的网络依赖 ──────────────────
-        # probe_all_models → 不触达真实 API
-        async def _noop_probe(self):
-            return {}
-
-        monkeypatch.setattr(
-            'plugins.DicePP.module.persona.factory.LLMRouter.probe_all_models',
-            _noop_probe,
-        )
-        # start_probe_task → 无操作（避免 asyncio 后台任务）
-        monkeypatch.setattr(
-            'plugins.DicePP.module.persona.factory.LLMRouter.start_probe_task',
-            lambda self: None,
-        )
-
         # ── 3. 构造 Bot mock ──────────────────────────────
         bot = MagicMock()
         bot.account = "test_bot_smoke"
+        bot.user_config = UserConfig(deepseek_api_key="sk-test")
         bot.config.persona_ai = _make_persona_config()
         bot.config.persona = "test_char"
         bot.config.master = ""          # 避免发送启动报告
@@ -230,20 +195,9 @@ class TestCreatePersonaSuccess:
             FakeCharacterLoader,
         )
 
-        async def _noop_probe(self):
-            return {}
-
-        monkeypatch.setattr(
-            'plugins.DicePP.module.persona.factory.LLMRouter.probe_all_models',
-            _noop_probe,
-        )
-        monkeypatch.setattr(
-            'plugins.DicePP.module.persona.factory.LLMRouter.start_probe_task',
-            lambda self: None,
-        )
-
         bot = MagicMock()
         bot.account = "test_bot_smoke2"
+        bot.user_config = UserConfig(deepseek_api_key="sk-test")
         bot.config.persona_ai = _make_persona_config()
         bot.config.persona = "test_char"
         bot.config.master = ""
@@ -271,11 +225,8 @@ class TestCreatePersonaSuccess:
         assert app.port is not None
 
         # 验证公有辅助方法不抛异常
-        router = app.get_router()
-        assert router is not None
-
-        stats = app.get_router_stats()
-        assert isinstance(stats, dict)
+        client = app.get_client()
+        assert client is not None
 
         scheduler = app.get_scheduler()
         if scheduler is not None:

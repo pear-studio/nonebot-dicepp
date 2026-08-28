@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from plugins.DicePP.utils.logger import logger
 
 from ..data.store import PersonaDataStore
-from ..llm.selection import SelectionPolicy, SCORING
+from ..llm.client import TextModelClient
 
 
 class RecordEvaluationArgs(BaseModel):
@@ -22,7 +22,6 @@ class RecordEvaluationArgs(BaseModel):
 
 if TYPE_CHECKING:
     from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-    from ..llm.router import LLMRouter
 
 # 常见中文地点词匹配
 _LOCATION_RE = re.compile(
@@ -46,12 +45,12 @@ class ActionEvaluator:
     def __init__(
         self,
         store: PersonaDataStore,
-        router: "LLMRouter",
+        client: TextModelClient,
         config: "PersonaConfig",
         timezone: str = "Asia/Shanghai",
     ):
         self._store = store
-        self._router = router
+        self._client = client
         self._timezone = timezone
         self._timeout = config.suggest_action_evaluation_timeout
 
@@ -136,7 +135,6 @@ class ActionEvaluator:
             return ("rejected", "评估异常，默认拒绝")
 
     async def _call_llm(self, user_prompt: str, user_id: str = "") -> Tuple[str, str]:
-        from ..llm.router import ServiceUnavailableError
         from ..agent.runtime import AgentRuntime
         from ..agent.runtime_types import (
             AgentRunRequest, LoopLimits, OutputSpec, RunMetadata, ToolKit,
@@ -144,7 +142,7 @@ class ActionEvaluator:
 
         try:
             runtime = AgentRuntime(
-                router=self._router,
+                client=self._client,
                 store=self._store,
                 limits=LoopLimits(max_rounds=1),
             )
@@ -160,7 +158,7 @@ class ActionEvaluator:
                     description="提交行动可行性评估结果。",
                     args_schema=RecordEvaluationArgs,
                 ),
-                selection=SCORING,
+                task="scoring",
                 limits=LoopLimits(max_rounds=1),
                 metadata=RunMetadata(agent_name="ActionEvaluator", run_tag="evaluation"),
             ))
@@ -170,9 +168,6 @@ class ActionEvaluator:
                 )
                 return ("rejected", "LLM 协议错误")
             collected_args = result.output.arguments if result.output else None
-        except ServiceUnavailableError:
-            logger.warning("[ActionEvaluator] 无可用 LLM provider")
-            return ("rejected", "无可用 LLM 服务")
         except Exception:
             logger.exception("[ActionEvaluator] LLM 调用异常")
             return ("rejected", "LLM 调用失败")

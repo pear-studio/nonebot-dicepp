@@ -745,13 +745,12 @@ class PersonaDataStore:
             INSERT INTO persona_llm_traces (
                 interaction_id, user_id, group_id, run_id, model, tier,
                 messages, response, tool_calls, round_messages,
-                selected_provider, selected_model, selection_policy, candidate_count,
                 latency_ms,
                 tokens_in, tokens_out, temperature, status, error,
                 reasoning_content, cache_read, cache_creation, reasoning_tokens,
                 usage_status, usage_raw_json, usage_note,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trace.interaction_id,
@@ -764,10 +763,6 @@ class PersonaDataStore:
                 trace.response,
                 trace.tool_calls,
                 trace.round_messages,
-                trace.selected_provider,
-                trace.selected_model,
-                trace.selection_policy,
-                trace.candidate_count,
                 trace.latency_ms,
                 trace.tokens_in,
                 trace.tokens_out,
@@ -795,7 +790,6 @@ class PersonaDataStore:
             """
             SELECT id, interaction_id, user_id, group_id, run_id, model, tier,
                    messages, response, tool_calls, round_messages,
-                   selected_provider, selected_model, selection_policy, candidate_count,
                    latency_ms,
                    tokens_in, tokens_out, temperature, status, error,
                    reasoning_content, cache_read, cache_creation, reasoning_tokens,
@@ -823,10 +817,6 @@ class PersonaDataStore:
                     response=row["response"],
                     tool_calls=row["tool_calls"] or "",
                     round_messages=row["round_messages"] or "",
-                    selected_provider=row["selected_provider"] or "",
-                    selected_model=row["selected_model"] or "",
-                    selection_policy=row["selection_policy"] or "",
-                    candidate_count=row["candidate_count"] or 0,
                     latency_ms=row["latency_ms"],
                     tokens_in=row["tokens_in"] or 0,
                     tokens_out=row["tokens_out"] or 0,
@@ -868,24 +858,24 @@ class PersonaDataStore:
     async def get_daily_token_usage(self, date: str) -> list[dict]:
         """返回指定日期各模型的 LLM 调用统计（次数 + token 消耗）
 
-        返回 [{"provider": str, "model": str, "requests": int,
+        返回 [{"provider": "deepseek", "model": str, "requests": int,
                "tokens_in": int, ...}, ...]
         """
         async with self.db.execute(
-            "SELECT selected_provider, selected_model, COUNT(*) as requests,"
+            "SELECT model, COUNT(*) as requests,"
             " COALESCE(SUM(tokens_in),0) as tokens_in, COALESCE(SUM(tokens_out),0) as tokens_out,"
             " COALESCE(SUM(cache_read),0) as cache_read, COALESCE(SUM(cache_creation),0) as cache_creation,"
             " COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens"
             " FROM persona_llm_traces WHERE date(created_at) = ?"
-            " GROUP BY selected_provider, selected_model"
+            " GROUP BY model"
             " ORDER BY SUM(tokens_in) + SUM(tokens_out) DESC",
             (date,),
         ) as cursor:
             rows = await cursor.fetchall()
         return [
             {
-                "provider": row["selected_provider"] or "",
-                "model": row["selected_model"] or "",
+                "provider": "deepseek",
+                "model": row["model"] or "",
                 "requests": row["requests"],
                 "tokens_in": row["tokens_in"],
                 "tokens_out": row["tokens_out"],

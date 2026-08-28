@@ -99,7 +99,6 @@ class AdminDispatcher:
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
             ".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）\n"
-            ".ai admin probe reset <provider>/<model> - 重置 exhausted 模型\n"
             ".ai admin pause - 暂停主动消息\n"
             ".ai admin resume - 恢复主动消息"
         )
@@ -209,42 +208,6 @@ class AdminDispatcher:
                 lines.append(f"  ... 还有 {len(profile.facts) - 5} 条")
         else:
             lines.append(f"\n[用户画像] 暂无")
-
-        # LLM 统计（本次运行）
-        lines.append(f"\n[LLM 统计]")
-        if self.app.get_router():
-            stats = self.app.get_router_stats()
-            total_requests = 0
-            total_errors = 0
-            stat_lines = []
-            for provider_name in sorted(stats.keys()):
-                s = stats[provider_name]
-                req = s["requests"]
-                err = s["errors"]
-                total_requests += req
-                total_errors += err
-                error_rate = f"{(err / max(1, req) * 100):.1f}%" if req else "0.0%"
-                p = self.app.get_router_latency_percentiles(provider_name)
-                p50 = p["p50"] / 1000.0
-                p90 = p["p90"] / 1000.0
-                p99 = p["p99"] / 1000.0
-                stat_lines.append(
-                    f"  {provider_name}: {req} 次, 错误率 {error_rate}, "
-                    f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s"
-                )
-            if stat_lines:
-                lines.append(f"  总调用: {total_requests} 次 (错误 {total_errors})")
-                lines.extend(stat_lines)
-            else:
-                lines.append(f"  暂无统计数据")
-            token_in_total, token_out_total = 0, 0
-            if self.data_store and self.config.trace_enabled:
-                ti, to = await self.data_store.get_today_token_usage()
-                token_in_total = ti or 0
-                token_out_total = to or 0
-            lines.append(f"  Token: 输入 {token_in_total} / 输出 {token_out_total}")
-        else:
-            lines.append(f"  路由器未初始化")
 
         # 24h 错误摘要
         lines.append(f"\n[24h 错误摘要]")
@@ -414,31 +377,6 @@ class AdminDispatcher:
             self.app.resume_scheduler()
             return "已恢复主动消息发送"
         return "调度器未初始化"
-
-    async def _admin_probe(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self._is_admin(user_id):
-            return "权限不足"
-        if len(args) < 2:
-            return "用法: .ai admin probe reset <provider>/<model>"
-        if args[1] != "reset":
-            return f"未知的 probe 子命令: {args[1]}"
-        if len(args) < 3:
-            return "请指定模型: .ai admin probe reset <provider>/<model>"
-
-        model_ref = args[2]
-        if "/" not in model_ref:
-            return f"格式错误，请使用 provider/model 格式（如 deepseek/deepseek-v4-flash），实际: {model_ref}"
-        parts = model_ref.split("/", 1)
-        provider_name, model_name = parts[0], parts[1]
-
-        router = self.app.get_router() if self.app else None
-        if not router:
-            return "路由器未初始化"
-
-        ok = router.reset_provider_probe(provider_name, model_name)
-        if ok:
-            return f"模型 {provider_name}/{model_name} 已从 exhausted 重置为 disabled，恢复探针循环"
-        return f"模型 {provider_name}/{model_name} 不存在或未处于 exhausted 状态"
 
     # ── 辅助方法 ──────────────────────────────────────────────
 

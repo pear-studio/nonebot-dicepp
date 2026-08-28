@@ -5,11 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender
-from plugins.DicePP.core.config.pydantic_models import (
-    ModelConfig,
-    PersonaConfig,
-    ProviderConfig,
-)
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 from plugins.DicePP.module.persona.command import PersonaCommand
 
 
@@ -35,31 +31,8 @@ def default_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_path="./content/characters",
-        providers={
-            "openai": ProviderConfig(
-                api_key="fake_key",
-                base_url="http://localhost",
-                models=[
-                    ModelConfig(
-                        name="gpt-4o",
-                        category="llm",
-                        capabilities=["text", "tool_calls"],
-                        quality=0.9,
-                        cost=0.5,
-                    )
-                ],
-            ),
-        },
-        group_activity_enabled=False,
-        trace_enabled=False,
         whitelist_enabled=True,
-        daily_limit=100,
-        quota_check_enabled=False,
-        relationship_refuse_enabled=False,
-        decay_enabled=False,
         proactive_enabled=False,
-        character_life_enabled=False,
-        group_chat_enabled=False,
     )
 
 

@@ -12,9 +12,6 @@ from typing import Any, Awaitable, Callable, Literal, Mapping
 
 from pydantic import BaseModel, Field
 
-from ..llm.selection import CHAT, SelectionPolicy
-
-
 @dataclass(frozen=True)
 class ModelTurn:
     """一次成功模型调用的结构化 assistant turn。
@@ -39,8 +36,8 @@ class ModelTurn:
     def to_message(self) -> dict[str, Any]:
         """转换为 Runtime/Conversation 保存的 assistant 消息。
 
-        ``_provider_context`` 是 Runtime 内部字段；Gateway 向 API 发送前
-        必须移除它，并只为兼容 candidate 恢复所需续接字段。
+    ``_provider_context`` 是 Runtime 内部字段；Gateway 向 API 发送前
+    必须移除它，并只恢复当前客户端需要的续接字段。
         """
         message: dict[str, Any] = {
             "role": "assistant",
@@ -252,7 +249,7 @@ class AgentRunSpec:
     user_input: str
     tools: ToolKit = field(default_factory=ToolKit)
     output: OutputSpec | None = None
-    selection: SelectionPolicy = CHAT
+    task: str = "chat"
     limits: LoopLimits = field(default_factory=LoopLimits)
     run_tag: str = ""
     user_id: str = ""  # Life（react/diary）路径不使用，仅作为 trace 元数据透传
@@ -270,9 +267,9 @@ class AgentRunRequest:
     messages: list[dict]
     tools: ToolKit
     output: OutputSpec | None
-    selection: SelectionPolicy
     limits: LoopLimits
     metadata: RunMetadata
+    task: str = "chat"
 
 
 # ── UsageReport / BillingEntry / BillingSummary ──────────────────

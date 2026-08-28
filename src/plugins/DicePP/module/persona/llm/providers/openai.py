@@ -10,7 +10,7 @@ from typing import List, Dict, Optional, Any
 
 from plugins.DicePP.utils.logger import logger
 
-from .protocol import LLMProvider, LLMResponse, TokenUsage, ToolCall, ErrorClass, NonRetryableError
+from .protocol import LLMResponse, TokenUsage, ToolCall, NonRetryableError
 
 
 _RETRYABLE_KEYWORDS = (
@@ -21,32 +21,6 @@ _RETRYABLE_KEYWORDS = (
 # 不可重试错误关键词（立即抛出 NonRetryableError）
 _NON_RETRYABLE_AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
 _NON_RETRYABLE_CONTENT_KEYWORDS = ("content_filter", "moderation", "content policy")
-
-
-def _log_probe_error(model: str, exception: Exception) -> None:
-    """提取并记录 probe 失败异常的详细信息，用于区分超时/A/B两类错误。"""
-    err_type = type(exception).__name__
-    err_msg = str(exception)[:300]
-
-    # 尝试从 OpenAI SDK 异常中提取 HTTP 状态码和 body
-    http_status = getattr(exception, 'status_code', None)
-    body = getattr(exception, 'body', None)
-    body_info = ""
-    if isinstance(body, dict):
-        error = body.get('error', body)
-        if isinstance(error, dict):
-            code = error.get('code', '')
-            err_type_name = error.get('type', '')
-            msg = str(error.get('message', ''))[:120]
-            body_info = f" error_code={code} error_type={err_type_name} error_msg={msg}"
-        else:
-            body_info = f" body_keys={list(body.keys())}"
-
-    logger.warning(
-        f"probe failed: model={model} exception={err_type} "
-        f"http_status={http_status}{body_info} "
-        f"message={err_msg[:200]}"
-    )
 
 
 class OpenAIProvider:
@@ -196,7 +170,7 @@ class OpenAIProvider:
 
         # 检查：如果 tool_calls 出现在 reasoning_content 里，记录警告
         if message.tool_calls and isinstance(reasoning, str) and "tool_calls" in reasoning:
-            logger.warning("检测到 tool_calls 出现在 reasoning_content 中，可能是 thinking + tool_calls 不稳定")
+            logger.warning("检测到 tool_calls 出现在 reasoning_content 中，可能是思考模式与工具调用同时使用不稳定")
 
         # 标准化 tool_calls
         raw_tool_calls = message.tool_calls or []
@@ -221,7 +195,6 @@ class OpenAIProvider:
             f"tokens_in={usage.input} tokens_out={usage.output} "
             f"cache_read={usage.cache_read} latency={latency:.1f}s"
         )
-
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
@@ -231,7 +204,6 @@ class OpenAIProvider:
             reasoning_content=reasoning,
             latency_ms=latency * 1000,
         )
-
     def _build_extra_body(self, thinking: bool) -> dict:
         """构建 extra_body，子类可覆盖以注入 provider 特定参数。"""
         extra: dict = {}
@@ -303,32 +275,3 @@ class OpenAIProvider:
                 usage_raw_json=usage_raw_json,
                 usage_note=f"usage 解析异常: {e}",
             )
-
-    async def probe(self) -> bool:
-        """Health check: 发送 max_tokens=1 的 completion 请求。"""
-        client = self._get_client()
-        try:
-            await asyncio.wait_for(
-                client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": "ping"}],
-                    max_tokens=1,
-                ),
-                timeout=10,
-            )
-            return True
-        except asyncio.TimeoutError:
-            logger.warning(f"probe timeout: model={self.model}")
-            raise  # 重新抛出，让 _probe_loop 通过 classify_from_provider 归类为 NETWORK_ERROR
-        except Exception as e:
-            _log_probe_error(self.model, e)
-            raise  # 重新抛出，让调用方用 classify_from_provider 分类后做路由决策
-
-    @staticmethod
-    def classify_error(exception: Exception) -> ErrorClass:
-        error_msg = str(exception).lower()
-        if any(k in error_msg for k in _NON_RETRYABLE_AUTH_KEYWORDS):
-            return ErrorClass.NON_RETRYABLE
-        if any(k in error_msg for k in _NON_RETRYABLE_CONTENT_KEYWORDS):
-            return ErrorClass.NON_RETRYABLE
-        return ErrorClass.RETRYABLE

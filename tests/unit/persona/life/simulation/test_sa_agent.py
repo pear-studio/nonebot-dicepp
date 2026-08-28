@@ -50,12 +50,12 @@ class TestSAAgent:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def sa_agent(self, mock_store, mock_router):
-        return SAAgent(store=mock_store, router=mock_router)
+    def sa_agent(self, mock_store, mock_client):
+        return SAAgent(store=mock_store, client=mock_client)
 
     @pytest.fixture
     def sa_context(self):
@@ -212,12 +212,12 @@ class TestSABuildUserPrompt:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def sa_agent(self, mock_store, mock_router):
-        return SAAgent(store=mock_store, router=mock_router)
+    def sa_agent(self, mock_store, mock_client):
+        return SAAgent(store=mock_store, client=mock_client)
 
     def test_prompt_contains_front_rules(self, sa_agent):
         """_build_user_prompt 应包含 _FRONT_RULES"""
@@ -292,17 +292,16 @@ class TestSASelfCleanup:
 
     @pytest.fixture
     def agent(self, store, router):
-        return SAAgent(store=store, router=router)
+        return SAAgent(store=store, client=router)
 
     @staticmethod
     def _spec():
         from plugins.DicePP.module.persona.agent.runtime_types import (
             AgentRunSpec, ToolKit, LoopLimits,
         )
-        from plugins.DicePP.module.persona.llm.selection import SUMMARIZE
         return AgentRunSpec(
             system_prompt="test", user_input="test", tools=ToolKit(),
-            output=None, selection=SUMMARIZE, limits=LoopLimits(max_rounds=5),
+            output=None, task="summary", limits=LoopLimits(max_rounds=5),
         )
 
     @pytest.mark.asyncio

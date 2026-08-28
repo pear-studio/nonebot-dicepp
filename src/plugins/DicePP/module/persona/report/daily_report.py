@@ -56,21 +56,21 @@ class DailyReportGenerator:
         bot: Bot,
         port: MessagePort,
         store=None,
-        router=None,
+        client=None,
         character=None,
         config=None,
     ):
         self._bot = bot
         self._port = port
         self._store = store
-        self._router = router
+        self._client = client
         self._character = character
         self._config = config
 
     def set_app(self, app) -> None:
         """PersonaApp 就位后注入引用"""
         self._store = app.store
-        self._router = app.get_router() if hasattr(app, "get_router") else self._router
+        self._client = app.get_client() if hasattr(app, "get_client") else self._client
         self._character = app.get_character() if hasattr(app, "get_character") else self._character
 
     # ── 入口 ───────────────────────────────────────────────────
@@ -363,7 +363,7 @@ class DailyReportGenerator:
     async def _generate_opening(self, diary: Optional[str], core_stats: Dict[str, Any]) -> str:
         """生成段 1 开场白 — LLM 角色口吻或纯模板"""
         voice_enabled = bool(self._config.daily_report_voice_enabled) if self._config else True
-        if voice_enabled and self._character and self._router:
+        if voice_enabled and self._character and self._client:
             try:
                 summary = await self._build_summary(diary, core_stats)
                 # opening 是一次性短请求，不复用 Life Character Conversation，
@@ -371,7 +371,7 @@ class DailyReportGenerator:
                 from ..life.character_agent import CharacterAgent
                 agent = CharacterAgent(
                     store=self._store,
-                    router=self._router,
+                    client=self._client,
                     config=self._config,
                 )
                 context = {

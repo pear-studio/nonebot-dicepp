@@ -8,23 +8,19 @@ Persona AI 可以让 DicePP 扮演一个有角色设定、记忆和主动消息�
 
 先准备一个 DeepSeek API Key。
 
-API Key 只写到 `config/bots/{QQ号}.json`。程序内置的 provider/model 目录不含密钥。
+API Key 只写到实例级 `config/user.json`。Bot 配置不包含模型连接信息。
 
-在 `config/bots/{QQ号}.json` 中加入：
+在 `config/user.json` 中加入：
 
 ```json
 {
-  "persona_ai": {
-    "providers": {
-      "deepseek": {
-        "api_key": "把你的 API Key 放在这里"
-      }
-    }
-  }
+  "deepseek_api_key": "把你的 API Key 放在这里",
+  "deepseek_model": "deepseek-v4-flash",
+  "deepseek_base_url": "https://api.deepseek.com"
 }
 ```
 
-如果文件里已经有其他内容，只把 `persona_ai` 这一段合并进去，不要重复写两个最外层 `{}`。
+如果文件里已经有其他内容，只把这几个字段合并进去，不要重复写两个最外层 `{}`。
 
 ## 启用 Persona
 
@@ -58,13 +54,13 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 | `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |
 
-DeepSeek 的模型配置已经内置。如果你需要在 Bot 配置中覆盖，默认 `providers.deepseek.base_url` 是：
+DeepSeek 的模型配置由实例级 `config/user.json` 管理，默认接口地址是：
 
 ```text
 https://api.deepseek.com
 ```
 
-`api_key` 只放在该 Bot 配置的对应 provider 下。
+`deepseek_api_key`、`deepseek_model` 和 `deepseek_base_url` 只放在 `config/user.json`。
 
 ## 准备角色卡
 

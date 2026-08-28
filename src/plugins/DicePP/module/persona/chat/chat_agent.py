@@ -26,12 +26,12 @@ from ..transcript import (
     provider_user_name,
     sanitize_speaker_label,
 )
-from .chat_shared import ChatOutcome, _router_has_quota
+from .chat_shared import ChatOutcome, _client_has_quota
 
 if TYPE_CHECKING:
     from ..character.models import Character
     from ..data.store import PersonaDataStore
-    from ..llm.router import LLMRouter
+    from ..llm.client import TextModelClient
     from .chat_config import ChatConfig
     from .context import ContextBuilder
     from .delivery_queue import DeliveryQueue
@@ -46,7 +46,7 @@ class ChatAgent:
         scope: ConversationScope,
         conversation: Conversation,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client: TextModelClient,
         character: Character,
         config: ChatConfig,
         context_builder: ContextBuilder,
@@ -56,7 +56,7 @@ class ChatAgent:
         self._scope = scope
         self._conversation = conversation
         self._store = store
-        self._router = router
+        self._client = client
         self._character = character
         self._config = config
         self._context_builder = context_builder
@@ -158,23 +158,6 @@ class ChatAgent:
         tools["read_events"] = build_read_events_tool(self._store, tz)
         tools["search_events"] = build_search_events_tool(self._store)
         tools["get_jrrp"] = build_get_jrrp_tool(user_id_default=user_id, timezone=tz)
-
-        # generate_image / look_at_past_image
-        try:
-            from ..tools.generate_image import build_generate_image_tool
-            get_gen = self._router.get_gen_provider if hasattr(self._router, "get_gen_provider") else None
-            handle_error = self._router.handle_model_error if hasattr(self._router, "handle_model_error") else None
-            base_style = getattr(self._character.extensions, "image_gen_style", "") or ""
-            appearance = getattr(self._character.extensions, "image_gen_appearance", "") or ""
-            if get_gen is not None and get_gen() is not None:
-                tools["generate_image"] = build_generate_image_tool(
-                    get_gen_provider=get_gen,
-                    handle_model_error=handle_error,
-                    base_style=base_style,
-                    character_appearance=appearance,
-                )
-        except Exception:
-            logger.debug("generate_image 工具构建失败，跳过", exc_info=True)
 
         try:
             from ..tools.look_at_past_image import build_look_at_past_image_tool
@@ -304,7 +287,6 @@ class ChatAgent:
         )
         from ..agent.runtime_types import ToolSpec as NewToolSpec
         from ..tools.send_reply_segment import build_send_reply_segment_tool
-        from ..llm.selection import CHAT, CHAT_WITH_IMAGE
         from ..agent.runtime import embed_images_in_last_user_message
 
         conv = self._conversation
@@ -355,9 +337,9 @@ class ChatAgent:
                     image_message["name"] = stable_name
             transient_list.append(image_message)
 
-        # 5. 配额检查（Runtime 之前执行，mock router 跳过）
-        if _router_has_quota(self._router):
-            await self._router.check_daily_quota(user_id)
+        # 5. 配额检查（Runtime 之前执行）
+        if _client_has_quota(self._client):
+            await self._client.check_daily_quota(user_id)
 
         # 6. 计算 token_budget（阶段 3b Stage B 硬轮换）
         if self._scope.is_private:
@@ -375,14 +357,13 @@ class ChatAgent:
             and m.get("message_stream_id") == inbound_message_stream_id
             for m in messages_before_run
         )
-        selection = CHAT_WITH_IMAGE if has_images else CHAT
         result = await conv.run(
             system_prompt=self._context_builder.build_static_prompt(),
             user_input=user_input,
             interaction_id=interaction_id,
             tools=toolkit,
             output=send_reply,
-            selection=selection,
+            task="chat",
             limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
             run_tag="chat",
             agent_name="Chat",
@@ -414,9 +395,9 @@ class ChatAgent:
             conv.add_messages([fallback_message])
             await conv.save()
 
-        # 配额计数（LLM 调用已完成，mock router 跳过）
-        if _router_has_quota(self._router):
-            await self._router.increment_usage(user_id)
+        # 配额计数（LLM 调用已完成）
+        if _client_has_quota(self._client):
+            await self._client.increment_usage(user_id)
 
         # 7. 消费 result.output → final_text
         final_text = ""
@@ -459,7 +440,6 @@ class ChatAgent:
         )
         from ..agent.runtime_types import ToolSpec as NewToolSpec
         from ..tools.send_reply_segment import build_send_reply_segment_tool
-        from ..llm.selection import CHAT
 
         conv = self._conversation
         interaction_id = uuid.uuid4().hex
@@ -493,7 +473,7 @@ class ChatAgent:
             interaction_id=interaction_id,
             tools=toolkit,
             output=send_reply,
-            selection=CHAT,
+            task="chat",
             limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
             run_tag="proactive",
             agent_name="Chat",

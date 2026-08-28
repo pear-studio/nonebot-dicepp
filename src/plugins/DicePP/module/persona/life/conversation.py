@@ -44,7 +44,6 @@ from ..agent.runtime_types import (
     RunMetadata,
     ToolKit,
 )
-from ..llm.selection import CHAT, SelectionPolicy
 from ..transcript import (
     format_assistant_message,
     format_player_message,
@@ -393,7 +392,7 @@ class Conversation:
         interaction_id: str,
         tools: ToolKit | None = None,
         output: OutputSpec | None = None,
-        selection: SelectionPolicy = CHAT,
+        task: str = "chat",
         limits: LoopLimits | None = None,
         run_tag: str = "",
         agent_name: str = "",
@@ -517,7 +516,7 @@ class Conversation:
             messages=messages,
             tools=tools or ToolKit(),
             output=output,
-            selection=selection,
+            task=task,
             limits=_limits,
             metadata=RunMetadata(agent_name=agent_name, run_tag=run_tag, user_id=user_id, group_id=group_id),
         )
@@ -646,7 +645,7 @@ class Conversation:
 
     # ── Compact ───────────────────────────────────────
 
-    async def compact(self, keep_recent: int, router=None) -> str:
+    async def compact(self, keep_recent: int, client=None) -> str:
         """原地压缩：LLM 摘要旧消息 + 保留近期消息 → 替换 _messages → save。
 
         保留 cursors 不变——compact 是内存管理操作，不重新触发已有通知。
@@ -668,7 +667,7 @@ class Conversation:
         old_msgs = self._messages[:-keep_recent]
         recent = self._messages[-keep_recent:]
 
-        summary_text = await _llm_compact_summarize(router, old_msgs)
+        summary_text = await _llm_compact_summarize(client, old_msgs)
 
         summary_msg = {
             "role": "user",
@@ -794,9 +793,9 @@ class Conversation:
 # ── LLM 摘要辅助函数 ──────────────────────────────────
 
 
-async def _llm_compact_summarize(router, old_msgs: list) -> str:
+async def _llm_compact_summarize(client, old_msgs: list) -> str:
     """调用 LLM 对旧消息生成摘要。失败时返回硬截断兜底文本。"""
-    if router is None:
+    if client is None:
         return _fallback_summary()
 
     lines = []
@@ -818,25 +817,11 @@ async def _llm_compact_summarize(router, old_msgs: list) -> str:
     ]
 
     try:
-        from ..llm.selection import SUMMARIZE
-        candidates = router.build_candidates(SUMMARIZE)
-        for key in candidates:
-            provider = router.get_model_provider(key)
-            if provider is None:
-                continue
-            try:
-                resp = await provider.generate(
-                    messages=messages, temperature=0.3, timeout=30,
-                )
-                return resp.content.strip() if resp and resp.content else _fallback_summary()
-            except Exception:
-                logger.warning(
-                    "Compact LLM summarizer provider 调用失败", exc_info=True,
-                )
-                continue
+        resp = await client.generate(messages=messages, task="summary")
+        return resp.content.strip() if resp and resp.content else _fallback_summary()
     except Exception:
         logger.warning(
-            "Conversation compact LLM 摘要路由失败", exc_info=True,
+            "Conversation compact LLM 摘要调用失败", exc_info=True,
         )
     return _fallback_summary()
 

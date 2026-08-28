@@ -185,12 +185,6 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
             "is_character_active": True,
         }
 
-        self.cmd.app.chat.router = MagicMock()
-        self.cmd.app.chat.router.get_stats.return_value = {
-            "openai": {"requests": 1, "errors": 0},
-        }
-        self.cmd.app.chat.router.get_latency_percentiles.return_value = {"p50": 100, "p90": 200, "p99": 300}
-
         # AdminDispatcher 在 make_cmd 中初始化时 app/data_store 为 None，
         # 后续赋值后需同步更新 dispatcher 引用。
         self.cmd.admin_dispatcher.app = self.cmd.app

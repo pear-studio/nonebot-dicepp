@@ -23,7 +23,6 @@ from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
 from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
-from plugins.DicePP.module.persona.llm.selection import CHAT, CHAT_WITH_IMAGE
 
 
 def _make_config():
@@ -66,7 +65,7 @@ def _make_orch():
     cb = MagicMock()
     cb.build_static_prompt.return_value = "sys"
     orch = ChatOrchestrator(
-        store=_make_store(), router=MagicMock(), character=_make_char(),
+        store=_make_store(), client=MagicMock(), character=_make_char(),
         config=_make_config(), context_builder=cb,
     )
     return orch
@@ -115,7 +114,7 @@ class TestExecuteTurn:
             scope=ConversationScope.for_private("u1"),
             conversation=conv,
             store=_make_store(),
-            router=MagicMock(),
+            client=MagicMock(),
             character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
@@ -213,7 +212,7 @@ class _LoopRuntime:
             toolkit=request.tools,
             output_spec=request.output,
             limits=request.limits,
-            selection=request.selection,
+            task=request.task,
             interaction_id=request.interaction_id,
         )
 
@@ -229,7 +228,7 @@ class TestProactiveFakeLLM:
             scope=ConversationScope.for_private("u1"),
             conversation=conversation,
             store=_make_store(),
-            router=MagicMock(),
+            client=MagicMock(),
             character=character,
             config=_make_config(),
             context_builder=ContextBuilder(character, segment_guide=None),
@@ -249,7 +248,7 @@ class TestSpeakerPropagation:
     def _agent(self, scope, conv, *, store=None, delivery=None):
         return ChatAgent(
             scope=scope, conversation=conv,
-            store=store or _make_store(), router=MagicMock(), character=_make_char(),
+            store=store or _make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
@@ -310,7 +309,7 @@ class TestAssistantRefRecording:
     def _agent(self, conv, delivery):
         return ChatAgent(
             scope=ConversationScope.for_private("u1"), conversation=conv,
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
@@ -362,7 +361,7 @@ class TestExecuteTurnBranches:
     def _agent(self, scope, conv, *, store=None, delivery=None):
         return ChatAgent(
             scope=scope, conversation=conv,
-            store=store or _make_store(), router=MagicMock(), character=_make_char(),
+            store=store or _make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: delivery),
@@ -383,7 +382,7 @@ class TestExecuteTurnBranches:
                           completion_kind="completed", output_arguments={"content": "ok"})
         agent = ChatAgent(
             scope=ConversationScope.for_private("u1"), conversation=conv,
-            store=_make_store(), router=MagicMock(), character=_make_char(),
+            store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
             make_delivery=(lambda: None), after_response=after,
@@ -466,18 +465,17 @@ class TestExecuteTurnBranches:
         await agent.execute_turn(
             "u1", "", "看图", image_data_urls=["data:image/png;base64,AAAA"],
         )
-        # 有图 → selection 切 CHAT_WITH_IMAGE，且当轮图片作为 transient 注入
-        assert conv.run.call_args.kwargs["selection"] is CHAT_WITH_IMAGE
+        # 有图仍使用 chat task，图片作为 transient 注入
+        assert conv.run.call_args.kwargs["task"] == "chat"
         assert conv.run.call_args.kwargs["transient_context_messages"]
 
     def test_no_image_provider_keeps_past_image_tool_only(self):
-        router = MagicMock()
-        router.get_gen_provider.return_value = None
+        client = MagicMock()
         agent = ChatAgent(
             scope=ConversationScope.for_private("u1"),
             conversation=MagicMock(spec=Conversation),
             store=_make_store(),
-            router=router,
+            client=client,
             character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(
@@ -522,12 +520,12 @@ class TestExecuteTurnBranches:
         ]
 
     @pytest.mark.asyncio
-    async def test_no_image_uses_plain_chat_selection(self):
+    async def test_no_image_uses_plain_chat_task(self):
         conv = self._conv(final_text="ok", final_reason="stop",
                           completion_kind="completed", output_arguments={"content": "ok"})
         agent = self._agent(ConversationScope.for_private("u1"), conv, delivery=None)
         await agent.execute_turn("u1", "", "hi")
-        assert conv.run.call_args.kwargs["selection"] is CHAT
+        assert conv.run.call_args.kwargs["task"] == "chat"
 
     @pytest.mark.asyncio
     async def test_group_speaker_status_query_failure_is_best_effort(self):
@@ -558,7 +556,7 @@ class TestExecuteTurnBranches:
             scope=ConversationScope.for_private("u1"),
             conversation=conv,
             store=store,
-            router=MagicMock(),
+            client=MagicMock(),
             character=_make_char(),
             config=config,
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),

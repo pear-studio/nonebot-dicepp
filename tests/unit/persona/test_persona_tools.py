@@ -62,7 +62,7 @@ class TestRollDiceTool:
 
 class TestQuotaExceededException:
     def test_quota_exceeded_exception(self):
-        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+        from plugins.DicePP.module.persona.llm.errors import QuotaExceeded
 
         with pytest.raises(QuotaExceeded) as exc_info:
             raise QuotaExceeded("今日配额已用完")

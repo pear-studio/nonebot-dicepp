@@ -8,8 +8,6 @@ from typing import Any, Optional
 from plugins.DicePP.utils.logger import logger
 from ..data.models import SAState
 from ..data.store import PersonaDataStore
-from ..llm.router import LLMRouter
-from ..llm.selection import SUMMARIZE
 from ..agent.runtime_types import AgentRunSpec, FinishPlanArgs, LoopLimits, OutputSpec
 from .agent import Agent
 from .types import AgentResult
@@ -26,10 +24,10 @@ class SAAgent(Agent):
     def __init__(
         self,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client,
         config=None,
     ):
-        super().__init__(store, router, config)
+        super().__init__(store, client, config)
         self._sa_fronts_dicts: list = []  # build_run_spec → interpret_result 间传递
         self._sa_state: Optional[SAState] = None
 
@@ -69,9 +67,6 @@ class SAAgent(Agent):
 - detail：从 entity 拆出的扩展信息，挂在 entity 下
 
 用 [[条目key]] 语法在 content 中建立条目之间的关联。"""
-
-    def _get_selection_policy(self):
-        return SUMMARIZE
 
     def _get_openai_tools(self) -> list:
         """SA 通过 ToolKit + OutputSpec 执行，不在此返回工具"""
@@ -161,7 +156,7 @@ class SAAgent(Agent):
             user_input=user_prompt,
             tools=toolkit,
             output=finish_plan_spec,
-            selection=SUMMARIZE,
+            task="summary",
             limits=LoopLimits(max_rounds=sa_max_rounds),
             run_tag="sa_plan",
         )

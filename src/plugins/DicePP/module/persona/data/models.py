@@ -340,10 +340,6 @@ class LLMTraceRecord(BaseModel):
     response: str
     tool_calls: str = ""  # JSON
     round_messages: str = ""  # JSON — 结构化轮次摘要
-    selected_provider: str = ""
-    selected_model: str = ""
-    selection_policy: str = ""
-    candidate_count: int = 0
     latency_ms: Optional[int] = None
     tokens_in: int = 0
     tokens_out: int = 0

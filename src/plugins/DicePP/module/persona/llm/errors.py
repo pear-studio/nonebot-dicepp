@@ -1,4 +1,4 @@
-"""LLM 错误分类体系 — ErrorKind 枚举 + 统一 classify() 入口 + 分级恢复策略"""
+"""LLM 错误分类和用户可见消息。"""
 from __future__ import annotations
 
 import asyncio
@@ -7,11 +7,18 @@ from typing import Optional
 
 
 class RecoveryAction(str, Enum):
-    """恢复动作标签，由调用方按标签执行具体逻辑"""
+    """错误是否可以由上层重试。"""
     ABORT = "abort"                  # 不可恢复，立即终止
-    BACKOFF_RETRY = "backoff_retry"  # 退避后重试当前 provider
-    SWITCH_CANDIDATE = "switch"      # 切换到下一个候选 provider
+    BACKOFF_RETRY = "backoff_retry"  # 退避后重试当前请求
     COMPACT_RETRY = "compact_retry"  # 压缩上下文后重试
+
+
+class LLMCallError(Exception):
+    """单一文本客户端调用失败。"""
+
+
+class QuotaExceeded(Exception):
+    """当前用户达到每日 LLM 配额。"""
 
 
 class ErrorKind(str, Enum):
@@ -28,7 +35,7 @@ class ErrorKind(str, Enum):
 
     @property
     def recovery(self) -> RecoveryAction:
-        """每种 ErrorKind 绑定的默认恢复策略"""
+        """每种错误类型的默认处理策略。"""
         return _RECOVERY_MAP[self]
 
     @property
@@ -46,13 +53,13 @@ _INPUT_ERROR_KINDS: frozenset[ErrorKind] = frozenset([ErrorKind.CONTENT_FILTERED
 
 _RECOVERY_MAP = {
     ErrorKind.QUOTA_EXCEEDED: RecoveryAction.ABORT,
-    ErrorKind.CONTENT_FILTERED: RecoveryAction.SWITCH_CANDIDATE,
+    ErrorKind.CONTENT_FILTERED: RecoveryAction.ABORT,
     ErrorKind.CONTEXT_TOO_LONG: RecoveryAction.COMPACT_RETRY,
-    ErrorKind.RATE_LIMITED: RecoveryAction.SWITCH_CANDIDATE,
-    ErrorKind.TEMPORARILY_DOWN: RecoveryAction.SWITCH_CANDIDATE,
+    ErrorKind.RATE_LIMITED: RecoveryAction.BACKOFF_RETRY,
+    ErrorKind.TEMPORARILY_DOWN: RecoveryAction.BACKOFF_RETRY,
     ErrorKind.NETWORK_ERROR: RecoveryAction.BACKOFF_RETRY,
     ErrorKind.PROVIDER_ERROR: RecoveryAction.ABORT,
-    ErrorKind.UNKNOWN: RecoveryAction.SWITCH_CANDIDATE,
+    ErrorKind.UNKNOWN: RecoveryAction.ABORT,
 }
 
 # ── 关键词匹配表 ──────────────────────────────────────────────
@@ -100,7 +107,6 @@ def classify(exception: Exception) -> ErrorKind:
     4. UNKNOWN 兜底
     """
     # 1. 已知异常类型直接映射
-    from .router import QuotaExceeded
     from .providers.protocol import NonRetryableError
 
     if isinstance(exception, QuotaExceeded):
@@ -120,40 +126,6 @@ def classify(exception: Exception) -> ErrorKind:
                 return kind
 
     return ErrorKind.UNKNOWN
-
-
-def classify_from_provider(exception: Exception, provider: object) -> ErrorKind:
-    """结合 provider 特定知识和通用规则进行分类。
-
-    优先级：
-    1. classify_error_kind（provider 细粒度分类）→ 命中直接返回
-    2. classify_error（旧 ErrorClass 二元分类）→ NON_RETRYABLE 细分
-    3. classify 通用关键词兜底
-    """
-    from .providers.protocol import ErrorClass
-
-    # 1. Provider 细粒度分类（优先）
-    classify_kind = getattr(type(provider), 'classify_error_kind', None)
-    if classify_kind is not None:
-        try:
-            result = classify_kind(exception)
-            if result is not None:
-                return result
-        except Exception:
-            pass
-
-    # 2. Provider 旧 ErrorClass 分类
-    classify_method = getattr(type(provider), 'classify_error', None)
-    if classify_method is not None:
-        try:
-            old_result = classify_method(exception)
-            if old_result == ErrorClass.NON_RETRYABLE:
-                # Provider 标记为不可重试，进一步细分
-                return _classify_non_retryable(exception)
-        except Exception:
-            pass
-
-    return classify(exception)
 
 
 def _classify_non_retryable(exception: Exception) -> ErrorKind:

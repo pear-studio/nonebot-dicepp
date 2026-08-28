@@ -4,7 +4,6 @@
 """
 import asyncio
 import os
-from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
@@ -51,7 +50,7 @@ from .life.conversation_registry import ConversationRegistry
 from .life.conversation_summary import ProviderSummarizer
 from .life.change_sources import CharacterStateChangeSource
 from .llm.coordinator import LLMCallCoordinator
-from .llm.router import LLMRouter
+from .llm.client import DeepSeekTextModelClient, TextModelClient
 
 
 @dataclass
@@ -62,7 +61,6 @@ class PersonaApp:
     life: LifeSimulator
     store: PersonaDataStore
     port: MessagePort
-    all_providers_disabled: bool = False
     current_character_name: str = ""
 
     # ── 角色卡 ──
@@ -119,18 +117,10 @@ class PersonaApp:
             message_type=message_type,
         )
 
-    # ── LLM 路由器 ──
+    # ── 文本模型 ──
 
-    def get_router(self) -> Optional[LLMRouter]:
-        return self.chat.router
-
-    def get_router_stats(self) -> Dict[str, Any]:
-        router = self.chat.router
-        return router.get_stats() if router else {}
-
-    def get_router_latency_percentiles(self, provider_name: str) -> Dict[str, float]:
-        router = self.chat.router
-        return router.get_latency_percentiles(provider_name) if router else {}
+    def get_client(self) -> Optional[TextModelClient]:
+        return self.chat.client
 
     # ── 调度器 ──
 
@@ -184,31 +174,8 @@ class PersonaApp:
 class _Infra:
     """基础设施组件 — _build_infra 的返回容器"""
     store: PersonaDataStore
-    router: LLMRouter
+    client: TextModelClient
     port: MessagePort
-
-
-class _StartupStatus(str, Enum):
-    """启动汇总里模型条目的状态枚举。"""
-    OK = "ok"
-    FAIL = "fail"
-    DISABLED = "disabled"
-
-
-_STATUS_PREFIX: Dict[_StartupStatus, str] = {
-    _StartupStatus.OK: "[OK]",
-    _StartupStatus.FAIL: "[FAIL]",
-    _StartupStatus.DISABLED: "[OFF]",
-}
-
-
-def _status_note(status: _StartupStatus) -> str:
-    """根据状态返回附加说明文本。"""
-    if status is _StartupStatus.OK:
-        return ""
-    if status is _StartupStatus.FAIL:
-        return " (probe 失败)"
-    return " (已禁用)"
 
 
 @dataclass
@@ -219,7 +186,7 @@ class ChatDeps:
     rel_store: RelationshipStore
     profile_store: ProfileStore
     event_store: EventStore
-    router: LLMRouter
+    client: TextModelClient
     coordinator: LLMCallCoordinator
     character: Character
     config: Any
@@ -290,21 +257,25 @@ async def _migrate_code_setting(store: PersonaDataStore) -> None:
         logger.info("已将口令 'code' 从 persona_settings 迁移到 persona_global_settings")
 
 
-def _build_router(config, store: PersonaDataStore) -> LLMRouter:
-    """初始化 LLM 路由器（依赖 store 做配额检查）"""
-    llm_router = LLMRouter(
-        providers=config.providers,
-        global_max_concurrent=config.max_concurrent_requests,
-        timeout=config.chat_llm_timeout_seconds,
+def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:
+    """从实例级 user.json 构建唯一的 DeepSeek 文本客户端。"""
+    user_config = bot.user_config
+    if not user_config.deepseek_api_key:
+        raise PersonaConfigError(
+            "未配置 DeepSeek API Key，请在 config/user.json 中设置 deepseek_api_key"
+        )
+    client = DeepSeekTextModelClient(
+        api_key=user_config.deepseek_api_key,
+        model=user_config.deepseek_model,
+        base_url=user_config.deepseek_base_url,
+        data_store=store,
+        timezone=config.timezone,
         daily_limit=config.daily_limit,
         quota_check_enabled=config.quota_check_enabled,
-        data_store=store,
-        config=config,
         trace_enabled=config.trace_enabled,
-        trace_max_age_days=config.trace_max_age_days,
     )
-    logger.info("LLM 路由器已初始化")
-    return llm_router
+    logger.info("DeepSeek 文本客户端已初始化: model=%s", client.model)
+    return client
 
 
 def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
@@ -326,28 +297,28 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
 
 
 async def _build_infra(bot: Bot, config, character_name: str) -> _Infra:
-    """创建基础设施组件: store / router / port"""
+    """创建基础设施组件: store / client / port"""
     store = await _build_store(bot, config, character_name)
-    router = _build_router(config, store)
+    client = _build_client(bot, config, store)
     port = _build_port(bot, store)
 
     return _Infra(
         store=store,
-        router=router,
+        client=client,
         port=port,
     )
 
 
 def _build_agents(
     store: PersonaDataStore,
-    router: LLMRouter,
+    client: TextModelClient,
     config,
     character: Character,
 ) -> tuple[DMAgent, CharacterAgent, SAAgent, CharacterLife, ActionEvaluator]:
     """创建 Agent 实例 — 工具由各 Agent 自建。"""
-    dm_agent = DMAgent(store, router, config=config)
-    character_agent = CharacterAgent(store, router, config=config)
-    sa_agent = SAAgent(store, router, config=config)
+    dm_agent = DMAgent(store, client, config=config)
+    character_agent = CharacterAgent(store, client, config=config)
+    sa_agent = SAAgent(store, client, config=config)
 
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
@@ -360,7 +331,7 @@ def _build_agents(
 
     action_evaluator = ActionEvaluator(
         store=store,
-        router=router,
+        client=client,
         config=config,
         timezone=config.timezone,
     )
@@ -383,7 +354,7 @@ def _make_resolve_query_db(bot: Bot):
 
 def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     """组装 ChatOrchestrator（替代 ChatSession）"""
-    scoring_agent = ScoringAgent(deps.router, timezone=deps.config.timezone,
+    scoring_agent = ScoringAgent(deps.client, timezone=deps.config.timezone,
                                  max_rounds=deps.config.background_llm_max_rounds,
                                  store=deps.store)
     from .chat.context import SegmentGuide
@@ -416,7 +387,7 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     )
     return ChatOrchestrator(
         store=deps.store,
-        router=deps.router,
+        client=deps.client,
         character=deps.character,
         config=chat_config,
         scoring_trigger=scoring_trigger,
@@ -449,14 +420,13 @@ async def _build_life(
     max_rounds = config.background_llm_max_rounds if config else 10
     from .agent.runtime_types import LoopLimits
     from .agent.runtime import AgentRuntime
-    # router 从任一已构造的 Agent 获取（所有 Agent 共享同一 router 实例）
-    _router = dm_agent.router
+    # 所有 Life Agent 共享同一文本客户端。
+    client = dm_agent.client
     life_registry = ConversationRegistry(
         store,
         runtime_factory=lambda: AgentRuntime(
-            router=_router, store=store,
+            client=client, store=store,
             limits=LoopLimits(max_rounds=max_rounds),
-            llm_timeout=config.background_llm_timeout_seconds,
         ),
         change_source_factory=lambda scope: (
             [CharacterStateChangeSource(store)]
@@ -464,7 +434,7 @@ async def _build_life(
             else []
         ),
         character_id_provider=lambda: character.character_id,
-        summarizer=ProviderSummarizer(_router),
+        summarizer=ProviderSummarizer(client),
     )
     dm_agent.inject_registry(
         life_registry,
@@ -536,100 +506,6 @@ async def _build_life(
         share_scheduler=share_scheduler,
     )
 
-
-async def _startup_summary(
-    character: Character,
-    providers: Dict[str, object],
-    probe_results: Dict[tuple, bool],
-    infra: _Infra,
-    bot: Bot,
-) -> None:
-    """输出启动汇总：结构化日志 + master 消息（仅可用模型）。"""
-    llm_entries: List[tuple] = []
-    gen_entries: List[tuple] = []
-    for pname, pconfig in providers.items():
-        for mconfig in pconfig.models:
-            if not pconfig.enabled or not mconfig.enabled:
-                status = _StartupStatus.DISABLED
-            else:
-                key = (pname, mconfig.name)
-                status = (
-                    _StartupStatus.OK
-                    if probe_results.get(key, False)
-                    else _StartupStatus.FAIL
-                )
-            if mconfig.category == "llm":
-                llm_entries.append((pname, mconfig, status))
-            elif mconfig.category == "gen":
-                gen_entries.append((pname, mconfig, status))
-
-    desc = character.description or ""
-    if len(desc) > 60:
-        desc = desc[:60] + "..."
-
-    lines: List[str] = []
-    lines.append("══════ Persona AI 启动报告 ══════")
-    lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
-
-    if llm_entries:
-        ok_count = sum(1 for _, _, s in llm_entries if s is _StartupStatus.OK)
-        fail_count = sum(1 for _, _, s in llm_entries if s is _StartupStatus.FAIL)
-        lines.append(f"LLM 模型 ({ok_count} 可用 / {fail_count} 失败 / {len(llm_entries)} 总计):")
-        for pname, mconfig, status in llm_entries:
-            thinking_note = " (thinking: on)" if getattr(mconfig, "thinking", False) else ""
-            lines.append(
-                f"  {_STATUS_PREFIX[status]} {pname}/{mconfig.name}"
-                f"{thinking_note}{_status_note(status)}"
-            )
-
-    if gen_entries:
-        ok_count = sum(1 for _, _, s in gen_entries if s is _StartupStatus.OK)
-        fail_count = sum(1 for _, _, s in gen_entries if s is _StartupStatus.FAIL)
-        lines.append(f"图像生成模型 ({ok_count} 可用 / {fail_count} 失败 / {len(gen_entries)} 总计):")
-        for pname, mconfig, status in gen_entries:
-            lines.append(
-                f"  {_STATUS_PREFIX[status]} {pname}/{mconfig.name}{_status_note(status)}"
-            )
-
-    lines.append("════════════════════════════════════")
-
-    for line in lines:
-        logger.info(line)
-
-    master_id = bot.config.master
-    if not master_id:
-        return
-
-    available_llm = [f"{p}/{m.name}" for p, m, s in llm_entries if s is _StartupStatus.OK]
-    failed_llm = [f"{p}/{m.name}" for p, m, s in llm_entries if s is _StartupStatus.FAIL]
-    available_gen = [f"{p}/{m.name}" for p, m, s in gen_entries if s is _StartupStatus.OK]
-    failed_gen = [f"{p}/{m.name}" for p, m, s in gen_entries if s is _StartupStatus.FAIL]
-
-    msg_lines = ["Persona AI 启动完成"]
-    msg_lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
-
-    if llm_entries and not available_llm and failed_llm:
-        msg_lines.append(
-            f"[ALERT] 所有 {len(failed_llm)} 个 LLM 模型 probe 失败"
-        )
-    if available_llm:
-        msg_lines.append(f"可用 LLM: {', '.join(available_llm)}")
-    if failed_llm:
-        msg_lines.append(f"不可用 (probe 失败): {', '.join(failed_llm)}")
-    if available_gen:
-        msg_lines.append(f"可用图像生成: {', '.join(available_gen)}")
-    if failed_gen:
-        msg_lines.append(f"不可用 (probe 失败): {', '.join(failed_gen)}")
-
-    try:
-        await infra.port.send(
-            master_id, "", "\n".join(msg_lines),
-            message_type=MessageType.SYSTEM_LOG,
-        )
-    except Exception:
-        logger.exception("发送启动报告到 master 失败")
-
-
 async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     """从 Bot 组装 Persona 模块所有组件
 
@@ -638,7 +514,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     Raises:
         PersonaCharacterLoadError: 角色卡加载失败。
-        PersonaConfigError: 必填配置（如 ``providers``）缺失。
+        PersonaConfigError: DeepSeek API Key 缺失。
         PersonaStorageError: 数据库句柄不可用。
     """
     config = bot.config.persona_ai
@@ -652,15 +528,13 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         return None
 
     character = _load_character(config.character_path, character_name)
-    if not config.providers:
+    if not bot.user_config.deepseek_api_key:
         raise PersonaConfigError(
-            "未配置任何 LLM 提供者 (persona_ai.providers)。"
-            "请参考新格式: persona_ai.providers.<name>.api_key / .base_url / .models[*]"
+            "未配置 DeepSeek API Key，请在 config/user.json 中设置 deepseek_api_key"
         )
-
     infra = await _build_infra(bot, config, character_name)
     dm_agent, character_agent, sa_agent, character_life, _ = _build_agents(
-        infra.store, infra.router, config, character,
+        infra.store, infra.client, config, character,
     )
 
     coordinator = LLMCallCoordinator(
@@ -681,7 +555,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         rel_store=infra.store,
         profile_store=infra.store,
         event_store=infra.store,
-        router=infra.router,
+        client=infra.client,
         coordinator=coordinator,
         character=character,
         config=config,
@@ -705,22 +579,8 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     if life.share_scheduler is not None:
         life.share_scheduler.set_trigger_callback(chat.trigger_proactive)
 
-    probe_results: Dict[tuple, bool] = {}
-    try:
-        probe_results = await infra.router.probe_all_models()
-    except Exception as e:
-        logger.error(f"启动探针异常: {e}")
-    all_disabled = infra.router.all_providers_disabled()
-    if all_disabled:
-        logger.warning("所有模型 probe 失败！Persona AI 功能将不可用")
-
-    infra.router.start_probe_task()
-
-    await _startup_summary(character, config.providers, probe_results, infra, bot)
-
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
         chat=chat, life=life, store=infra.store, port=infra.port,
-        all_providers_disabled=all_disabled,
         current_character_name=character_name,
     )

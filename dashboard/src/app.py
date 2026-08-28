@@ -738,7 +738,6 @@ def _load_pydantic_models_module():
     module_name = f"{package_name}.pydantic_models"
     try:
         sys.modules.pop(module_name, None)
-        sys.modules.pop(f"{package_name}.builtin_providers", None)
         package = types.ModuleType(package_name)
         package.__path__ = [str(_pydantic_path.parent)]
         package.__package__ = package_name
@@ -779,9 +778,7 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
     ``dashboard_section`` directly from schema nodes.
 
     Known limitation: does not handle anyOf (Optional[BaseModel]) or
-    items.$ref (List[BaseModel]).  These patterns exist for fields like
-    persona_ai.providers.<name>.models[*].circuit_breaker, but their dotted
-    keys contain dynamic segments the flat config_merged output cannot match.
+    items.$ref (List[BaseModel]).
     """
     # Model-level json_schema_extra keys are merged at the model schema top level
     tab = s.get("dashboard_tab", inherited_tab)
@@ -803,6 +800,8 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
             "description": desc,
             "tab": field_tab,
             "section": field_section,
+            "format": prop.get("format", ""),
+            "writeOnly": bool(prop.get("writeOnly", False)),
         }
 
         # Resolve $ref for nested models
@@ -822,7 +821,7 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
                     ref_schema = defs.get(ref_name, {})
                     result.update(_flatten_json_schema(ref_schema, defs, full,
                                                        field_tab, field_section))
-        # Handle additionalProperties.$ref (Dict[str, BaseModel], e.g. providers)
+        # Handle additionalProperties.$ref (Dict[str, BaseModel])
         elif "additionalProperties" in prop and isinstance(prop["additionalProperties"], dict):
             ap = prop["additionalProperties"]
             if "$ref" in ap:
@@ -869,7 +868,11 @@ def _is_sensitive_config_path(path: str) -> bool:
     """Return whether a config leaf contains a credential value."""
 
     leaf = path.rsplit(".", 1)[-1]
-    return leaf in _SENSITIVE_CONFIG_LEAFS or leaf.endswith("_token")
+    return (
+        leaf in _SENSITIVE_CONFIG_LEAFS
+        or leaf.endswith("_token")
+        or leaf.endswith("_api_key")
+    )
 
 
 def _cached_config_field_metadata() -> dict:
@@ -892,13 +895,8 @@ def _cached_config_layout() -> dict:
 
 
 def _find_meta(dotted: str, meta: dict) -> dict:
-    """Match exact metadata keys and the explicit provider field shape."""
-    if dotted in meta:
-        return meta[dotted]
-    parts = dotted.split(".")
-    if len(parts) == 4 and parts[:2] == ["persona_ai", "providers"]:
-        return meta.get("persona_ai.providers." + parts[3], {})
-    return {}
+    """Return metadata for an exact configuration field path."""
+    return meta.get(dotted, {})
 
 
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
@@ -934,9 +932,8 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
                     "source": source if key in overlay else "default",
                 }
 
-        # ``providers`` is a legal open mapping: a user may add a provider
-        # name that is absent from the built-in catalog.  Keep those dynamic
-        # keys visible in the merged view instead of silently dropping them.
+        # Keep explicitly supplied values visible in the merged view even when
+        # they are not part of the defaults.
         for key, value in overlay.items():
             if key in base:
                 continue
@@ -968,6 +965,8 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             "description": meta.get("description", ""),
             "tab": meta.get("tab", "config"),
             "section": meta.get("section", "runtime"),
+            "format": meta.get("format", ""),
+            "writeOnly": bool(meta.get("writeOnly", False)),
         }
 
     layout = _cached_config_layout()
@@ -1348,18 +1347,18 @@ def _compute_llm_usage(persona_db_path: Path, today: str) -> Optional[dict]:
 
         by_model = []
         cursor = conn.execute(
-            "SELECT selected_provider, selected_model,"
+            "SELECT model,"
             " COUNT(*) as requests,"
             " COALESCE(SUM(tokens_in + tokens_out), 0) as tokens"
             " FROM persona_llm_traces WHERE date(created_at) = ?"
-            " GROUP BY selected_provider, selected_model"
+            " GROUP BY model"
             " ORDER BY tokens DESC",
             (today,),
         )
         for r in cursor.fetchall():
             by_model.append({
-                "provider": r["selected_provider"] or "",
-                "model": r["selected_model"] or "",
+                "provider": "deepseek",
+                "model": r["model"] or "",
                 "requests": r["requests"],
                 "tokens": r["tokens"],
             })

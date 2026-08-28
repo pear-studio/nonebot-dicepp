@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 from pydantic import BaseModel
 from plugins.DicePP.utils.logger import logger
-from ..llm.router import LLMRouter
 from ..data.store import PersonaDataStore
-from ..llm.selection import SelectionPolicy, EVENT_GEN
+from ..llm.client import TextModelClient
 from ..agent.runtime_types import AgentRunSpec, LoopLimits, OutputSpec, ToolKit
 from .types import AgentResult
 
@@ -20,7 +19,7 @@ class Agent(ABC):
     每一个 Agent 持有自己的身份、system prompt、工具声明和持久化状态。
     run() 方法一站式完成：加载状态 → 拼 prompt → LLM 执行 → 返回结果。
     子类可覆盖 load_state / save_state / build_system_prompt / _build_user_prompt
-    / _get_selection_policy / build_run_spec / interpret_result 等钩子。
+    / build_run_spec / interpret_result 等钩子。
     T6: ToolKit 由子类在 build_run_spec() 中直接构建，使用 tools/*.py 中的 build_xxx_tool() 函数。
     """
 
@@ -32,16 +31,15 @@ class Agent(ABC):
     def __init__(
         self,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client: TextModelClient,
         config=None,
     ):
         self.store = store
-        self.router = router
+        self.client = client
         self.config = config
         self._cached_state = None  # DMAgent 专用：在 super().run() 前设置以跳过 load_state()
         self._cached_system_prompt: Optional[str] = None  # DMAgent 专用：在 super().run() 前设置以跳过重复构建
         self._max_rounds = config.background_llm_max_rounds if config else 10
-        self._llm_timeout = config.background_llm_timeout_seconds if config else 90
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
         # A2: Registry 注入 — 不为 None 时 Conversation 由 registry 托管
@@ -79,10 +77,6 @@ class Agent(ABC):
         """构建用户提示词，子类可覆盖。默认将 context 转为字符串。"""
         return str(context)
 
-    def _get_selection_policy(self) -> SelectionPolicy:
-        """获取 LLM 选择策略，子类可覆盖。"""
-        return EVENT_GEN
-
     # ── ChangeSource 支持 ───────────────────────────────────────
 
     def _get_change_sources(self) -> "list[ChangeSource]":
@@ -114,10 +108,9 @@ class Agent(ABC):
         from ..agent.runtime_types import LoopLimits
 
         runtime = AgentRuntime(
-            router=self.router,
+            client=self.client,
             store=self.store,
             limits=LoopLimits(max_rounds=self._max_rounds),
-            llm_timeout=self._llm_timeout,
         )
         self._conversation = _Conv(runtime=runtime)
         self._system_prompt = system_prompt
@@ -241,7 +234,7 @@ class Agent(ABC):
             user_input=user_prompt,
             tools=toolkit,
             output=None,
-            selection=self._get_selection_policy(),
+            task="background",
             limits=LoopLimits(max_rounds=self._max_rounds),
         )
 
@@ -274,10 +267,8 @@ class Agent(ABC):
         try:
             spec = await self.build_run_spec(context)
 
-            # 配额检查（Runtime 之前执行）。
-            # 仅当 router 已配置 data_store 时检查（mock router 无 data_store 则跳过）。
-            if _router_has_quota(self.router):
-                await self.router.check_daily_quota(spec.user_id)
+            if _client_has_quota(self.client):
+                await self.client.check_daily_quota(spec.user_id)
 
             result = await self._run_conversation(
                 context,
@@ -287,7 +278,7 @@ class Agent(ABC):
                 interaction_id=interaction_id,
                 tools=spec.tools,
                 output=spec.output,
-                selection=spec.selection,
+                task=spec.task,
                 limits=spec.limits,
                 run_tag=spec.run_tag,
                 agent_name=self.name,
@@ -295,10 +286,8 @@ class Agent(ABC):
                 group_id=spec.group_id,
             )
 
-            # 配额计数（LLM 调用已完成）。
-            # 仅当 router 已配置 data_store 时计数（mock router 无 data_store 则跳过）。
-            if _router_has_quota(self.router):
-                await self.router.increment_usage(spec.user_id)
+            if _client_has_quota(self.client):
+                await self.client.increment_usage(spec.user_id)
 
             return await self.interpret_result(result, context)
         except Exception as e:
@@ -321,12 +310,12 @@ class Agent(ABC):
             )
 
 
-def _router_has_quota(router) -> bool:
-    """判断 router 是否配置了配额功能（排除 mock 对象）。"""
+def _client_has_quota(client) -> bool:
+    """判断文本客户端是否启用配额。"""
     from unittest.mock import Mock
-    if isinstance(router, Mock):
+    if isinstance(client, Mock):
         return False
-    return getattr(router, "quota_check_enabled", False) and getattr(router, "data_store", None) is not None
+    return getattr(client, "quota_check_enabled", False) and getattr(client, "data_store", None) is not None
 
 
 # 子类通过 build_run_spec() 直接构建 ToolKit，使用 tools/*.py 中的 build_xxx_tool() 函数。

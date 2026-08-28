@@ -5,7 +5,7 @@ former contains instance-wide service policy while the latter contains one
 QQ account's runtime settings.  Their JSON files are independent sparse
 overlays; one is never treated as an overlay of the other.
 """
-from typing import List, Literal, Optional, Dict
+from typing import List
 
 from pydantic import (
     BaseModel,
@@ -14,9 +14,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from .builtin_providers import builtin_provider_catalog_data
-
 
 # ── Dashboard layout metadata ─────────────────────────────────────────────────
 
@@ -33,7 +30,6 @@ DASHBOARD_LAYOUT = {
         "advanced":   {"label": "高级",       "tab": "config",  "order": 3, "priority": "low"},
         # Persona tab
         "basic":        {"label": "基本设置",     "tab": "persona", "order": 0},
-        "providers":    {"label": "模型与提供商", "tab": "persona", "order": 1},
         "chat_reply":   {"label": "对话与回复",   "tab": "persona", "order": 2},
         "proactive":    {"label": "主动消息",     "tab": "persona", "order": 3},
         "life_sim":     {"label": "生活模拟",     "tab": "persona", "order": 4},
@@ -48,9 +44,9 @@ DASHBOARD_LAYOUT = {
 class UserConfig(BaseModel):
     """Configuration shared by all Bots in one DicePP instance.
 
-    The first configuration-foundation batch intentionally keeps this schema
-    empty.  Future instance-wide fields will be added here without allowing
-    Bot identity or behaviour into ``config/user.json``.
+    The API connection is shared by all Bots in one DicePP instance. Bot files
+    only contain Persona behaviour; they never select a provider or carry a
+    copy of the API key.
     """
 
     model_config = ConfigDict(
@@ -62,79 +58,23 @@ class UserConfig(BaseModel):
         },
     )
 
-
-
-# ── Sub-config models ─────────────────────────────────────────────────────────
-
-
-class CircuitBreakerConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={"dashboard_section": "providers"}
+    deepseek_api_key: str = Field(
+        default="", title="DeepSeek API Key",
+        json_schema_extra={
+            "dashboard_section": "user",
+            "format": "password",
+            "writeOnly": True,
+        },
     )
-
-    failure_threshold: int = Field(default=3, ge=1, title="失败阈值", description="连续失败 N 次后 disabled")
-    probe_interval_seconds: int = Field(default=300, ge=10, title="探测间隔", description="disabled 模型放行探测的间隔（秒）")
-
-
-class ModelConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={"dashboard_section": "providers"}
+    deepseek_model: str = Field(
+        default="deepseek-v4-flash", title="DeepSeek 模型",
+        json_schema_extra={"dashboard_section": "user"},
     )
-
-    name: str = Field(title="模型名")
-    api_model: Optional[str] = Field(default=None, title="API 模型名", description="实际 API 模型名，默认使用 name")
-    category: Literal["llm", "gen"] = Field(title="模型类别")
-    capabilities: List[str] = Field(title="能力列表")
-    quality: float = Field(default=0.5, ge=0.0, le=1.0, title="质量权重")
-    cost: float = Field(default=0.5, ge=0.0, le=1.0, title="成本权重")
-    thinking: bool = Field(default=False, title="思考模式")
-    enabled: bool = Field(default=True, title="启用")
-    circuit_breaker: Optional[CircuitBreakerConfig] = Field(default=None, title="熔断器")
-    max_prompt_chars: Optional[int] = Field(default=None, ge=1, title="最大提示字符数")
-
-    @model_validator(mode="after")
-    def _validate_category_capabilities(self) -> "ModelConfig":
-        if self.category == "llm" and "text" not in self.capabilities:
-            raise ValueError(
-                f"llm 模型 '{self.name}' 必须包含 'text' capability，"
-                f"当前 capabilities={self.capabilities}。"
-                f"请检查 persona_ai.providers.<name>.models[*] 配置。"
-            )
-        if self.category == "gen":
-            non_text = [c for c in self.capabilities if c != "text"]
-            if not non_text:
-                raise ValueError(
-                    f"gen 模型 '{self.name}' 必须包含至少一个非 'text' capability，"
-                    f"当前 capabilities={self.capabilities}。"
-                    f"请检查 persona_ai.providers.<name>.models[*] 配置。"
-                )
-        return self
-
-
-class ProviderConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        strict=True,
-        json_schema_extra={"dashboard_section": "providers"}
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com", title="DeepSeek 接口地址",
+        description="高级配置：通常无需修改",
+        json_schema_extra={"dashboard_section": "advanced"},
     )
-
-    api_key: str = Field(title="API Key")
-    base_url: str = Field(title="接口地址")
-    models: List[ModelConfig] = Field(title="模型列表")
-    max_concurrent: Optional[int] = Field(default=None, ge=1, title="最大并发")
-    enabled: bool = Field(default=True, title="启用")
-
-
-def _builtin_provider_catalog() -> Dict[str, ProviderConfig]:
-    """Construct catalog entries using this schema module's own model types."""
-    return {
-        name: ProviderConfig.model_validate(value)
-        for name, value in builtin_provider_catalog_data().items()
-    }
 
 
 class PersonaConfig(BaseModel):
@@ -174,28 +114,6 @@ class PersonaConfig(BaseModel):
     )
 
     timezone: str = Field(default="Asia/Shanghai", title="时区")
-
-    # ── 模型与提供商 ─────────────────────────────────────────────────────────
-
-    providers: Dict[str, ProviderConfig] = Field(
-        default_factory=_builtin_provider_catalog, title="模型提供商",
-        json_schema_extra={"dashboard_section": "providers"},
-    )
-
-    max_concurrent_requests: int = Field(
-        default=2, title="最大并发请求",
-        json_schema_extra={"dashboard_section": "providers"},
-    )
-    chat_llm_timeout_seconds: int = Field(
-        default=30, ge=5, title="聊天 LLM 超时",
-        description="用户对话触发的 LLM 调用超时（秒）",
-        json_schema_extra={"dashboard_section": "providers"},
-    )
-    background_llm_timeout_seconds: int = Field(
-        default=90, ge=5, title="后台 LLM 超时",
-        description="后台角色模拟（事件/反应/日记/分享/观察）LLM 调用超时（秒）",
-        json_schema_extra={"dashboard_section": "providers"},
-    )
 
     # ── 对话与回复 ───────────────────────────────────────────────────────────
 

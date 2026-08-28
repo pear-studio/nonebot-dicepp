@@ -365,12 +365,17 @@
                         <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
                           <template x-if="!field.editing">
                             <div class="pt-2">
-                              <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                              <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="field.writeOnly ? (field.value ? '******' : '') : formatFieldValue(field.value)"></pre>
                             </div>
                           </template>
                           <template x-if="field.editing">
                             <div class="pt-2">
-                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                              <template x-if="field.writeOnly || field.format === 'password'">
+                                <input type="password" x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                              </template>
+                              <template x-if="!(field.writeOnly || field.format === 'password')">
+                                <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                              </template>
                               <div class="flex gap-2 mt-1">
                                 <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
                                 <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
@@ -463,12 +468,17 @@
                       <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
                         <template x-if="!field.editing">
                           <div class="pt-2">
-                            <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                            <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="field.writeOnly ? (field.value ? '******' : '') : formatFieldValue(field.value)"></pre>
                           </div>
                         </template>
                         <template x-if="field.editing">
                           <div class="pt-2">
-                            <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                            <template x-if="field.writeOnly || field.format === 'password'">
+                              <input type="password" x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                            </template>
+                            <template x-if="!(field.writeOnly || field.format === 'password')">
+                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                            </template>
                             <div class="flex gap-2 mt-1">
                               <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
                               <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
@@ -1847,6 +1857,8 @@ function app() {
           editValue: '',
           label: entry.label || '',
           description: entry.description || '',
+          format: entry.format || '',
+          writeOnly: entry.writeOnly === true,
           tab: entry.tab || 'config',
           section: entry.section || 'runtime',
           expanded: false,

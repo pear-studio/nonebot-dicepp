@@ -407,7 +407,7 @@ class TestConversationCompact:
         for i in range(10):
             conv.add_message("user", f"msg{i}")
 
-        summary = await conv.compact(keep_recent=3, router=None)
+        summary = await conv.compact(keep_recent=3, client=None)
         assert conv.length == 4  # 1 summary + 3 recent
         assert conv._messages[0]["content"].startswith("[通知] 之前的对话摘要")
         assert conv._messages[1]["content"] == "msg7"
@@ -422,13 +422,13 @@ class TestConversationCompact:
     async def test_compact_noop_when_under_limit(self):
         conv = Conversation()
         conv.add_message("user", "a")
-        result = await conv.compact(keep_recent=5, router=None)
+        result = await conv.compact(keep_recent=5, client=None)
         assert result == ""
         assert conv.length == 1
 
     @pytest.mark.asyncio
-    async def test_compact_with_router(self):
-        """使用 mock router 执行 LLM 压缩"""
+    async def test_compact_with_client(self):
+        """使用 mock client 执行 LLM 压缩"""
         store = FakeStore()
         conv = Conversation(store=store)
         conv._id = "c1"
@@ -442,11 +442,10 @@ class TestConversationCompact:
         mock_response.model = "test-summarizer"
         mock_provider.generate = AsyncMock(return_value=mock_response)
 
-        mock_router = MagicMock()
-        mock_router.build_candidates.return_value = ["summarize"]
-        mock_router.get_model_provider.return_value = mock_provider
+        mock_client = MagicMock()
+        mock_client.generate = mock_provider.generate
 
-        summary = await conv.compact(keep_recent=3, router=mock_router)
+        summary = await conv.compact(keep_recent=3, client=mock_client)
         assert "这是测试摘要" in summary
         assert conv.length == 4  # 1 summary + 3 recent
 
@@ -461,11 +460,10 @@ class TestConversationCompact:
 
         mock_provider = MagicMock()
         mock_provider.generate = AsyncMock(side_effect=RuntimeError("always fails"))
-        mock_router = MagicMock()
-        mock_router.build_candidates.return_value = ["summarize"]
-        mock_router.get_model_provider.return_value = mock_provider
+        mock_client = MagicMock()
+        mock_client.generate = mock_provider.generate
 
-        summary = await conv.compact(keep_recent=3, router=mock_router)
+        summary = await conv.compact(keep_recent=3, client=mock_client)
         # 应返回 fallback 文本，不崩溃
         assert "已丢弃" in summary
         assert conv.length == 4

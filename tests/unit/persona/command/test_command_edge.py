@@ -48,7 +48,7 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
         self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
     async def test_quota_exceeded(self):
-        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+        from plugins.DicePP.module.persona.llm.errors import QuotaExceeded
         self.cmd.app.chat_with_user = AsyncMock(side_effect=QuotaExceeded("配额超限"))
         meta = self.make_private_meta("你好")
         meta.to_me = True
@@ -152,31 +152,14 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self):
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
+        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
         # 与 default_persona_config() 同源, 但启用 group_activity
         persona = PersonaConfig(
             enabled=True,
             character_path="./content/characters",
-            providers={
-                "openai": ProviderConfig(
-                    api_key="fake_key",
-                    base_url="http://localhost",
-                    models=[
-                        ModelConfig(name="gpt-4o", category="llm", capabilities=["text", "tool_calls"], quality=0.9, cost=0.5)
-                    ],
-                ),
-            },
             observe_group_enabled=False,
-            group_activity_enabled=True,
-            trace_enabled=False,
             whitelist_enabled=False,
-            daily_limit=100,
-            quota_check_enabled=False,
-            relationship_refuse_enabled=False,
-            decay_enabled=False,
             proactive_enabled=False,
-            character_life_enabled=False,
-            group_chat_enabled=False,
         )
         self.bot = self.make_mock_bot(persona)
         self.cmd = self.make_cmd(self.bot)

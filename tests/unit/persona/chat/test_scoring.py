@@ -11,18 +11,18 @@ class TestScoringAgent:
 
     def test_init_defaults(self):
         """默认初始化参数"""
-        router = Mock()
-        agent = ScoringAgent(router)
-        assert agent.llm_router is router
+        client = Mock()
+        agent = ScoringAgent(client)
+        assert agent.client is client
         assert agent.timezone == "Asia/Shanghai"
         assert agent.max_rounds == 3
         assert agent._store is None
 
     def test_init_with_store(self):
         """带 store 初始化"""
-        router = Mock()
+        client = Mock()
         store = Mock()
-        agent = ScoringAgent(router, timezone="UTC", max_rounds=5, store=store)
+        agent = ScoringAgent(client, timezone="UTC", max_rounds=5, store=store)
         assert agent.timezone == "UTC"
         assert agent.max_rounds == 5
         assert agent._store is store

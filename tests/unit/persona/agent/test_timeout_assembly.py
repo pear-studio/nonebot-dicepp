@@ -28,7 +28,6 @@ from plugins.DicePP.module.persona.life.dm_agent import DMAgent
 from plugins.DicePP.module.persona.life.sa_agent import SAAgent
 from plugins.DicePP.module.persona.data.models import SAState
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, ToolCall
-from plugins.DicePP.module.persona.llm.selection import CHAT
 from plugins.DicePP.module.persona.report.daily_report import DailyReportGenerator
 
 
@@ -42,10 +41,10 @@ class _RecordingProvider:
     ) -> None:
         self.content = content
         self.tool_calls = tool_calls or []
-        self.timeouts: list[int] = []
+        self.tasks: list[str] = []
 
     async def generate(self, **kwargs) -> LLMResponse:
-        self.timeouts.append(kwargs["timeout"])
+        self.tasks.append(kwargs.get("task", "chat"))
         return LLMResponse(
             content=self.content,
             tool_calls=self.tool_calls,
@@ -53,27 +52,17 @@ class _RecordingProvider:
         )
 
 
-class _FakeRouter:
-    def __init__(self, provider: _RecordingProvider, *, timeout: int = 30) -> None:
-        self.timeout = timeout
+class _FakeClient:
+    provider_name = "deepseek"
+    model = "fake-model"
+    quota_check_enabled = False
+    data_store = None
+
+    def __init__(self, provider: _RecordingProvider) -> None:
         self.provider = provider
-        self.stats = {"fake": {"requests": 0, "errors": 0}}
-        self.circuit_breakers = SimpleNamespace(get=lambda *_args: None)
-        self.trace_enabled = False
-        self.quota_check_enabled = False
-        self.data_store = None
 
-    def build_candidates(self, _policy):
-        return [("fake", "fake-model")]
-
-    def get_model_provider(self, _key):
-        return self.provider
-
-    def get_model_config(self, _key):
-        return None
-
-    def acquire_semaphore(self, _key):
-        return asyncio.Semaphore(1)
+    async def generate(self, **kwargs):
+        return await self.provider.generate(**kwargs)
 
 
 def _store():
@@ -90,7 +79,7 @@ async def _run_minimal(runtime, *, tag: str) -> None:
         messages=[{"role": "user", "content": tag}],
         tools=ToolKit(),
         output=None,
-        selection=CHAT,
+        task="chat",
         limits=LoopLimits(max_rounds=1),
         metadata=RunMetadata(agent_name=tag, run_tag=tag),
     ))
@@ -104,38 +93,35 @@ def test_agent_layers_do_not_add_outer_wait_for_budget():
 
 
 @pytest.mark.asyncio
-async def test_chat_runtime_provider_keeps_router_30_second_timeout():
-    """普通 Chat 的真实 Runtime 装配不覆盖 Router 的 30 秒超时。"""
+async def test_chat_runtime_uses_the_client():
+    """普通 Chat 的 Runtime 直接使用共享文本客户端。"""
     provider = _RecordingProvider()
-    router = _FakeRouter(provider, timeout=30)
+    client = _FakeClient(provider)
     store = _store()
     character = Character(name="Timeout Tester")
     chat = ChatOrchestrator(
         store=store,
-        router=router,
+        client=client,
         character=character,
         config=ChatConfig.from_persona(PersonaConfig()),
     )
 
     await _run_minimal(chat._make_runtime(), tag="chat")
 
-    assert provider.timeouts == [30]
+    assert provider.tasks == ["chat"]
 
 
 @pytest.mark.asyncio
-async def test_factory_life_registry_provider_uses_90_second_timeout():
-    """factory 装配的 Life registry 将 90 传到 Provider。"""
-    config = PersonaConfig(
-        chat_llm_timeout_seconds=30,
-        background_llm_timeout_seconds=90,
-    )
+async def test_factory_life_registry_uses_background_task_profile():
+    """factory 装配的 Life registry 使用后台任务 profile。"""
+    config = PersonaConfig()
     provider = _RecordingProvider()
-    router = _FakeRouter(provider, timeout=30)
+    client = _FakeClient(provider)
     store = _store()
     character = Character(name="Timeout Tester")
-    dm_agent = DMAgent(store, router, config=config)
-    character_agent = CharacterAgent(store, router, config=config)
-    sa_agent = SAAgent(store, router, config=config)
+    dm_agent = DMAgent(store, client, config=config)
+    character_agent = CharacterAgent(store, client, config=config)
+    sa_agent = SAAgent(store, client, config=config)
     character_life = MagicMock()
     character_life.add_boundary_receiver = MagicMock()
     character_life.load_persistent_state = AsyncMock()
@@ -157,12 +143,12 @@ async def test_factory_life_registry_provider_uses_90_second_timeout():
     runtime_factory = character_agent._registry._runtime_factory
     await _run_minimal(runtime_factory(), tag="life")
 
-    assert provider.timeouts == [90]
+    assert provider.tasks == ["chat"]
 
 
 @pytest.mark.asyncio
-async def test_diary_agent_provider_uses_90_second_timeout():
-    """CharacterAgent.diary 的真实 Runtime 将 90 传到 Provider。"""
+async def test_diary_agent_uses_background_task_profile():
+    """CharacterAgent.diary 的 Runtime 使用后台任务 profile。"""
     diary_text = "今" * 100
     provider = _RecordingProvider(
         content="",
@@ -172,11 +158,11 @@ async def test_diary_agent_provider_uses_90_second_timeout():
             arguments=f'{{"diary":"{diary_text}"}}',
         )],
     )
-    router = _FakeRouter(provider, timeout=30)
+    client = _FakeClient(provider)
     agent = CharacterAgent(
         _store(),
-        router,
-        config=PersonaConfig(background_llm_timeout_seconds=90),
+        client,
+        config=PersonaConfig(),
     )
 
     result = await agent.diary({
@@ -191,13 +177,13 @@ async def test_diary_agent_provider_uses_90_second_timeout():
 
     assert result.success is True
     assert result.data == diary_text
-    assert provider.timeouts == [90]
+    assert provider.tasks == ["diary"]
 
 
 @pytest.mark.asyncio
-async def test_sa_agent_runtime_provider_uses_90_second_timeout():
-    """SA Agent 自建 Conversation 的真实 Runtime 将 90 传到 Provider。"""
-    config = PersonaConfig(background_llm_timeout_seconds=90)
+async def test_sa_agent_runtime_uses_summary_task_profile():
+    """SA Agent 自建 Conversation 的 Runtime 使用摘要 profile。"""
+    config = PersonaConfig()
     provider = _RecordingProvider(
         content="",
         tool_calls=[ToolCall(
@@ -206,8 +192,8 @@ async def test_sa_agent_runtime_provider_uses_90_second_timeout():
             arguments='{"summary":"无需调整","changed":false}',
         )],
     )
-    router = _FakeRouter(provider, timeout=30)
-    agent = SAAgent(_store(), router, config=config)
+    client = _FakeClient(provider)
+    agent = SAAgent(_store(), client, config=config)
 
     result = await agent.run({
         "character_name": "Timeout Tester",
@@ -219,24 +205,23 @@ async def test_sa_agent_runtime_provider_uses_90_second_timeout():
     }, interaction_id="timeout-sa")
 
     assert result.success is True
-    assert provider.timeouts == [90]
+    assert provider.tasks == ["summary"]
 
 
 @pytest.mark.asyncio
-async def test_isolated_daily_opening_provider_uses_90_second_timeout():
-    """日报 opening 的一次性 Agent 通过真实 Runtime 将 90 传到 Provider。"""
+async def test_isolated_daily_opening_uses_summary_task_profile():
+    """日报 opening 的一次性 Agent 使用摘要 profile。"""
     config = PersonaConfig(
         daily_report_voice_enabled=True,
-        background_llm_timeout_seconds=90,
     )
     provider = _RecordingProvider(content="早上好")
-    router = _FakeRouter(provider, timeout=30)
+    client = _FakeClient(provider)
     store = _store()
     generator = DailyReportGenerator(
         bot=MagicMock(),
         port=MagicMock(),
         store=store,
-        router=router,
+        client=client,
         character=Character(name="Timeout Tester"),
         config=config,
     )
@@ -246,4 +231,4 @@ async def test_isolated_daily_opening_provider_uses_90_second_timeout():
     )
 
     assert opening == "早上好"
-    assert provider.timeouts == [90]
+    assert provider.tasks == ["summary"]

@@ -172,7 +172,7 @@ class TestLLMCallCoordinatorBasics:
             elif len(attempts) == 3:
                 started3.set()
                 await barrier3.wait()
-            raise Exception("fail")
+            raise Exception("temporarily unavailable")
 
         first_task = asyncio.create_task(
             coordinator.submit(
@@ -221,11 +221,11 @@ class TestLLMCallCoordinatorBasics:
             if len(attempts) == 1:
                 started1.set()
                 await barrier1.wait()
-                raise Exception("fail")
+                raise Exception("temporarily unavailable")
             if len(attempts) == 2:
                 started2.set()
                 await barrier2.wait()
-                raise Exception("fail")
+                raise Exception("temporarily unavailable")
             return "success"
 
         first_task = asyncio.create_task(
@@ -368,7 +368,7 @@ class TestLLMCallCoordinatorExhaustion:
             # 而非测试并发 buffered 行为本身。
             if len(attempts) <= 2:
                 coordinator._has_buffered["user:1"] = True
-            raise Exception("fail")
+            raise Exception("temporarily unavailable")
 
         call_fn = AsyncMock(side_effect=inner_failing_call_fn)
         # 不应抛出异常
@@ -441,7 +441,7 @@ class TestLLMCallCoordinatorExhaustion:
             elif len(attempts) == 3:
                 started3.set()
                 await barrier3.wait()
-            raise Exception("fail")
+            raise Exception("temporarily unavailable")
 
         on_exhausted_called = False
 
@@ -510,7 +510,7 @@ class TestLLMCallCoordinatorExhaustion:
                 started1.set()
                 await barrier1.wait()
                 return "first_success"
-            raise Exception("fail")
+            raise Exception("temporarily unavailable")
 
         async def on_exhausted_fn():
             nonlocal on_exhausted_called

@@ -1,5 +1,1 @@
-from .openai import OpenAIProvider
-
-_PROVIDER_CLASSES: dict[str, type] = {
-    "llm": OpenAIProvider,
-}
+"""OpenAI-compatible response parsing used by the DeepSeek text client."""

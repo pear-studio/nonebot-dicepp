@@ -42,7 +42,7 @@ def _make_test_repo(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _isolate_shell_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    _, _, _, shell_session = prepare.import_runtime_types(REPO_ROOT)
+    _, _, _, _, shell_session = prepare.import_runtime_types(REPO_ROOT)
     shell_root = tmp_path / "shell-sessions"
     monkeypatch.setattr(shell_session, "SHELL_DIR", shell_root)
     monkeypatch.setattr(shell_session, "_LOCKS_DIR", shell_root / ".locks")
@@ -51,11 +51,11 @@ def _isolate_shell_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 def test_prepare_rejects_custom_provider_before_creating_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, skill = _make_test_repo(tmp_path)
-    _write_json(skill / "test_llm.local.json", {"persona_ai": {"providers": {"custom-provider": {"api_key": "sk-test"}}}})
+    _write_json(skill / "test_llm.local.json", {"custom_provider_api_key": "sk-test"})
     monkeypatch.setattr(prepare, "assert_git_ignored", lambda *_: None)
     shell_session = _isolate_shell_sessions(monkeypatch, tmp_path)
 
-    with pytest.raises(prepare.PreparationError, match="不允许自定义 provider"):
+    with pytest.raises(prepare.PreparationError, match="只能包含 deepseek_api_key"):
         prepare.prepare_session(repo_root=repo, skill_dir=skill, scenarios=("private",))
 
     assert not shell_session.SHELL_DIR.exists()
@@ -64,7 +64,7 @@ def test_prepare_rejects_custom_provider_before_creating_session(tmp_path: Path,
 def test_config_validation_error_never_includes_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo, skill = _make_test_repo(tmp_path)
     secret = "sk-sensitive-validation-test"
-    _write_json(skill / "test_llm.local.json", {"persona_ai": {"providers": {"deepseek": {"api_key": secret}}}})
+    _write_json(skill / "test_llm.local.json", {"deepseek_api_key": secret})
     test_overrides = json.loads(
         (skill / "assets" / "test-overrides.json").read_text(encoding="utf-8")
     )

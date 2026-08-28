@@ -26,12 +26,12 @@ class TestCharacterAgentReact:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_react_parses_valid_reaction(self, agent):
@@ -82,12 +82,12 @@ class TestCharacterAgentDiary:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_diary_truncates_long_text(self, agent):
@@ -120,12 +120,12 @@ class TestCharacterAgentShare:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_share_disabled_returns_empty_success(self, agent):
@@ -154,12 +154,12 @@ class TestCharacterAgentContract:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_run_dispatches_to_react(self, agent):
@@ -292,12 +292,12 @@ class TestCharacterAgentNoEndConversation:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_build_reaction_spec_no_end_conversation_tool(self, agent):
@@ -340,12 +340,12 @@ class TestDiarySubmitDiaryOutputSpec:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_diary_output_name_is_submit_diary(self, agent):
@@ -393,7 +393,7 @@ class TestCharacterAgentChangeSources:
         from unittest.mock import MagicMock
         store = MagicMock()
         router = MagicMock()
-        agent = CharacterAgent(store=store, router=router)
+        agent = CharacterAgent(store=store, client=router)
         sources = agent._get_change_sources()
         assert len(sources) == 1
         assert sources[0].source_id == "state.character"
@@ -408,7 +408,7 @@ class TestReactionUserPromptNoStateText:
         from unittest.mock import MagicMock
         store = MagicMock()
         router = MagicMock()
-        agent = CharacterAgent(store=store, router=router)
+        agent = CharacterAgent(store=store, client=router)
         prompt = agent._build_reaction_user_prompt({
             "event": "远处传来声音",
             "energy": 80, "mood": 60, "health": 90,
@@ -431,12 +431,12 @@ class TestDiaryInterpretError:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     def test_interpret_diary_exception_returns_success_false(self, agent):
         """output_arguments 为 int 42 时（无法 .get()），返回 success=False"""
@@ -465,12 +465,12 @@ class TestOpeningError:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_opening_exception_returns_success_false(self, agent):
@@ -502,12 +502,12 @@ class TestTraceMetadata:
         return store
 
     @pytest.fixture
-    def mock_router(self):
+    def mock_client(self):
         return MagicMock()
 
     @pytest.fixture
-    def agent(self, mock_store, mock_router):
-        return CharacterAgent(store=mock_store, router=mock_router)
+    def agent(self, mock_store, mock_client):
+        return CharacterAgent(store=mock_store, client=mock_client)
 
     @pytest.mark.asyncio
     async def test_react_passes_trace_metadata(self, agent):

@@ -9,7 +9,7 @@ from typing import Any, Optional
 import json
 from plugins.DicePP.utils.logger import logger
 from ..data.store import PersonaDataStore
-from ..llm.router import LLMRouter
+from ..llm.client import TextModelClient
 from .agent import Agent
 from .types import AgentResult, EventGenerationResult
 
@@ -68,10 +68,10 @@ class DMAgent(Agent):
     def __init__(
         self,
         store: PersonaDataStore,
-        router: LLMRouter,
+        client: TextModelClient,
         config=None,
     ):
-        super().__init__(store, router, config)
+        super().__init__(store, client, config)
 
     def build_system_prompt(self, state: None, context: dict) -> str:
         """构建 DM 系统提示词
@@ -317,7 +317,7 @@ class DMAgent(Agent):
             user_input=user_prompt,
             tools=toolkit,
             output=output_spec,
-            selection=self._get_selection_policy(),
+            task="event",
             limits=LoopLimits(max_rounds=self._max_rounds),
             run_tag="dm_event",
         )

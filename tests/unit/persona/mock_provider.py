@@ -29,7 +29,7 @@ class Step:
 class ScriptedProvider:
     """纯 seq 队列 LLMProvider，严格按序消费。
 
-    注入到 LLMRouter._model_providers，替代真实 LLM API 调用。
+    作为文本客户端内部的可控模型响应，替代真实 LLM API 调用。
     耗尽后抛 RuntimeError（调用次数是确定性的，多调了就是 bug）。
     """
 
@@ -134,7 +134,7 @@ class FakeMessagePort:
 class FakeImageGenProvider:
     """模拟图片生成，实现 ImageGenProvider 协议。
 
-    注入到 LLMRouter._model_providers 的 gen 槽位。
+    作为独立图片能力测试 double。
     """
 
     max_prompt_chars: Optional[int] = 2000

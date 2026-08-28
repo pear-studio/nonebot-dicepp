@@ -94,7 +94,7 @@ class TestR2InboundHookFallback:
             scope=ConversationScope.for_private("u1"),
             conversation=conv,
             store=store or _make_store(),
-            router=MagicMock(),
+            client=MagicMock(),
             character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),

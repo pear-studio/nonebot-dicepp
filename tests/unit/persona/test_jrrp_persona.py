@@ -383,7 +383,7 @@ class TestHandleJrrp:
         cb.build_static_prompt.return_value = "you are a test bot"
 
         orch = ChatOrchestrator(
-            store=store, router=MagicMock(), character=char,
+            store=store, client=MagicMock(), character=char,
             config=config, context_builder=cb,
         )
 

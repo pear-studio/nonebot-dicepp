@@ -179,7 +179,7 @@ class TestBuildSummaryPrompt:
         assert "昵称碰巧与内部名称相同" in prompt[1]["content"]
 
 class TestProviderSummarizer:
-    """ProviderSummarizer 调用链测试（mock router/provider）"""
+    """ProviderSummarizer 调用链测试（mock client）"""
 
     @pytest.mark.asyncio
     async def test_successful_summary(self):
@@ -189,11 +189,10 @@ class TestProviderSummarizer:
         mock_resp.model = "test"
         mock_provider.generate = AsyncMock(return_value=mock_resp)
 
-        mock_router = MagicMock()
-        mock_router.build_candidates.return_value = ["key1"]
-        mock_router.get_model_provider.return_value = mock_provider
+        mock_client = MagicMock()
+        mock_client.generate = mock_provider.generate
 
-        summarizer = ProviderSummarizer(mock_router)
+        summarizer = ProviderSummarizer(mock_client)
         result = await summarizer.generate_summary([
             {"role": "user", "content": "测试"},
             {"role": "assistant", "content": "回复"},
@@ -212,11 +211,10 @@ class TestProviderSummarizer:
         mock_provider = MagicMock()
         mock_provider.generate = AsyncMock(side_effect=RuntimeError("API down"))
 
-        mock_router = MagicMock()
-        mock_router.build_candidates.return_value = ["key1"]
-        mock_router.get_model_provider.return_value = mock_provider
+        mock_client = MagicMock()
+        mock_client.generate = mock_provider.generate
 
-        summarizer = ProviderSummarizer(mock_router)
+        summarizer = ProviderSummarizer(mock_client)
         # 异常被吞，返回空串
         result = await summarizer.generate_summary([
             {"role": "user", "content": "hi"},
@@ -231,11 +229,10 @@ class TestProviderSummarizer:
         mock_resp.model = "test"
         mock_provider.generate = AsyncMock(return_value=mock_resp)
 
-        mock_router = MagicMock()
-        mock_router.build_candidates.return_value = ["key1"]
-        mock_router.get_model_provider.return_value = mock_provider
+        mock_client = MagicMock()
+        mock_client.generate = mock_provider.generate
 
-        summarizer = ProviderSummarizer(mock_router)
+        summarizer = ProviderSummarizer(mock_client)
         result = await summarizer.generate_summary([
             {"role": "user", "content": "hi"},
         ])
