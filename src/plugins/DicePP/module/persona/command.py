@@ -705,10 +705,6 @@ class PersonaCommand(UserCommandBase):
             return "\n".join(lines)
         return ""
 
-    async def _handle_debug(self, user_id: str, group_id: str, msg: str) -> str:
-        """.pa 命令已废弃，请使用 .ai admin 子命令"""
-        return ".pa 命令已废弃，请使用 .ai admin 子命令"
-
     async def shutdown(self) -> None:
         """Bot 关闭时清理资源"""
         self._shutting_down = True

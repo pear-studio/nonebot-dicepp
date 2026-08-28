@@ -137,7 +137,7 @@ Persona 对话默认对所有用户开放。管理员可维护不计入 AI 限�
 | `.ai admin` | 查看当前 Persona 状态 |
 | `.ai admin reload` | 重新加载角色卡 |
 | `.ai admin events` | 查看角色事件配置 |
-| `.ai admin today` | 查看今天的日记和事件 |
+| `.ai admin diary [日期]` | 查看指定日期的日记和事件（缺省今天，`-1` 表示昨天） |
 | `.ai admin whitelist` | 查看 AI 限额豁免名单 |
 
 这些命令只对 `master` 有效。
@@ -165,7 +165,7 @@ Persona 对话默认对所有用户开放。管理员可维护不计入 AI 限�
 
 检查：
 
-- `api_key` 是否写在实例级 `config/user.json`
+- `deepseek_api_key` 是否写在实例级 `config/user.json`
 - `base_url` 是否正确
 - 模型名是否写对
 

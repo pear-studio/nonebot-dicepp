@@ -45,11 +45,6 @@ class AdminDispatcher:
             return self._help_text()
         subcmd = args[0]
 
-        # 兼容映射：today/yesterday → diary
-        if subcmd in ("today", "yesterday"):
-            args = ["diary", "-1"] if subcmd == "yesterday" else ["diary"]
-            subcmd = "diary"
-
         # debug 特殊处理：需要 data_store 和 app
         if subcmd == "debug":
             if not self.data_store:
