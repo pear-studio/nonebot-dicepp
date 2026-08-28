@@ -1,4 +1,4 @@
-"""ChatConfig — 对话域配置（从 PersonaConfig 中提取的子集）"""
+"""ChatConfig — 对话域运行策略与少量公开 Persona 设置。"""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -11,29 +11,27 @@ from ..data.models import DEFAULT_SESSION_TOKEN_BUDGET
 
 @dataclass
 class ChatConfig:
-    """对话域配置（从 PersonaConfig 中提取的子集）"""
+    """对话域配置。
+
+    纯聊天算法参数在此处提供内部默认值，不再由 PersonaConfig 暴露。
+    ``from_persona`` 只复制仍属于公开 Persona 边界的字段。
+    """
 
     max_history_turns: int = 10
     max_history_tokens: int = 4000
-    max_diary_context_chars: int = 500
     timezone: str = "Asia/Shanghai"
     lore_token_budget: int = 300
-    tools_max_rounds: int = 5
+    tools_max_rounds: int = 10
     relationship_refuse_enabled: bool = False
     reputation_refuse_threshold: float = 30.0
     scoring_interval: int = 5
-    max_messages: int = 100
-    group_max_age_minutes: int = 60
-    group_context_budget_tokens: float = 2000.0
-    group_max_messages: int = 15
-    group_single_message_max_tokens: float = 500.0
+    search_max_chars: int = 180
     # ── 分段回复配置
     segment_target_chars: int = 30
     segment_max_chars: int = 80
     segment_soft_limit: int = 100
     segment_hard_limit: int = 120
     segment_count_max: int = 10
-    segment_max_delay: float = 10.0
     # ── Session 配置
     private_session_gap_seconds: int = 86400
     group_session_gap_seconds: int = 1800
@@ -42,29 +40,11 @@ class ChatConfig:
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
+        """Build runtime chat policy from the Persona settings still public."""
         return cls(
-            max_history_turns=persona.max_history_turns,
-            max_history_tokens=persona.max_history_tokens,
-            max_diary_context_chars=persona.max_diary_context_chars,
             timezone=persona.timezone,
-            lore_token_budget=persona.lore_token_budget,
-            tools_max_rounds=persona.tools_max_rounds,
+            search_max_chars=persona.search_max_chars,
             relationship_refuse_enabled=persona.relationship_refuse_enabled,
             reputation_refuse_threshold=persona.reputation_refuse_threshold,
             scoring_interval=persona.scoring_interval,
-            max_messages=persona.max_messages,
-            group_max_age_minutes=persona.group_max_age_minutes,
-            group_context_budget_tokens=persona.group_context_budget_tokens,
-            group_max_messages=persona.group_max_messages,
-            group_single_message_max_tokens=persona.group_single_message_max_tokens,
-            segment_target_chars=persona.segment_target_chars,
-            segment_max_chars=persona.segment_max_chars,
-            segment_soft_limit=persona.segment_soft_limit,
-            segment_hard_limit=persona.segment_hard_limit,
-            segment_count_max=persona.segment_count_max,
-            segment_max_delay=persona.segment_max_delay,
-            private_session_gap_seconds=persona.private_session_gap_seconds,
-            group_session_gap_seconds=persona.group_session_gap_seconds,
-            private_session_token_budget=persona.private_session_token_budget,
-            group_session_token_budget=persona.group_session_token_budget,
         )

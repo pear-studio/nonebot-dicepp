@@ -11,8 +11,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_validator,
-    model_validator,
 )
 
 # ── Dashboard layout metadata ─────────────────────────────────────────────────
@@ -110,37 +108,8 @@ class PersonaConfig(BaseModel):
 
     # ── 对话与回复 ───────────────────────────────────────────────────────────
 
-    # Phase 3: 短期记忆限制
-    max_messages: int = Field(
-        default=15, title="最大消息数",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    max_history_turns: int = Field(
-        default=10, title="最大历史轮次",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    max_history_tokens: int = Field(
-        default=4000, title="最大历史 Token",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_max_messages: int = Field(
-        default=40, title="群聊最大消息数",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_max_age_minutes: int = Field(
-        default=10, title="群聊时间窗口",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_context_budget_tokens: int = Field(
-        default=1600, title="群聊上下文 Token 预算",
-        description="群聊上下文 token 总预算（基于字符统计的估算值，不引入真实 tokenizer，建议按实际需求的 70% 配置）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_single_message_max_tokens: int = Field(
-        default=180, title="群聊单消息 Token 上限",
-        description="单条消息 token 上限（基于字符统计的估算值，超长先截断）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
+    # 搜索结果和消息流上限仍是公开运行配置；其余纯聊天算法参数由
+    # ``module.persona.chat.ChatConfig`` 的内部默认值统一管理。
     search_max_chars: int = Field(
         default=180, title="搜索结果最大字符数",
         description="搜索结果中每条消息的最大字符数",
@@ -152,84 +121,11 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
 
-    # Phase 3: 工具调用
-    tools_max_rounds: int = Field(
-        default=10, title="工具最大轮次",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
+    # Phase 3: 后台 LLM 工具调用轮次（与响应式聊天策略分开保留）
     background_llm_max_rounds: int = Field(
         default=10, title="后台 LLM 最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
-
-    # Phase 3: 日记上下文长度限制
-    max_diary_context_chars: int = Field(
-        default=500, title="日记上下文最大字符数",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-
-    # Phase 5a: 世界书 Token 预算
-    lore_token_budget: int = Field(
-        default=300, title="世界书 Token 预算",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-
-    # Session 上下文持久化
-    private_session_gap_seconds: int = Field(
-        default=86400, ge=60, title="私聊会话间隔",
-        description="私聊 session gap 超时秒数（默认 1 天）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_session_gap_seconds: int = Field(
-        default=1800, ge=60, title="群聊会话间隔",
-        description="群聊 session gap 超时秒数（默认 30 分钟）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    private_session_token_budget: int = Field(
-        default=64000, ge=1000, title="私聊会话 Token 预算",
-        description="私聊 session token 预算上限",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    group_session_token_budget: int = Field(
-        default=64000, ge=1000, title="群聊会话 Token 预算",
-        description="群聊 session token 预算上限",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-
-    # ── 分段回复（Segmented Reply）
-    segment_target_chars: int = Field(
-        default=30, ge=1, title="分段建议字数", description="单段建议字数（写入 system prompt 引导 LLM）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    segment_max_chars: int = Field(
-        default=80, ge=1, title="分段最大字符数", description="单段字符上限，超出由 send_reply_segment executor 拒绝",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    segment_soft_limit: int = Field(
-        default=100, ge=1, title="总分软上限", description="单次回复总字数软上限，超出返回 warning",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    segment_hard_limit: int = Field(
-        default=120, ge=1, title="总分硬上限", description="单次回复总字数硬上限，超出返回 error 并拒绝该段",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    segment_count_max: int = Field(
-        default=10, ge=1, title="最大段数", description="单次回复最大段数，超出由 executor 拒绝",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-    segment_max_delay: float = Field(
-        default=10.0, gt=0, title="分段最大延迟", description="单段 delay_before 上限（秒）",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
-
-    @model_validator(mode="after")
-    def _validate_segment_limits(self) -> "PersonaConfig":
-        if self.segment_soft_limit > self.segment_hard_limit:
-            raise ValueError(
-                f"segment_soft_limit ({self.segment_soft_limit}) "
-                f"必须 <= segment_hard_limit ({self.segment_hard_limit})"
-            )
-        return self
 
     # ── 主动消息 ─────────────────────────────────────────────────────────────
 

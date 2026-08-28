@@ -72,7 +72,11 @@ class ChatOrchestrator:
         self._scoring_trigger = scoring_trigger
         self._response_handler = response_handler
         self._context_builder = context_builder or ContextBuilder(
-            character=character, timezone=config.timezone,
+            character=character,
+            max_history_turns=config.max_history_turns,
+            max_history_tokens=config.max_history_tokens,
+            timezone=config.timezone,
+            lore_token_budget=config.lore_token_budget,
         )
         self._sleep_gate = sleep_gate
         self.decay_calculator = decay_calculator  # 供 PersonaApp.get_decay_calculator 委托

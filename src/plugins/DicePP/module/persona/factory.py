@@ -354,6 +354,9 @@ def _make_resolve_query_db(bot: Bot):
 
 def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
     """组装 ChatOrchestrator（替代 ChatSession）"""
+    # ChatConfig owns all chat-only policy defaults and receives only the
+    # Persona settings that remain part of the public configuration.
+    chat_config = ChatConfig.from_persona(deps.config)
     scoring_agent = ScoringAgent(deps.client, timezone=deps.config.timezone,
                                  max_rounds=deps.config.background_llm_max_rounds,
                                  store=deps.store)
@@ -361,21 +364,20 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
 
     segment_guide = SegmentGuide(
         enabled=True,
-        target_chars=deps.config.segment_target_chars,
-        max_chars=deps.config.segment_max_chars,
-        soft_limit=deps.config.segment_soft_limit,
-        hard_limit=deps.config.segment_hard_limit,
+        target_chars=chat_config.segment_target_chars,
+        max_chars=chat_config.segment_max_chars,
+        soft_limit=chat_config.segment_soft_limit,
+        hard_limit=chat_config.segment_hard_limit,
     )
 
     context_builder = ContextBuilder(
         deps.character,
-        max_history_turns=deps.config.max_history_turns,
-        max_history_tokens=deps.config.max_history_tokens,
-        timezone=deps.config.timezone,
-        lore_token_budget=deps.config.lore_token_budget,
+        max_history_turns=chat_config.max_history_turns,
+        max_history_tokens=chat_config.max_history_tokens,
+        timezone=chat_config.timezone,
+        lore_token_budget=chat_config.lore_token_budget,
         segment_guide=segment_guide,
     )
-    chat_config = ChatConfig.from_persona(deps.config)
 
     response_handler = ResponseHandler(store=deps.store, port=deps.port)
     scoring_trigger = ScoringTrigger(

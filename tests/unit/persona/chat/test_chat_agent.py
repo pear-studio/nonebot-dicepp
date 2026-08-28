@@ -18,6 +18,7 @@ from plugins.DicePP.module.persona.chat.context import ContextBuilder
 from plugins.DicePP.module.persona.character.models import Character
 from plugins.DicePP.module.persona.agent.loop import AgentLoop
 from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
 from plugins.DicePP.module.persona.agent.state import AgentRunState
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
@@ -491,6 +492,38 @@ class TestExecuteTurnBranches:
 
         assert "generate_image" not in toolkit.tools
         assert "look_at_past_image" in toolkit.tools
+
+    @pytest.mark.asyncio
+    async def test_segment_tool_uses_chat_policy_length_limit(self):
+        delivery = _CapDelivery()
+        agent = ChatAgent(
+            scope=ConversationScope.for_private("u1"),
+            conversation=MagicMock(spec=Conversation),
+            store=_make_store(),
+            client=MagicMock(),
+            character=_make_char(),
+            config=_make_config(),
+            context_builder=MagicMock(
+                build_static_prompt=MagicMock(return_value="sys")
+            ),
+            make_delivery=lambda: delivery,
+            after_response=AsyncMock(),
+        )
+
+        toolkit, _ = agent._build_chat_toolkit(
+            delivery, "interaction", "u1", "", "TestBot"
+        )
+        tool = toolkit.tools["send_reply_segment"]
+        result = await tool.handler(
+            tool.args_schema(content="x" * 81),
+            ToolExecutionContext(
+                run_id="r1", tool_call_id="tc1", call_index=0, same_name_index=0,
+            ),
+        )
+
+        assert result.status == "error"
+        assert "80" in result.observation
+        assert delivery.items == []
 
     @pytest.mark.asyncio
     async def test_group_image_transient_keeps_speaker_identity(self):

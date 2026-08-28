@@ -125,7 +125,7 @@ class ChatAgent:
 
         tools: dict[str, NewToolSpec] = {}
         tz = self._config.timezone
-        search_max_chars = getattr(self._config, "search_max_chars", 2000)
+        search_max_chars = self._config.search_max_chars
 
         # send_reply_segment — 仅在有 port 时注册
         if delivery is not None:
@@ -134,6 +134,7 @@ class ChatAgent:
                 interaction_id=interaction_id,
                 user_id=user_id,
                 group_id=group_id,
+                max_chars=self._config.segment_max_chars,
                 segment_count_max=self._config.segment_count_max,
                 display_name=char_name,
             )

@@ -292,8 +292,8 @@ class TestFieldMetadata:
                         "title": "启用 Persona",
                         "type": "boolean",
                     },
-                    "max_messages": {
-                        "title": "最大消息数",
+                    "search_max_chars": {
+                        "title": "搜索结果最大字符数",
                         "type": "integer",
                         "dashboard_section": "chat_reply",
                     },
@@ -320,10 +320,10 @@ class TestFieldMetadata:
         defs = schema.get("$defs", {})
         result = _flatten_json_schema(schema, defs)
 
-        # Field with override: persona_ai.max_messages has section="chat_reply" (not "basic")
-        assert result["persona_ai.max_messages"]["section"] == "chat_reply", \
-            f"max_messages section should be 'chat_reply', got {result.get('persona_ai.max_messages', {}).get('section')}"
-        assert result["persona_ai.max_messages"]["tab"] == "persona"
+        # Field with override: persona_ai.search_max_chars has section="chat_reply" (not "basic")
+        assert result["persona_ai.search_max_chars"]["section"] == "chat_reply", \
+            f"search_max_chars section should be 'chat_reply', got {result.get('persona_ai.search_max_chars', {}).get('section')}"
+        assert result["persona_ai.search_max_chars"]["tab"] == "persona"
 
     def test_field_inherits_model_section(self):
         """Field WITHOUT override inherits model-level dashboard_section."""

@@ -369,44 +369,6 @@ class TestContextBuilderProactivePrompt:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 6.6 配置迁移兼容性
-# ═══════════════════════════════════════════════════════════════════
-
-class TestConfigMigration:
-
-    def test_new_fields_assembled_correctly(self):
-        """ChatConfig.from_persona() 装配新字段正确"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        pc = PersonaConfig(
-            max_history_turns=7,
-            max_history_tokens=3000,
-            max_diary_context_chars=600,
-        )
-        cc = ChatConfig.from_persona(pc)
-        assert cc.max_history_turns == 7
-        assert cc.max_history_tokens == 3000
-        assert cc.max_diary_context_chars == 600
-
-
-# ═══════════════════════════════════════════════════════════════════
-# 6.7 Diary 截断独立配置
-# ═══════════════════════════════════════════════════════════════════
-
-class TestDiaryContextConfig:
-
-    def test_diary_uses_max_diary_context_chars(self):
-        """_build_diary_context 使用 max_diary_context_chars"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        pc = PersonaConfig(
-            max_diary_context_chars=300,
-        )
-        cc = ChatConfig.from_persona(pc)
-        assert cc.max_diary_context_chars == 300
-
-
-# ═══════════════════════════════════════════════════════════════════
 # 6.1 私聊格式化 _format_private_history
 # ═══════════════════════════════════════════════════════════════════
 

@@ -47,9 +47,7 @@ Persona 的设置写在 `config/bots/{QQ号}.json` 的 `persona_ai` 段；未写
 
 - `.jrrp` 由 Persona 处理，私聊和群聊都支持。
 - 群聊中的正常 `@机器人` / `.ai` 对话路径始终可用。
-- 对话始终注入分段回复引导；`segment_target_chars`、`segment_max_chars`、
-  `segment_soft_limit`、`segment_hard_limit`、`segment_count_max` 和 `segment_max_delay`
-  仍是可调整的高级参数。
+- 对话始终注入内置的分段回复引导和长度策略。
 
 含义：
 

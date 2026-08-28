@@ -93,8 +93,6 @@ def _make_persona_config() -> PersonaConfig:
         character_life_enabled=False,
         relationship_refuse_enabled=False,
         daily_limit=9999,
-        segment_max_chars=64,
-        segment_hard_limit=128,
     )
 
 
@@ -182,7 +180,7 @@ class TestCreatePersonaSuccess:
         assert app.current_character_name == "test_char"
         system_prompt = app.chat._context_builder.build_static_prompt()
         assert "【回复长度】" in system_prompt
-        assert "单段上限 64 字，总字数硬上限 128 字" in system_prompt
+        assert "单段上限 80 字，总字数硬上限 120 字" in system_prompt
 
         # ── 8. 清理 ──────────────────────────────────────
         await app.store.close()
@@ -261,12 +259,18 @@ class TestCreatePersonaFromPersonaMappings:
         assert dc.enabled == config.decay_enabled
 
     def test_chat_config_from_persona(self):
-        """ChatConfig.from_persona 映射所有字段。"""
+        """ChatConfig.from_persona 映射仍公开的聊天设置。"""
         from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
         config = _make_persona_config()
+        config.timezone = "UTC"
+        config.search_max_chars = 321
         cc = ChatConfig.from_persona(config)
-        assert cc.max_history_turns == config.max_history_turns
-        assert cc.timezone == config.timezone
+        assert cc.timezone == "UTC"
+        assert cc.search_max_chars == 321
+        assert cc.relationship_refuse_enabled == config.relationship_refuse_enabled
+        assert cc.reputation_refuse_threshold == config.reputation_refuse_threshold
+        assert cc.scoring_interval == config.scoring_interval
+        assert cc.max_history_turns == 10
 
     def test_character_life_config_from_persona(self):
         """CharacterLifeConfig.from_persona 映射所有字段。"""
@@ -292,17 +296,6 @@ class TestCreatePersonaFromPersonaMappings:
         config = _make_persona_config()
         lc = LifeConfig.from_persona(config)
         assert lc.timezone == config.timezone
-
-    def test_chat_config_default_session_budget(self):
-        """ChatConfig 默认 session token budget 应与常量一致。"""
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        from plugins.DicePP.module.persona.data.models import (
-            DEFAULT_SESSION_TOKEN_BUDGET,
-        )
-        config = _make_persona_config()
-        cc = ChatConfig.from_persona(config)
-        assert cc.private_session_token_budget == DEFAULT_SESSION_TOKEN_BUDGET
-        assert cc.group_session_token_budget == DEFAULT_SESSION_TOKEN_BUDGET
 
     def test_decay_config_defaults(self):
         """DecayConfig.from_persona 在禁用 decay 时使用正确的默认值。"""

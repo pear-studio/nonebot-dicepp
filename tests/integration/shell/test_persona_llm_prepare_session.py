@@ -68,8 +68,7 @@ def test_config_validation_error_never_includes_api_key(tmp_path: Path, monkeypa
     test_overrides = json.loads(
         (skill / "assets" / "test-overrides.json").read_text(encoding="utf-8")
     )
-    test_overrides["persona_ai"]["segment_soft_limit"] = 999
-    test_overrides["persona_ai"]["segment_hard_limit"] = 1
+    test_overrides["persona_ai"]["max_history_tokens"] = 8000
     _write_json(skill / "assets" / "test-overrides.json", test_overrides)
     monkeypatch.setattr(prepare, "assert_git_ignored", lambda *_: None)
     shell_session = _isolate_shell_sessions(monkeypatch, tmp_path)
@@ -78,5 +77,5 @@ def test_config_validation_error_never_includes_api_key(tmp_path: Path, monkeypa
         prepare.prepare_session(repo_root=repo, skill_dir=skill, scenarios=("private",))
 
     assert secret not in str(exc_info.value)
-    assert "segment_soft_limit" in str(exc_info.value)
+    assert "max_history_tokens" in str(exc_info.value)
     assert not shell_session.SHELL_DIR.exists()
