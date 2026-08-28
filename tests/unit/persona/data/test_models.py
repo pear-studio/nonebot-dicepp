@@ -7,7 +7,6 @@ class TestPersonaConfig:
     def test_default_values(self):
         config = PersonaConfig()
         assert config.enabled is False
-        assert config.whitelist_enabled is True
         assert config.daily_limit == 20
 
 

@@ -108,26 +108,16 @@ content/characters/mychar/
 3. 群聊中 `@机器人 你好`。
 4. 私聊或群聊发送 `.jrrp`，确认由 Persona 生成结果。
 
-## 白名单和口令
+## AI 限额豁免名单
 
-默认未设置口令时，白名单不会拦截访问，适合测试。
-
-生产环境建议由管理员设置口令：
+Persona 对话默认对所有用户开放。管理员可维护不计入 AI 限额的用户和群聊名单：
 
 ```text
-.ai admin code 你的口令
-```
-
-用户私聊加入：
-
-```text
-.ai join 你的口令
-```
-
-群聊白名单由管理员添加：
-
-```text
+.ai admin whitelist add user 用户号
 .ai admin whitelist add group 群号
+.ai admin whitelist remove 用户号
+.ai admin whitelist remove group 群号
+.ai admin whitelist clear
 ```
 
 ## 常用管理员命令
@@ -138,9 +128,9 @@ content/characters/mychar/
 | `.ai admin reload` | 重新加载角色卡 |
 | `.ai admin events` | 查看角色事件配置 |
 | `.ai admin today` | 查看今天的日记和事件 |
-| `.ai admin list` | 查看白名单 |
+| `.ai admin whitelist` | 查看 AI 限额豁免名单 |
 
-这些命令只对 `master` 或 `admin` 有效。
+这些命令只对 `master` 有效。
 
 ## 常见问题
 
@@ -157,7 +147,7 @@ content/characters/mychar/
 
 检查：
 
-- 是否被白名单拦截，可发送 `.ai status`
+- Persona 模块是否已启用，可发送 `.ai status`
 - 是否超过 `daily_limit`
 - 日志中是否有 LLM 错误
 

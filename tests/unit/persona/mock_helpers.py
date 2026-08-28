@@ -5,20 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 class MockDataStore:
     def __init__(self):
         self._usage: dict = {}
-        self._whitelist_users: set = set()
-        self._whitelist_groups: set = set()
 
     async def get_daily_usage(self, user_id: str, date: str) -> int:
         return self._usage.get((user_id, date), 0)
 
     async def increment_daily_usage(self, user_id: str, date: str) -> None:
         self._usage[(user_id, date)] = self._usage.get((user_id, date), 0) + 1
-
-    async def is_user_whitelisted(self, user_id: str) -> bool:
-        return user_id in self._whitelist_users
-
-    async def is_group_whitelisted(self, group_id: str) -> bool:
-        return group_id in self._whitelist_groups
 
     async def insert_agent_run(self, **kwargs):
         return "run_id"
@@ -28,19 +20,6 @@ class MockDataStore:
 
     async def insert_agent_event(self, **kwargs):
         pass
-
-    def add_whitelist_user(self, user_id: str):
-        self._whitelist_users.add(user_id)
-
-    def add_whitelist_group(self, group_id: str):
-        self._whitelist_groups.add(group_id)
-
-class MockQuotaConfig:
-    def __init__(self):
-        self.whitelist_enabled = True
-        self.timezone = "Asia/Shanghai"
-        self.quota_exceeded_message = "今日配额已用完（{limit}次）"
-
 
 def make_mock_provider():
     provider = MagicMock()

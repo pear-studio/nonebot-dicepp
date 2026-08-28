@@ -89,8 +89,6 @@ class PersonaConfig(BaseModel):
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
     character_name: str = Field(default="qiqi.local", title="角色名")
 
-    whitelist_enabled: bool = Field(default=True, title="白名单")
-
     # ── 对话与回复 ───────────────────────────────────────────────────────────
 
     # ── 生活模拟 ─────────────────────────────────────────────────────────────

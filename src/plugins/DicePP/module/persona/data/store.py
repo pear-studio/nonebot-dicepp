@@ -963,37 +963,6 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
-    # ========== 全局设置相关（bot 级，core_db 侧） ==========
-
-    async def get_global_setting(self, key: str) -> Optional[str]:
-        """获取 bot 级全局设置值（如口令 'code'）"""
-        async with self._core_db.execute(
-            "SELECT value FROM persona_global_settings WHERE key = ?",
-            (key,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row[0] if row else None
-
-    async def set_global_setting(self, key: str, value: str) -> None:
-        """设置 bot 级全局设置值"""
-        await self._core_db.execute(
-            """
-            INSERT INTO persona_global_settings (key, value)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            """,
-            (key, value)
-        )
-        await self._core_db.commit()
-
-    async def delete_global_setting(self, key: str) -> None:
-        """删除 bot 级全局设置"""
-        await self._core_db.execute(
-            "DELETE FROM persona_global_settings WHERE key = ?",
-            (key,)
-        )
-        await self._core_db.commit()
-
     # ========== 用量相关 ==========
 
     async def get_daily_usage(self, user_id: str, date: str) -> int:

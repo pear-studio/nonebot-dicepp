@@ -190,22 +190,7 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
         raise PersonaStorageError(f"数据库表初始化失败: {e}") from e
     logger.info(f"数据存储已初始化: persona_db={persona_db_path}")
 
-    await _migrate_code_setting(store)
-
     return store
-
-
-async def _migrate_code_setting(store: PersonaDataStore) -> None:
-    """首次启动时将旧 persona_settings 中的 'code' 迁移到 persona_global_settings"""
-    existing = await store.get_global_setting("code")
-    if existing is not None:
-        await store.delete_setting("code")
-        return
-    old_code = await store.get_setting("code")
-    if old_code is not None:
-        await store.set_global_setting("code", old_code)
-        await store.delete_setting("code")
-        logger.info("已将口令 'code' 从 persona_settings 迁移到 persona_global_settings")
 
 
 def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:

@@ -2,8 +2,7 @@
 
 处理所有 .ai admin 子命令，从 command.py 拆出以瘦身命令入口。
 """
-from typing import List, Dict, Optional
-import time
+from typing import List, Optional
 from plugins.DicePP.utils.logger import logger
 from datetime import timedelta
 
@@ -30,8 +29,6 @@ class AdminDispatcher:
         self.app = app
         self.data_store = data_store
         self.init_error = init_error
-        self.config = bot.config.persona_ai if bot else None
-        self._whitelist_confirm_pending: Dict[str, float] = {}
         self._report_generator = report_generator
 
     def _is_admin(self, user_id: str) -> bool:
@@ -62,10 +59,6 @@ class AdminDispatcher:
             return await self._admin_debug(user_id, group_id, args,
                                            daily_pending=daily_pending)
 
-        # code 已迁移到 whitelist code
-        if subcmd == "code":
-            return "此命令已迁移，请使用 .ai admin whitelist code <口令>"
-
         # 通用 data_store 检查
         if not self.data_store:
             return "模块未初始化"
@@ -83,13 +76,12 @@ class AdminDispatcher:
     def _help_text() -> str:
         return (
             "管理员命令:\n"
-            ".ai admin whitelist code <口令> - 设置/更新口令\n"
-            ".ai admin whitelist code clear - 清除口令\n"
-            ".ai admin whitelist - 查看白名单\n"
-            ".ai admin whitelist add group <group_id> - 添加群到白名单\n"
+            ".ai admin whitelist - 查看 AI 限额豁免名单\n"
+            ".ai admin whitelist add user <user_id> - 添加用户到 AI 限额豁免名单\n"
+            ".ai admin whitelist add group <group_id> - 添加群到 AI 限额豁免名单\n"
             ".ai admin whitelist remove <user_id> - 移除用户\n"
             ".ai admin whitelist remove group <group_id> - 移除群\n"
-            ".ai admin whitelist clear - 清空白名单\n"
+            ".ai admin whitelist clear - 清空 AI 限额豁免名单\n"
             ".ai admin debug - 运行诊断（LLM统计、错误摘要）\n"
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
@@ -98,26 +90,12 @@ class AdminDispatcher:
 
     # ── admin 子命令 ──────────────────────────────────────────
 
-    async def _admin_whitelist_code(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not args:
-            current_code = await self.data_store.get_global_setting("code")
-            if current_code:
-                return f"当前已设置口令（{len(current_code)}位字符）"
-            else:
-                return "当前未设置口令，白名单功能未激活"
-        if args[0] == "clear":
-            await self.data_store.delete_global_setting("code")
-            return "口令已清除，白名单功能已停用"
-        new_code = args[0]
-        await self.data_store.set_global_setting("code", new_code)
-        return "已更新，白名单功能已激活"
-
     async def _admin_whitelist(self, user_id: str, group_id: str, args: List[str]) -> str:
         if len(args) < 2:
             entries = await self.data_store.list_whitelist()
             if not entries:
-                return "白名单为空"
-            lines = ["白名单列表:"]
+                return "AI 限额豁免名单为空"
+            lines = ["AI 限额豁免名单:"]
             users = [e for e in entries if e.type == "user"]
             groups = [e for e in entries if e.type == "group"]
             if users:
@@ -134,39 +112,35 @@ class AdminDispatcher:
                     lines.append(f"  ... 还有 {len(groups) - 10} 个")
             return "\n".join(lines)
         action = args[1]
-        if action == "code":
-            return await self._admin_whitelist_code(user_id, group_id, args[2:])
-        if action == "add" and len(args) >= 3 and args[2] == "group":
-            target_group_id = args[3] if len(args) > 3 else ""
-            if not target_group_id:
-                return "请提供群ID"
-            await self.data_store.add_group_to_whitelist(target_group_id)
-            return f"已添加群 {target_group_id} 到白名单"
+        if action == "add" and len(args) >= 3:
+            target_type = args[2]
+            target_id = args[3] if len(args) > 3 else ""
+            if target_type == "user":
+                if not target_id:
+                    return "请提供用户ID"
+                await self.data_store.add_user_to_whitelist(target_id)
+                return f"已添加用户 {target_id} 到 AI 限额豁免名单"
+            if target_type == "group":
+                if not target_id:
+                    return "请提供群ID"
+                await self.data_store.add_group_to_whitelist(target_id)
+                return f"已添加群 {target_id} 到 AI 限额豁免名单"
         if action == "remove":
             if len(args) >= 3 and args[2] == "group":
                 target_group_id = args[3] if len(args) > 3 else ""
                 if not target_group_id:
                     return "请提供群ID"
                 await self.data_store.remove_from_whitelist(target_group_id, "group")
-                return f"已移除群 {target_group_id}"
+                return f"已从 AI 限额豁免名单移除群 {target_group_id}"
             else:
                 target_id = args[2] if len(args) > 2 else ""
                 if not target_id:
                     return "请提供用户ID"
                 await self.data_store.remove_from_whitelist(target_id, "user")
-                return f"已移除用户 {target_id}"
+                return f"已从 AI 限额豁免名单移除用户 {target_id}"
         if action == "clear":
-            self._whitelist_confirm_pending[user_id] = time.monotonic()
-            return "确认清空？60秒内发 `.ai admin whitelist confirm` 执行"
-        if action == "confirm":
-            pending_time = self._whitelist_confirm_pending.get(user_id)
-            if pending_time and (time.monotonic() - pending_time) < 60.0:
-                await self.data_store.clear_whitelist()
-                self._whitelist_confirm_pending.pop(user_id, None)
-                return "白名单已清空"
-            else:
-                self._whitelist_confirm_pending.pop(user_id, None)
-                return "没有待确认的清空操作（可能已超时）"
+            await self.data_store.clear_whitelist()
+            return "AI 限额豁免名单已清空"
         return "未知的管理员命令"
 
     async def _admin_debug(

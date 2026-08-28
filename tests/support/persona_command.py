@@ -31,7 +31,6 @@ def default_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_name="test_char",
-        whitelist_enabled=True,
     )
 
 
@@ -49,7 +48,6 @@ def make_cmd(bot=None, enabled: bool = True) -> PersonaCommand:
     command = PersonaCommand(bot)
     command.enabled = enabled
     command.config = bot.config.persona_ai
-    command._register_admin_handlers()
     return command
 
 

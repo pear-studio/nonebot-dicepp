@@ -2,9 +2,9 @@
 Persona AI 命令入口
 
 集成 persona 模块完成对话功能
-支持白名单访问控制
+提供 Persona 正常聊天与工具命令
 """
-from typing import List, Dict, Tuple, Any, Optional, Callable
+from typing import List, Tuple, Any, Optional
 import json
 import time
 import asyncio
@@ -92,14 +92,13 @@ class PersonaCommand(UserCommandBase):
         self.app: Optional[PersonaApp] = None
         self.data_store: Optional[PersonaDataStore] = None
         self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
-        self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
         self._async_tick_task: Optional[asyncio.Task] = None
         self._async_tick_daily_task: Optional[asyncio.Task] = None
         self._async_sa_daily_task: Optional[asyncio.Task] = None
         self._shutting_down = False
-        # 管理员子命令分发器（在 delay_init 后由外部补齐）
-        self._admin_handlers: Dict[str, Callable] = {}
+        # 管理员子命令分发器（PersonaApp 成功初始化后注册）
+        self.admin_dispatcher: Optional[AdminDispatcher] = None
         # 日报生成器（生命周期独立于 PersonaApp）
         self.report_generator: Optional[DailyReportGenerator] = None
         # 图片缓存
@@ -158,6 +157,7 @@ class PersonaCommand(UserCommandBase):
                 # 注入 app 引用到日报生成器
                 if self.report_generator:
                     self.report_generator.set_app(self.app)
+                self._register_admin_handlers()
                 # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
                 if hasattr(self, "_post_send_hook_unregister"):
                     self._post_send_hook_unregister()
@@ -176,7 +176,6 @@ class PersonaCommand(UserCommandBase):
                 self.enabled = False
             return []
 
-        self._register_admin_handlers()
         self.bot.scheduler.schedule(init_persona, is_async=True, timeout=30)
 
         return [
@@ -313,38 +312,6 @@ class PersonaCommand(UserCommandBase):
         # 使用 DicePP 的 is_admin 检查
         return bool(self.bot.config.master) and user_id == self.bot.config.master
 
-    async def _check_whitelist(self, user_id: str, group_id: str, is_private: bool) -> bool:
-        """
-        检查用户/群是否在白名单中
-
-        Returns:
-            True = 允许访问，False = 拒绝访问
-        """
-        config = self.bot.config.persona_ai
-
-        # 白名单功能未启用，允许所有人
-        if not config.whitelist_enabled:
-            return True
-
-        if not self.data_store:
-            return False
-
-        # 检查是否设置了口令
-        code = await self.data_store.get_global_setting("code")
-        if not code:
-            # 未设置口令，白名单不激活，允许所有人
-            return True
-
-        # 私聊：检查用户白名单
-        if is_private:
-            return await self.data_store.is_user_whitelisted(user_id)
-
-        # 群聊：检查群白名单
-        if group_id:
-            return await self.data_store.is_group_whitelisted(group_id)
-
-        return False
-
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         """判断是否处理消息"""
         if not self.enabled:
@@ -363,12 +330,6 @@ class PersonaCommand(UserCommandBase):
         if msg in (".jrrp", "。jrrp"):
             if not self.app:
                 logger.info("[Persona] .jrrp 未拦截：模块未初始化，回退到 JrrpCommand")
-                return False, False, None
-            # 白名单
-            is_private = not meta.group_id
-            whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
-            if not whitelisted:
-                logger.info("[Persona] .jrrp 未拦截：用户不在白名单，回退到 JrrpCommand")
                 return False, False, None
             logger.info("[Persona] .jrrp 已拦截，路由到 _handle_jrrp")
             return True, False, "jrrp"
@@ -394,14 +355,6 @@ class PersonaCommand(UserCommandBase):
         parts = content.split()
         cmd = parts[0] if parts else ""
 
-        # .ai join 命令：任何人可在私聊执行
-        if cmd == "join":
-            if not meta.group_id:  # 仅私聊
-                return True, False, "join"
-            else:
-                # 群聊中提示私聊
-                return True, False, "join_group_hint"
-
         # .ai admin 命令：仅管理员
         if cmd == "admin":
             if self._is_admin(meta.user_id):
@@ -410,25 +363,12 @@ class PersonaCommand(UserCommandBase):
                 # 非管理员尝试执行 admin 命令，静默忽略
                 return False, False, None
 
-        # 不调用 LLM 的工具类命令：无需白名单
+        # 不调用 LLM 的工具类命令
         if cmd in ("clear", "status"):
             return True, False, None
-        # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
+        # 聊天触发（@bot）
         if meta.to_me and not msg.startswith(".ai"):
-            is_private = not meta.group_id
-            whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
-            if not whitelisted:
-                return False, False, None
             return True, False, None
-
-        # 其余 .ai 命令（含未知子命令 → 自我介绍）：检查白名单
-        is_private = not meta.group_id
-        whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
-
-        if not whitelisted:
-            # 不在白名单，静默忽略（不干扰 TRPG 流程）
-            return False, False, None
-
         return True, False, None
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
@@ -450,22 +390,10 @@ class PersonaCommand(UserCommandBase):
                 else:
                     content = msg
 
-                # 特殊提示：群聊中发送 join
-                if hint == "join_group_hint":
-                    response = "请私聊发送此命令"
-                    await self._send(user_id, group_id, response)
-                    return []
-
                 # 解析命令
                 parts = content.split()
                 cmd = parts[0] if parts else ""
                 args = parts[1:] if len(parts) > 1 else []
-
-                # 处理 join 命令
-                if cmd == "join" or hint == "join":
-                    response = await self._handle_join(user_id, args)
-                    await self._send(user_id, group_id, response)
-                    return []
 
                 # 处理 admin 命令
                 if cmd == "admin" or hint == "admin":
@@ -709,38 +637,6 @@ class PersonaCommand(UserCommandBase):
                 f"user={user_id} group={group_id}", exc_info=True,
             )
 
-    async def _handle_join(self, user_id: str, args: List[str]) -> str:
-        """处理 join 命令（用户加入白名单）"""
-        if not self.data_store:
-            return "模块未初始化，请稍后再试"
-
-        config = self.bot.config.persona_ai
-
-        # 检查白名单功能是否启用
-        if not config.whitelist_enabled:
-            return "AI 功能暂未开放，请联系管理员"
-
-        # 检查是否设置了口令
-        code = await self.data_store.get_global_setting("code")
-        if not code:
-            return "AI 功能暂未开放，请联系管理员"
-
-        # 检查是否已在白名单
-        if await self.data_store.is_user_whitelisted(user_id):
-            return "你已经在啦~"
-
-        # 检查口令
-        if not args:
-            return "请输入口令: .ai join <口令>"
-
-        input_code = args[0]
-        if input_code != code:
-            return "口令不对哦~"
-
-        # 加入白名单
-        await self.data_store.add_user_to_whitelist(user_id)
-        return "已开启 AI 对话，开始聊天吧！"
-
     async def _handle_admin(self, user_id: str, group_id: str, args: List[str]) -> str:
         """处理 admin 命令（管理员功能）——分发给 AdminDispatcher"""
         if not self.admin_dispatcher:
@@ -772,18 +668,7 @@ class PersonaCommand(UserCommandBase):
         if not self.app:
             return "Persona AI 状态: 初始化中..."
 
-        config = self.bot.config.persona_ai
         char = self.app.get_character()
-
-        # 检查白名单状态
-        whitelist_status = ""
-        if config.whitelist_enabled and self.data_store:
-            code = await self.data_store.get_global_setting("code")
-            if code:
-                whitelisted = await self._check_whitelist(user_id, group_id, is_private)
-                whitelist_status = f"\n白名单: {'已通过' if whitelisted else '未加入（发送 .ai join <口令> 加入）'}"
-            else:
-                whitelist_status = "\n白名单: 未激活（所有人可用）"
 
         model_name = self.bot.user_config.deepseek_model
 
@@ -792,14 +677,12 @@ class PersonaCommand(UserCommandBase):
                 f"Persona AI 状态: 初始化中...\n"
                 f"角色: {self.bot.config.persona_ai.character_name or '未指定'}\n"
                 f"模型: DeepSeek/{model_name}"
-                f"{whitelist_status}"
             )
 
         base = (
             f"Persona AI 状态: 已启用\n"
             f"角色: {char.name}\n"
-            f"模型: DeepSeek/{model_name}"
-            f"{whitelist_status}\n"
+            f"模型: DeepSeek/{model_name}\n"
             f"\n使用方法: @bot <消息>\n"
             f".ai status - 查看状态"
         )
@@ -812,7 +695,6 @@ class PersonaCommand(UserCommandBase):
                 ".ai - 自我介绍",
                 "@bot <消息> - 与 AI 对话",
                 ".ai status - 查看状态",
-                ".ai join <口令> - 加入白名单（私聊）",
             ]
             if self._is_admin(meta.user_id):
                 lines.append("")
@@ -821,7 +703,6 @@ class PersonaCommand(UserCommandBase):
                 lines.append(".ai admin reload - 热重载角色卡")
                 lines.append(".ai admin events - 事件配置")
                 lines.append(".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）")
-                lines.append(".ai admin whitelist code <口令> - 设置/更新口令")
             return "\n".join(lines)
         return ""
 

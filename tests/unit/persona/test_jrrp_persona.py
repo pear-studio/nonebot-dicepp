@@ -2,7 +2,7 @@
 Tests for jrrp persona interception paths.
 
 Covers:
-- PersonaCommand.can_process_msg .jrrp branching (is_awake, whitelist)
+- PersonaCommand.can_process_msg .jrrp branching
 - PersonaCommand._handle_jrrp with mocked compute_jrrp and mocked app.chat.chat
 - is_command=True propagation through ChatSession.chat
 - PersonaApp.is_awake() delegation to sleep_gate
@@ -44,16 +44,12 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
     cmd.bot = MagicMock()
     cmd.bot.get_nickname = AsyncMock(return_value="test_user")
     cmd.image_cache = MagicMock()
-    cmd._admin_handlers = {}
+    cmd.admin_dispatcher = None
 
     if config is None:
-        config = PersonaConfig(
-            whitelist_enabled=False,
-        )
+        config = PersonaConfig()
     cmd.config = config
 
-    # _check_whitelist 使用 self.bot.config.persona_ai，而非 self.config，
-    # 因此需同步配置 bot mock
     cmd.bot.config.persona_ai = config
 
     return cmd
@@ -82,43 +78,11 @@ class TestCanProcessMsgJrrpBranching:
         result = await self._call_can_process(cmd)
         assert result is False
 
-    async def test_jrrp_with_valid_app_returns_true(self):
-        """角色清醒或睡眠时 .jrrp 均返回 True（is_awake 不参与 jrrp 路由决策）"""
+    async def test_jrrp_with_valid_app_is_always_intercepted(self):
+        """Persona 已装配时 .jrrp 直接由 Persona 接管。"""
         app = MagicMock()
         cmd = _make_cmd(app=app)
         result = await self._call_can_process(cmd)
-        assert result is True
-
-    async def test_whitelist_enabled_and_not_whitelisted_returns_false(self):
-        """白名单启用但用户不在白名单时返回 False"""
-        config = PersonaConfig(
-            whitelist_enabled=True,
-        )
-
-        app = MagicMock()
-
-        data_store = MagicMock()
-        data_store.get_global_setting = AsyncMock(return_value="some_code")
-        data_store.is_user_whitelisted = AsyncMock(return_value=False)
-
-        cmd = _make_cmd(app=app, data_store=data_store, config=config)
-        result = await self._call_can_process(cmd, group_id="")
-        assert result is False
-
-    async def test_whitelist_enabled_and_whitelisted_returns_true(self):
-        """白名单启用且用户在白名单时返回 True"""
-        config = PersonaConfig(
-            whitelist_enabled=True,
-        )
-
-        app = MagicMock()
-
-        data_store = MagicMock()
-        data_store.get_global_setting = AsyncMock(return_value="some_code")
-        data_store.is_user_whitelisted = AsyncMock(return_value=True)
-
-        cmd = _make_cmd(app=app, data_store=data_store, config=config)
-        result = await self._call_can_process(cmd, group_id="")
         assert result is True
 
     async def test_non_jrrp_command_not_intercepted(self):

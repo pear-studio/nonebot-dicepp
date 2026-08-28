@@ -79,7 +79,6 @@ def _make_persona_config() -> PersonaConfig:
         # 关闭不需要的子系统
         trace_enabled=False,
         quota_check_enabled=False,
-        whitelist_enabled=False,
         character_life_enabled=False,
         daily_limit=9999,
     )

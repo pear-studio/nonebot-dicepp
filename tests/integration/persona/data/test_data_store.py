@@ -909,56 +909,6 @@ class TestPersonaStoreLifecycle:
             assert not (tmp_path.parent / 'outside.db').exists()
             await store.close()
 
-class TestMigrateCodeSetting:
-    """_migrate_code_setting 测试"""
-
-    @pytest.mark.asyncio
-    async def test_migrate_code_setting_first_run(self):
-        """首次迁移正确写入 global_settings"""
-        import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
-        async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
-            store = PersonaDataStore(':memory:', core_db)
-            store._persona_db = persona_db
-            await store.ensure_tables()
-            await store.set_setting('code', 'secret123')
-            await _migrate_code_setting(store)
-            global_code = await store.get_global_setting('code')
-            assert global_code == 'secret123'
-            old_code = await store.get_setting('code')
-            assert old_code is None
-
-    @pytest.mark.asyncio
-    async def test_migrate_code_setting_idempotent(self):
-        """已存在 global_settings 时不覆盖"""
-        import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
-        async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
-            store = PersonaDataStore(':memory:', core_db)
-            store._persona_db = persona_db
-            await store.ensure_tables()
-            await store.set_global_setting('code', 'existing_code')
-            await store.set_setting('code', 'old_code')
-            await _migrate_code_setting(store)
-            global_code = await store.get_global_setting('code')
-            assert global_code == 'existing_code'
-
-    @pytest.mark.asyncio
-    async def test_migrate_code_setting_no_old_code(self):
-        """旧表无 code 时无操作"""
-        import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
-        async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
-            store = PersonaDataStore(':memory:', core_db)
-            store._persona_db = persona_db
-            await store.ensure_tables()
-            await _migrate_code_setting(store)
-            global_code = await store.get_global_setting('code')
-            assert global_code is None
-
 class TestPersonaScopeFilter:
     """_PERSONA_SCOPE 排除 system_log，包含 ambient / chat / command"""
 

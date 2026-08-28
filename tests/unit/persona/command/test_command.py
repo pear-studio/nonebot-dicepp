@@ -11,13 +11,11 @@ autouse fixture 注入到 self 上，本文件直接使用 self.make_group_meta(
 """
 
 import pytest
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.data.models import WhitelistEntry, DiaryEntry, DailyEvent
 from plugins.DicePP.core.communication import MessageMetaData, MessageSender
 
 
@@ -54,20 +52,6 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         ok, _, _ = await cmd.can_process_msg(".r 1d20", meta)
         assert ok is False
 
-    async def test_join_private(self):
-        cmd = self.make_cmd()
-        meta = self.make_private_meta(".ai join abc")
-        ok, _, hint = await cmd.can_process_msg(".ai join abc", meta)
-        assert ok is True
-        assert hint == "join"
-
-    async def test_join_group_hint(self):
-        cmd = self.make_cmd()
-        meta = self.make_group_meta(".ai join abc")
-        ok, _, hint = await cmd.can_process_msg(".ai join abc", meta)
-        assert ok is True
-        assert hint == "join_group_hint"
-
     async def test_admin_allowed_for_master(self):
         cmd = self.make_cmd()
         meta = self.make_group_meta(".ai admin debug", user_id="master_user")
@@ -81,41 +65,18 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         ok, _, _ = await cmd.can_process_msg(".ai admin debug", meta)
         assert ok is False
 
-    async def test_tool_commands_exempt_whitelist(self):
+    async def test_tool_commands_are_available(self):
         cmd = self.make_cmd()
         for sub in ["clear", "status"]:
             meta = self.make_private_meta(f".ai {sub}")
             ok, _, _ = await cmd.can_process_msg(f".ai {sub}", meta)
             assert ok is True, f"failed for {sub}"
 
-    async def test_at_trigger_whitelist_matrix(self):
-        bot = self.make_mock_bot()
-        bot.config.persona_ai.whitelist_enabled = True
-        cmd = self.make_cmd(bot)
-        store = AsyncMock()
-        store.get_global_setting = AsyncMock(return_value="secret")
-        store.is_user_whitelisted = AsyncMock(return_value=True)
-        cmd.data_store = store
-
+    async def test_at_trigger_is_available_without_whitelist(self):
+        cmd = self.make_cmd()
         meta = self.make_private_meta("你好")
         meta.to_me = True
         ok, _, _ = await cmd.can_process_msg("你好", meta)
-        assert ok is True
-
-        store.is_user_whitelisted = AsyncMock(return_value=False)
-        ok, _, _ = await cmd.can_process_msg("你好", meta)
-        assert ok is False
-
-    async def test_whitelist_disabled_or_no_code(self):
-        bot = self.make_mock_bot()
-        cmd = self.make_cmd(bot)
-        # whitelist_enabled=True but no code set
-        store = AsyncMock()
-        store.get_global_setting = AsyncMock(return_value=None)
-        cmd.data_store = store
-
-        meta = self.make_private_meta(".ai hello")
-        ok, _, _ = await cmd.can_process_msg(".ai hello", meta)
         assert ok is True
 
     async def test_private_chat_triggers(self):
@@ -148,6 +109,42 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         assert PersonaCommand._is_persona_trigger(group_meta, ".ai status") is True
 
 
+class TestDelayedInitialization(IsolatedAsyncioTestCase):
+    async def test_admin_dispatcher_registers_after_persona_app_ready(self):
+        bot = self.make_mock_bot()
+        scheduled = []
+        bot.scheduler = MagicMock()
+        bot.scheduler.schedule = lambda callback, **kwargs: scheduled.append(callback)
+        cmd = self.make_cmd(bot)
+        cmd._send = AsyncMock()
+
+        store = AsyncMock()
+        store.list_whitelist = AsyncMock(return_value=[])
+        app = MagicMock()
+        app.store = store
+
+        with patch(
+            "plugins.DicePP.module.persona.command.create_persona",
+            new=AsyncMock(return_value=app),
+        ):
+            cmd.delay_init()
+
+            assert cmd.admin_dispatcher is None
+            assert await cmd._handle_admin("master_user", "", ["whitelist"]) == "模块未初始化"
+            assert len(scheduled) == 1
+
+            await scheduled[0]()
+
+        assert cmd.admin_dispatcher is not None
+        assert cmd.admin_dispatcher.app is app
+        assert cmd.admin_dispatcher.data_store is store
+        response = await cmd._handle_admin(
+            "master_user", "", ["whitelist", "add", "user", "U100"],
+        )
+        assert response == "已添加用户 U100 到 AI 限额豁免名单"
+        store.add_user_to_whitelist.assert_awaited_once_with("U100")
+
+
 class TestAdminCommands(IsolatedAsyncioTestCase):
     """admin 子命令（10个）"""
 
@@ -168,10 +165,8 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
         self.cmd.app.current_character_name = "test_char"
 
-        # AdminDispatcher 在 make_cmd 中初始化时 app/data_store 为 None，
-        # 后续赋值后需同步更新 dispatcher 引用。
-        self.cmd.admin_dispatcher.app = self.cmd.app
-        self.cmd.admin_dispatcher.data_store = self.store
+        # 测试 fixture 在依赖就绪后走正式注册路径。
+        self.cmd._register_admin_handlers()
 
         self.cmd.app.update_character = AsyncMock()
 
@@ -182,36 +177,32 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         await self.cmd.process_msg(".ai admin", meta, "admin")
         assert "管理员命令" in self.get_sent_content(self.cmd)
 
-    async def test_admin_code_migration(self):
-        meta = self.make_private_meta(".ai admin code newcode", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin code newcode", meta, "admin")
-        assert "此命令已迁移" in self.get_sent_content(self.cmd)
-
-    async def test_admin_whitelist_code(self):
-        self.store.get_global_setting = AsyncMock(return_value=None)
-        meta = self.make_private_meta(".ai admin whitelist code newcode", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin whitelist code newcode", meta, "admin")
-        assert "已更新" in self.get_sent_content(self.cmd)
-
-    async def test_admin_whitelist_and_confirm(self):
+    async def test_admin_whitelist_management(self):
         self.store.list_whitelist = AsyncMock(return_value=[])
         meta = self.make_private_meta(".ai admin whitelist", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin whitelist", meta, "admin")
-        assert "白名单为空" in self.get_sent_content(self.cmd)
+        assert "AI 限额豁免名单为空" in self.get_sent_content(self.cmd)
 
-        meta2 = self.make_private_meta(".ai admin whitelist clear", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin whitelist clear", meta2, "admin")
-        assert "确认清空" in self.get_sent_content(self.cmd)
+        for command, method, expected in (
+            (".ai admin whitelist add user U100", "add_user_to_whitelist", "U100"),
+            (".ai admin whitelist add group G100", "add_group_to_whitelist", "G100"),
+        ):
+            meta = self.make_private_meta(command, user_id=self.user_id)
+            await self.cmd.process_msg(command, meta, "admin")
+            getattr(self.store, method).assert_awaited_once_with(expected)
 
-        meta3 = self.make_private_meta(".ai admin whitelist confirm", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin whitelist confirm", meta3, "admin")
-        assert "白名单已清空" in self.get_sent_content(self.cmd)
+        for command, expected in (
+            (".ai admin whitelist remove U100", ("U100", "user")),
+            (".ai admin whitelist remove group G100", ("G100", "group")),
+        ):
+            meta = self.make_private_meta(command, user_id=self.user_id)
+            await self.cmd.process_msg(command, meta, "admin")
+            self.store.remove_from_whitelist.assert_any_await(*expected)
 
-    async def test_admin_whitelist_confirm_timeout(self):
-        self.cmd._whitelist_confirm_pending[self.user_id] = time.monotonic() - 120
-        meta = self.make_private_meta(".ai admin whitelist confirm", user_id=self.user_id)
-        await self.cmd.process_msg(".ai admin whitelist confirm", meta, "admin")
-        assert "超时" in self.get_sent_content(self.cmd)
+        meta = self.make_private_meta(".ai admin whitelist clear", user_id=self.user_id)
+        await self.cmd.process_msg(".ai admin whitelist clear", meta, "admin")
+        assert "AI 限额豁免名单已清空" in self.get_sent_content(self.cmd)
+        self.store.clear_whitelist.assert_awaited_once_with()
 
     async def test_admin_debug(self):
         meta = self.make_private_meta(".ai admin debug", user_id=self.user_id)
@@ -309,10 +300,3 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         meta = self.make_private_meta(".ai status")
         await self.cmd.process_msg(".ai status", meta, None)
         assert "已启用" in self.get_sent_content(self.cmd)
-
-    async def test_join(self):
-        self.store.get_global_setting = AsyncMock(return_value="secret")
-        self.store.is_user_whitelisted = AsyncMock(return_value=False)
-        meta = self.make_private_meta(".ai join secret")
-        await self.cmd.process_msg(".ai join secret", meta, "join")
-        assert "已开启 AI 对话" in self.get_sent_content(self.cmd)

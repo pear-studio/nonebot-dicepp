@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS persona_whitelist (
 );
 """
 
-# 设置表（存储口令等运行时配置）
+# 角色级设置表
 CREATE_SETTINGS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_settings (
     key TEXT PRIMARY KEY,
@@ -101,7 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_msgstream_group_time
 ON message_stream(group_id, created_at DESC);
 """
 
-# 全局设置表 — core_db 侧（存 bot 级设置，如口令 "code"）
+# 全局设置表 — core_db 侧（保留既有数据库结构）
 CREATE_GLOBAL_SETTINGS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_global_settings (
     key TEXT PRIMARY KEY,
