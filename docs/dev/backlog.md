@@ -52,27 +52,6 @@
     - 明确旧 DiceHub 配置和数据的保留、迁移或废弃策略
     - 使用本地 Fake Adapter 覆盖完整命令行为；真实外部 DiceHub 验收需要另行确认
 
-## persona
-
-### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
-- 创建: 2026-06-01
-- 优先级: P2
-- 类型: feature
-- 改动量: M
-- 问题表现:
-  当前 .ai key config 命令返回"升级中，暂不可用"，用户无法配置自己的 API Key。
-  - command.py:436 硬编码了占位回复
-  - errors.py:163 已提示用户使用 .ai key config 配置 API Key 可解除限制，但功能未实现
-  - data/models.py 已有 primary_api_key / auxiliary_api_key 字段，但缺少命令入口和路由集成
-  - 所有对话只能使用全局 provider 配置，用户无法配置自有 key 来解除限流或使用自己的额度
-- 开发备忘:
-  实现 .ai key config 命令，允许用户配置自己的 API Key：
-  - 实现 command.py 中的 key config 子命令（设置/查看/删除）
-  - 加密存储用户 API Key 到数据库（复用 data/models.py 已有字段）
-  - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
-  - 影响面：command.py、data/store.py、llm/router.py
-  - 风险点：用户 key 的安全存储与传输，key 校验机制
-
 ## statistics
 
 ### [B-260622-d85176] StatManager 规模化运维

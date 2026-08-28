@@ -244,7 +244,7 @@ class ChatOrchestrator:
             return ChatOutcome("skipped", reason="buffered")
 
         if isinstance(submit_result.error, QuotaExceeded):
-            fallback = f"{submit_result.error}\n\n使用 `.ai key config` 配置自己的 API Key 可解除限制"
+            fallback = str(submit_result.error)
             reason = "quota_exceeded"
         else:
             fallback = "LLM服务暂时不可用，请稍后再试"

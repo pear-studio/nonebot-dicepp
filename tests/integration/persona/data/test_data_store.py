@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from plugins.DicePP.utils.time import wall_now
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState, LLMTraceRecord, UserLLMConfig, ScoreEvent, ScoreDeltas
+from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState, LLMTraceRecord, ScoreEvent, ScoreDeltas
 
 class TestMessageCRUD:
     """测试统一消息表 CRUD"""
@@ -783,26 +783,6 @@ class TestLLMTraceCRUD:
         errors = await store.get_error_summary_since(since)
         assert len(errors) == 1
         assert errors[0] == ('failed', 2)
-
-class TestUserLLMConfigCRUD:
-    """测试用户 LLM 配置 CRUD（不依赖加密密钥时返回 False/None）"""
-
-    @pytest.mark.asyncio
-    async def test_save_and_get_user_llm_config_without_key(self, temp_db):
-        store = temp_db
-        config = UserLLMConfig(user_id='u1', primary_api_key='sk-test', primary_model='gpt-4o')
-        success = await store.save_user_llm_config(config)
-        assert success is False
-
-    @pytest.mark.asyncio
-    async def test_get_nonexistent_user_llm_config(self, temp_db):
-        store = temp_db
-        assert await store.get_user_llm_config('u_unknown') is None
-
-    @pytest.mark.asyncio
-    async def test_clear_user_llm_config(self, temp_db):
-        store = temp_db
-        assert await store.clear_user_llm_config('u1') is True
 
 class TestRelationshipCRUD:
     """测试关系状态 CRUD"""

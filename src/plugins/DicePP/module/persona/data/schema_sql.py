@@ -194,20 +194,6 @@ CREATE INDEX IF NOT EXISTS idx_msgstream_group_time
 ON message_stream(group_id, created_at DESC);
 """
 
-# 用户 LLM 配置表 (Phase 4) — core_db 侧
-CREATE_USER_LLM_CONFIG_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_user_llm_config (
-    user_id TEXT PRIMARY KEY,
-    primary_api_key_encrypted TEXT DEFAULT '',
-    primary_base_url TEXT DEFAULT '',
-    primary_model TEXT DEFAULT '',
-    auxiliary_api_key_encrypted TEXT DEFAULT '',
-    auxiliary_base_url TEXT DEFAULT '',
-    auxiliary_model TEXT DEFAULT '',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
 # 全局设置表 — core_db 侧（存 bot 级设置，如口令 "code"）
 CREATE_GLOBAL_SETTINGS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_global_settings (
@@ -478,6 +464,5 @@ PERSONA_SCHEMA_SQL = [
 BOT_CORE_SCHEMA_SQL = [
     CREATE_WHITELIST_TABLE,
     CREATE_USER_MUTE_TABLE,
-    CREATE_USER_LLM_CONFIG_TABLE,
     CREATE_GLOBAL_SETTINGS_TABLE,
 ]

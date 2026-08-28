@@ -291,7 +291,7 @@ class LLMRouter:
         if current >= self.daily_limit:
             raise QuotaExceeded(
                 f"今日 LLM 调用次数已达上限 ({self.daily_limit})，"
-                f"请明天再试或配置自己的 API Key"
+                f"请稍后再试"
             )
 
     def get_stats(self) -> Dict[str, Any]:

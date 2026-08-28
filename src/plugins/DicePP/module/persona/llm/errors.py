@@ -181,8 +181,7 @@ def user_message(kind: ErrorKind, detail: str = "") -> str:
     """根据 ErrorKind 生成差异化的用户可见错误信息"""
     templates: dict[ErrorKind, str] = {
         ErrorKind.QUOTA_EXCEEDED:
-            f"{detail or 'API 配额已用尽'}\n\n"
-            "使用 `.ai key config` 配置自己的 API Key 可解除限制",
+            f"{detail or 'API 配额已用尽，请稍后再试'}",
         ErrorKind.CONTENT_FILTERED:
             "消息内容被过滤，请修改输入后重试",
         ErrorKind.CONTEXT_TOO_LONG:

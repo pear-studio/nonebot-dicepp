@@ -141,19 +141,6 @@ class UserProfile(BaseModel):
         self.updated_at = updated_at
 
 
-class UserLLMConfig(BaseModel):
-    """用户自带的 LLM 配置（内存中为明文，数据库存储为加密）"""
-    user_id: str
-    primary_api_key: str = ""  # 内存中为明文，已从数据库解密
-    primary_base_url: str = ""
-    primary_model: str = ""
-    auxiliary_api_key: str = ""  # 内存中为明文，已从数据库解密
-    auxiliary_base_url: str = ""
-    auxiliary_model: str = ""
-    updated_at: Optional[datetime] = None
-    decrypt_failed: bool = False  # 数据库有加密数据但解密失败
-
-
 class UnifiedMessage(BaseModel):
     """统一消息流表模型"""
     id: Optional[int] = None

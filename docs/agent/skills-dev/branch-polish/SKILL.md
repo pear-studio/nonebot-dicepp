@@ -38,8 +38,8 @@ Dirty 模式扫 `git diff HEAD`，Commit 模式逐 commit `git show <hash>`。�
 - 过时或与代码现状不一致的注释
 - 冗余变量或中间赋值
 - 硬编码临时值（magic number、临时端口号等）
-- **TODO/待办类注释**：逐行判断是否为"写了 TODO 但没 backlog 引用"的待办项。TODO 注释必须引用有效的 backlog ID（格式 `B-YYMMDD-xxxxxx`，如 `B-260601-ef9e5a`），引用写在 TODO 旁边：
-  - 规范写法：`# TODO(B-260601-ef9e5a): 此处需集成用户自定义 API Key 路由`
+- **TODO/待办类注释**：逐行判断是否为"写了 TODO 但没 backlog 引用"的待办项。TODO 注释必须引用 `docs/dev/backlog.md` 中当前有效的 backlog ID（格式 `B-YYMMDD-xxxxxx`），引用写在 TODO 旁边：
+  - 规范写法：`# TODO(<有效 backlog ID>): 描述待办事项`
   - 无 backlog 引用 → 清理项，建议"添加 backlog 引用或移除此 TODO"
   - 有 backlog 引用 → 可保留，标注"有 backlog 引用"
 - 类型标注缺失或不一致

@@ -20,7 +20,6 @@ from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
-    UserLLMConfig,
     WhitelistEntry,
     GroupActivity,
     DiaryEntry,

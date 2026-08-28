@@ -181,11 +181,11 @@ class TestClassifyFromProvider:
 class TestUserMessage:
     def test_quota_exceeded_with_detail(self):
         msg = user_message(ErrorKind.QUOTA_EXCEEDED, "今日配额已用完")
-        assert "配额" in msg or "quota" in msg.lower() or "key config" in msg
+        assert msg == "今日配额已用完"
 
     def test_quota_exceeded_no_detail(self):
         msg = user_message(ErrorKind.QUOTA_EXCEEDED)
-        assert ".ai key config" in msg
+        assert msg == "API 配额已用尽，请稍后再试"
 
     def test_content_filtered(self):
         assert "过滤" in user_message(ErrorKind.CONTENT_FILTERED)

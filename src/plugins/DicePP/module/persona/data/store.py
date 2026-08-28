@@ -12,20 +12,14 @@ from datetime import datetime, timedelta
 import json
 import re
 from plugins.DicePP.utils.logger import logger
-import os
-import base64
 import aiosqlite
 from pydantic import ValidationError
 
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dicepp_data import PERSONA_DB_ASSET
-from ..utils.privacy import mask_sensitive_string
 
 from .models import (
     WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
-    RelationshipState, DailyEvent, GroupActivity, UserLLMConfig,
+    RelationshipState, DailyEvent, GroupActivity,
     LLMTraceRecord, CharacterState, DMState, SAState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
     DEFAULT_SESSION_TOKEN_BUDGET,
@@ -2555,149 +2549,6 @@ class PersonaDataStore:
                     content += "..."
                 results.append((date, content))
             return results
-
-    # ========== Phase 4: 用户 LLM 配置（core_db 侧） ==========
-
-    @staticmethod
-    def _get_encryption_key() -> Optional[bytes]:
-        """从环境变量获取加密密钥，返回 32 字节密钥或 None"""
-        secret = os.environ.get("DICE_PERSONA_SECRET")
-        if not secret:
-            return None
-        # 使用 PBKDF2 从密码派生密钥
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=b"dicepp_persona_static_salt_v1",  # 固定 salt，保证可逆
-            iterations=100000,
-        )
-        key = kdf.derive(secret.encode("utf-8"))
-        return base64.urlsafe_b64encode(key)
-
-    @classmethod
-    def encrypt_api_key(cls, api_key: str) -> Optional[str]:
-        """加密 API Key，返回 base64 编码的密文或 None（空输入/密钥未设置时）"""
-        if not api_key:
-            return None
-        key = cls._get_encryption_key()
-        if not key:
-            return None
-        f = Fernet(key)
-        encrypted = f.encrypt(api_key.encode("utf-8"))
-        return base64.urlsafe_b64encode(encrypted).decode("ascii")
-
-    @classmethod
-    def decrypt_api_key(cls, encrypted_key: Optional[str]) -> Optional[str]:
-        """解密 API Key，返回明文或 None（空输入/解密失败时）"""
-        if not encrypted_key:
-            return None
-        key = cls._get_encryption_key()
-        if not key:
-            return None
-        try:
-            f = Fernet(key)
-            encrypted_bytes = base64.urlsafe_b64decode(encrypted_key.encode("ascii"))
-            decrypted = f.decrypt(encrypted_bytes)
-            return decrypted.decode("utf-8")
-        except Exception:
-            logger.warning("API Key 解密失败", exc_info=True)
-            return None
-
-    async def get_user_llm_config(self, user_id: str) -> Optional[UserLLMConfig]:
-        """获取用户 LLM 配置（自动解密 API Key）"""
-        async with self._core_db.execute(
-            """
-            SELECT user_id, primary_api_key_encrypted, primary_base_url, primary_model,
-                   auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at
-            FROM persona_user_llm_config
-            WHERE user_id = ?
-            """,
-            (user_id,)
-        ) as cursor:
-            raw_row = await cursor.fetchone()
-            if not raw_row:
-                return None
-            cols = [desc[0] for desc in cursor.description]
-            row = dict(zip(cols, raw_row))
-
-            # 解密 API Keys
-            primary_enc = row.get("primary_api_key_encrypted")
-            auxiliary_enc = row.get("auxiliary_api_key_encrypted")
-            primary_key = self.decrypt_api_key(primary_enc) if primary_enc else None
-            auxiliary_key = self.decrypt_api_key(auxiliary_enc) if auxiliary_enc else None
-
-            decrypt_failed = bool(
-                (primary_enc and primary_key is None) or (auxiliary_enc and auxiliary_key is None)
-            )
-
-            return UserLLMConfig(
-                user_id=row["user_id"],
-                primary_api_key=primary_key or "",
-                primary_base_url=row.get("primary_base_url") or "",
-                primary_model=row.get("primary_model") or "",
-                auxiliary_api_key=auxiliary_key or "",
-                auxiliary_base_url=row.get("auxiliary_base_url") or "",
-                auxiliary_model=row.get("auxiliary_model") or "",
-                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
-                decrypt_failed=decrypt_failed,
-            )
-
-    async def save_user_llm_config(self, config: UserLLMConfig) -> bool:
-        """保存用户 LLM 配置（自动加密 API Key）
-
-        Returns:
-            是否成功（加密密钥未设置时返回 False）
-        """
-        # 加密 API Keys（内存中为明文，存储前加密）
-        primary_encrypted = self.encrypt_api_key(config.primary_api_key)
-        if primary_encrypted is None and config.primary_api_key:
-            return False
-
-        auxiliary_encrypted = self.encrypt_api_key(config.auxiliary_api_key)
-        if auxiliary_encrypted is None and config.auxiliary_api_key:
-            return False
-
-        await self._core_db.execute(
-            """
-            INSERT INTO persona_user_llm_config
-            (user_id, primary_api_key_encrypted, primary_base_url, primary_model,
-             auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                primary_api_key_encrypted = excluded.primary_api_key_encrypted,
-                primary_base_url = excluded.primary_base_url,
-                primary_model = excluded.primary_model,
-                auxiliary_api_key_encrypted = excluded.auxiliary_api_key_encrypted,
-                auxiliary_base_url = excluded.auxiliary_base_url,
-                auxiliary_model = excluded.auxiliary_model,
-                updated_at = excluded.updated_at
-            """,
-            (
-                config.user_id,
-                primary_encrypted,
-                config.primary_base_url,
-                config.primary_model,
-                auxiliary_encrypted,
-                config.auxiliary_base_url,
-                config.auxiliary_model,
-                self._wall_now().isoformat(),
-            )
-        )
-        await self._core_db.commit()
-        return True
-
-    async def clear_user_llm_config(self, user_id: str) -> bool:
-        """清除用户 LLM 配置
-
-        Returns:
-            是否成功清除（配置不存在也返回 True）
-        """
-        await self._core_db.execute(
-            "DELETE FROM persona_user_llm_config WHERE user_id = ?",
-            (user_id,)
-        )
-        await self._core_db.commit()
-        return True
 
     # ========== Agent Runtime (Phase M1) ==========
 

@@ -63,7 +63,6 @@ def test_pyinstaller_spec_keeps_implementation_modules_out_of_datas_except_launc
     assert 'datas += collect_dicepp_resources()' in spec
     assert "DICEPP_PACKAGE_DIR.rglob('*')" in spec
     assert 'resource.suffix not in ALL_SUFFIXES' in spec
-    assert "collect_submodules('cryptography')" not in spec
     assert "collect_submodules('dicepp_meta')" not in spec
     assert "os.path.join(PROJECT_ROOT, 'src')" in spec
     assert "os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP')" not in spec

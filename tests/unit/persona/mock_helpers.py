@@ -2,15 +2,11 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.data.models import UserLLMConfig
-
-
 class MockDataStore:
     def __init__(self):
         self._usage: dict = {}
         self._whitelist_users: set = set()
         self._whitelist_groups: set = set()
-        self._user_configs: dict = {}
 
     async def get_daily_usage(self, user_id: str, date: str) -> int:
         return self._usage.get((user_id, date), 0)
@@ -23,9 +19,6 @@ class MockDataStore:
 
     async def is_group_whitelisted(self, group_id: str) -> bool:
         return group_id in self._whitelist_groups
-
-    async def get_user_llm_config(self, user_id: str):
-        return self._user_configs.get(user_id)
 
     async def insert_agent_run(self, **kwargs):
         return "run_id"
@@ -41,10 +34,6 @@ class MockDataStore:
 
     def add_whitelist_group(self, group_id: str):
         self._whitelist_groups.add(group_id)
-
-    def set_user_config(self, user_id: str, config: UserLLMConfig):
-        self._user_configs[user_id] = config
-
 
 class MockQuotaConfig:
     def __init__(self):

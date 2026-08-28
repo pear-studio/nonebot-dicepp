@@ -591,11 +591,7 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "group_limits"},
     )
     quota_exceeded_message: str = Field(
-        default="今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key", title="超配额消息",
-        json_schema_extra={"dashboard_section": "group_limits"},
-    )
-    allow_user_key: bool = Field(
-        default=True, title="允许用户 Key",
+        default="今日配额已用完（{limit}次），请稍后再试", title="超配额消息",
         json_schema_extra={"dashboard_section": "group_limits"},
     )
 

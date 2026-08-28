@@ -20,7 +20,6 @@ from plugins.DicePP.module.persona.command import PersonaCommand
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
-    UserLLMConfig,
     WhitelistEntry,
     GroupActivity,
     DiaryEntry,
@@ -395,12 +394,3 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         meta = self.make_private_meta(".ai join secret")
         await self.cmd.process_msg(".ai join secret", meta, "join")
         assert "已开启 AI 对话" in self.get_sent_content(self.cmd)
-
-    async def test_key_command_deprecated(self):
-        meta = self.make_private_meta(".ai key")
-        await self.cmd.process_msg(".ai key", meta, None)
-        assert "功能升级中" in self.get_sent_content(self.cmd)
-
-        meta2 = self.make_private_meta(".ai key config")
-        await self.cmd.process_msg(".ai key config", meta2, None)
-        assert "功能升级中" in self.get_sent_content(self.cmd)

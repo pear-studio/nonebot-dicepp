@@ -544,7 +544,6 @@ async def test_persona_bot_core_fragment_tables_exist_after_bot_database_connect
         assert {
             "persona_whitelist",
             "persona_user_mute",
-            "persona_user_llm_config",
             "persona_global_settings",
         } <= _tables(Path(db._db_path))
     finally:

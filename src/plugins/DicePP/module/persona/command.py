@@ -498,8 +498,6 @@ class PersonaCommand(UserCommandBase):
                     response = await self._get_status(user_id, group_id, is_private)
                 elif content == "mute":
                     response = await self._handle_mute_toggle(user_id)
-                elif content == "key" or content.startswith("key "):
-                    response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
                 elif is_at_trigger:
                     if self.app and self.enabled:
                         try:
