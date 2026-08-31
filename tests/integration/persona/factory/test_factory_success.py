@@ -66,7 +66,7 @@ class FakeCharacterLoader:
 # ============================================================
 
 
-def _make_persona_config() -> PersonaConfig:
+def _make_persona_config(*, life_simulation_enabled: bool = False) -> PersonaConfig:
     """最小可成功初始化 Persona 模块的 PersonaConfig。
 
     关闭所有可选子系统以减小依赖范围，只保留必需配置。
@@ -74,7 +74,7 @@ def _make_persona_config() -> PersonaConfig:
     return PersonaConfig(
         enabled=True,
         character_name="test_char",
-        life_simulation_enabled=False,
+        life_simulation_enabled=life_simulation_enabled,
     )
 
 
@@ -165,6 +165,20 @@ class TestCreatePersonaSuccess:
         assert "【回复长度】" in system_prompt
         assert "单段上限 80 字，总字数硬上限 120 字" in system_prompt
 
+        from plugins.DicePP.module.persona.life.conversation import Conversation
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+        agent = app.chat._ensure_agent(
+            ConversationScope.for_private("u1"), Conversation(),
+        )
+        toolkit, _ = agent._build_chat_toolkit(
+            delivery=None,
+            interaction_id="i1",
+            user_id="u1",
+            group_id="",
+            char_name="test_char",
+        )
+        assert "suggest_action" not in toolkit.tools
+
         # ── 8. 清理 ──────────────────────────────────────
         await app.store.close()
         await core_db.close()
@@ -188,7 +202,7 @@ class TestCreatePersonaSuccess:
         bot = MagicMock()
         bot.account = "test_bot_suggest_action"
         bot.user_config = UserConfig(deepseek_api_key="sk-test")
-        bot.config.persona_ai = _make_persona_config()
+        bot.config.persona_ai = _make_persona_config(life_simulation_enabled=True)
         bot.config.master = ""
         bot.config.timezone = "Asia/Shanghai"
 
@@ -219,17 +233,14 @@ class TestCreatePersonaSuccess:
                 evaluated.append((action_idea, ongoing_descriptions, user_id))
                 return "approved", "符合当前状态"
 
-        class _Life:
-            def get_ongoing_activities(self):
-                return []
-
-            async def inject_spontaneous_event(self, action_idea):
-                injected.append(action_idea)
-                injected_event.set()
-                return True
+        async def inject_spontaneous_event(action_idea):
+            injected.append(action_idea)
+            injected_event.set()
+            return True
 
         app.chat._action_evaluator = _Evaluator()
-        app.chat._character_life = _Life()
+        app.chat._character_life.get_ongoing_activities = lambda: []
+        app.chat._character_life.inject_spontaneous_event = inject_spontaneous_event
 
         agent = app.chat._ensure_agent(
             ConversationScope.for_private("u1"), Conversation(),

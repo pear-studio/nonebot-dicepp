@@ -130,11 +130,12 @@ class ChatAgent:
         tools["read_events"] = build_read_events_tool(self._store, tz)
         tools["search_events"] = build_search_events_tool(self._store)
         tools["get_jrrp"] = build_get_jrrp_tool(user_id_default=user_id, timezone=tz)
-        tools["suggest_action"] = build_suggest_action_tool(
-            action_evaluator=self._action_evaluator,
-            character_life=self._character_life,
-            user_id=user_id,
-        )
+        if self._character_life.config.enabled:
+            tools["suggest_action"] = build_suggest_action_tool(
+                action_evaluator=self._action_evaluator,
+                character_life=self._character_life,
+                user_id=user_id,
+            )
 
         try:
             from ..tools.look_at_past_image import build_look_at_past_image_tool
