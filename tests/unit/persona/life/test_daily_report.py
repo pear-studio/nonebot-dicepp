@@ -548,8 +548,6 @@ class TestDailyReportGenerator:
         from plugins.DicePP.module.persona.data.models import CharacterState
         state = CharacterState(
             energy=80, mood=65, health=90,
-            current_intention="sleeping",
-            text="",
         )
 
         mock_store = MagicMock()
