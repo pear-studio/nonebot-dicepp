@@ -11,7 +11,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeVar, get_args, get_origin
+from typing import Any, Dict, Optional, TypeVar
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import SchemaSerializer, SchemaValidator
@@ -62,11 +62,9 @@ def _merge_model_layer(
 ) -> Dict[str, Any]:
     """Apply one sparse model layer using schema-aware mapping semantics.
 
-    A mapping field is replaceable with an explicit ``{}`` (for example,
-    clearing a provider map).  Nested Pydantic models keep their default when
-    given ``{}``, since an empty partial model means "no field overrides".
-    Non-empty nested models and mapping values recurse so unchanged siblings
-    continue to inherit their defaults.
+    Nested Pydantic models keep their default when given ``{}``, since an
+    empty partial model means "no field overrides". Non-empty nested models
+    recurse so unchanged siblings continue to inherit their defaults.
     """
 
     result = dict(default)
@@ -78,29 +76,6 @@ def _merge_model_layer(
                 result[name] = _merge_model_layer(
                     result[name], value, annotation
                 )
-            continue
-
-        dict_value_model = _dict_value_model_type(annotation)
-        if dict_value_model is not None and isinstance(value, dict):
-            if not value:
-                result[name] = {}
-                continue
-            mapping = dict(result.get(name, {}))
-            for key, item in value.items():
-                if isinstance(item, dict):
-                    base_item = mapping.get(key)
-                    if not isinstance(base_item, dict):
-                        # Open mappings may contain a legal model key that is
-                        # absent from the built-in defaults.  Such a value has
-                        # no model instance to inherit from; its required
-                        # fields are checked by the final strict validation.
-                        base_item = {}
-                    mapping[key] = _merge_model_layer(
-                        base_item, item, dict_value_model
-                    )
-                else:
-                    mapping[key] = item
-            result[name] = mapping
             continue
 
         result[name] = value
@@ -177,26 +152,6 @@ def _write_json_file_atomic(path: Path, data: Dict[str, Any]) -> None:
 
 def _is_model_type(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
-
-
-def _dict_value_model_type(annotation: Any) -> Optional[type[BaseModel]]:
-    origin = get_origin(annotation)
-    if origin not in (dict, Dict):
-        return None
-    args = get_args(annotation)
-    if len(args) != 2 or not _is_model_type(args[1]):
-        return None
-    return args[1]
-
-
-def _list_item_model_type(annotation: Any) -> Optional[type[BaseModel]]:
-    origin = get_origin(annotation)
-    if origin not in (list,):
-        return None
-    args = get_args(annotation)
-    if len(args) != 1 or not _is_model_type(args[0]):
-        return None
-    return args[0]
 
 
 def _config_validation_error(path: Path, message: str) -> ConfigValidationError:
@@ -318,43 +273,6 @@ def _canonicalize_field_value(
         if not isinstance(value, dict):
             return _dump_json_value(annotation, value)
         return _canonicalize_model_dict(annotation, value, path=path, field_path=field_path)
-
-    dict_value_model = _dict_value_model_type(annotation)
-    if dict_value_model is not None:
-        if not isinstance(value, dict):
-            return _dump_json_value(annotation, value)
-        canonical: Dict[str, Any] = {}
-        for key, item in value.items():
-            item_path = field_path + (str(key),)
-            if not isinstance(key, str):
-                raise _config_validation_error(
-                    path, f"field '{'.'.join(item_path)}' has a non-string key"
-                )
-            if isinstance(item, dict):
-                canonical[key] = _canonicalize_model_dict(
-                    dict_value_model, item, path=path, field_path=item_path
-                )
-            else:
-                canonical[key] = _dump_json_value(dict_value_model, item)
-        return canonical
-
-    list_item_model = _list_item_model_type(annotation)
-    if list_item_model is not None:
-        if not isinstance(value, list):
-            return _dump_json_value(annotation, value)
-        canonical_items = []
-        for index, item in enumerate(value):
-            if isinstance(item, dict):
-                item = _canonicalize_model_dict(
-                    list_item_model,
-                    item,
-                    path=path,
-                    field_path=field_path + (str(index),),
-                )
-            canonical_items.append(item)
-        return _dump_model_field_json_value(
-            owner_model_type, field_path[-1], annotation, canonical_items
-        )
 
     return _dump_model_field_json_value(owner_model_type, field_path[-1], annotation, value)
 
