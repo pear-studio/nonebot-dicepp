@@ -6,46 +6,75 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from plugins.DicePP.module.persona.llm.client import DeepSeekTextModelClient
-from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse
+
+
+def _fake_sdk():
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(
+            message=SimpleNamespace(
+                content="ok",
+                tool_calls=None,
+                reasoning_content=None,
+            ),
+            finish_reason="stop",
+        )],
+        usage=None,
+        model="fake-model",
+    )
+    create = AsyncMock(return_value=response)
+    sdk = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create),
+        ),
+    )
+    return sdk, create
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("task", "timeout", "thinking"),
+    ("task", "timeout", "thinking_type"),
     [
-        ("chat", 30, True),
-        ("background", 90, False),
-        ("action_evaluation", 30, False),
+        ("chat", 30, "enabled"),
+        ("background", 90, "disabled"),
+        ("action_evaluation", 30, "disabled"),
     ],
 )
-async def test_generate_uses_internal_task_request_profile(task, timeout, thinking):
-    response = LLMResponse(content="ok")
-    provider = SimpleNamespace(generate=AsyncMock(return_value=response))
+async def test_generate_uses_internal_task_request_profile(
+    task, timeout, thinking_type,
+):
+    client = DeepSeekTextModelClient(
+        api_key="sk-test",
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com",
+    )
+    sdk, create = _fake_sdk()
+    client._transport._client = sdk
+    observed_timeout = {}
+
+    async def wait_for(awaitable, timeout):
+        observed_timeout["value"] = timeout
+        return await awaitable
 
     with patch(
-        "plugins.DicePP.module.persona.llm.client.DeepSeekTransport",
-        return_value=provider,
+        "plugins.DicePP.module.persona.llm.providers.deepseek.asyncio.wait_for",
+        new=wait_for,
     ):
-        client = DeepSeekTextModelClient(
-            api_key="sk-test",
-            model="deepseek-v4-flash",
-            base_url="https://api.deepseek.com",
-        )
         result = await client.generate(
             messages=[{"role": "user", "content": "hi"}],
             tools=[{"type": "function"}],
             task=task,
         )
 
-    assert result is response
-    provider.generate.assert_awaited_once_with(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=[{"type": "function"}],
-        temperature=None,
-        timeout=timeout,
-        tool_choice="auto",
-        thinking=thinking,
-    )
+    assert result.content == "ok"
+    assert observed_timeout["value"] == timeout
+    kwargs = create.call_args.kwargs
+    assert kwargs == {
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{"type": "function"}],
+        "tool_choice": "auto",
+        "extra_body": {"thinking": {"type": thinking_type}},
+    }
 
 
 def test_unknown_tasks_use_chat_profile():

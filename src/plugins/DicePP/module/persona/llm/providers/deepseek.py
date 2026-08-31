@@ -205,11 +205,8 @@ class DeepSeekTransport:
             latency_ms=latency * 1000,
         )
     def _build_extra_body(self, thinking: bool) -> dict:
-        """构建 extra_body，子类可覆盖以注入 provider 特定参数。"""
-        extra: dict = {}
-        if thinking:
-            extra["thinking"] = {"type": "enabled"}
-        return extra
+        """构建 DeepSeek thinking 参数。"""
+        return {"thinking": {"type": "enabled" if thinking else "disabled"}}
 
     def _extract_reasoning(self, message) -> Optional[str]:
         """从 message 提取推理内容，子类可覆盖以兼容不同格式。"""
