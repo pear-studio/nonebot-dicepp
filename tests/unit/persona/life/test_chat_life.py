@@ -25,7 +25,6 @@ def _make_cfg(**kw):
         timezone="Asia/Shanghai",
         min_event_interval_minutes=5,
         chain_max_depth=1,
-        default_energy=50, default_mood=50, default_health=50,
         recovery_energy=20,
         **kw,
     )
@@ -252,17 +251,6 @@ class TestInjectSpontaneousEvent:
         life = CharacterLife(config=cfg, dm_agent=dm_agent, data_store=store, character=char)
         assert hasattr(life, '_state_lock')
         assert isinstance(life._state_lock, asyncio.Lock)
-
-    @pytest.mark.asyncio
-    async def test_inject_returns_false_on_missing_state(self):
-        char = _make_character()
-        cfg = _make_cfg()
-        dm_agent = MagicMock()
-        store = AsyncMock()
-        store.get_character_state = AsyncMock(return_value=None)
-        life = CharacterLife(config=cfg, dm_agent=dm_agent, data_store=store, character=char)
-        result = await life.inject_spontaneous_event("测试行动")
-        assert result is False
 
     @pytest.mark.asyncio
     async def test_lock_serializes_concurrent_calls(self):

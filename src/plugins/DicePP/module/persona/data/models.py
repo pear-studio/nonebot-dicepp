@@ -103,13 +103,13 @@ class DailyEvent(BaseModel):
 
 
 class CharacterState(BaseModel):
-    """角色永久状态（忽略未知字段，store 层负责旧数据迁移）"""
+    """角色永久状态"""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-    energy: Optional[int] = None  # None 表示尚未初始化（旧版纯文本迁移兼容）
-    mood: Optional[int] = None
-    health: Optional[int] = None
+    energy: int = 50
+    mood: int = 50
+    health: int = 50
 
 
 class SAState(BaseModel):

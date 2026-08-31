@@ -138,19 +138,3 @@ class TestCharacterStateChangeSource:
         notifs, _ = await source.update({"energy": 80, "mood": 60, "health": 90})
         assert len(notifs) == 1
         assert "体力 -5" in notifs[0].content
-
-    @pytest.mark.asyncio
-    async def test_none_value_skipped(self):
-        """None 维度不发通知"""
-        from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
-        from plugins.DicePP.module.persona.data.models import CharacterState
-
-        state = CharacterState(energy=None, mood=60, health=None)
-        store = MagicMock()
-        store.get_character_state = AsyncMock(return_value=state)
-        source = CharacterStateChangeSource(store=store)
-
-        notifs, cursor = await source.update(None)
-        assert len(notifs) == 1  # only mood
-        assert "心情" in notifs[0].content
-        assert cursor == {"energy": None, "mood": 60, "health": None}

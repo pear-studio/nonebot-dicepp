@@ -1247,31 +1247,9 @@ class PersonaDataStore:
             "SELECT text FROM persona_character_state WHERE id = 1"
         ) as cursor:
             row = await cursor.fetchone()
-            raw = row["text"] if row else ""
-
-        if not raw:
+        if not row:
             return CharacterState()
-
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                try:
-                    return CharacterState.model_validate(data)
-                except ValidationError as ve:
-                    logger.warning(
-                        "CharacterState JSON 字段验证失败: %s 原始数据: %s",
-                        str(ve), raw[:500],
-                    )
-        except json.JSONDecodeError:
-            pass
-
-        # Phase 1: 旧版纯文本数据 — 记录日志后返回默认值（设计决策：不迁移中间数据）
-        logger.warning(
-            "旧版 CharacterState 纯文本数据已丢弃，长度=%d — "
-            "返回空默认值（Phase 1 设计中明确不迁移中间数据）",
-            len(raw),
-        )
-        return CharacterState()
+        return CharacterState.model_validate(json.loads(row["text"]))
 
     async def update_character_state(self, state: CharacterState) -> None:
         """更新角色永久状态（结构化 JSON 存储）"""

@@ -72,9 +72,9 @@ class ActionEvaluator:
     ) -> str:
         now = self._now()
         time_str = now.strftime("%H:%M")
-        energy = character_state.energy if character_state.energy is not None else 50
-        mood = character_state.mood if character_state.mood is not None else 50
-        health = character_state.health if character_state.health is not None else 50
+        energy = character_state.energy
+        mood = character_state.mood
+        health = character_state.health
 
         events_lines = []
         for e in today_events[-5:]:
@@ -108,8 +108,6 @@ class ActionEvaluator:
         """评估行动可行性，返回 (result, reason)。"""
         try:
             character_state = await self._store.get_character_state()
-            if not character_state:
-                return ("rejected", "角色状态不存在")
 
             today_str = self._get_today_str()
             today_events = await self._store.get_daily_events(today_str)

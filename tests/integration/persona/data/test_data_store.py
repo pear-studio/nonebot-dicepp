@@ -322,7 +322,7 @@ class TestDiaryAndDailyEventsCRUD:
         store = temp_db
         await store.db.execute('INSERT OR REPLACE INTO persona_character_state (id, text, updated_at) VALUES (1, ?, ?)', ('old', '2024-01-01T00:00:00'))
         await store.db.commit()
-        state = CharacterState(text='new', energy=50)
+        state = CharacterState(energy=50)
         await store.update_character_state(state)
         async with store.db.execute('SELECT updated_at FROM persona_character_state WHERE id = 1') as cursor:
             row = await cursor.fetchone()
@@ -571,17 +571,44 @@ class TestCharacterStateCRUD:
         store = temp_db
         state = await store.get_character_state()
         assert isinstance(state, CharacterState)
-        assert state.energy is None
-        assert state.mood is None
-        assert state.health is None
+        assert state.model_dump() == {"energy": 50, "mood": 50, "health": 50}
         state.energy = 60
         await store.update_character_state(state)
         loaded = await store.get_character_state()
         assert loaded.energy == 60
-        await store.db.execute('INSERT OR REPLACE INTO persona_character_state (id, text, updated_at) VALUES (1, ?, ?)', ('Feeling tired', '2024-01-01T00:00:00'))
+
+    @pytest.mark.asyncio
+    async def test_get_character_state_requires_current_json(self, temp_db):
+        store = temp_db
+        await store.db.execute(
+            'INSERT OR REPLACE INTO persona_character_state (id, text) VALUES (1, ?)',
+            ('Feeling tired',),
+        )
         await store.db.commit()
-        legacy = await store.get_character_state()
-        assert legacy.energy is None
+        with pytest.raises(ValueError):
+            await store.get_character_state()
+
+    @pytest.mark.asyncio
+    async def test_get_character_state_rejects_unknown_fields(self, temp_db):
+        store = temp_db
+        await store.db.execute(
+            'INSERT OR REPLACE INTO persona_character_state (id, text) VALUES (1, ?)',
+            ('{"energy": 50, "mood": 50, "health": 50, "legacy": 1}',),
+        )
+        await store.db.commit()
+        with pytest.raises(ValueError):
+            await store.get_character_state()
+
+    @pytest.mark.asyncio
+    async def test_get_character_state_rejects_null_values(self, temp_db):
+        store = temp_db
+        await store.db.execute(
+            'INSERT OR REPLACE INTO persona_character_state (id, text) VALUES (1, ?)',
+            ('{"energy": null, "mood": 50, "health": 50}',),
+        )
+        await store.db.commit()
+        with pytest.raises(ValueError):
+            await store.get_character_state()
 
 class TestGetDailyChatStats:
     """get_daily_chat_stats — 仅统计 type='chat' 消息，排除 SYSTEM_LOG"""

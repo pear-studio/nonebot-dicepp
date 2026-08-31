@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
-from ..data.models import CharacterState
 from plugins.DicePP.utils.time import format_timestamp
 from .types import EventGenerationResult, EventReactionResult, UnrecoverableAgentError
 
@@ -49,9 +48,6 @@ class CharacterLifeConfig:
         min_event_interval_minutes: int = 5,
         chain_max_depth: int = 3,
         recovery_energy: int = 20,
-        default_energy: int = 50,
-        default_mood: int = 50,
-        default_health: int = 50,
         good_night_cooldown_hours: int = 22,
     ):
         self.enabled = enabled
@@ -60,9 +56,6 @@ class CharacterLifeConfig:
         self.min_event_interval_minutes = min_event_interval_minutes
         self.chain_max_depth = max(1, min(10, chain_max_depth))
         self.recovery_energy = recovery_energy
-        self.default_energy = default_energy
-        self.default_mood = default_mood
-        self.default_health = default_health
         self.good_night_cooldown_hours = good_night_cooldown_hours
 
     @classmethod
@@ -396,14 +389,6 @@ class CharacterLife:
                 )
         return None
 
-    def _migrate_legacy_state(self, state: Any) -> None:
-        if state.energy is None:
-            state.energy = self.config.default_energy
-        if state.mood is None:
-            state.mood = self.config.default_mood
-        if state.health is None:
-            state.health = self.config.default_health
-
     @staticmethod
     def _clamp_delta(d: Optional[int]) -> int:
         if d is None:
@@ -462,19 +447,6 @@ class CharacterLife:
         try:
             # 获取角色状态
             character_state = await self.data_store.get_character_state()
-            if character_state:
-                self._migrate_legacy_state(character_state)
-            else:
-                character_state = CharacterState(
-                    energy=self.config.default_energy,
-                    mood=self.config.default_mood,
-                    health=self.config.default_health,
-                )
-                await self.data_store.update_character_state(character_state)
-                logger.info(
-                    "首次初始化角色状态: energy=%s mood=%s health=%s",
-                    character_state.energy, character_state.mood, character_state.health,
-                )
 
             # 加载一次上下文（链内复用）
             recent_diaries = await self._get_recent_diaries(3)
@@ -594,9 +566,9 @@ class CharacterLife:
                     ed = max(event_result.energy_delta or 0, self.config.recovery_energy)
 
                 # 更新角色状态
-                character_state.energy = max(0, min(100, (character_state.energy if character_state.energy is not None else 50) + ed))
-                character_state.mood = max(0, min(100, (character_state.mood if character_state.mood is not None else 50) + md))
-                character_state.health = max(0, min(100, (character_state.health if character_state.health is not None else 50) + hd))
+                character_state.energy = max(0, min(100, character_state.energy + ed))
+                character_state.mood = max(0, min(100, character_state.mood + md))
+                character_state.health = max(0, min(100, character_state.health + hd))
                 await self.data_store.update_character_state(character_state)
 
                 # ── 调用 Character Agent ──
@@ -790,9 +762,6 @@ class CharacterLife:
 
     async def _inject_spontaneous_event_impl(self, action_description: str) -> bool:
         character_state = await self.data_store.get_character_state()
-        if not character_state:
-            return False
-        self._migrate_legacy_state(character_state)
 
         now = self.config.now()
         recent_diaries = await self._get_recent_diaries(3)
@@ -864,9 +833,9 @@ class CharacterLife:
         md = CharacterLife._clamp_delta(event_result.mood_delta)
         hd = CharacterLife._clamp_delta(event_result.health_delta)
 
-        character_state.energy = max(0, min(100, (character_state.energy if character_state.energy is not None else 50) + ed))
-        character_state.mood = max(0, min(100, (character_state.mood if character_state.mood is not None else 50) + md))
-        character_state.health = max(0, min(100, (character_state.health if character_state.health is not None else 50) + hd))
+        character_state.energy = max(0, min(100, character_state.energy + ed))
+        character_state.mood = max(0, min(100, character_state.mood + md))
+        character_state.health = max(0, min(100, character_state.health + hd))
         await self.data_store.update_character_state(character_state)
 
         # ── 调用 Character Agent ──

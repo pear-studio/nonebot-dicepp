@@ -254,7 +254,8 @@ class TestCharacterAgentNoDoubleRegistration:
     async def test_non_registry_path_still_registers(self):
         """未注入时 CharacterAgent 仍自注册 CharacterStateChangeSource。"""
         store = MagicMock()
-        store.get_character_state = AsyncMock(return_value=None)
+        from plugins.DicePP.module.persona.data.models import CharacterState
+        store.get_character_state = AsyncMock(return_value=CharacterState())
         agent = CharacterAgent(store=store, client=MagicMock())
 
         conv = await agent._ensure_conversation({})

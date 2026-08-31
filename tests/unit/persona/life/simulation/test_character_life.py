@@ -1288,23 +1288,6 @@ class TestStateZeroPreserved:
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 10, f'energy should be 10, got {updated_state.energy}'
 
-    @pytest.mark.asyncio
-    async def test_none_uses_default_50(self, life, mock_data_store, monkeypatch):
-        """energy=None 时使用默认值 50"""
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        set_test_clock(fake_now)
-        life._slot_minutes_today = [(10 * 60, 'system')]
-        life._last_event_date = '2024-01-01'
-        from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
-        mock_data_store.get_character_state = AsyncMock(return_value=CharacterState(energy=None, mood=None, health=None))
-        life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试', duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0)))
-        life.character_agent.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))
-        await life.tick()
-        updated_state = mock_data_store.update_character_state.call_args[0][0]
-        assert updated_state.energy == 50
-        assert updated_state.mood == 50
-        assert updated_state.health == 50
-
 class TestSpontaneousIntentionContext:
     """R2: 自发事件路径意图信息传递修复"""
 

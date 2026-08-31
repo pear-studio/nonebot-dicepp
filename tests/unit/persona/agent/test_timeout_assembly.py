@@ -26,7 +26,7 @@ from plugins.DicePP.module.persona.factory import _build_life
 from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
 from plugins.DicePP.module.persona.life.dm_agent import DMAgent
 from plugins.DicePP.module.persona.life.sa_agent import SAAgent
-from plugins.DicePP.module.persona.data.models import SAState
+from plugins.DicePP.module.persona.data.models import CharacterState, SAState
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, ToolCall
 from plugins.DicePP.module.persona.report.daily_report import DailyReportGenerator
 
@@ -67,7 +67,7 @@ class _FakeClient:
 def _store():
     store = AsyncMock()
     store.get_setting = AsyncMock(return_value=None)
-    store.get_character_state = AsyncMock(return_value=None)
+    store.get_character_state = AsyncMock(return_value=CharacterState())
     store.get_sa_state = AsyncMock(return_value=SAState())
     return store
 

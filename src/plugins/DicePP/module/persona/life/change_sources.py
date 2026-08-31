@@ -7,7 +7,7 @@ chat 路径：DateChangeSource、DailyEventChangeSource
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.utils.time import wall_now, format_timestamp, format_relative_time, DEFAULT_EPOCH
@@ -29,7 +29,7 @@ class CharacterStateChangeSource(ChangeSource):
     """监听角色状态全维度变化。
 
     首次 update(None) 时返回各维度的初始化通知，后续仅在有变化时返回增量通知。
-    cursor 格式：dict[str, Optional[int]]，如 {"energy": 75, "mood": 60, "health": None}。
+    cursor 格式：dict[str, int]，如 {"energy": 75, "mood": 60, "health": 50}。
     """
 
     source_id: str = "state.character"
@@ -43,7 +43,7 @@ class CharacterStateChangeSource(ChangeSource):
         """拉取变更通知。"""
         state = await self._store.get_character_state()
         current = {
-            dim: getattr(state, dim, None)
+            dim: getattr(state, dim)
             for dim in _DIMENSIONS
         }
         # 首次调用 — 返回各维度初始化通知
@@ -51,13 +51,12 @@ class CharacterStateChangeSource(ChangeSource):
             notifications = []
             for dim in _DIMENSIONS:
                 val = current[dim]
-                if val is not None:
-                    label = _DIMENSION_LABELS[dim]
-                    notifications.append(Notification(
-                        source_id=self.source_id,
-                        content=f"当前{label}: {val}/100",
-                        name=self.name,
-                    ))
+                label = _DIMENSION_LABELS[dim]
+                notifications.append(Notification(
+                    source_id=self.source_id,
+                    content=f"当前{label}: {val}/100",
+                    name=self.name,
+                ))
             return notifications, current
 
         # 有 cursor — 逐维 diff
@@ -66,13 +65,11 @@ class CharacterStateChangeSource(ChangeSource):
             val = current[dim]
             prev = cursor.get(dim) if isinstance(cursor, dict) else None
 
-            if val is None and prev is None:
-                continue
             if val == prev:
                 continue
 
             label = _DIMENSION_LABELS[dim]
-            if val is not None and prev is not None:
+            if prev is not None:
                 delta = val - prev
                 if delta > 0:
                     text = f"{label} +{delta} (当前 {val}/100)"
@@ -80,10 +77,8 @@ class CharacterStateChangeSource(ChangeSource):
                     text = f"{label} {delta} (当前 {val}/100)"
                 else:
                     continue
-            elif val is not None:
-                text = f"当前{label}: {val}/100"
             else:
-                text = f"{label} 无记录"
+                text = f"当前{label}: {val}/100"
 
             notifications.append(Notification(
                 source_id=self.source_id,
