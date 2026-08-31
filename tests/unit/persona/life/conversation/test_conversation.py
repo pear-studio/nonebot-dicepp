@@ -395,80 +395,6 @@ class TestConversationPersistence:
         assert conv.id == "my_id"
 
 
-class TestConversationCompact:
-    """compact 测试"""
-
-    @pytest.mark.asyncio
-    async def test_compact_preserves_recent(self):
-        store = FakeStore()
-        conv = Conversation(store=store)
-        conv._id = "c1"
-        conv._cursors["s"] = "cursor"
-        for i in range(10):
-            conv.add_message("user", f"msg{i}")
-
-        summary = await conv.compact(keep_recent=3, client=None)
-        assert conv.length == 4  # 1 summary + 3 recent
-        assert conv._messages[0]["content"].startswith("[通知] 之前的对话摘要")
-        assert conv._messages[1]["content"] == "msg7"
-        assert conv._messages[2]["content"] == "msg8"
-        assert conv._messages[3]["content"] == "msg9"
-        # cursors preserved
-        assert conv._cursors["s"] == "cursor"
-        # summary is fallback text (no router)
-        assert "已丢弃" in summary
-
-    @pytest.mark.asyncio
-    async def test_compact_noop_when_under_limit(self):
-        conv = Conversation()
-        conv.add_message("user", "a")
-        result = await conv.compact(keep_recent=5, client=None)
-        assert result == ""
-        assert conv.length == 1
-
-    @pytest.mark.asyncio
-    async def test_compact_with_client(self):
-        """使用 mock client 执行 LLM 压缩"""
-        store = FakeStore()
-        conv = Conversation(store=store)
-        conv._id = "c1"
-        for i in range(10):
-            conv.add_message("user", f"msg{i}")
-
-        # mock provider that returns a summary
-        mock_provider = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = "这是测试摘要。"
-        mock_response.model = "test-summarizer"
-        mock_provider.generate = AsyncMock(return_value=mock_response)
-
-        mock_client = MagicMock()
-        mock_client.generate = mock_provider.generate
-
-        summary = await conv.compact(keep_recent=3, client=mock_client)
-        assert "这是测试摘要" in summary
-        assert conv.length == 4  # 1 summary + 3 recent
-
-    @pytest.mark.asyncio
-    async def test_compact_provider_always_fails_returns_fallback(self):
-        """所有 provider 失败时不崩溃，返回 fallback 文本"""
-        store = FakeStore()
-        conv = Conversation(store=store)
-        conv._id = "c1"
-        for i in range(10):
-            conv.add_message("user", f"msg{i}")
-
-        mock_provider = MagicMock()
-        mock_provider.generate = AsyncMock(side_effect=RuntimeError("always fails"))
-        mock_client = MagicMock()
-        mock_client.generate = mock_provider.generate
-
-        summary = await conv.compact(keep_recent=3, client=mock_client)
-        # 应返回 fallback 文本，不崩溃
-        assert "已丢弃" in summary
-        assert conv.length == 4
-
-
 class TestConversationEstimateTokens:
     """token 估算测试"""
 
@@ -932,55 +858,6 @@ FakeSource = FakeChangeSource  # alias for brevity
 
 
 # ── R1 回归测试：_merge_extra_registry 调用约定 ──────────────
-
-
-class TestConversationCompactQ39:
-    """Q39: compact 行为契约（无 router 兜底路径）"""
-
-    @pytest.mark.asyncio
-    async def test_compact_reduces_message_count(self):
-        """compact 后 _messages 数 ≤ keep_recent + 1（摘要消息）"""
-        conv = Conversation()
-        # 添加超过 keep_recent 的消息
-        for i in range(10):
-            conv.add_message("user", f"msg_{i}")
-
-        assert conv.length == 10
-        # compact 保留最近 3 条，前面 7 条被摘要为一条
-        summary = await conv.compact(keep_recent=3)
-
-        # 有旧消息被摘要，返回非空文本
-        assert summary != ""
-        # 消息数 = 1 (摘要) + 3 (最近保留) = 4
-        assert conv.length == 4
-
-    @pytest.mark.asyncio
-    async def test_compact_preserves_system_in_render(self):
-        """compact 后 render() 仍正确前置 system prompt"""
-        conv = Conversation()
-        for i in range(5):
-            conv.add_message("user", f"msg_{i}")
-
-        await conv.compact(keep_recent=2)
-        msgs = conv.render("system prompt")
-        # 第一条始终是 system prompt
-        assert msgs[0] == {"role": "system", "content": "system prompt"}
-        # 消息结构为: system + (summary) + recent
-        assert msgs[1]["role"] == "user"  # summary msg has role "user"
-        assert "摘要" in msgs[1]["content"]
-        assert msgs[2]["content"] == "msg_3"
-        assert msgs[3]["content"] == "msg_4"
-
-    @pytest.mark.asyncio
-    async def test_compact_noop_when_under_threshold(self):
-        """消息数 ≤ keep_recent 时 compact 不操作"""
-        conv = Conversation()
-        conv.add_message("user", "a")
-        conv.add_message("user", "b")
-
-        summary = await conv.compact(keep_recent=10)
-        assert summary == ""  # 无操作
-        assert conv.length == 2
 
 
 # ── P3 回归测试：register() 保留已恢复 cursor ──────────────

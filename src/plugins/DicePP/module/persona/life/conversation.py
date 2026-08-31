@@ -3,7 +3,7 @@ Conversation 模块 — 纯追加的消息线程管理
 
 为 DM Agent 和 Character Agent（reaction 模式）提供纯追加的消息线程管理。
 天内正常运行时纯追加，保证前缀不变 → LLM prompt cache 友好。
-truncate() 仅在日终 compact 时调用一次，是显式的 cache-reset 点。
+truncate() 仅在显式的 cache-reset 点调用。
 
 核心约束：
 - _messages 私有，外部不可直接赋值
@@ -191,8 +191,6 @@ class Conversation:
     持久化：
     - save() / open() / delete() 通过 Store 协议操作
     - 懒恢复: 首次操作时从 store 加载快照
-    - compact(): 原地压缩（摘要旧消息 + 保留近期消息）
-
     变更通知事务性：
     - register() 注册 ChangeSource
     - fetch_notifications() 拉取通知（纯读）
@@ -643,40 +641,6 @@ class Conversation:
             await self._store.delete(self._id)
         self.clear()
 
-    # ── Compact ───────────────────────────────────────
-
-    async def compact(self, keep_recent: int, client=None) -> str:
-        """原地压缩：LLM 摘要旧消息 + 保留近期消息 → 替换 _messages → save。
-
-        保留 cursors 不变——compact 是内存管理操作，不重新触发已有通知。
-
-        .. deprecated::
-            引入不可变摘要（Summarizer 协议 + _ensure_summary_for_scope），
-            compact 的破坏性原地替换与不可变摘要冲突。保留方法本体供阶段 3c
-            Life 全面接管前使用； 将删除并替换为 registry.close + 摘要。
-
-        Returns:
-            生成的摘要文本（用于日志/调试）。
-        """
-        if keep_recent <= 0:
-            logger.warning("compact: keep_recent <= 0，跳过压缩")
-            return ""
-        if len(self._messages) <= keep_recent:
-            return ""
-
-        old_msgs = self._messages[:-keep_recent]
-        recent = self._messages[-keep_recent:]
-
-        summary_text = await _llm_compact_summarize(client, old_msgs)
-
-        summary_msg = {
-            "role": "user",
-            "content": f"{NOTIFICATION_PREFIX} 之前的对话摘要：{summary_text}",
-        }
-        self._messages = [summary_msg] + list(recent)
-        await self.save()
-        return summary_text
-
     # ── Token 估算 ───────────────────────────────────────
 
     def estimate_tokens(self) -> int:
@@ -788,46 +752,3 @@ class Conversation:
     def length(self) -> int:
         """当前消息数（不含 system prompt）。"""
         return len(self._messages)
-
-
-# ── LLM 摘要辅助函数 ──────────────────────────────────
-
-
-async def _llm_compact_summarize(client, old_msgs: list) -> str:
-    """调用 LLM 对旧消息生成摘要。失败时返回硬截断兜底文本。"""
-    if client is None:
-        return _fallback_summary()
-
-    lines = []
-    for msg in old_msgs:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "user":
-            lines.append(f"玩家：{content}")
-        elif role == "assistant":
-            lines.append(f"角色：{content}")
-
-    if not lines:
-        return _fallback_summary()
-
-    conversation_text = "\n".join(lines)
-    messages = [
-        {"role": "system", "content": "你是一个对话摘要助手。请用一段简短的中文总结以下角色扮演对话的关键信息。要求：只记录明确发生的内容，不要推断或编造；保留准确的名称、数字、时间等具体信息；用 200-300 字概括。"},
-        {"role": "user", "content": f"对话记录：\n{conversation_text}"},
-    ]
-
-    try:
-        resp = await client.generate(messages=messages, task="summary")
-        return resp.content.strip() if resp and resp.content else _fallback_summary()
-    except Exception:
-        logger.warning(
-            "Conversation compact LLM 摘要调用失败", exc_info=True,
-        )
-    return _fallback_summary()
-
-
-_FALLBACK_SUMMARY_TEXT = "之前的对话内容超出上下文限制，部分历史已丢弃。"
-
-
-def _fallback_summary() -> str:
-    return _FALLBACK_SUMMARY_TEXT

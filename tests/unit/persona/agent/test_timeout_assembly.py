@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunRequest,
     LoopLimits,
@@ -115,7 +114,6 @@ async def test_chat_runtime_uses_the_client():
 @pytest.mark.asyncio
 async def test_factory_life_registry_uses_background_task_profile():
     """factory 装配的 Life registry 使用后台任务 profile。"""
-    config = PersonaConfig()
     provider = _RecordingProvider()
     client = _FakeClient(provider)
     store = _store()
@@ -129,7 +127,6 @@ async def test_factory_life_registry_uses_background_task_profile():
     life = await _build_life(
         store=store,
         character=character,
-        config=config,
         character_life=character_life,
         dm_agent=dm_agent,
         character_agent=character_agent,
@@ -179,7 +176,6 @@ async def test_diary_agent_uses_background_task_profile():
 @pytest.mark.asyncio
 async def test_sa_agent_runtime_uses_summary_task_profile():
     """SA Agent 自建 Conversation 的 Runtime 使用摘要 profile。"""
-    config = PersonaConfig()
     provider = _RecordingProvider(
         content="",
         tool_calls=[ToolCall(

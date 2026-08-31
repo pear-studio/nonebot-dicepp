@@ -17,7 +17,6 @@ from .character_life import CharacterLife
 from .types import DailyTickResult
 
 if TYPE_CHECKING:
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
     from .dm_agent import DMAgent
     from .character_agent import CharacterAgent
     from .sa_agent import SAAgent
@@ -31,11 +30,6 @@ class LifeConfig:
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30
     timezone: str = "Asia/Shanghai"
-
-    @classmethod
-    def from_persona(cls, persona: "PersonaConfig") -> "LifeConfig":
-        return cls()
-
 
 class LifeSimulator:
     """生活模拟器 — Phase 1: 持有 DM / Character / SA Agent，编排协作"""

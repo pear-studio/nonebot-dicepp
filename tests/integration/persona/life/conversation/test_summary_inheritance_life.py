@@ -1,7 +1,7 @@
 """DM/Character 日界 close -> 次日摘要继承 端到端测试（A3）。
 
 验证：Day1 通过 life.dm/life.character scope 写入消息 ->
-tick_daily compact（registry.close，status=closed） ->
+registry.close（status=closed） ->
 Day2 首次 _ensure_conversation（registry.get_or_create）继承 Day1 摘要。
 
 使用 temp_db + FakeSummarizer，绝不调真实 LLM。
@@ -31,8 +31,8 @@ class TestLifeScopeSummaryInheritance:
     """life.* scope 的摘要继承端到端验证。"""
 
     @pytest.mark.asyncio
-    async def test_life_dm_inherits_summary_after_compact(self, temp_db):
-        """DM (life.dm): Day1 写消息 -> compact(close) -> Day2 get_or_create 继承摘要。"""
+    async def test_life_dm_inherits_summary_after_close(self, temp_db):
+        """DM (life.dm): Day1 写消息 -> close -> Day2 get_or_create 继承摘要。"""
         summarizer = FakeSummarizer(return_text="DM 上轮对话摘要")
         registry = ConversationRegistry(
             temp_db,
@@ -50,7 +50,7 @@ class TestLifeScopeSummaryInheritance:
             conv_dm.add_message("user", f"dm_day1_msg{i}")
         await conv_dm.save()
 
-        # Day 边界: compact = registry.close（模拟 tick_daily compact_conversation）
+        # Day 边界：registry.close 模拟 tick_daily 的会话收束。
         await registry.close(dm_scope)
 
         # 验证旧 session 已 closed
@@ -80,8 +80,8 @@ class TestLifeScopeSummaryInheritance:
         assert len(summarizer.called_with) >= 1
 
     @pytest.mark.asyncio
-    async def test_life_character_inherits_summary_after_compact(self, temp_db):
-        """Character (life.character): Day1 写消息 -> compact(close) -> Day2 get_or_create 继承摘要。"""
+    async def test_life_character_inherits_summary_after_close(self, temp_db):
+        """Character (life.character): Day1 写消息 -> close -> Day2 get_or_create 继承摘要。"""
         summarizer = FakeSummarizer(return_text="Character 上轮摘要")
         registry = ConversationRegistry(
             temp_db,
@@ -99,7 +99,7 @@ class TestLifeScopeSummaryInheritance:
             conv_char.add_message("assistant", f"char_day1_reaction{i}")
         await conv_char.save()
 
-        # Day 边界: compact
+        # Day 边界：close 当前会话。
         await registry.close(char_scope)
 
         async with temp_db.db.execute(

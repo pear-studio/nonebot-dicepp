@@ -357,7 +357,6 @@ class TestFactoryRegistryInjection:
         store = MagicMock()
         character = MagicMock()
         character.character_id = "test-char-id"
-        config = MagicMock()
         character_life = MagicMock()
         character_life.load_persistent_state = AsyncMock()
 
@@ -372,7 +371,7 @@ class TestFactoryRegistryInjection:
             MockLS.return_value = "life-simulator"
 
             result = await _build_life(
-                store, character, config,
+                store, character,
                 character_life=character_life,
                 dm_agent=dm_agent,
                 character_agent=character_agent,

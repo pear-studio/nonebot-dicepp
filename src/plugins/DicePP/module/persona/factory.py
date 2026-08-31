@@ -328,7 +328,6 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
 async def _build_life(
     store: PersonaDataStore,
     character: Character,
-    config,
     character_life: CharacterLife,
     dm_agent: DMAgent,
     character_agent: CharacterAgent,
@@ -383,7 +382,7 @@ async def _build_life(
         config=diary_config,
     )
 
-    life_config_obj = LifeConfig.from_persona(config)
+    life_config_obj = LifeConfig()
     return LifeSimulator(
         store=store,
         character_life=character_life,
@@ -438,7 +437,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     ))
 
     life = await _build_life(
-        infra.store, character, config,
+        infra.store, character,
         character_life=character_life,
         dm_agent=dm_agent,
         character_agent=character_agent,

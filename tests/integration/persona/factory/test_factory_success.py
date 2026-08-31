@@ -6,7 +6,7 @@ create_persona 全路径冒烟测试
 - SessionManager, LLMCallCoordinator
 
 使用真实 PersonaConfig（Pydantic 模型）替代 MagicMock，
-以确保所有 from_persona() 配置映射路径都覆盖到——这才是 rc6 缺字段崩溃的入口。
+以确保 CharacterLifeConfig 的 from_persona() 映射路径被真实配置覆盖到。
 
 外部依赖策略：
 - CharacterLoader → monkey-patch FakeLoader（无需真实角色卡 YAML）
@@ -303,7 +303,7 @@ class TestCreatePersonaSuccess:
 
 
 class TestCreatePersonaFromPersonaMappings:
-    """验证所有 from_persona() 配置映射方法在真实 PersonaConfig 上工作。
+    """验证仍保留的 from_persona() 配置映射方法使用真实 PersonaConfig。
 
     这些测试是 rc6 类型崩溃的专项防护：如果 PersonaConfig 缺失某个字段，
     from_persona 会抛出 AttributeError，而 MagicMock 会静默掩盖。
@@ -317,11 +317,3 @@ class TestCreatePersonaFromPersonaMappings:
         config = _make_persona_config()
         clc = CharacterLifeConfig.from_persona(config)
         assert clc.enabled == config.life_simulation_enabled
-
-    def test_life_config_from_persona(self):
-        """LifeConfig.from_persona 保留公开开关，其余使用内部默认值。"""
-        from plugins.DicePP.module.persona.life.simulator import LifeConfig
-        config = _make_persona_config()
-        lc = LifeConfig.from_persona(config)
-        assert lc.timezone == "Asia/Shanghai"
-        assert (lc.trace_max_age_days, lc.daily_events_keep_days, lc.diary_keep_days) == (7, 30, 30)

@@ -138,22 +138,3 @@ class TestFullRunPipeline:
         assert conv2.length == 1
         assert conv2._messages[0]["content"] == "hi"
         assert conv2._cursors == {"s.test": "v1"}
-
-    @pytest.mark.asyncio
-    async def test_compact_and_recover(self):
-        """compact + save → open 后消息正确"""
-        store = FakeStore()
-        conv = Conversation(store=store)
-        conv._id = "c1"
-        conv._cursors["keep"] = "this"
-        for i in range(10):
-            conv.add_message("user", f"msg{i}")
-
-        await conv.compact(keep_recent=3, client=None)
-        assert conv.length == 4
-        assert conv._cursors["keep"] == "this"
-
-        conv2 = await Conversation.open("c1", store)
-        assert conv2.length == 4
-        assert conv2._cursors["keep"] == "this"
-        assert conv2._messages[0]["content"].startswith("[通知]")
