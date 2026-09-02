@@ -135,6 +135,15 @@ def test_release_updates_latest_only_for_stable_tags() -> None:
     assert 'docker push "$LATEST_IMAGE"' in push
 
 
+def test_release_marks_non_stable_tags_as_prereleases() -> None:
+    workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+    create = _step(workflow["jobs"]["publish"], "Create GitHub Release")["run"]
+
+    assert 'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]' in create
+    assert "release_args+=(--prerelease)" in create
+    assert '"${release_args[@]}"' in create
+
+
 def test_release_publishes_the_verified_windows_artifact_from_test_suite() -> None:
     release = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
     suite = yaml.safe_load(TEST_SUITE_WORKFLOW.read_text(encoding="utf-8"))

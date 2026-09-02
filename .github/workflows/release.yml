@@ -85,14 +85,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes="docs/releases/${{ github.ref_name }}.md"
+          release_args=()
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            release_args+=(--prerelease)
+          fi
           if [ -f "$notes" ]; then
             gh release create "${{ github.ref_name }}" \
               "dist/DicePP-${{ github.ref_name }}-win64-Portable.zip" \
               dist/docker-compose.yml dist/checksums.sha256 \
-              --title "${{ github.ref_name }}" --notes-file "$notes" --target "${{ github.sha }}"
+              --title "${{ github.ref_name }}" --notes-file "$notes" \
+              --target "${{ github.sha }}" "${release_args[@]}"
           else
             gh release create "${{ github.ref_name }}" \
               "dist/DicePP-${{ github.ref_name }}-win64-Portable.zip" \
               dist/docker-compose.yml dist/checksums.sha256 \
-              --title "${{ github.ref_name }}" --generate-notes --target "${{ github.sha }}"
+              --title "${{ github.ref_name }}" --generate-notes \
+              --target "${{ github.sha }}" "${release_args[@]}"
           fi
