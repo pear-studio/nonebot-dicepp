@@ -99,3 +99,10 @@ def test_distribution_sources_do_not_ship_global_config() -> None:
         encoding="utf-8"
     )
     assert "Windows distribution must not contain config/global.json" in assembly
+
+
+def test_docker_image_creates_empty_instance_dirs_without_repository_config() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY config/" not in dockerfile
+    assert "RUN mkdir -p config data content dashboard/data" in dockerfile

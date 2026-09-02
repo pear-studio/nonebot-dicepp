@@ -45,7 +45,6 @@ RUN VERSION="$(python -c "import tomllib; print(tomllib.load(open('pyproject.tom
 COPY bot.py ./
 COPY src/ src/
 COPY dashboard/ dashboard/
-COPY config/ config/
 COPY templates/ templates/
 RUN uv pip install --python /app/.venv/bin/python --no-deps .
 
@@ -70,8 +69,8 @@ COPY bot.py ./
 COPY pyproject.toml uv.lock ./
 COPY src/ src/
 COPY dashboard/ dashboard/
-COPY config/ config/
 COPY templates/ templates/
+RUN mkdir -p config data content dashboard/data
 
 # 设置环境变量
 ENV PATH="/app/.venv/bin:$PATH"
