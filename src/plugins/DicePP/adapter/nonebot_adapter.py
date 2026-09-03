@@ -53,7 +53,33 @@ request_matcher = on_request()
 heartbeat_matcher = on_metaevent(priority=1, block=False)
 
 all_bots: Dict[str, DicePPBot] = {}
+_bot_registration_waiters: Dict[str, asyncio.Event] = {}
 _group_folder_cache: Dict[str, Dict[str, Optional[str]]] = {}
+
+
+async def _get_bot_instance(bot_self_id: str) -> DicePPBot:
+    """Return the registered DicePP Bot, waiting for the connect hook if needed."""
+    bot_instance = all_bots.get(bot_self_id)
+    if bot_instance is not None:
+        return bot_instance
+
+    waiter = _bot_registration_waiters.setdefault(bot_self_id, asyncio.Event())
+    bot_instance = all_bots.get(bot_self_id)
+    if bot_instance is not None:
+        if _bot_registration_waiters.get(bot_self_id) is waiter:
+            _bot_registration_waiters.pop(bot_self_id, None)
+        return bot_instance
+
+    await waiter.wait()
+    return all_bots[bot_self_id]
+
+
+def _register_bot_instance(bot_self_id: str, bot_instance: DicePPBot) -> None:
+    """Publish a DicePP Bot and release events that arrived just before it."""
+    all_bots[bot_self_id] = bot_instance
+    waiter = _bot_registration_waiters.pop(bot_self_id, None)
+    if waiter is not None:
+        waiter.set()
 
 
 def convert_group_info(nb_group_info: Dict) -> GroupInfo:
@@ -468,7 +494,8 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
         meta.message_id = None
 
     # 让机器人处理信息
-    await all_bots[bot.self_id].process_message(plain_msg, meta)
+    bot_instance = await _get_bot_instance(bot.self_id)
+    await bot_instance.process_message(plain_msg, meta)
 
 
 @notice_matcher.handle()
@@ -491,7 +518,8 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
 
     # 处理消息提示
     if data:
-        await all_bots[bot.self_id].process_notice(data)
+        bot_instance = await _get_bot_instance(bot.self_id)
+        await bot_instance.process_notice(data)
 
 @request_matcher.handle()
 async def handle_request(bot: NoneBot, event: RequestEvent):
@@ -509,7 +537,8 @@ async def handle_request(bot: NoneBot, event: RequestEvent):
 
     # 处理请求
     if data:
-        approve: Optional[bool] = all_bots[bot.self_id].process_request(data)
+        bot_instance = await _get_bot_instance(bot.self_id)
+        approve: Optional[bool] = bot_instance.process_request(data)
         if approve:
             if event.request_type == "friend":
                 await bot.set_friend_add_request(flag=event.flag, approve=True, remark="")
@@ -571,8 +600,8 @@ else:
 
         proxy = NoneBotClientProxy(bot)
         bot_instance = DicePPBot(bot.self_id)
-        all_bots[bot.self_id] = bot_instance
         bot_instance.set_client_proxy(proxy)
+        _register_bot_instance(bot.self_id, bot_instance)
         await bot_instance.delay_init_command()
         # 通知健康监控：bot 已连接
         bot_instance.health_monitor.on_bot_connect()

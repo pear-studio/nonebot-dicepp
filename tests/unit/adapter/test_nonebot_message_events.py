@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import plugins.DicePP.adapter.nonebot_adapter as nonebot_adapter
 from plugins.DicePP.adapter.nonebot_adapter import (
     NoneBotClientProxy,
     _handle_group_recall,
     all_bots,
+    handle_command,
 )
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.command import BotSendForwardMsgCommand, BotSendMsgCommand
@@ -153,3 +156,49 @@ async def test_group_recall_is_dispatched_as_structured_event(registered_bot):
     assert recalled.group_id == "100"
     assert recalled.platform_message_id == "909"
     assert recalled.recalled_at.timestamp() == 1_750_000_000
+
+
+@pytest.mark.asyncio
+async def test_message_waits_for_dice_bot_registration() -> None:
+    original = dict(all_bots)
+    all_bots.clear()
+    dice_bot = SimpleNamespace(process_message=AsyncMock())
+    nonebot = SimpleNamespace(self_id="42")
+    message = SimpleNamespace(extract_plain_text=lambda: ".r")
+    message.__str__ = lambda: ".r"
+    sender = SimpleNamespace(
+        nickname="tester",
+        sex="unknown",
+        age=0,
+        card="",
+        area="",
+        level="",
+        role="member",
+        title="",
+    )
+    event = SimpleNamespace(
+        get_message=lambda: message,
+        get_user_id=lambda: "100",
+        sender=sender,
+        to_me=True,
+        message_id=7,
+    )
+
+    try:
+        handling = asyncio.create_task(handle_command(nonebot, event))
+        await asyncio.sleep(0)
+
+        assert not handling.done()
+        dice_bot.process_message.assert_not_awaited()
+
+        nonebot_adapter._register_bot_instance("42", dice_bot)
+        await asyncio.wait_for(handling, timeout=1)
+
+        dice_bot.process_message.assert_awaited_once()
+        plain_msg, meta = dice_bot.process_message.await_args.args
+        assert plain_msg == ".r"
+        assert meta.sender.user_id == "100"
+        assert meta.message_id == "7"
+    finally:
+        all_bots.clear()
+        all_bots.update(original)
