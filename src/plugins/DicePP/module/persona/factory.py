@@ -209,7 +209,7 @@ def _build_client(bot: Bot, config, store: PersonaDataStore) -> TextModelClient:
         data_store=store,
         llm_debug_enabled=user_config.llm_debug_enabled,
     )
-    logger.info("DeepSeek 文本客户端已初始化: model=%s", client.model)
+    logger.info("DeepSeek 文本客户端已初始化: model={}", client.model)
     return client
 
 

@@ -402,7 +402,7 @@ def _restore_serialized(value):
         try:
             return json.loads(payload)
         except json.JSONDecodeError:
-            logger.warning("ConversationStore: 无法解析序列化标记后的 payload: %s", payload[:100])
+            logger.warning("ConversationStore: 无法解析序列化标记后的 payload: {}", payload[:100])
             return payload
     return value
 
