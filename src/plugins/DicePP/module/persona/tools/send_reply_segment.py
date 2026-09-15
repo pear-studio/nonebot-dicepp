@@ -1,105 +1,64 @@
-"""send_reply_segment 工具 — 让 LLM 按段输出回复内容
+"""Chat 正文的唯一发送工具：稳定段标识、真实投递回执。"""
 
-T5: send_reply_segment 转为普通 ToolSpec（只保留 content 参数）。
-handler 把中间消息交给 DeliveryQueue，写入 message stream，segment_phase="interim"。
-"""
-
-from typing import Dict, Any, Optional
-
-from plugins.DicePP.utils.logger import logger
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
-from pydantic import BaseModel, Field
+from ..chat.delivery_queue import DeliveryItem, DeliveryQueue
+from ..chat.reply_session import ReplySession
+from ..data.models import MessageType
 
-
-# ── ToolSpec 定义 ───────────────────────────────────────────
 
 def build_send_reply_segment_tool(
-    delivery_queue: "DeliveryQueue",
+    delivery_queue: DeliveryQueue,
     interaction_id: str,
     user_id: str,
     group_id: str,
     max_chars: int = 2000,
     segment_count_max: int = 10,
     display_name: str = "我",
-) -> "ToolSpec":
-    """T5: 构建 send_reply_segment 普通工具。
-
-    LLM 可见 schema 只包含 content。
-    handler 把中间消息交给 DeliveryQueue，segment_phase="interim"。
-
-    R6: 恢复长度约束——LLM 可见 max_chars 描述，handler 超限返回 error。
-    segment_count_max: 单次交互最大分段数，超出返回 error。
-    """
-    from pydantic import BaseModel, Field
-    from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
+    reply_session: ReplySession | None = None,
+    message_type: MessageType = MessageType.CHAT,
+) -> ToolSpec:
+    session = reply_session if reply_session is not None else ReplySession(delivery_queue, segment_count_max)
 
     class SendReplySegmentArgs(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        segment_id: str = Field(
+            ...,
+            description="本次交流内的唯一段标识，例如 s1；重试同一段必须保持原标识和正文，新段使用新标识",
+        )
         content: str = Field(
             ...,
-            description=f"该段回复的文本内容（单段上限 {max_chars} 字符）",
+            description=f"直接发送给玩家的正文（单段上限 {max_chars} 字符），不要汇总已发送段",
         )
 
-    async def handler(parsed, ctx: "ToolExecutionContext") -> ToolResult:
-        from ..chat.delivery_queue import DeliveryItem
-
+    async def handler(parsed, ctx: ToolExecutionContext) -> ToolResult:
         if not parsed.content.strip():
-            return ToolResult(observation="content 不能为空", status="error")
-
-        # R6: 单段长度检查
+            return session.reject("content 不能为空，未发送此段。")
         if len(parsed.content) > max_chars:
-            return ToolResult(
-                observation=(
-                    f"单段超过 {max_chars} 字符（当前 {len(parsed.content)} 字符），"
-                    f"请精简后重试"
-                ),
-                status="error",
+            return session.reject(
+                f"单段超过 {max_chars} 字符（当前 {len(parsed.content)} 字符），未发送此段；请精简后重试。"
             )
-
-        # 段数硬限：真实 DeliveryQueue 支持 enqueue 前同步 reserve；
-        # 测试替身缺少该方法时回退到只读计数。
-        reserve = getattr(delivery_queue, "try_reserve_interim", None)
-        if reserve is not None:
-            accepted = reserve(interaction_id, segment_count_max)
-            current_count = delivery_queue.count_interim(interaction_id)
-            if not accepted:
-                return ToolResult(
-                    observation=(
-                        f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
-                        f"请调用 send_reply 提交最终内容。"
-                    ),
-                    status="error",
-                )
-        else:
-            count = getattr(delivery_queue, "count_interim", None)
-            current_count = count(interaction_id) if count is not None else 0
-            if current_count >= segment_count_max:
-                return ToolResult(
-                    observation=(
-                        f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
-                        f"请调用 send_reply 提交最终内容。"
-                    ),
-                    status="error",
-                )
-
-        delivery_queue.enqueue(DeliveryItem(
+        return await session.send(parsed.segment_id, DeliveryItem(
             content=parsed.content,
             interaction_id=interaction_id,
             call_index=ctx.call_index,
             segment_phase="interim",
             user_id=user_id,
             group_id=group_id,
+            message_type=message_type,
             agent_run_id=ctx.run_id,
             display_name=display_name,
         ))
-        return ToolResult(observation=f"第 {ctx.call_index + 1} 段已发送")
 
     return ToolSpec(
         name="send_reply_segment",
         description=(
-            "发送回复的前置分段内容。最多调用 {segment_count_max} 次，"
-            "最后必须调用 send_reply 提交。"
-        ).format(segment_count_max=segment_count_max),
+            "向玩家发送一段正文并等待实际投递回执。所有回复正文都必须通过此工具发送，"
+            f"包括仅一条的回复；每次交流最多 {segment_count_max} 个不同段。"
+            "每段用唯一 segment_id；失败重试使用原 id 和原正文，成功段不要重发。"
+            "全部完成后调用 finish_reply({}) 结束，它不发送正文。"
+        ),
         args_schema=SendReplySegmentArgs,
         handler=handler,
     )

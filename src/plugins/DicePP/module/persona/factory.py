@@ -97,7 +97,7 @@ class PersonaApp:
         content: str,
         msg_id: Optional[int] = None,
         message_type: MessageType = MessageType.CHAT,
-    ) -> bool:
+    ) -> bool | None:
         return await self.port.send(
             user_id, group_id, content,
             msg_id=msg_id,
@@ -217,11 +217,14 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     """初始化消息发送端口"""
     pipeline = MessagePipeline()
     pipeline.add(TruncateStage(max_chars=2000))
-    async def _on_delivery_failed(user_id: str, group_id: str, content: str, error: str = "") -> None:
+    async def _on_delivery_failed(
+        user_id: str, group_id: str, content: str, error: str = "", delivery_unknown: bool = False,
+    ) -> None:
         try:
+            label = "投递结果未确认，可能已送达，不要重发" if delivery_unknown else "发送失败"
             await store.add_message_stream(
                 user_id=user_id, group_id=group_id, role="assistant",
-                type=MessageType.SYSTEM_NOTICE, content=f"[发送失败] {content}",
+                type=MessageType.SYSTEM_NOTICE, content=f"[{label}] {content}",
             )
         except Exception:
             logger.exception("on_delivery_failed 二次入库失败")

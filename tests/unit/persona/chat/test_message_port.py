@@ -57,11 +57,13 @@ async def test_send_group_message_uses_group_port():
 @pytest.mark.asyncio
 async def test_send_without_proxy_reports_delivery_failure():
     bot = _make_bot(with_proxy=False)
-    port = MessagePort(bot)
+    on_failed = AsyncMock()
+    port = MessagePort(bot, on_delivery_failed=on_failed)
 
     delivered = await port.send(user_id="u1", group_id="", content="hi")
 
     assert delivered is False
+    assert on_failed.await_args.kwargs["content"] == "hi"
 
 
 @pytest.mark.asyncio
@@ -95,15 +97,23 @@ async def test_send_defaults_skip_history_to_false():
 
 
 @pytest.mark.asyncio
-async def test_send_failure_returns_false_and_calls_on_delivery_failed():
+@pytest.mark.parametrize("proxy_error", [RuntimeError("connection lost"), TimeoutError("ack timeout")])
+async def test_send_then_proxy_error_preserves_unknown_outcome(proxy_error):
     bot = _make_bot()
-    bot.proxy.process_bot_command = AsyncMock(side_effect=RuntimeError("net down"))
+    received = []
+
+    async def deliver_then_fail(cmd):
+        received.append(cmd.msg)
+        raise proxy_error
+
+    bot.proxy.process_bot_command = AsyncMock(side_effect=deliver_then_fail)
     on_failed = AsyncMock()
     port = MessagePort(bot, on_delivery_failed=on_failed)
 
     result = await port.send("u1", "", "oops")
 
-    assert result is False
+    assert result is None
+    assert received == ["oops"]
     on_failed.assert_awaited_once()
     kwargs = on_failed.await_args.kwargs
     assert kwargs["user_id"] == "u1"
@@ -127,8 +137,8 @@ async def test_send_pipeline_stages_still_applied():
 
 
 @pytest.mark.asyncio
-async def test_send_failure_callback_exception_still_returns_false():
-    """on_delivery_failed 自身抛异常时 send 仍返回 False 且不向上抛"""
+async def test_send_failure_callback_exception_preserves_unknown_outcome():
+    """错误回调失败不能把未知投递降级为可重试的确认未发送。"""
     bot = _make_bot()
     bot.proxy.process_bot_command = AsyncMock(side_effect=RuntimeError("net down"))
     on_failed = AsyncMock(side_effect=RuntimeError("callback boom"))
@@ -136,7 +146,37 @@ async def test_send_failure_callback_exception_still_returns_false():
 
     result = await port.send("u1", "", "oops")
 
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_is_confirmed_not_attempted():
+    bot = _make_bot()
+    pipeline = MagicMock()
+    pipeline.process = AsyncMock(side_effect=ValueError("invalid metadata"))
+    on_failed = AsyncMock()
+    port = MessagePort(bot, pipeline=pipeline, on_delivery_failed=on_failed)
+
+    result = await port.send("u1", "g1", "hello")
+
     assert result is False
+    bot.proxy.process_bot_command.assert_not_awaited()
+    assert on_failed.await_args.kwargs == {
+        "user_id": "u1", "group_id": "g1", "content": "hello",
+        "error": "invalid metadata",
+        "delivery_unknown": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unknown_delivery_notice_does_not_claim_definite_failure():
+    from plugins.DicePP.module.persona.factory import _build_port
+    bot = _make_bot()
+    bot.proxy.process_bot_command.side_effect = TimeoutError("receipt lost")
+    store = MagicMock(add_message_stream=AsyncMock())
+    port = _build_port(bot, store)
+    assert await port.send("u1", "g1", "hello") is None
+    assert store.add_message_stream.await_args.kwargs["content"] == "[投递结果未确认，可能已送达，不要重发] hello"
 
 
 @pytest.mark.asyncio

@@ -113,8 +113,8 @@ class DailyReportGenerator:
 
         return "\n".join(lines)
 
-    async def send_snapshot_to(self, user_id: str, group_id: str) -> bool:
-        """公开接口：生成快照并通过 port 直接发送，返回成功/失败"""
+    async def send_snapshot_to(self, user_id: str, group_id: str) -> bool | None:
+        """生成快照并发送；True 成功，False 未发送，None 投递结果未知。"""
         try:
             text = await self.generate_snapshot()
             return await self._port.send(user_id, group_id, text)

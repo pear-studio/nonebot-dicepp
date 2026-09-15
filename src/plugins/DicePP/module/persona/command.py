@@ -533,7 +533,8 @@ class PersonaCommand(UserCommandBase):
         #    message=".jrrp"：仅用于去重/缓冲，不进入 LLM 上下文。
         #    参考 SillyTavern 的 injected 标记方案——若未来多源注入可考虑消息级标记字段。
         #    角色评语由 chat_command() 通过 delivery 发送并按 CHAT 入库；
-        #    empty/failed 时回退到模板，partial_sent 不再补额外 fallback。
+        #    empty/failed 时回退到模板；partial_sent/delivery_unknown 不再补发，
+        #    未知投递可能已经到达，不能把回执缺失当作没发出去。
         from .chat.chat_shared import ChatCallContext
         ctx = ChatCallContext(
             is_command=True,

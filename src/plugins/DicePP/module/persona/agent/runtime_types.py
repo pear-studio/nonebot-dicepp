@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Mapping
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 @dataclass(frozen=True)
 class ModelTurn:
@@ -79,9 +79,9 @@ class FinishPlanArgs(BaseModel):
     changed: bool = Field(..., description="本次是否修改了 story_deck 或 fronts")
 
 
-class SendReplyArgs(BaseModel):
-    """Chat 回复 — send_reply OutputSpec 的参数"""
-    content: str = Field(..., description="回复内容")
+class FinishReplyArgs(BaseModel):
+    """Chat 完成标记；正文只能经发送工具交付，不能在结束时重新提交。"""
+    model_config = ConfigDict(extra="forbid")
 
 
 # ── ToolHandler ──────────────────────────────────────────────────
@@ -167,6 +167,7 @@ class OutputSpec:
     description: str
     args_schema: type[BaseModel]
     accepted_observation: str = "已接收最终输出"
+    require_tool_success: bool = False
 
     def __post_init__(self):
         if not self.name or not self.name.strip():

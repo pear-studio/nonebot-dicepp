@@ -59,11 +59,11 @@ class ResponseHandler:
         group_id: str,
         content: str,
         msg_id: int,
-    ) -> bool:
+    ) -> bool | None:
         """通过 MessagePort 发送消息
 
         Returns:
-            发送成功返回 True，port 未注入或发送失败返回 False
+            True 为确认成功，False 为确认未发送，None 为投递结果未知。
         """
         if self.port is None:
             logger.warning(

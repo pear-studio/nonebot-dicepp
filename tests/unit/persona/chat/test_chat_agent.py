@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.support.persona_chat import CaptureDelivery, ChatRunMock
+
 from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
 from plugins.DicePP.module.persona.chat.chat_agent import ChatAgent
 from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
@@ -115,14 +117,14 @@ class TestExecuteTurn:
             character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=lambda: None,  # 无 port：跳过实际发送
+            make_delivery=CaptureDelivery,
             **_make_action_deps(),
         )
 
     @pytest.mark.asyncio
     async def test_execute_turn_uses_record_user_input_false(self):
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="你好", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "你好"},
         ))
@@ -130,13 +132,14 @@ class TestExecuteTurn:
         outcome = await agent.execute_turn("u1", "", "hi")
         assert conv.run.call_args.kwargs.get("record_user_input") is False
         output = conv.run.call_args.kwargs["output"]
-        assert output.description == "通过聊天通道向玩家发送最终回复，并结束本轮交流。"
+        assert output.name == "finish_reply"
+        assert output.args_schema().model_dump() == {}
         assert outcome.status == "sent"
 
     @pytest.mark.asyncio
     async def test_execute_turn_binds_own_conversation(self):
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="ok", final_reason="stop", completion_kind="completed",
             output_arguments={"content": "ok"},
         ))
@@ -145,25 +148,7 @@ class TestExecuteTurn:
         # 调用的是自己绑定的 conversation
         conv.run.assert_awaited_once()
 
-class _CapDelivery:
-    """捕获 enqueue 的假 DeliveryQueue。"""
-    def __init__(self, sent_stream_ids=None):
-        self.items = []
-        self.sent_count = 0
-        self.sent_contents = []
-        self.sent_stream_ids = sent_stream_ids if sent_stream_ids is not None else []
-
-    def next_call_index(self, iid):
-        return 0
-
-    def enqueue(self, item):
-        self.items.append(item)
-        self.sent_count += 1
-        self.sent_contents.append(item.content)
-
-    async def drain(self):
-        pass
-
+_CapDelivery = CaptureDelivery
 
 class TestSpeakerPropagation:
     def _agent(self, scope, conv, *, store=None, delivery=None):
@@ -172,13 +157,13 @@ class TestSpeakerPropagation:
             store=store or _make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=(lambda: delivery),
+            make_delivery=(lambda: delivery if delivery is not None else _CapDelivery()),
             **_make_action_deps(),
         )
 
     def _completed_conv(self):
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="回复", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "回复"},
         ))
@@ -208,13 +193,13 @@ class TestAssistantRefRecording:
             store=_make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=(lambda: delivery),
+            make_delivery=(lambda: delivery if delivery is not None else _CapDelivery()),
             **_make_action_deps(),
         )
 
     def _conv(self):
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="回复", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "回复"},
         ))
@@ -224,6 +209,18 @@ class TestAssistantRefRecording:
     @pytest.mark.asyncio
     async def test_delivered_segments_appended_as_assistant_refs(self):
         conv = self._conv()
+        original_run = conv.run
+
+        async def two_segments(**kwargs):
+            result = await original_run(**kwargs)
+            tool = kwargs["tools"].tools["send_reply_segment"]
+            await tool.handler(
+                tool.args_schema(content="第二段", segment_id="second"),
+                ToolExecutionContext(run_id="r", tool_call_id="t2", call_index=1, same_name_index=1),
+            )
+            return result
+
+        conv.run = AsyncMock(side_effect=two_segments)
         delivery = _CapDelivery(sent_stream_ids=[101, 102])
         agent = self._agent(conv, delivery)
         await agent.execute_turn("u1", "", "hi")
@@ -235,7 +232,7 @@ class TestAssistantRefRecording:
     @pytest.mark.asyncio
     async def test_failed_delivery_records_no_assistant_ref(self):
         conv = self._conv()
-        delivery = _CapDelivery(sent_stream_ids=[])  # 未送达 → 无 stream id
+        delivery = _CapDelivery(succeeds=False)  # 未送达 → 无 stream id
         agent = self._agent(conv, delivery)
         await agent.execute_turn("u1", "", "hi")
         conv.append_ref.assert_not_awaited()
@@ -260,19 +257,19 @@ class TestExecuteTurnBranches:
             store=store or _make_store(), client=MagicMock(), character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=(lambda: delivery),
+            make_delivery=(lambda: delivery if delivery is not None else _CapDelivery()),
             **_make_action_deps(),
         )
 
     def _conv(self, **result_kwargs):
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(**result_kwargs))
+        conv.run = ChatRunMock(return_value=ConversationRunResult(**result_kwargs))
         conv.append_ref = AsyncMock()
         return conv
 
     @pytest.mark.asyncio
-    async def test_delivery_none_offline_path_still_sent(self):
-        # make_delivery 返回 None（无 port）：正文仍算已产出
+    async def test_delivery_unavailable_fails_without_running_model(self):
+        # 无投递端时不调用模型，也不能宣称已经发送
         conv = self._conv(final_text="ok", final_reason="stop",
                           completion_kind="completed", output_arguments={"content": "ok"})
         agent = ChatAgent(
@@ -284,7 +281,9 @@ class TestExecuteTurnBranches:
             **_make_action_deps(),
         )
         outcome = await agent.execute_turn("u1", "", "hi")
-        assert outcome.status == "sent" and outcome.sent_count == 1
+        assert outcome.status == "failed" and outcome.sent_count == 0
+        assert outcome.reason == "delivery_unavailable"
+        conv.run.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_empty_outcome_when_no_output(self):
@@ -304,11 +303,22 @@ class TestExecuteTurnBranches:
 
     @pytest.mark.asyncio
     async def test_partial_sent_when_interim_sent_but_no_final(self):
-        # 中间段已发（delivery.sent_count>0）但无 final 输出 → partial_sent
+        # 实际发送两段后耗尽轮数，没有 finish 标记 → partial_sent。
         conv = self._conv(final_text="", final_reason="max_rounds",
                           completion_kind="completed", output_arguments=None)
+
+        async def send_then_exhaust(**kwargs):
+            tool = kwargs["tools"].tools["send_reply_segment"]
+            for index, content in enumerate(("第一段", "第二段")):
+                await tool.handler(
+                    tool.args_schema(content=content, segment_id=f"segment-{index}"),
+                    ToolExecutionContext(run_id="r", tool_call_id=f"t{index}",
+                                         call_index=index, same_name_index=index),
+                )
+            return ConversationRunResult(completion_kind="limit_reached", final_reason="max_rounds")
+
+        conv.run = AsyncMock(side_effect=send_then_exhaust)
         cap = _CapDelivery()
-        cap.sent_count = 2  # 模拟 send_reply_segment 已送达 2 段
         agent = self._agent(ConversationScope.for_private("u1"), conv, delivery=cap)
         outcome = await agent.execute_turn("u1", "", "hi")
         assert outcome.status == "partial_sent" and outcome.sent_count == 2
@@ -327,7 +337,7 @@ class TestExecuteTurnBranches:
     async def test_rotation_needed_returns_skipped(self):
         """P1-4: conv.run() 返回 rotation_needed → agent 返回 ChatOutcome('skipped')"""
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_reason="rotation_needed", completion_kind="completed",
         ))
         conv.append_ref = AsyncMock()
@@ -343,7 +353,7 @@ class TestExecuteTurnBranches:
     async def test_normal_outcome_not_affected_by_rotation_check(self):
         """正常返回时 rotation_needed 检查不影响原有逻辑。"""
         conv = MagicMock(spec=Conversation)
-        conv.run = AsyncMock(return_value=ConversationRunResult(
+        conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="正常回复", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "正常回复"},
         ))
@@ -376,7 +386,7 @@ class TestExecuteTurnBranches:
             context_builder=MagicMock(
                 build_static_prompt=MagicMock(return_value="sys")
             ),
-            make_delivery=lambda: None,
+            make_delivery=CaptureDelivery,
             **_make_action_deps(),
         )
 
@@ -409,7 +419,7 @@ class TestExecuteTurnBranches:
         )
         tool = toolkit.tools["send_reply_segment"]
         result = await tool.handler(
-            tool.args_schema(content="x" * 81),
+            tool.args_schema(content="x" * 81, segment_id="too-long"),
             ToolExecutionContext(
                 run_id="r1", tool_call_id="tc1", call_index=0, same_name_index=0,
             ),
@@ -459,7 +469,7 @@ class TestExecuteTurnBranches:
         """P1-4 real path: 真实 Conversation + mock runtime + 超预算消息,
         经 execute_turn→conv.run 验证 rotation_needed,_runtime.run 未被调用。"""
         runtime = MagicMock()
-        runtime.run = AsyncMock()
+        runtime.run = ChatRunMock()
         conv = Conversation(runtime=runtime)
         # 填一条超长消息使 token 预算一定超出（预算=1）
         conv.add_message("user", "A" * 5000)
@@ -475,7 +485,7 @@ class TestExecuteTurnBranches:
             character=_make_char(),
             config=config,
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=lambda: None,
+            make_delivery=CaptureDelivery,
             **_make_action_deps(),
         )
         outcome = await agent.execute_turn("u1", "", "hi")

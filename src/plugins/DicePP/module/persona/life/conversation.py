@@ -558,7 +558,7 @@ class Conversation:
                 completion_kind=result.completion.kind,
                 output_arguments=(
                     dict(result.output.arguments)
-                    if result.output and result.output.arguments
+                    if result.output and result.output.arguments is not None
                     else None
                 ),
                 output_call_index=(

@@ -42,28 +42,28 @@ class TestRuntimeTypes:
         assert tk.get_openai_schemas() == []
 
     def test_output_spec_creation(self):
-        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, SendReplyArgs
+        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, FinishReplyArgs
         spec = OutputSpec(
-            name="send_reply",
-            description="发送回复",
-            args_schema=SendReplyArgs,
+            name="finish_reply",
+            description="结束交流",
+            args_schema=FinishReplyArgs,
         )
-        assert spec.name == "send_reply"
-        assert spec.args_schema is SendReplyArgs
+        assert spec.name == "finish_reply"
+        assert spec.args_schema is FinishReplyArgs
 
     def test_output_spec_empty_name_raises(self):
         """R6: OutputSpec(name='') 抛出 ValueError"""
-        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, SendReplyArgs
+        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, FinishReplyArgs
         import pytest
         with pytest.raises(ValueError, match="name 不能为空"):
-            OutputSpec(name="", description="test", args_schema=SendReplyArgs)
+            OutputSpec(name="", description="test", args_schema=FinishReplyArgs)
 
     def test_output_spec_whitespace_name_raises(self):
         """R6: OutputSpec(name='   ') 抛出 ValueError"""
-        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, SendReplyArgs
+        from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec, FinishReplyArgs
         import pytest
         with pytest.raises(ValueError, match="name 不能为空"):
-            OutputSpec(name="   ", description="test", args_schema=SendReplyArgs)
+            OutputSpec(name="   ", description="test", args_schema=FinishReplyArgs)
 
     def test_run_completion_enum_values(self):
         from plugins.DicePP.module.persona.agent.runtime_types import RunCompletion

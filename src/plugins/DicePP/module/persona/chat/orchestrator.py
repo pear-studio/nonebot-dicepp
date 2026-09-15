@@ -169,7 +169,7 @@ class ChatOrchestrator:
         """处理普通用户消息。
 
         T5: 使用 Conversation.run() + send_reply_segment ToolSpec +
-        send_reply OutputSpec 新路径。
+        finish_reply 完成标记路径。
         """
         if ctx is None:
             ctx = ChatCallContext()

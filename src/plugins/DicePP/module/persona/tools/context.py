@@ -6,7 +6,9 @@ class SendPort(Protocol):
     """工具执行 — 我需要一个能发消息的口子
 
     最小行为契约：
-    - 失败不抛异常，返回 bool 表示成功/失败
+    - True 表示确认发送成功；False 表示确认未尝试投递
+    - None 表示投递结果未知（例如发送后异常或超时），不得据此自动重发
+    - 常规投递异常由实现转换为上述结果；任务取消仍向上传播
     - 群/私聊路由由实现自行处理
     - skip_history_record 表示调用方自行维护 Persona 历史
     """
@@ -18,4 +20,4 @@ class SendPort(Protocol):
         content: str,
         *,
         skip_history_record: Optional[bool] = None,
-    ) -> bool: ...
+    ) -> bool | None: ...

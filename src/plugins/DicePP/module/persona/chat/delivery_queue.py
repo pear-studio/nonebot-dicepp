@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -41,6 +40,8 @@ _WORKER_TIMEOUT = 0.2
 # 当第一条 delivery item 的 call_index > 0 时，短暂等待可能稍晚到达的
 # 更小 delivery item；超时后按已到达 item 的最小 call_index 发送。
 _ORDERING_GRACE = 0.45
+_SEND_TIMEOUT = 30.0
+_DRAIN_TIMEOUT = 30.0
 
 
 @dataclass
@@ -65,7 +66,7 @@ class DeliveryQueue:
     使用方式：
     1. ChatOrchestrator 创建 DeliveryQueue，注入 port、store
     2. send_reply_segment handler 调用 enqueue() 入队中间消息
-    3. ChatOrchestrator run 成功后调用 enqueue() 入队最终消息
+    3. 发送工具等待回执；finish_reply 只结束交流，不再入队正文
     4. 调用 drain() 等待所有消息发送完成
 
     保序机制：
@@ -91,23 +92,27 @@ class DeliveryQueue:
     _buffered_at: dict[str, dict[int, float]] = field(default_factory=dict)
     _max_seen: dict[str, int] = field(default_factory=dict)
 
-    # 已接受 interim 段计数（按 interaction_id，用于 segment_count_max 硬限）
-    _interim_count: dict[str, int] = field(default_factory=dict)
-    _interim_count_lock: threading.Lock = field(default_factory=threading.Lock)
     _sent_count: int = 0
     _failed_count: int = 0
     _sent_contents: list[str] = field(default_factory=list)
+    _receipts: dict[tuple[str, int], asyncio.Future[bool | None]] = field(default_factory=dict)
     # 成功送达并写入 message_stream 的行 id（供 Conversation 以 ref 记录 assistant，
     # 只记录实际送达的消息；发送失败不写 message_stream 故不入此列表）。
     _sent_stream_ids: list[int] = field(default_factory=list)
 
     # ── 公开 API ──────────────────────────────────────────
 
-    def enqueue(self, item: DeliveryItem) -> None:
-        """入队消息，不阻塞"""
+    def enqueue(self, item: DeliveryItem) -> asyncio.Future[bool | None]:
+        """回执 True=成功，False=明确失败，None=无法确认，不可自动重发。"""
+        receipt = asyncio.get_running_loop().create_future()
         if self._shutting_down:
             logger.warning(f"DeliveryQueue: 正在关闭，丢弃消息 call_index={item.call_index}")
-            return
+            receipt.set_result(False)
+            return receipt
+        key = (item.interaction_id, item.call_index)
+        if key in self._receipts:
+            raise ValueError(f"重复的 delivery call_index: {key}")
+        self._receipts[key] = receipt
         self._pending_count += 1
         # 追踪 max_seen
         iid = item.interaction_id
@@ -118,23 +123,7 @@ class DeliveryQueue:
         # 确保 worker 运行
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
-
-    def count_interim(self, interaction_id: str) -> int:
-        """返回该 interaction 已接受的 interim 段数（用于 segment_count_max 硬限）。"""
-        return self._interim_count.get(interaction_id, 0)
-
-    def try_reserve_interim(self, interaction_id: str, segment_count_max: int) -> bool:
-        """同步保留一个 interim 段名额。
-
-        send_reply_segment 的 handler 可能在同一轮被并发执行；硬限必须在
-        enqueue 前占位，而不是等 worker 实际发送后再计数。
-        """
-        with self._interim_count_lock:
-            current = self._interim_count.get(interaction_id, 0)
-            if current >= segment_count_max:
-                return False
-            self._interim_count[interaction_id] = current + 1
-            return True
+        return receipt
 
     @property
     def sent_count(self) -> int:
@@ -164,14 +153,11 @@ class DeliveryQueue:
 
     async def drain(self) -> None:
         """等待所有已入队消息发送完成（含 pending buffer 中暂存的项目）"""
-        for _ in range(600):  # 最多等 30s
-            if self._pending_count <= 0 and self._queue.empty():
-                break
-            await asyncio.sleep(0.05)
-        else:
-            logger.warning(
-                f"DeliveryQueue.drain: 等待超时 pending={self._pending_count}"
-            )
+        try:
+            await asyncio.wait_for(self._queue.join(), timeout=_DRAIN_TIMEOUT)
+        except TimeoutError:
+            await self.shutdown()
+            raise TimeoutError("DeliveryQueue.drain: 等待投递完成超时，队列已关闭")
 
     async def shutdown(self) -> None:
         """关闭队列，丢弃未发送消息"""
@@ -182,6 +168,9 @@ class DeliveryQueue:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
+        for receipt in self._receipts.values():
+            if not receipt.done():
+                receipt.set_result(False)
 
     # ── Worker ────────────────────────────────────────────
 
@@ -278,6 +267,9 @@ class DeliveryQueue:
         try:
             await self._send_one_inner(item)
         finally:
+            receipt = self._receipts[(item.interaction_id, item.call_index)]
+            if not receipt.done():
+                receipt.set_result(None)
             self._pending_count -= 1
 
     async def _send_one_inner(self, item: DeliveryItem) -> None:
@@ -305,23 +297,32 @@ class DeliveryQueue:
         msg_text = _build_msg(item.content, item.image_url)
 
         sent = False
+        uncertain = False
         try:
-            sent = await self.port.send(
+            sent = await asyncio.wait_for(self.port.send(
                 user_id=item.user_id,
                 group_id=item.group_id,
                 content=msg_text,
                 skip_history_record=True,
                 message_type=item.message_type,
-            )
+            ), timeout=_SEND_TIMEOUT)
         except Exception:
+            uncertain = True
             logger.exception(
                 f"DeliveryQueue: 发送失败 interaction={item.interaction_id} "
                 f"call_index={item.call_index}"
             )
         if not sent:
+            self._receipts[(iid, item.call_index)].set_result(None if uncertain or sent is None else False)
             async with self._lock:
                 self._failed_count += 1
             return
+
+        # 先记录真实投递事实；持久化失败或随后关闭队列不能把已发消息变成可重发。
+        self._last_sent_at[iid] = time.monotonic()
+        self._sent_count += 1
+        self._sent_contents.append(item.content)
+        self._receipts[(iid, item.call_index)].set_result(True)
 
         # 写 message_stream
         stream_id: Optional[int] = None
@@ -345,9 +346,6 @@ class DeliveryQueue:
             )
 
         async with self._lock:
-            self._last_sent_at[iid] = time.monotonic()
-            self._sent_count += 1
-            self._sent_contents.append(item.content)
             if isinstance(stream_id, int):
                 self._sent_stream_ids.append(stream_id)
 

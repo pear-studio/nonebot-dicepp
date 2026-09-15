@@ -37,7 +37,7 @@ class ChatOutcome:
     不携带待发送文本；用户可见内容必须已经由 delivery 发送。
     """
 
-    status: Literal["sent", "skipped", "empty", "failed", "partial_sent"]
+    status: Literal["sent", "skipped", "empty", "failed", "partial_sent", "delivery_unknown"]
     sent_count: int = 0
     reason: str = ""
 
@@ -47,7 +47,7 @@ class ChatOutcome:
 
     @property
     def sent(self) -> bool:
-        return self.status in {"sent", "partial_sent"} and self.sent_count > 0
+        return self.status in {"sent", "partial_sent", "delivery_unknown"} and self.sent_count > 0
 
     @property
     def empty_reply(self) -> bool:

@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.support.persona_chat import CaptureDelivery, ChatRunMock
+
 from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult, RunCompletion, RunOutput, BillingSummary,
 )
@@ -90,7 +92,7 @@ class TestR2InboundHookFallback:
             character=_make_char(),
             config=_make_config(),
             context_builder=MagicMock(build_static_prompt=MagicMock(return_value="sys")),
-            make_delivery=lambda: None,
+            make_delivery=CaptureDelivery,
             action_evaluator=MagicMock(),
             character_life=MagicMock(),
         )
@@ -100,7 +102,7 @@ class TestR2InboundHookFallback:
         """Conversation 中无 user 消息时，execute_turn 兜底追加 user_input。"""
         # 真实 Conversation，没有 user 消息（模拟 hook 失败）
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
         conv = Conversation(runtime=runtime)
 
         agent = self._agent(conv)
@@ -118,7 +120,7 @@ class TestR2InboundHookFallback:
     async def test_normal_hook_no_fallback(self):
         """Conversation 已有 user ref 时（hook 正常写入），不触发兜底。"""
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
         conv = Conversation(runtime=runtime)
         # hook 正常写入: 模拟入站 hook 已追加 user ref（entry_type="ref"）
         await conv.append_ref(999, "user")
@@ -143,7 +145,7 @@ class TestR2InboundHookFallback:
         hook 失败也能正确触发兜底。
         """
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
         conv = Conversation(runtime=runtime)
         # 模拟之前轮次的旧 user 消息（非 ref，普通 add_message）
         conv.add_message("user", "旧消息")
@@ -168,7 +170,7 @@ class TestR2InboundHookFallback:
         from plugins.DicePP.module.persona.life.conversation_store import ConversationStore
 
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
         conv_store = ConversationStore(
             temp_db, user_id="u1", character_id="test",
             scope_namespace="chat.private", scope_key="u1",
@@ -201,7 +203,7 @@ class TestR2InboundHookFallback:
         from plugins.DicePP.module.persona.life.conversation_store import ConversationStore
 
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
         conv_store = ConversationStore(
             temp_db, user_id="u1", character_id="test",
             scope_namespace="chat.private", scope_key="u1",
@@ -231,7 +233,7 @@ class TestR2InboundHookFallback:
     async def test_fallback_not_triggered_on_failed_run(self):
         """completion_kind 不是 'completed' 时，不触发兜底。"""
         runtime = MagicMock()
-        runtime.run = AsyncMock(return_value=_make_runtime_result(
+        runtime.run = ChatRunMock(return_value=_make_runtime_result(
             completion_kind="failed", completion_code="llm_error", arguments=None,
         ))
         conv = Conversation(runtime=runtime)

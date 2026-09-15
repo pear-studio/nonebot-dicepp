@@ -1,6 +1,8 @@
 """Phase 2 集成测试: ChatOrchestrator + Conversation + Store 完整链路"""
 import asyncio
 import pytest
+
+from tests.support.persona_chat import CaptureDelivery, ChatRunMock
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
@@ -153,14 +155,10 @@ class TestChatOrchestratorGate:
 
         captured = []
 
-        class _CapDelivery:
-            sent_count = 1
-
+        class _CapDelivery(CaptureDelivery):
             def enqueue(self, item):
                 captured.append(item)
-
-            async def drain(self):
-                pass
+                return super().enqueue(item)
 
         orch._make_delivery = lambda: _CapDelivery()
         result = await orch.chat("u1", "", "hello")
@@ -181,7 +179,7 @@ class TestChatOrchestratorChat:
 
         mock_conv = MagicMock(spec=Conversation)
         # conv.run() 返回 ConversationRunResult
-        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
+        mock_conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="你好！",
             final_reason="output_collected",
             completion_kind="completed",
@@ -407,7 +405,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=[
+        mock_conv.run = ChatRunMock(side_effect=[
             ConversationRunResult(final_reason="rotation_needed", completion_kind="completed"),
             ConversationRunResult(
                 final_text="成功回复", final_reason="output_collected",
@@ -451,7 +449,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
+        mock_conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_reason="rotation_needed", completion_kind="completed",
         ))
 
@@ -508,7 +506,7 @@ class TestStageBRetry:
 
         # Real Conversation 1: 超预算 → rotation_needed
         runtime1 = MagicMock()
-        runtime1.run = AsyncMock()
+        runtime1.run = ChatRunMock()
         conv1 = Conversation(runtime=runtime1)
         conv1._id = "c1"
         conv1.add_message("user", "A" * 5000)
@@ -516,7 +514,7 @@ class TestStageBRetry:
         # Real Conversation 2: 正常回复
         runtime2 = MagicMock()
         rv = self._make_runtime_result(final_text="成功回复")
-        runtime2.run = AsyncMock(return_value=rv)
+        runtime2.run = ChatRunMock(return_value=rv)
         conv2 = Conversation(runtime=runtime2)
         conv2._id = "c2"
 
@@ -569,13 +567,13 @@ class TestStageBRetry:
 
         # 两个 conv 都超预算
         runtime1 = MagicMock()
-        runtime1.run = AsyncMock()
+        runtime1.run = ChatRunMock()
         conv1 = Conversation(runtime=runtime1)
         conv1._id = "c1"
         conv1.add_message("user", "A" * 5000)
 
         runtime2 = MagicMock()
-        runtime2.run = AsyncMock()
+        runtime2.run = ChatRunMock()
         conv2 = Conversation(runtime=runtime2)
         conv2._id = "c2"
         conv2.add_message("user", "B" * 5000)
@@ -628,7 +626,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=[
+        mock_conv.run = ChatRunMock(side_effect=[
             ConversationRunResult(final_reason="rotation_needed", completion_kind="completed"),
             ConversationRunResult(
                 final_text="命令回复", final_reason="output_collected",
@@ -666,7 +664,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
+        mock_conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_reason="rotation_needed", completion_kind="completed",
         ))
 
@@ -700,7 +698,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
+        mock_conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="命令回复", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "命令回复"},
         ))
@@ -735,7 +733,7 @@ class TestStageBRetry:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=RuntimeError("LLM crash"))
+        mock_conv.run = ChatRunMock(side_effect=RuntimeError("LLM crash"))
 
 
         orch = ChatOrchestrator(
@@ -793,7 +791,7 @@ class TestStageBRetry:
             )
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=_tracked_run)
+        mock_conv.run = ChatRunMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
@@ -900,7 +898,7 @@ class TestChatOrchestratorScope:
         store.get_recent_messages = AsyncMock(return_value=[{}])
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
+        mock_conv.run = ChatRunMock(return_value=ConversationRunResult(
             final_text="hi", final_reason="output_collected",
             completion_kind="completed", output_arguments={"content": "hi"},
         ))
@@ -949,7 +947,7 @@ class TestF2RealRegistryIntegration:
             billing=BillingSummary(),
         )
         rt = MagicMock()
-        rt.run = AsyncMock(return_value=succeed)
+        rt.run = ChatRunMock(return_value=succeed)
         return rt
 
     @pytest.mark.asyncio
@@ -990,6 +988,7 @@ class TestF2RealRegistryIntegration:
             **_make_action_deps(),
             registry=reg,
         )
+        orch._make_delivery = CaptureDelivery
 
         # mock coordinator.submit → 直接驱动 chat_call_fn
         async def mock_submit(target_key, message, chat_call_fn):
@@ -1062,6 +1061,7 @@ class TestF2RealRegistryIntegration:
             **_make_action_deps(),
             registry=reg,
         )
+        orch._make_delivery = CaptureDelivery
 
         async def mock_submit(target_key, message, chat_call_fn):
             result = await chat_call_fn([message])
@@ -1120,7 +1120,7 @@ class TestChatCommandSerialization:
             )
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=_tracked_run)
+        mock_conv.run = ChatRunMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
@@ -1189,7 +1189,7 @@ class TestChatCommandSerialization:
             )
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(side_effect=_tracked_run)
+        mock_conv.run = ChatRunMock(side_effect=_tracked_run)
 
         orch = ChatOrchestrator(
             store=store, client=MagicMock(), character=_make_char(),
@@ -1386,6 +1386,7 @@ class TestAgentCacheInvalidationOnSilentRotation:
             **_make_action_deps(),
             registry=reg,
         )
+        orch._make_delivery = CaptureDelivery
         # 确认 orchestrator 已将 on_scope_closed 回调注册到 registry
         assert reg._on_scope_closed is not None, \
             "orchestrator 应自动注册 on_scope_closed 回调"

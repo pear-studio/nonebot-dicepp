@@ -81,14 +81,16 @@ class ChatAgent:
         user_id: str,
         group_id: str,
         char_name: str,
+        reply_session=None,
+        message_type: MessageType = MessageType.CHAT,
     ):
         """构建 Chat 工具集（ToolKit + OutputSpec），供 execute_turn 复用。
 
         Returns:
-            (toolkit, send_reply) 元组
+            (toolkit, finish_reply) 元组
         """
         from ..agent.runtime_types import (
-            SendReplyArgs,
+            FinishReplyArgs,
             OutputSpec,
             ToolKit,
         )
@@ -109,6 +111,8 @@ class ChatAgent:
                 max_chars=self._config.segment_max_chars,
                 segment_count_max=self._config.segment_count_max,
                 display_name=char_name,
+                reply_session=reply_session,
+                message_type=message_type,
             )
             tools["send_reply_segment"] = srs
 
@@ -145,82 +149,52 @@ class ChatAgent:
 
         toolkit = ToolKit(tools=tools)
 
-        send_reply = OutputSpec(
-            name="send_reply",
-            description="通过聊天通道向玩家发送最终回复，并结束本轮交流。",
-            args_schema=SendReplyArgs,
+        finish_reply = OutputSpec(
+            name="finish_reply",
+            description=(
+                "结束本轮交流，不发送任何正文，参数必须为 {}。"
+                "所有面向玩家的正文（包括仅一条的回复）先用 send_reply_segment 发送。"
+                "根据发送回执仅重试失败段，成功段不要重发；此处不要汇总全文。"
+            ),
+            args_schema=FinishReplyArgs,
+            require_tool_success=True,
         )
-        return toolkit, send_reply
+        return toolkit, finish_reply
 
     async def _finalize_turn(
         self,
         conv,
         delivery,
-        interaction_id: str,
-        user_id: str,
-        group_id: str,
-        message_type: MessageType,
-        char_name: str,
-        final_text: str,
+        reply_session,
         result,
     ) -> ChatOutcome:
-        """消费 result 输出、入队 DeliveryItem、等待 delivery 完成并追加 ref。"""
-        from .delivery_queue import DeliveryItem
-
-        # DeliveryItem enqueue（output_arguments 或 final_text 路径）
-        if final_text and delivery is not None:
-            if result.output_arguments:
-                call_index = (
-                    result.output_call_index
-                    if result.output_call_index is not None
-                    else delivery.next_call_index(interaction_id)
-                )
-            else:
-                call_index = delivery.next_call_index(interaction_id)
-            delivery.enqueue(DeliveryItem(
-                content=final_text,
-                interaction_id=interaction_id,
-                call_index=call_index,
-                segment_phase="final",
-                user_id=user_id,
-                group_id=group_id,
-                message_type=message_type,
-                agent_run_id=result.run_id,
-                display_name=char_name,
-            ))
-
-        # 等待 delivery 完成
+        """完成标记没有正文；只结算发送回执及实际送达消息的 ref。"""
+        timed_out = False
         if delivery is not None:
-            await delivery.drain()
-            # 成功送达的段以 ref 追加进 Conversation
-            for stream_id in delivery.sent_stream_ids:
-                try:
-                    await conv.append_ref(stream_id, "assistant")
-                except Exception:
-                    logger.warning(
-                        "ChatAgent: 追加 assistant ref 失败 stream_id=%s（正文已在 message_stream）",
-                        stream_id, exc_info=True,
-                    )
+            try:
+                await delivery.drain()
+            except TimeoutError:
+                timed_out = True
+        await reply_session.settle()
 
-        sent_count = delivery.sent_count if delivery is not None else (1 if final_text else 0)
-
-        # 回复后处理
-        if final_text:
+        sent_count = delivery.sent_count
+        if reply_session.uncertain_count > 0:
+            return ChatOutcome("delivery_unknown", sent_count=sent_count, reason="delivery_unknown")
+        completed = result.completion_kind == "completed" and result.output_arguments == {}
+        delivery_failed = (
+            timed_out or reply_session.failed_count > 0
+            or (not completed and reply_session.rejected_count > 0)
+        )
+        reason = "delivery_failed" if delivery_failed else result.final_reason or result.completion_kind
+        if sent_count > 0:
             return ChatOutcome(
-                "sent",
+                "sent" if completed and not delivery_failed else "partial_sent",
                 sent_count=sent_count,
-                reason=result.final_reason or "output_collected",
+                reason=reason,
             )
-
-        if delivery is not None and delivery.sent_count > 0:
-            return ChatOutcome(
-                "partial_sent",
-                sent_count=delivery.sent_count,
-                reason=result.final_reason or result.completion_kind,
-            )
-        if result.completion_kind == "failed":
-            return ChatOutcome("failed", reason=result.final_reason)
-        return ChatOutcome("empty", reason=result.final_reason or result.completion_kind)
+        if delivery_failed or result.completion_kind == "failed":
+            return ChatOutcome("failed", reason=reason)
+        return ChatOutcome("empty", reason=reason)
 
     async def execute_turn(
         self,
@@ -234,24 +208,18 @@ class ChatAgent:
         inbound_message_stream_id: Optional[int] = None,
         speaker_name: str = "",
     ) -> ChatOutcome:
-        """执行一轮 chat：Conversation.run() + send_reply_segment + send_reply。
+        """执行一轮 chat：Conversation.run() + send_reply_segment + finish_reply。
 
         1. 构建 DeliveryQueue
         2. 构建 ToolKit（send_reply_segment + 其他 chat 工具）
-        3. 组装 OutputSpec（send_reply）
+        3. 组装 OutputSpec（finish_reply）
         4. 调用 conv.run()
-        5. 消费 result.output.arguments["content"]，入队 final
+        5. finish_reply 仅结束交流，正文均由发送工具交付
         6. 等待 DeliveryQueue 发送完成
         """
         import uuid
-        from ..agent.runtime_types import (
-            SendReplyArgs,
-            LoopLimits,
-            OutputSpec,
-            ToolKit,
-        )
-        from ..agent.runtime_types import ToolSpec as NewToolSpec
-        from ..tools.send_reply_segment import build_send_reply_segment_tool
+        from ..agent.runtime_types import LoopLimits
+        from .reply_session import ReplySession
         from ..agent.runtime import embed_images_in_last_user_message
 
         conv = self._conversation
@@ -260,115 +228,126 @@ class ChatAgent:
         # 使其历史消息在 render/read_history 中被正确归属（阶段 2）。
         char_name = getattr(self._character, "name", "") or "我"
 
-        # 1. 构建 DeliveryQueue（port 为 None 时跳过实际发送，仅用于测试/离线场景）
+        # 1. 构建 DeliveryQueue；没有投递通道时不启动模型调用
         delivery = self._make_delivery()
+        if delivery is None:
+            return ChatOutcome("failed", reason="delivery_unavailable")
+        reply_session = ReplySession(delivery, self._config.segment_count_max)
 
-        # 2. 构建 ToolKit
-        toolkit, send_reply = self._build_chat_toolkit(
-            delivery, interaction_id, user_id, group_id, char_name,
-        )
-        # 4. 准备 transient（本轮可见、不持久化）内容
-        #    chat 路径 record_user_input=False —— 用户消息正文由消息接入 hook 以 ref
-        #    写入 message_stream 并 append 进本 scope Conversation（在 run 之前）。
-        #    带图片的当轮内容作为 transient 注入，使多模态模型本轮可见。
-        has_images = bool(image_data_urls)
-        current_turn_at = get_clock().now()
-        transient_list: List[dict] = []
-        # 群聊当前说话者只影响本轮消息格式。
-        resolved_nickname = speaker_name or user_id
-        if transient_message:
-            transient_list.append(
-                {"role": "user", "name": "系统", "content": transient_message}
+        try:
+            # 2. 构建 ToolKit
+            toolkit, finish_reply = self._build_chat_toolkit(
+                delivery, interaction_id, user_id, group_id, char_name,
+                reply_session=reply_session,
+                message_type=message_type,
             )
-        if has_images:
-            image_user_input = user_input
-            if self._scope.is_group:
-                image_user_input = format_player_message(
-                    user_input, user_id, resolved_nickname, current_turn_at,
+            # 4. 准备 transient（本轮可见、不持久化）内容
+            #    chat 路径 record_user_input=False —— 用户消息正文由消息接入 hook 以 ref
+            #    写入 message_stream 并 append 进本 scope Conversation（在 run 之前）。
+            #    带图片的当轮内容作为 transient 注入，使多模态模型本轮可见。
+            has_images = bool(image_data_urls)
+            current_turn_at = get_clock().now()
+            transient_list: List[dict] = []
+            # 群聊当前说话者只影响本轮消息格式。
+            resolved_nickname = speaker_name or user_id
+            if transient_message:
+                transient_list.append(
+                    {"role": "user", "name": "系统", "content": transient_message}
                 )
-            embedded = embed_images_in_last_user_message(
-                [{"role": "user", "content": image_user_input}],
-                image_data_urls,
+            if has_images:
+                image_user_input = user_input
+                if self._scope.is_group:
+                    image_user_input = format_player_message(
+                        user_input, user_id, resolved_nickname, current_turn_at,
+                    )
+                embedded = embed_images_in_last_user_message(
+                    [{"role": "user", "content": image_user_input}],
+                    image_data_urls,
+                )
+                image_message = {"role": "user", "content": embedded[0]["content"]}
+                if self._scope.is_group:
+                    stable_name = provider_user_name(user_id)
+                    if stable_name:
+                        image_message["name"] = stable_name
+                transient_list.append(image_message)
+
+            # 5. 计算 token_budget（阶段 3b Stage B 硬轮换）
+            if self._scope.is_private:
+                token_budget = self._config.private_session_token_budget
+            else:
+                token_budget = self._config.group_session_token_budget
+
+            # 6. 调用 conv.run()
+            # R2: 只接受入站 hook 明确返回的 message_stream_id 作为本次成功证据。
+            # user/scope/content 即使完全相同也可能是旧消息，不能用于身份判定。
+            messages_before_run = conv.get_messages()
+            has_current_user_ref = inbound_message_stream_id is not None and any(
+                m.get("entry_type") == "ref"
+                and m.get("role") == "user"
+                and m.get("message_stream_id") == inbound_message_stream_id
+                for m in messages_before_run
             )
-            image_message = {"role": "user", "content": embedded[0]["content"]}
-            if self._scope.is_group:
-                stable_name = provider_user_name(user_id)
-                if stable_name:
-                    image_message["name"] = stable_name
-            transient_list.append(image_message)
+            result = await conv.run(
+                system_prompt=self._context_builder.build_static_prompt(),
+                user_input=user_input,
+                interaction_id=interaction_id,
+                tools=toolkit,
+                output=finish_reply,
+                task="chat",
+                limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
+                run_tag="chat",
+                agent_name="Chat",
+                user_id=user_id,
+                group_id=group_id,
+                transient_context_messages=transient_list or None,
+                record_user_input=False,
+                token_budget=token_budget,
+                group_transcript_in_content=self._scope.is_group,
+            )
 
-        # 5. 计算 token_budget（阶段 3b Stage B 硬轮换）
-        if self._scope.is_private:
-            token_budget = self._config.private_session_token_budget
-        else:
-            token_budget = self._config.group_session_token_budget
+            # 阶段 3b：Stage B 硬轮换信号透传
+            if result.final_reason == "rotation_needed":
+                return ChatOutcome("skipped", reason="rotation_needed")
 
-        # 6. 调用 conv.run()
-        # R2: 只接受入站 hook 明确返回的 message_stream_id 作为本次成功证据。
-        # user/scope/content 即使完全相同也可能是旧消息，不能用于身份判定。
-        messages_before_run = conv.get_messages()
-        has_current_user_ref = inbound_message_stream_id is not None and any(
-            m.get("entry_type") == "ref"
-            and m.get("role") == "user"
-            and m.get("message_stream_id") == inbound_message_stream_id
-            for m in messages_before_run
-        )
-        result = await conv.run(
-            system_prompt=self._context_builder.build_static_prompt(),
-            user_input=user_input,
-            interaction_id=interaction_id,
-            tools=toolkit,
-            output=send_reply,
-            task="chat",
-            limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
-            run_tag="chat",
-            agent_name="Chat",
-            user_id=user_id,
-            group_id=group_id,
-            transient_context_messages=transient_list or None,
-            record_user_input=False,
-            token_budget=token_budget,
-            group_transcript_in_content=self._scope.is_group,
-        )
+            # R2: 兜底——Chat 路径 record_user_input=False，用户消息应由入站 hook 的
+            # append_visible 以 ref 形式写入 Conversation。若当前 ref 缺失，直接追加
+            # user_input 并 save，确保后续轮次和 Store 重载都能看到当前正文。
+            if result.completion_kind == "completed" and not has_current_user_ref:
+                fallback_content = user_input
+                fallback_message: dict = {"role": "user", "content": fallback_content}
+                if self._scope.is_group:
+                    stable_name = provider_user_name(user_id)
+                    if stable_name:
+                        fallback_message["name"] = stable_name
+                    fallback_message["content"] = format_player_message(
+                        fallback_content, user_id, resolved_nickname, current_turn_at,
+                    )
+                conv.add_messages([fallback_message])
+                await conv.save()
 
-        # 阶段 3b：Stage B 硬轮换信号透传
-        if result.final_reason == "rotation_needed":
-            return ChatOutcome("skipped", reason="rotation_needed")
-
-        # R2: 兜底——Chat 路径 record_user_input=False，用户消息应由入站 hook 的
-        # append_visible 以 ref 形式写入 Conversation。若当前 ref 缺失，直接追加
-        # user_input 并 save，确保后续轮次和 Store 重载都能看到当前正文。
-        if result.completion_kind == "completed" and not has_current_user_ref:
-            fallback_content = user_input
-            fallback_message: dict = {"role": "user", "content": fallback_content}
-            if self._scope.is_group:
-                stable_name = provider_user_name(user_id)
-                if stable_name:
-                    fallback_message["name"] = stable_name
-                fallback_message["content"] = format_player_message(
-                    fallback_content, user_id, resolved_nickname, current_turn_at,
-                )
-            conv.add_messages([fallback_message])
-            await conv.save()
-
-        # 7. 消费 result.output → final_text
-        final_text = ""
-        if result.output_arguments:
-            final_content = result.output_arguments.get("content", "")
-            if final_content:
-                final_text = final_content
-        elif result.final_text:
-            final_text = result.final_text
-
-        # 8. 交付 & 后处理
-        return await self._finalize_turn(
-            conv=conv,
-            delivery=delivery,
-            interaction_id=interaction_id,
-            user_id=user_id,
-            group_id=group_id,
-            message_type=message_type,
-            char_name=char_name,
-            final_text=final_text,
-            result=result,
-        )
+            # finish_reply 仅是完成标记；绝不从最终输出创建第二条正文发送路径。
+            return await self._finalize_turn(
+                conv=conv,
+                delivery=delivery,
+                reply_session=reply_session,
+                result=result,
+            )
+        except Exception as exc:
+            from ..life.conversation import ConversationRunResult
+            logger.exception("ChatAgent 执行失败")
+            return await self._finalize_turn(
+                conv=conv, delivery=delivery, reply_session=reply_session,
+                result=ConversationRunResult(completion_kind="failed", final_reason=type(exc).__name__),
+            )
+        finally:
+            await delivery.shutdown()
+            await reply_session.settle()
+            # 成功送达的段以 ref 追加进 Conversation
+            for stream_id in delivery.sent_stream_ids:
+                try:
+                    await conv.append_ref(stream_id, "assistant")
+                except Exception:
+                    logger.warning(
+                        "ChatAgent: 追加 assistant ref 失败 stream_id=%s（正文已在 message_stream）",
+                        stream_id, exc_info=True,
+                    )

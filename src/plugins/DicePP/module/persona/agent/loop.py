@@ -91,6 +91,7 @@ class AgentLoop:
         correction_streak = 0
         final_output: RunOutput | None = None
         round_idx = 0
+        next_call_index = 0
         provider = ""
         model = ""
 
@@ -220,8 +221,10 @@ class AgentLoop:
 
             # ── call_index 分配 ──
             call_index_map: dict[str, int] = {}
-            for i, tc in enumerate(all_tool_calls):
+            # DeliveryQueue 按 interaction 保序，跨模型轮次也必须使用唯一递增序号。
+            for i, tc in enumerate(all_tool_calls, start=next_call_index):
                 call_index_map[tc["id"]] = i
+            next_call_index += len(all_tool_calls)
 
             # ── same_name_index 计算 ──
             name_counter: Counter[str] = Counter()
@@ -348,6 +351,17 @@ class AgentLoop:
                             tr["content"] = (
                                 f"输出 {output_spec.name} 无效："
                                 f"后面还有普通工具调用，请先完成所有工具调用后再提交最终输出。"
+                            )
+                    final_output = None
+                elif output_spec.require_tool_success and any_tool_error:
+                    # 有副作用的 Chat 工具必须先把失败回执交给模型处理，
+                    # 不能让同轮完成信号掩盖参数校验或投递失败。
+                    for tr in tool_results:
+                        if tr.get("_is_output") and tr["_call_index"] == candidate_output_idx:
+                            tr["status"] = "error"
+                            tr["content"] = (
+                                "本轮工具调用有失败，完成信号未接受。请检查回执，"
+                                "只纠正失败项；已成功的发送不要重发，未知送达状态不要重试。"
                             )
                     final_output = None
                 else:
