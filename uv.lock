@@ -291,7 +291,7 @@ wheels = [
 
 [[package]]
 name = "dicepp"
-version = "3.0.0rc25"
+version = "3.0.0rc26"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
